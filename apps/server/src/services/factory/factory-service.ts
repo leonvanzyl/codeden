@@ -1,5 +1,6 @@
 import {
   type FactoryCandidate,
+  type FactoryDecisionRequest,
   type FactoryDigest,
   type FactoryItem,
   type FactoryLoop,
@@ -35,6 +36,7 @@ import { hasBudget, localDay } from "./policy";
 import { FactorySessions, isFactorySession } from "./sessions";
 import { buildStatus } from "./status";
 import { FactoryStore } from "./store";
+import { answerProviderQuestion, recordDecision, unattendedSession } from "./unattended";
 import { readVision, writeVision } from "./vision";
 
 export interface FactoryOptions {
@@ -328,6 +330,16 @@ export class FactoryService {
     return res;
   }
 
+  /** `factory_record_decision`: a decision an unattended agent made instead of asking. */
+  recordDecision(session: Session, req: FactoryDecisionRequest) {
+    return recordDecision(this.ctx, session, req);
+  }
+
+  /** True when nobody answers this session's questions (dark factory PM or factory agent). */
+  isUnattended(sessionId: string): boolean {
+    return unattendedSession(this.ctx, sessionId) !== undefined;
+  }
+
   // ------------------------------------------------------------ internals
 
   private async halt(projectId: string): Promise<string[]> {
@@ -397,7 +409,18 @@ export class FactoryService {
 
   private onEvents(events: RawEventEnvelope[]): void {
     for (const e of events) {
-      if (e.type === "session.updated") {
+      if (e.type === "agent.item.started") {
+        if ((e.payload as { item?: { kind?: string } }).item?.kind !== "user_question") continue;
+        // After the current append: answering appends events of its own.
+        setImmediate(
+          () =>
+            void answerProviderQuestion(
+              this.ctx,
+              (id, req) => this.deps.sessions.respond(id, req),
+              e,
+            ),
+        );
+      } else if (e.type === "session.updated") {
         const { session } = e.payload as { session: Session };
         if (session.projectId && isFactorySession(session)) this.soon(session.projectId);
       } else if (e.type.startsWith("pr.")) {

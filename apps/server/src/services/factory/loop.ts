@@ -233,7 +233,7 @@ function requestTriage(ctx: FactoryContext, project: Project): void {
     target: "pm",
     event: "triage_needed",
     title: `Factory: ${fresh.length} candidate${fresh.length === 1 ? "" : "s"} to triage`,
-    text: triageInstructions(fresh),
+    text: triageInstructions(fresh, project.autonomyMode === "dark_factory"),
     itemIds: fresh.map((i) => i.id),
   });
   for (const item of fresh) ctx.store.updateItem(item.id, (i) => ({ ...i, triageRequestedAt: at }));

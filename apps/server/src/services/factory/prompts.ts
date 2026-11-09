@@ -42,6 +42,7 @@ export function discoveryPrompt(opts: {
     opts.known.length > 0
       ? `Already known (do not repeat): ${opts.known.map((t) => `"${t}"`).join(", ")}.`
       : "",
+    "Don't ask the user anything: when you're unsure about a candidate, state your assumption in its summary or leave it out. If the code doesn't match the vision (a different stack or architecture, say), the work that brings it in line is a candidate in its own right.",
     "When done, call `factory_report_candidates` once with your candidates (title, summary of why it matters, testable acceptance criteria, paths it would touch). If you found nothing worth doing, call it with an empty list. Then call `finish` with a one-line summary.",
   ]
     .filter((l) => l !== "")
@@ -64,6 +65,7 @@ export function builderPrompt(item: FactoryItem, vision: string): string {
     "How to work:",
     "- Work only in this worktree. Keep the change small and focused on the criteria; stay out of protected areas and never deploy or release anything.",
     "- Add or update tests that prove every criterion, and run the project's tests and linters until they pass.",
+    "- Don't stop to ask the user: make the reasonable call within the criteria and the vision, and say what you assumed in the pull request description. If you truly cannot go on, call `finish` with outcome `blocked`.",
     "- Commit, then open the pull request with `create_pull_request` (it links the issue with `Fixes #N`).",
     "- If you changed anything visible in a UI, start the dev server, take browser screenshots of the change and attach them with `attach_evidence`.",
     "- Call `finish` with the outcome, a summary, the tests you ran and the changed files.",
@@ -133,8 +135,11 @@ export function revertPrompt(opts: { sha: string; prNumber: number; title: strin
   ].join("\n");
 }
 
-/** The PM's structured triage instructions for new candidates. */
-export function triageInstructions(items: FactoryItem[]): string {
+/**
+ * The PM's structured triage instructions for new candidates. `unattended` (dark factory): the
+ * PM makes every judgement call itself and records it, since nobody is watching to answer.
+ */
+export function triageInstructions(items: FactoryItem[], unattended = false): string {
   return [
     `The factory has ${items.length} new candidate${items.length === 1 ? "" : "s"} to triage. Score each against the project vision (read it with read_project_notes or the vision file) and decide:`,
     ...items.map(
@@ -143,5 +148,11 @@ export function triageInstructions(items: FactoryItem[]): string {
     ),
     "",
     "For each, call `factory_triage` with decision `accept` (a score from 0 to 1 and, if needed, sharper acceptance criteria) or `reject` (with the reason). Accepted items become GitHub issues and are built and merged automatically within the limits; reject anything outside the vision, too large, or touching protected areas.",
-  ].join("\n");
+    "The vision wins over the current code. When the code doesn't match it (a different stack or architecture, say), the work that brings it in line comes first: score it highest, or open it with `create_issue` if no candidate covers it (new issues become candidates). Reject work that change would throw away, saying it waits for it.",
+    unattended
+      ? "This project runs as a dark factory: nobody is watching, so never ask the user. Make every judgement call yourself from the vision and record the ones that matter with `factory_record_decision` (the user reviews them in the inbox and the daily digest). Flag `needsHuman` only for a protected area, a missing or self-contradicting vision, or something irreversible outside the code, and triage everything else meanwhile."
+      : "",
+  ]
+    .filter((l) => l !== "")
+    .join("\n");
 }

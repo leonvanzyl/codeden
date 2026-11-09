@@ -218,10 +218,40 @@ export const FactoryDigest = z.object({
   waiting: z.array(
     z.object({ title: z.string(), inboxItemId: Id.nullable(), itemId: Id.nullable() }),
   ),
+  /** Judgement calls factory agents made on their own during the day (dark factory). */
+  decisions: z
+    .array(
+      z.object({
+        title: z.string(),
+        decision: z.string(),
+        needsHuman: z.boolean(),
+        inboxItemId: Id,
+      }),
+    )
+    .default([]),
   text: z.string(),
   createdAt: Timestamp,
 });
 export type FactoryDigest = z.infer<typeof FactoryDigest>;
+
+/**
+ * `factory_record_decision` (§10.1): in a dark factory nobody is watching, so a factory agent
+ * that would have asked the user decides from the vision instead and records the call here.
+ * It reaches the user's inbox and the daily digest so they can review or override it later;
+ * nothing waits on it. `needsHuman` flags the few calls that are the user's to make
+ * (protected areas, a missing or self-contradicting vision, anything irreversible outside the
+ * code) without stopping the loop.
+ */
+export const FactoryDecisionRequest = z.object({
+  /** What the agent would have asked. */
+  question: z.string().min(1).max(2_000),
+  /** What it decided. */
+  decision: z.string().min(1).max(2_000),
+  /** Why, grounded in the vision. */
+  reasoning: z.string().min(1).max(4_000),
+  needsHuman: z.boolean().default(false),
+});
+export type FactoryDecisionRequest = z.infer<typeof FactoryDecisionRequest>;
 
 // ---------------------------------------------------------------- vision
 

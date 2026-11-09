@@ -1,11 +1,13 @@
 import { z } from "zod";
+import { UNATTENDED_ANSWER } from "../../services/factory/unattended";
 import { defineTool } from "../define";
 import { currentTurn } from "../transcript";
 
 /**
  * `ask_user` (§8.3, §11.1): a question for the user, shown in the transcript and the inbox.
  * Blocks for a few minutes; unanswered questions stay in the inbox and the answer arrives
- * later as a new message (see `QuestionBroker`).
+ * later as a new message (see `QuestionBroker`). In a dark factory the PM and the factory's
+ * agents are unattended: they get {@link UNATTENDED_ANSWER} at once and decide themselves.
  */
 export const askUser = defineTool({
   name: "ask_user",
@@ -29,6 +31,7 @@ export const askUser = defineTool({
     multiSelect: z.boolean().optional(),
   }),
   handler: async (input, { services, sessionId, signal }) => {
+    if (services.factory.isUnattended(sessionId)) return UNATTENDED_ANSWER;
     const turn = currentTurn(services, sessionId);
     const outcome = await services.questions.ask(
       sessionId,

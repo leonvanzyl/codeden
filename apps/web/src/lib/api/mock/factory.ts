@@ -175,6 +175,7 @@ export function mockFactoryApi(world: MockWorld): FactoryApi {
         rejected: [],
         spend: { usd: 0, tokens: 0, budgetUsd: null, budgetTokens: null },
         waiting: [],
+        decisions: [],
         text: "Nothing shipped yet today.",
         createdAt: now(),
       };

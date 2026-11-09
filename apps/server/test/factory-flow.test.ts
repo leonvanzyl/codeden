@@ -165,4 +165,55 @@ describe("factory loop with the Fake provider (§10.1)", () => {
     expect(status.consecutiveFailures).toBe(1);
     expect(status.recent[0]).toMatchObject({ id: itemId, stage: "failed" });
   }, 60_000);
+
+  it("never waits on the user: factory agents decide and record it", async () => {
+    const started = Date.now();
+    const asked = await h.server.services.tools.call(
+      "ask_user",
+      { question: "Polish index.html or migrate to the vision stack first?" },
+      {
+        role: "agent",
+        sessionId: finder,
+        projectId: h.projectId,
+        caller: "mcp",
+        signal: new AbortController().signal,
+      },
+    );
+    expect(asked.isError).toBeFalsy();
+    expect(asked.text).toContain("factory_record_decision");
+    expect(Date.now() - started).toBeLessThan(5_000);
+    // Nothing was put in front of the user to answer.
+    const open = () => h.server.services.inbox.list({ projectId: h.projectId });
+    expect(open().some((i) => i.kind === "question" && i.status === "open")).toBe(false);
+
+    const recorded = await call(
+      "agent",
+      "factory_record_decision",
+      {
+        question: "Polish index.html or migrate first?",
+        decision: "Migrate to the vision stack first",
+        reasoning: "The vision names Next.js; polishing index.html would be thrown away",
+      },
+      finder,
+    );
+    const decision = open().find((i) => i.id === recorded.inboxItemId);
+    expect(decision).toMatchObject({ kind: "message", priority: "low", status: "open" });
+    expect(decision?.title).toMatch(/^Factory decided: Polish index\.html/);
+
+    const digest = (await h.api("POST", `/projects/${h.projectId}/factory/digest`))
+      .body as FactoryDigest;
+    expect(digest.decisions).toEqual([
+      expect.objectContaining({
+        decision: "Migrate to the vision stack first",
+        needsHuman: false,
+        inboxItemId: recorded.inboxItemId,
+      }),
+    ]);
+    expect(digest.waiting.some((w) => w.inboxItemId === recorded.inboxItemId)).toBe(false);
+
+    // A session the user started still asks as usual.
+    const mine = await h.startFakeSession();
+    expect(h.server.services.factory.isUnattended(mine)).toBe(false);
+    expect(h.server.services.factory.isUnattended(finder)).toBe(true);
+  }, 60_000);
 });

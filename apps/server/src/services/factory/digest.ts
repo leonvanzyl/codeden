@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { FactoryDigest, FactoryItem, FactoryLimits, InboxItem } from "@codeden/contracts";
+import { DECISION_INBOX_PREFIX } from "./unattended";
 
 /**
  * The daily digest (§10.1 step 7): what shipped, what was rejected and why, spend against the
@@ -38,9 +39,24 @@ export function buildDigest(opts: {
       itemId: i.id,
     })),
     ...opts.inbox
-      .filter((x) => x.status === "open" && !x.id.startsWith("inbox:factory-digest:"))
+      .filter(
+        (x) =>
+          x.status === "open" &&
+          !x.id.startsWith("inbox:factory-digest:") &&
+          // Decisions the factory made on its own are reported, not waiting (unless flagged).
+          !(x.id.startsWith(DECISION_INBOX_PREFIX) && x.priority !== "high"),
+      )
       .map((x) => ({ title: x.title, inboxItemId: x.id, itemId: null })),
   ];
+  const decisions = opts.inbox
+    .filter((x) => x.id.startsWith(DECISION_INBOX_PREFIX) && dayOf(x.createdAt) === opts.day)
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+    .map((x) => ({
+      title: x.title,
+      decision: /\*\*Decision:\*\* (.*)/.exec(x.body ?? "")?.[1] ?? "",
+      needsHuman: x.priority === "high",
+      inboxItemId: x.id,
+    }));
   const spend = {
     usd: Math.round(opts.spend.usd * 100) / 100,
     tokens: opts.spend.tokens,
@@ -55,6 +71,7 @@ export function buildDigest(opts: {
     rejected,
     spend,
     waiting,
+    decisions,
     createdAt: (opts.now ?? new Date()).toISOString(),
   };
   return { ...digest, text: renderDigest(opts.projectName, digest, opts.pausedReason) };
@@ -91,6 +108,12 @@ export function renderDigest(
   lines.push("", `Rejected or failed (${d.rejected.length}):`);
   for (const r of d.rejected) lines.push(`- ${r.title}: ${r.reason}`);
   if (d.rejected.length === 0) lines.push("- nothing");
+  if (d.decisions.length > 0) {
+    lines.push("", `Decided on its own (${d.decisions.length}):`);
+    for (const x of d.decisions) {
+      lines.push(`- ${x.title}${x.decision ? ` → ${x.decision}` : ""}`);
+    }
+  }
   lines.push("", `Spend: ${budget}`, "", `Waiting on you (${d.waiting.length}):`);
   for (const w of d.waiting) lines.push(`- ${w.title}`);
   if (d.waiting.length === 0) lines.push("- nothing");

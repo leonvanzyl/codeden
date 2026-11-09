@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   EventEnvelope,
+  FactoryDecisionRequest,
+  FactoryDigest,
   FactoryItem,
   FactoryLimits,
   FactoryLoop,
@@ -91,6 +93,27 @@ describe("factory API contracts (§10.1)", () => {
     expect(
       FactoryTriageRequest.safeParse({ itemId: "i1", decision: "accept", score: 2 }).success,
     ).toBe(false);
+    const decision = FactoryDecisionRequest.parse({
+      question: "Polish index.html or migrate first?",
+      decision: "Migrate first",
+      reasoning: "The vision names the stack",
+    });
+    expect(decision.needsHuman).toBe(false);
+    expect(FactoryDecisionRequest.parse(JSON.parse(JSON.stringify(decision)))).toEqual(decision);
+    expect(FactoryDecisionRequest.safeParse({ ...decision, reasoning: "" }).success).toBe(false);
+    // Digests stored before decisions existed still parse.
+    const digest = FactoryDigest.parse({
+      id: "d1",
+      projectId: "p1",
+      day: "2026-11-09",
+      shipped: [],
+      rejected: [],
+      spend: { usd: 0, tokens: 0, budgetUsd: null, budgetTokens: null },
+      waiting: [],
+      text: "",
+      createdAt: ts,
+    });
+    expect(digest.decisions).toEqual([]);
     const req = SetAutonomyModeRequest.parse({
       mode: "autopilot",
       limits: { dailyBudget: { usd: 5 } },

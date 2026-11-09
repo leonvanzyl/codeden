@@ -370,7 +370,9 @@ Each project has an **autonomy mode**, a ladder you can climb one step at a time
    - the change is under a size limit and touches no protected area
 5. **Merge.** Squash-merge, then link the result back to the issue.
 6. **Watch.** After merging, CI on main is watched. A regression triggers an **automatic revert PR**, which goes through the same merge checks, plus a pause of the factory loop and an inbox item.
-7. **Report.** A daily digest lists what shipped, what was rejected and why, spend, and anything waiting on you.
+7. **Report.** A daily digest lists what shipped, what was rejected and why, the decisions the factory made on its own, spend, and anything waiting on you.
+
+**Unattended in dark factory.** Nobody waits on the user in dark-factory mode. A question from the PM or a factory session (through `ask_user` or the provider's own question tool) is answered at once by the server: decide from the vision, which wins over the current code. The agent records each judgement call with `factory_record_decision`, and it reaches the inbox and the digest for review. Protected areas, a missing or self-contradicting vision, and irreversible actions outside the code are flagged at high priority, but the loop never blocks on them. Sessions the user starts still ask as usual.
 
 **Limits** (required, enforced by the server, not left to agent judgement):
 - maximum concurrent sessions, maximum PRs merged per day

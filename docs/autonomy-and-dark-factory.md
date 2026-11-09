@@ -98,9 +98,19 @@ The loop is a server-side state machine, ticked every 30 seconds and whenever a 
 4. **Verify.** The merge checks below run on each PR.
 5. **Merge.** Squash merge, then a comment on the issue.
 6. **Watch.** CI on the merge commit is watched. A failure opens an **automatic revert PR** (which goes through the same checks), **pauses the loop** and raises a high-priority inbox item.
-7. **Report.** Once a day, a **digest**: what shipped, what was rejected or failed and why, spend against the budget, and what's waiting on you. It lands in your inbox and is sent to the orchestrator.
+7. **Report.** Once a day, a **digest**: what shipped, what was rejected or failed and why, the decisions the factory made on its own, spend against the budget, and what's waiting on you. It lands in your inbox and is sent to the orchestrator.
 
 Factory work is ordinary sessions, issues and PRs, so all of it stays traceable.
+
+### Nobody waits on you in Dark factory
+
+In **Dark factory**, the project's PM and the factory's own sessions (finders, builders, reviewers) never stop to ask you something. If one of them asks, through CodeDen's `ask_user` or the agent's own question tool, it gets an immediate answer instead: decide from the vision and carry on.
+
+- **The vision wins over the current code.** If the code doesn't match the vision (say the vision names a different stack), the work that brings it in line comes first. Work it would throw away waits.
+- **Decisions are recorded.** The agent records each judgement call with `factory_record_decision`: the question, what it decided and why. It arrives in your inbox as a low-priority **Factory decided** message and in the daily digest. To change one, tell the project manager or edit the vision.
+- **Flagged decisions:** a protected area, a missing or self-contradicting vision, or anything irreversible outside the code (deploys, releases, data, money) is flagged as **Factory needs you**, at high priority. The factory still doesn't wait: it carries on with everything that doesn't depend on that decision.
+
+Sessions you start yourself in a Dark factory project still ask you as usual, and so does the PM when you're talking to it directly. In **Autopilot**, questions still reach you, since exceptions are yours to handle there.
 
 ## Merge checks
 

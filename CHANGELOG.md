@@ -4,6 +4,10 @@ All notable changes to CodeDen are documented here. The format follows [Keep a C
 
 ## [Unreleased]
 
+### Changed
+
+- **Dark factory no longer waits on you.** The project manager and the factory's own sessions used to stop and ask questions, which left the loop waiting. Now they decide from the vision (which wins over the current code) and carry on. Each decision lands in your inbox as **Factory decided** and in the daily digest, with what was decided and why. Calls that are yours to make (protected areas, a missing or self-contradicting vision, anything irreversible outside the code) are flagged as **Factory needs you** without stopping the rest of the work. Sessions you start yourself still ask as usual.
+
 ## [0.4.1] - 2026-11-09
 
 ### Changed

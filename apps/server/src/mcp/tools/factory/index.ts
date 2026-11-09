@@ -1,5 +1,6 @@
 import {
   FactoryCandidate,
+  FactoryDecisionRequest,
   FactoryTriageRequest,
   isFactoryMode,
   ReviewVerdict,
@@ -131,9 +132,27 @@ export const factoryTriage = defineTool({
     }),
 });
 
+/** `factory_record_decision`: a dark-factory agent records a call it made instead of asking. */
+export const factoryRecordDecision = defineTool({
+  name: "factory_record_decision",
+  description:
+    "Record a decision you made on your own instead of asking the user (this project runs as a dark factory, so nobody waits to answer). Give the question you would have asked, what you decided and why, grounded in the vision. It goes to the user's inbox and the daily digest so they can review or override it; nothing waits on it. Set `needsHuman` only for a protected area, a missing or self-contradicting vision, or something irreversible outside the code: that flags it for the user, and you carry on with the work that doesn't depend on it.",
+  roles: ["agent", "pm"],
+  scope: "session",
+  alwaysLoad: true,
+  isAvailable: (services, caller) => {
+    if (!caller) return true;
+    return caller.sessionId !== null && services.factory.isUnattended(caller.sessionId);
+  },
+  input: FactoryDecisionRequest,
+  handler: async (input, { services, sessionId }) =>
+    asTool(() => services.factory.recordDecision(services.sessionRepo.get(sessionId), input)),
+});
+
 export const factoryTools: AnyServerTool[] = [
   factoryReportCandidates,
   factorySubmitReview,
   factoryStatus,
   factoryTriage,
+  factoryRecordDecision,
 ];
