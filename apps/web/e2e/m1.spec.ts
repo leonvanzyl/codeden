@@ -38,7 +38,7 @@ test("M1 flow with the Fake provider", async ({ page }) => {
     const checklist = page.getByTestId("setup-checklist");
     await expect(checklist.locator("[data-check=git]")).toBeVisible();
     await expect(checklist.getByText("Checking…")).toHaveCount(0, { timeout: 60_000 });
-    for (const id of ["claude", "codex", "gh", "git", "browser"]) {
+    for (const id of ["claude", "codex", "opencode", "gh", "git", "browser"]) {
       await expect(checklist.locator(`[data-check=${id}]`)).toBeVisible();
     }
     await page.getByRole("button", { name: "Skip setup" }).click();

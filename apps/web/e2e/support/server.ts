@@ -24,6 +24,16 @@ const here = import.meta.dirname;
 /** The seeded global Claude memory file in the temp user home. */
 export const E2E_CLAUDE_MD = "# Global rules\n\n- Keep answers short.\n";
 const repoRoot = resolve(here, "../../../..");
+/** The scripted OpenCode stand-in from the provider tests (`opencode serve --stdio`). */
+const FAKE_OPENCODE = join(
+  repoRoot,
+  "packages",
+  "providers",
+  "test",
+  "fixtures",
+  "fake-opencode",
+  "opencode.mjs",
+);
 
 /** A small committed git repo in a temp folder. */
 export function makeTempRepo(parent: string): string {
@@ -69,7 +79,16 @@ export async function startE2eServer(opts: E2eServerOptions = {}): Promise<E2eSe
   mkdirSync(join(userHome, ".claude"), { recursive: true });
   mkdirSync(join(userHome, ".codex"), { recursive: true });
   writeFileSync(join(userHome, ".claude", "CLAUDE.md"), E2E_CLAUDE_MD);
-  const baseEnv = { ...process.env, CODEDEN_HOME: home, CODEDEN_UPDATE_CHECK: "0" };
+  const baseEnv = {
+    ...process.env,
+    CODEDEN_HOME: home,
+    CODEDEN_UPDATE_CHECK: "0",
+    // A real OpenCode on this machine (the setup check) never sees the user's own data.
+    XDG_DATA_HOME: join(base, "xdg", "data"),
+    XDG_CONFIG_HOME: join(base, "xdg", "config"),
+    XDG_STATE_HOME: join(base, "xdg", "state"),
+    XDG_CACHE_HOME: join(base, "xdg", "cache"),
+  };
   const child: ChildProcess = spawn(
     process.execPath,
     [
@@ -85,6 +104,9 @@ export async function startE2eServer(opts: E2eServerOptions = {}): Promise<E2eSe
       "--exit-with-stdin",
       ...(opts.builtin ? ["--builtin"] : []),
       ...(opts.pinPath ? ["--no-path-refresh"] : []),
+      // OpenCode runs against the scripted stand-in the provider tests use.
+      "--opencode",
+      FAKE_OPENCODE,
     ],
     {
       cwd: repoRoot,
