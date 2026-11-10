@@ -1,3 +1,5 @@
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { formAnswer, questionOf } from "../src/opencode/approvals";
@@ -9,11 +11,12 @@ import {
   openCodeVariant,
   toPromptBody,
 } from "../src/opencode/config";
-import { exeFromCmdShim, openCodeKnownLocations } from "../src/opencode/locate";
+import { nativeBehindShim } from "../src/opencode/locate";
 import { fallbackOpenCodeModels, openCodeModelList } from "../src/opencode/models";
 import { guardPluginSource, HIDDEN_ENV_VARS } from "../src/opencode/plugin";
 import { mergeConfig, openCodeServerEnv } from "../src/opencode/server";
 import { TurnUsage } from "../src/opencode/usage";
+import { knownLocations } from "../src/util/known-locations";
 
 describe("OpenCode config", () => {
   it("parses provider/model ids, keeping slashes in the model id", () => {
@@ -144,22 +147,29 @@ describe("OpenCode config", () => {
   });
 
   it("finds the native binary behind npm's .cmd shim and the installer folders", () => {
-    const shim = '@ECHO off\r\n"%dp0%\\node_modules\\@opencode\\cli\\bin\\opencode.exe"   %*\r\n';
-    expect(exeFromCmdShim("C:\\npm\\opencode.cmd", shim)).toBe(
-      "C:\\npm\\node_modules\\@opencode\\cli\\bin\\opencode.exe",
+    const dir = mkdtempSync(path.join(tmpdir(), "codeden-oc-shim-"));
+    const shim = path.join(dir, "opencode.cmd");
+    writeFileSync(
+      shim,
+      '@ECHO off\r\n"%dp0%\\node_modules\\@opencode\\cli\\bin\\opencode.exe"   %*\r\n',
     );
-    expect(exeFromCmdShim("C:\\npm\\x.cmd", '"%dp0%\\x.js" %*')).toBeUndefined();
-    expect(
-      openCodeKnownLocations("win32", "C:\\Users\\me", {
-        APPDATA: "C:\\Users\\me\\AppData\\Roaming",
-      }),
-    ).toEqual([
+    expect(nativeBehindShim({ kind: "shell-script", path: shim })).toEqual({
+      kind: "native",
+      path: path.win32.resolve(dir, "node_modules\\@opencode\\cli\\bin\\opencode.exe"),
+    });
+    const native = { kind: "native" as const, path: "/usr/local/bin/opencode" };
+    expect(nativeBehindShim(native)).toBe(native);
+    const jsShim = path.join(dir, "other.cmd");
+    writeFileSync(jsShim, '"%dp0%\\x.js" %*');
+    expect(nativeBehindShim({ kind: "shell-script", path: jsShim }).kind).toBe("shell-script");
+    expect(knownLocations("opencode", { platform: "win32", home: "C:\\Users\\me" })).toEqual([
       "C:\\Users\\me\\.opencode\\bin\\opencode.exe",
-      "C:\\Users\\me\\AppData\\Roaming\\npm\\opencode.cmd",
     ]);
-    expect(openCodeKnownLocations("darwin", "/Users/me", {})).toContain(
+    expect(knownLocations("opencode", { platform: "darwin", home: "/Users/me" })).toEqual([
       "/Users/me/.opencode/bin/opencode",
-    );
+      "/opt/homebrew/bin/opencode",
+      "/usr/local/bin/opencode",
+    ]);
   });
 
   it("parses SSE across chunk boundaries", () => {

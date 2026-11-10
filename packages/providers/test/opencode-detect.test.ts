@@ -18,7 +18,7 @@ afterEach(() => {
 
 describe("OpenCode detection", () => {
   it("reports a missing install with the install command", async () => {
-    const status = await detectOpenCode({ locate: () => undefined });
+    const status = await detectOpenCode({ locate: { pathEnv: "", knownLocations: [] } });
     expect(status).toMatchObject({ providerId: "opencode", installed: false, loggedIn: null });
     expect(status.issues[0]).toMatchObject({
       code: "not_installed",
@@ -28,7 +28,8 @@ describe("OpenCode detection", () => {
       executable: { kind: "native", path: join(tmpdir(), "no-such-opencode") },
     });
     expect(broken.installed).toBe(false);
-    expect(broken.issues[0]).toMatchObject({ code: "detect_failed" });
+    expect(broken.issues[0]).toMatchObject({ code: "broken_install" });
+    expect(broken.broken?.[0]?.path).toContain("no-such-opencode");
   });
 
   it("detects version, providers and credentials through a probe", async () => {

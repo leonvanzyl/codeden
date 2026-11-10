@@ -67,10 +67,13 @@ export class OpenCodeAdapter implements ProviderAdapter {
     return this.options.executable ?? locateOpenCode();
   }
 
-  /** `opencode --version` and a probe for providers; the probe also refreshes the models. */
+  /**
+   * Finds a working copy (validating each one, so a broken shim never wins), then probes it
+   * for providers; the probe also refreshes the models.
+   */
   detect(): Promise<ProviderStatus> {
     return detectOpenCode({
-      executable: this.executable(),
+      ...(this.options.executable ? { executable: this.options.executable } : {}),
       probe: (exe) => this.probe(exe),
     });
   }

@@ -20,7 +20,7 @@ export {
   OPENCODE_MIN_VERSION,
   OPENCODE_UPGRADE_COMMAND,
 } from "./detect";
-export { exeFromCmdShim, locateOpenCode, openCodeKnownLocations } from "./locate";
+export { locateOpenCode, nativeBehindShim } from "./locate";
 export { OpenCodeEventMapper } from "./mapper";
 export { fallbackOpenCodeModels, modelInfoFromOpenCode, openCodeModelList } from "./models";
 export { OPENCODE_UTILITY_MODEL, OpenCodeUtilityModel } from "./one-shot";
