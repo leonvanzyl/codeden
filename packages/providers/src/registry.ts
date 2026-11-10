@@ -2,6 +2,7 @@ import type { ProviderInfo } from "@codeden/contracts";
 import { type ProviderAdapter, providerInfo, type RefreshModelsOptions } from "./adapter";
 import { ClaudeAdapter } from "./claude/adapter";
 import { CodexAdapter } from "./codex/adapter";
+import { OpenCodeAdapter } from "./opencode/adapter";
 
 /** The set of adapters a runner has loaded, keyed by id. */
 export class ProviderRegistry {
@@ -58,9 +59,9 @@ export class ProviderRegistry {
   }
 }
 
-/** Fresh instances of the built-in real providers (Claude Code, Codex). */
+/** Fresh instances of the built-in real providers (Claude Code, Codex, OpenCode). */
 export function builtinProviders(): ProviderAdapter[] {
-  return [new ClaudeAdapter(), new CodexAdapter()];
+  return [new ClaudeAdapter(), new CodexAdapter(), new OpenCodeAdapter()];
 }
 
 let defaultRegistry: ProviderRegistry | undefined;
@@ -71,7 +72,7 @@ export function defaultProviderRegistry(): ProviderRegistry {
   return defaultRegistry;
 }
 
-/** A built-in provider by id (`claude`, `codex`). */
+/** A built-in provider by id (`claude`, `codex`, `opencode`). */
 export function getProvider(id: string): ProviderAdapter | undefined {
   return defaultProviderRegistry().get(id);
 }
