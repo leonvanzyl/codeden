@@ -26,6 +26,13 @@ describe("ProviderMark", () => {
     expect(mark.textContent).toBe("");
   });
 
+  it("shows the OpenCode logo in the theme's text colour", () => {
+    const { mark, logo } = markOf("opencode");
+    expect(logo?.getAttribute("data-provider-logo")).toBe("opencode");
+    expect(logo?.querySelector("path")?.getAttribute("fill")).toBe("currentColor");
+    expect(mark.textContent).toBe("");
+  });
+
   it("keeps the caller's size", () => {
     const { mark } = markOf("codex", "size-6");
     expect(mark.className).toContain("size-6");

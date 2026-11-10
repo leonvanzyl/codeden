@@ -277,7 +277,7 @@ describe("favourites", () => {
 
   it("puts the Favourites tab first and can move to it", () => {
     const tabs = providerTabs(providers, undefined, undefined, { favorites: true });
-    expect(tabs.map((t) => t.id)).toEqual([FAVORITES_TAB, "claude", "codex"]);
+    expect(tabs.map((t) => t.id)).toEqual([FAVORITES_TAB, "claude", "codex", "opencode"]);
     expect(adjacentTab(tabs, "claude", -1)?.id).toBe(FAVORITES_TAB);
     expect(tabRows(tabs[0], providers, favorites).map((r) => r.model.id)).toEqual([
       "gpt-6-nova",

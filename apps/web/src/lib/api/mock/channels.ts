@@ -17,6 +17,12 @@ const loginScript: Record<string, string[]> = {
     "",
     `${c.green}✓ Successfully logged in${c.reset}`,
   ],
+  "opencode auth login": [
+    `${c.dim}Select a provider to connect${c.reset}`,
+    `${c.cyan}› Anthropic${c.reset}`,
+    "Opening browser to sign in…",
+    `${c.green}✓ Connected Anthropic${c.reset}`,
+  ],
   "claude auth login": [
     "Opening browser to sign in…",
     `${c.green}✓ Logged in as leon@example.com${c.reset}`,

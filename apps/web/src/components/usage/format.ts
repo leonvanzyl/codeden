@@ -89,4 +89,8 @@ export function shiftDay(day: string, n: number): string {
   return d.toISOString().slice(0, 10);
 }
 
-export const PROVIDER_NAMES: Record<string, string> = { claude: "Claude", codex: "Codex" };
+export const PROVIDER_NAMES: Record<string, string> = {
+  claude: "Claude",
+  codex: "Codex",
+  opencode: "OpenCode",
+};

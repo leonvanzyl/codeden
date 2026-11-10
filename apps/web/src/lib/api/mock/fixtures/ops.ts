@@ -203,6 +203,15 @@ export const setupChecks: SetupCheck[] = [
     fix: { kind: "login", command: "codex login" },
   }),
   check({
+    id: "opencode",
+    label: "OpenCode",
+    version: "2.2.7",
+    loggedIn: true,
+    authMethod: "api key, oauth",
+    account: "Anthropic, OpenAI",
+    message: "Connected: Anthropic, OpenAI",
+  }),
+  check({
     id: "gh",
     label: "GitHub CLI",
     loggedIn: true,

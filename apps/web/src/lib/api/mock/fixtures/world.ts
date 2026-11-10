@@ -372,6 +372,63 @@ export const providers: ProviderInfo[] = [
       },
     ],
   },
+  {
+    id: "opencode",
+    displayName: "OpenCode",
+    capabilities: {
+      ...caps,
+      planMode: false,
+      skills: false,
+      liveAutonomy: true,
+    },
+    // OpenCode lists the models of every provider it is connected to, as `<provider>/<model>`;
+    // the description names the provider. Efforts are each model's own variants.
+    models: [
+      {
+        id: "anthropic/claude-opus-5-5",
+        label: "Claude Opus 5.5",
+        description: "Anthropic",
+        efforts: ["low", "medium", "high", "xhigh", "max"],
+        isDefault: true,
+        contextWindow: 1_000_000,
+      },
+      {
+        id: "openai/gpt-6.1-sol",
+        label: "GPT-6.1 Sol",
+        description: "OpenAI",
+        efforts: ["low", "medium", "high", "xhigh"],
+        contextWindow: 400_000,
+      },
+      {
+        id: "deepseek/deepseek-v4.1",
+        label: "DeepSeek V4.1",
+        description: "DeepSeek",
+        efforts: ["low", "high", "max"],
+        contextWindow: 1_000_000,
+      },
+      {
+        id: "zai/glm-5.3",
+        label: "GLM-5.3",
+        description: "Z.AI",
+        efforts: [],
+        contextWindow: 200_000,
+      },
+      {
+        id: "ollama/qwen3.8:27b",
+        label: "qwen3.8:27b",
+        description: "Ollama (local)",
+        efforts: [],
+        contextWindow: 262_144,
+      },
+      {
+        id: "opencode/iceman-free",
+        label: "Iceman Free",
+        description: "OpenCode",
+        efforts: [],
+        contextWindow: 262_144,
+      },
+    ],
+  },
 ];
 
 export const runner: RunnerConnectionStatus = {
