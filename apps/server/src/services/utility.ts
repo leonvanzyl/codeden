@@ -91,7 +91,7 @@ export function runnerOneShot(runner: RunnerPort): OneShotPort {
   };
 }
 
-const PREFERENCE = ["claude", "codex"];
+const PREFERENCE = ["claude", "codex", "opencode"];
 const TIMEOUT_MS = 60_000;
 /** Read-aloud waits on the summary, so it gets less time than the other jobs. */
 const SPEECH_TIMEOUT_MS = 30_000;
@@ -110,8 +110,8 @@ function defaultWarn(message: string): void {
 
 /**
  * The real `UtilityService`: a one-shot, tool-less call on a small model (§7.4). The provider
- * comes from settings (`auto` = Claude, then Codex); when the chosen provider fails, the
- * other one is tried. Each job can be switched off in settings.
+ * comes from settings (`auto` = Claude, then Codex, then OpenCode); when the chosen provider
+ * fails, the others are tried. Each job can be switched off in settings.
  */
 export class ProviderUtilityService implements UtilityService {
   constructor(

@@ -77,3 +77,39 @@ export function expiresWithin(iso: string | null, days: number, now = Date.now()
   if (!iso) return false;
   return Date.parse(iso) - now < days * 24 * 60 * 60 * 1000;
 }
+
+export interface OpenCodeAuth {
+  /** Integrations with a connection, by display name (`Anthropic`, `OpenAI`). */
+  providers: string[];
+  /** How they are connected: `api key`, `oauth`, `environment` (or a mix, comma-separated). */
+  authMethod: string | null;
+}
+
+/**
+ * `opencode auth list --format json`: integrations with their connections, e.g.
+ * `[{ "id": "google", "name": "Google", "connections": [{ "type": "env", "name": "GEMINI_API_KEY" }] }]`.
+ * An empty list means no provider is connected (OpenCode's own free models still work).
+ * Secrets are never part of this output.
+ */
+export function parseOpenCodeAuth(stdout: string): OpenCodeAuth | null {
+  try {
+    const raw = JSON.parse(stdout) as unknown;
+    if (!Array.isArray(raw)) return null;
+    const providers: string[] = [];
+    const methods = new Set<string>();
+    for (const entry of raw as Array<Record<string, unknown>>) {
+      const connections = Array.isArray(entry?.connections) ? entry.connections : [];
+      if (!connections.length) continue;
+      providers.push(String(entry.name ?? entry.id ?? "unknown"));
+      for (const c of connections as Array<Record<string, unknown>>) {
+        const type = String(c?.type ?? "").toLowerCase();
+        methods.add(
+          type === "env" ? "environment" : type === "key" ? "api key" : type || "unknown",
+        );
+      }
+    }
+    return { providers, authMethod: methods.size ? [...methods].sort().join(", ") : null };
+  } catch {
+    return null;
+  }
+}

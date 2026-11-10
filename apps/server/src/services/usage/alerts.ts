@@ -97,7 +97,11 @@ export function toWindow(
   };
 }
 
-const PROVIDER_NAMES: Record<string, string> = { claude: "Claude", codex: "Codex" };
+const PROVIDER_NAMES: Record<string, string> = {
+  claude: "Claude",
+  codex: "Codex",
+  opencode: "OpenCode",
+};
 
 /** Alerts for current windows at or above `warnPercent` (or flagged by the provider). */
 export function rateLimitAlerts(windows: RateLimitWindow[], warnPercent: number): AlertSpec[] {

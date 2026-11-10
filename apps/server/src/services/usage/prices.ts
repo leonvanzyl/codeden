@@ -94,9 +94,16 @@ function normalizeModel(model: string): string {
 }
 
 /**
+ * Model vendors whose `<vendor>/<model>` ids (OpenCode's form, e.g. `anthropic/claude-opus-5-5`)
+ * are priced from another provider's bundled table: the same models at the same list prices.
+ */
+const VENDOR_TABLES: Record<string, string> = { anthropic: "claude", openai: "codex" };
+
+/**
  * The price for a model: user overrides first, then the bundled table; within each, an exact
  * id match, else the longest entry the id starts with at a `-` boundary (dated snapshots such
- * as `claude-sonnet-4-5-20250929`). Null when nothing matches.
+ * as `claude-sonnet-4-5-20250929`). A `<vendor>/<model>` id with no price of its own falls back
+ * to the vendor's table (`anthropic/` -> Claude, `openai/` -> Codex). Null when nothing matches.
  */
 export function findPrice(
   provider: string,
@@ -117,6 +124,9 @@ export function findPrice(
     }
     if (best) return best;
   }
+  const slash = model.indexOf("/");
+  const vendor = slash > 0 ? VENDOR_TABLES[model.slice(0, slash).toLowerCase()] : undefined;
+  if (vendor && vendor !== provider) return findPrice(vendor, model.slice(slash + 1), overrides);
   return null;
 }
 

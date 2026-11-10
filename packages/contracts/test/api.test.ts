@@ -3,9 +3,13 @@ import {
   CreateProjectRequest,
   defaultSettings,
   ListSessionsQuery,
+  LoginCommandResponse,
+  LoginToolId,
   RefreshModelsResponse,
   ReorderProjectsRequest,
   SendMessageRequest,
+  SetupCheck,
+  SetupToolId,
   StartSessionRequest,
   StartSessionResponse,
   ThreadItemsQuery,
@@ -57,6 +61,72 @@ describe("api schemas", () => {
     });
     expect(res.providers[0]?.models[0]).toMatchObject({ resolvedId: "claude-fable-5-2" });
     expect(RefreshModelsResponse.safeParse({}).success).toBe(false);
+  });
+
+  it("round-trips OpenCode's setup check, sign-in command and provider info", () => {
+    expect(SetupToolId.options).toContain("opencode");
+    expect(LoginToolId.options).toEqual(["claude", "codex", "opencode", "gh"]);
+    const check = roundTrip(SetupCheck, {
+      id: "opencode",
+      label: "OpenCode",
+      state: "ok",
+      installed: true,
+      version: "2.2.7",
+      executablePath: "C:UsersmeAppDataRoaming\npm\node_modules@opencodecli\binopencode.exe",
+      loggedIn: true,
+      authMethod: "credentials",
+      account: "anthropic, openai",
+      loginExpiresAt: null,
+      message: "OpenCode 2.2.7, connected to anthropic, openai",
+      fix: null,
+      durationMs: 900,
+    });
+    expect(check.id).toBe("opencode");
+    expect(
+      roundTrip(LoginCommandResponse, {
+        tool: "opencode",
+        command: "opencode",
+        args: ["auth", "login"],
+      }).tool,
+    ).toBe("opencode");
+    expect(LoginCommandResponse.safeParse({ tool: "rm", command: "rm", args: [] }).success).toBe(
+      false,
+    );
+    const info = roundTrip(RefreshModelsResponse, {
+      providers: [
+        {
+          id: "opencode",
+          displayName: "OpenCode",
+          capabilities: {
+            resume: true,
+            steer: true,
+            interrupt: true,
+            approvals: true,
+            userQuestions: true,
+            subagents: true,
+            rollback: false,
+            fork: false,
+            images: true,
+            planMode: false,
+            reasoningEffort: true,
+            mcp: true,
+            skills: false,
+            liveAutonomy: true,
+            readOnly: true,
+          },
+          models: [
+            {
+              id: "lmstudio/openai/gpt-oss-20b",
+              label: "GPT OSS 20B",
+              description: "LM Studio",
+              efforts: ["low", "medium", "high"],
+              contextWindow: 131072,
+            },
+          ],
+        },
+      ],
+    });
+    expect(info.providers[0]?.models[0]?.id).toBe("lmstudio/openai/gpt-oss-20b");
   });
 
   it("accepts every start outcome", () => {

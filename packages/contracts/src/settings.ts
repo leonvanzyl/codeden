@@ -3,7 +3,7 @@ import { AutonomyLevel, ProviderId, QuietHours, ReasoningEffort } from "./common
 import { UpdateMode } from "./updates";
 import { DictationEngine, WhisperModelId } from "./voice-api";
 
-/** `auto` lets CodeDen pick the first ready provider (Claude, then Codex). */
+/** `auto` lets CodeDen pick the first ready provider (Claude, then Codex, then OpenCode). */
 export const ProviderChoice = z.union([z.literal("auto"), ProviderId]);
 export type ProviderChoice = z.infer<typeof ProviderChoice>;
 

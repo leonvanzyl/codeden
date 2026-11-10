@@ -10,6 +10,7 @@ import {
   parseCodexLogin,
   parseGhAuthJson,
   parseGhAuthText,
+  parseOpenCodeAuth,
   parseVersion,
 } from "../src/services/setup/parse";
 import { SetupService, type SetupServiceDeps } from "../src/services/setup/setup-service";
@@ -44,6 +45,21 @@ describe("detection parsers", () => {
     expect(parseClaudeAuth("not json")).toBeNull();
     expect(expiresWithin(auth?.loginExpiresAt ?? null, 3, NOW)).toBe(true);
     expect(expiresWithin("2026-12-01T00:00:00Z", 3, NOW)).toBe(false);
+  });
+
+  it("reads OpenCode's connected providers", () => {
+    expect(parseVersion("opencode v2.2.7")).toBe("2.2.7");
+    expect(
+      parseOpenCodeAuth(
+        JSON.stringify([
+          { id: "anthropic", name: "Anthropic", connections: [{ type: "key", label: "API key" }] },
+          { id: "google", name: "Google", connections: [{ type: "env", name: "GEMINI_API_KEY" }] },
+          { id: "zai", name: "Z.AI", connections: [] },
+        ]),
+      ),
+    ).toEqual({ providers: ["Anthropic", "Google"], authMethod: "api key, environment" });
+    expect(parseOpenCodeAuth("[]")).toEqual({ providers: [], authMethod: null });
+    expect(parseOpenCodeAuth("not json")).toBeNull();
   });
 
   it("reads codex and gh login state without capturing tokens", () => {
@@ -200,6 +216,50 @@ describe("SetupService", () => {
     expect(status.ready).toBe(false);
   });
 
+  it("checks OpenCode: version, providers, the free tier and OpenCode 1", async () => {
+    const run = async (extra: Record<string, Partial<ExecResult>>) => {
+      const calls: string[] = [];
+      const status = await service({ ...extra }, { calls }).status();
+      return { status, check: status.checks.find((c) => c.id === "opencode"), calls };
+    };
+    const connected = await run({
+      "opencode --version": { stdout: "opencode v2.2.7" },
+      "opencode auth list --standalone --format json": {
+        stdout: JSON.stringify([
+          { id: "openai", name: "OpenAI", connections: [{ type: "oauth", label: "OAuth" }] },
+        ]),
+      },
+    });
+    expect(connected.check).toMatchObject({
+      label: "OpenCode",
+      state: "ok",
+      installed: true,
+      version: "2.2.7",
+      loggedIn: true,
+      authMethod: "oauth",
+      account: "OpenAI",
+    });
+    // Ready with only OpenCode signed in; detection never uses the user's background service.
+    expect(connected.status.ready).toBe(true);
+    expect(connected.calls).toContain("opencode auth list --standalone --format json");
+
+    const free = await run({
+      "opencode --version": { stdout: "opencode v2.2.7" },
+      "opencode auth list --standalone --format json": { stdout: "[]" },
+    });
+    expect(free.check).toMatchObject({ state: "warning", loggedIn: true, authMethod: "free" });
+    // Sign in runs the copy that was found, by its full path.
+    expect(free.check?.fix?.command).toBe("/bin/opencode auth login");
+
+    const v1 = await run({ "opencode --version": { stdout: "1.19.5" } });
+    expect(v1.check).toMatchObject({ state: "missing", installed: true, version: "1.19.5" });
+    expect(v1.check?.fix?.command).toBe("npm install -g @opencode/cli");
+
+    const missing = await run({});
+    expect(missing.check).toMatchObject({ state: "missing", installed: false });
+    expect(missing.check?.fix?.command).toBe("npm install -g @opencode/cli");
+  });
+
   it("persists completion in settings and hands out login commands", () => {
     const setup = service({});
     setup.complete();
@@ -207,6 +267,11 @@ describe("SetupService", () => {
     // Before a check found gh, the bare command is all there is.
     expect(setup.loginCommand("gh")).toMatchObject({
       command: "gh auth login --web --git-protocol https",
+    });
+    expect(setup.loginCommand("opencode")).toEqual({
+      tool: "opencode",
+      command: "opencode auth login",
+      args: ["auth", "login"],
     });
   });
 });

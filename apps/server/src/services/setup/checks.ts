@@ -8,11 +8,15 @@ import {
   parseCodexLogin,
   parseGhAuthJson,
   parseGhAuthText,
+  parseOpenCodeAuth,
   parseVersion,
 } from "./parse";
 import { LOGIN_COMMANDS, type Locate, loginFix, lookupTool, runDetail } from "./tool-lookup";
 
 export { LOGIN_COMMANDS };
+
+/** Oldest OpenCode with the v2 server API the adapter uses (OpenCode 1 is a different API). */
+export const OPENCODE_MIN_VERSION = "2.2.0";
 
 /** Days before `loginExpiresAt` at which a Claude login is flagged. */
 export const LOGIN_EXPIRY_WARNING_DAYS = 3;
@@ -22,6 +26,7 @@ export const MIN_NODE_MAJOR = 24;
 const LABELS: Record<SetupToolId, string> = {
   claude: "Claude Code",
   codex: "Codex",
+  opencode: "OpenCode",
   gh: "GitHub CLI",
   git: "git",
   browser: "Browser",
@@ -34,6 +39,12 @@ function installFix(id: SetupToolId, platform: NodeJS.Platform): SetupCommand {
       return { kind: "install", command: "npm install -g @anthropic-ai/claude-code" };
     case "codex":
       return { kind: "install", command: "npm install -g @openai/codex" };
+    case "opencode":
+      return {
+        kind: "install",
+        command: "npm install -g @opencode/cli",
+        url: "https://opencode.ai/docs",
+      };
     case "gh":
       return {
         kind: "install",
@@ -191,6 +202,91 @@ ${status.stderr}`,
   };
 }
 
+/**
+ * A working `opencode` (PATH, then its installer's folders), then `opencode auth list` on a
+ * private server (`--standalone`), never the user's background service.
+ */
+export async function checkOpenCode({
+  exec,
+  locate,
+  shell,
+  platform,
+}: CheckEnv): Promise<CheckResult> {
+  const tool = await lookupTool(locate, "opencode", base("opencode"), {
+    message: "OpenCode is not installed",
+    fix: installFix("opencode", platform),
+  });
+  if (!tool.found) return tool.result;
+  const found = tool.version;
+  const installed = {
+    ...base("opencode"),
+    ...tool.extra,
+    installed: true,
+    version: found,
+    executablePath: tool.path,
+  };
+  if (found && compareVersions(found, "2.0.0") < 0) {
+    return {
+      ...installed,
+      state: "missing",
+      message: `OpenCode ${found} is OpenCode 1, which CodeDen does not support; install OpenCode 2`,
+      fix: installFix("opencode", platform),
+    };
+  }
+  if (found && compareVersions(found, OPENCODE_MIN_VERSION) < 0) {
+    return {
+      ...installed,
+      state: "warning",
+      message: `OpenCode ${found} is older than ${OPENCODE_MIN_VERSION}; update it`,
+      fix: { kind: "upgrade", command: "opencode upgrade" },
+    };
+  }
+  const login = loginFix("opencode", shell, tool.path);
+  const list = await exec(tool.path, ["auth", "list", "--standalone", "--format", "json"], {
+    timeoutMs: 15_000,
+  });
+  const auth = list.code === 0 ? parseOpenCodeAuth(list.stdout) : null;
+  if (!auth) {
+    return {
+      ...installed,
+      state: "warning",
+      message: "Could not read OpenCode's providers",
+      detail: runDetail("opencode auth list --standalone --format json", list),
+      fix: login,
+    };
+  }
+  if (!auth.providers.length) {
+    // OpenCode's own free models work without an account.
+    return {
+      ...installed,
+      loggedIn: true,
+      authMethod: "free",
+      state: "warning",
+      message: "Only OpenCode's free models: connect a provider for more",
+      fix: login,
+    };
+  }
+  return {
+    ...installed,
+    loggedIn: true,
+    authMethod: auth.authMethod,
+    account: auth.providers.join(", "),
+    state: "ok",
+    message: `Connected: ${auth.providers.join(", ")}`,
+  };
+}
+
+/** Compare `x.y.z` versions numerically. */
+function compareVersions(a: string, b: string): number {
+  const pa = a.split(/[.-]/).map((n) => Number.parseInt(n, 10) || 0);
+  const pb = b.split(/[.-]/).map((n) => Number.parseInt(n, 10) || 0);
+  for (let i = 0; i < 3; i += 1) {
+    const diff = (pa[i] ?? 0) - (pb[i] ?? 0);
+    if (diff !== 0) return diff;
+  }
+  return 0;
+}
+
 export async function checkGh({ exec, locate, shell, platform }: CheckEnv): Promise<CheckResult> {
   const tool = await lookupTool(locate, "gh", base("gh"), {
     message: "GitHub CLI is not installed (optional)",
@@ -320,6 +416,7 @@ export async function checkNode({ nodeVersion, platform }: CheckEnv): Promise<Ch
 export const CHECKS: Record<SetupToolId, (env: CheckEnv) => Promise<CheckResult>> = {
   claude: checkClaude,
   codex: checkCodex,
+  opencode: checkOpenCode,
   gh: checkGh,
   git: checkGit,
   browser: checkBrowser,

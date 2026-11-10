@@ -36,7 +36,12 @@ const SOURCE_LABELS: Record<string, string> = {
   automation: "Automations",
   factory: "Factory",
 };
-const PROVIDER_LABELS: Record<string, string> = { claude: "Claude", codex: "Codex", fake: "Fake" };
+const PROVIDER_LABELS: Record<string, string> = {
+  claude: "Claude",
+  codex: "Codex",
+  opencode: "OpenCode",
+  fake: "Fake",
+};
 
 function labeller(dim: UsageDimension, names: ReportNames): (key: string) => string {
   switch (dim) {

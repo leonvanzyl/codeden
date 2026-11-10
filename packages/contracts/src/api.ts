@@ -296,8 +296,16 @@ export type InboxCounts = z.infer<typeof InboxCounts>;
 
 // ---------------------------------------------------------------- first-run setup
 
-export const SetupToolId = z.enum(["claude", "codex", "gh", "git", "browser", "node"]);
+/**
+ * A first-run check (§14): the agent CLIs (`claude`, `codex`, `opencode`), then `gh`, `git`,
+ * the browser and Node.js.
+ */
+export const SetupToolId = z.enum(["claude", "codex", "opencode", "gh", "git", "browser", "node"]);
 export type SetupToolId = z.infer<typeof SetupToolId>;
+
+/** Setup checks whose sign-in command the UI can run in its embedded terminal. */
+export const LoginToolId = z.enum(["claude", "codex", "opencode", "gh"]);
+export type LoginToolId = z.infer<typeof LoginToolId>;
 
 /** A command the UI runs in its embedded terminal to fix a check (§14 step 3). */
 export const SetupCommand = z.object({
@@ -386,7 +394,7 @@ export type RefreshModelsResponse = z.infer<typeof RefreshModelsResponse>;
 
 /** `POST /api/setup/login/:tool` response: what to run in a terminal. */
 export const LoginCommandResponse = z.object({
-  tool: z.enum(["claude", "codex", "gh"]),
+  tool: LoginToolId,
   command: z.string(),
   args: z.array(z.string()),
 });

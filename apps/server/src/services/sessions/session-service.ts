@@ -46,7 +46,7 @@ export interface SessionServiceDeps {
 }
 
 /** Preferred providers when the choice is `auto` (first ready one wins). */
-const AUTO_ORDER = ["claude", "codex"];
+const AUTO_ORDER = ["claude", "codex", "opencode"];
 
 const BUSY = new Set(["running", "waiting"]);
 const NOT_STARTED = new Set(["created", "queued", "starting"]);
