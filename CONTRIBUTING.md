@@ -93,7 +93,7 @@ Before you push: **`pnpm typecheck && pnpm lint && pnpm test`** must pass. CI ru
 
 ### Live tests (opt in, small real cost)
 
-Live tests use your real Claude Code and Codex logins, so they are skipped unless `CODEDEN_LIVE=1` is set. The `test:live` scripts set it for you:
+Live tests use your real Claude Code, Codex and OpenCode logins, so they are skipped unless `CODEDEN_LIVE=1` is set. The `test:live` scripts set it for you:
 
 ```sh
 pnpm --filter @codeden/providers test:live    # adapter smoke tests against the installed CLIs

@@ -8,7 +8,7 @@ From `npx codeden` to your first agent session in a couple of minutes, without t
 |---|---|---|
 | Node.js 24 or newer | `node --version` | CodeDen refuses to start on older versions |
 | git | `git --version` | Set `user.name` and `user.email`: `git config --global user.name "Your Name"` |
-| Claude Code and/or Codex CLI | `claude --version`, `codex --version` | At least one, **signed in** (`claude auth login`, `codex login`) |
+| Claude Code, Codex CLI and/or OpenCode 2.2+ | `claude --version`, `codex --version`, `opencode --version` | At least one, **signed in** (`claude auth login`, `codex login`, `opencode auth login`; OpenCode's own free models work without an account) |
 | GitHub CLI *(optional)* | `gh auth status` | Needed for issues, PRs, evidence, triage and the factory |
 | Edge or Chrome *(optional)* | | For the browser panel and the agents' browser tools |
 
@@ -37,14 +37,15 @@ The first screen checks, in parallel:
 
 - **Claude Code:** installed version, login and login expiry.
 - **Codex:** installed version and login. A Codex login also makes Codex the default image engine.
+- **OpenCode:** installed version (2.2 or newer) and the providers it's connected to. With none, only OpenCode's free models are available, and the row suggests `opencode auth login`.
 - **GitHub CLI:** installed and signed in.
 - **git:** installed, with your identity set.
 - **Browser:** an installed Edge or Chrome.
 - **Node.js:** version 24 or newer.
 
-Anything that passes is never asked about. Anything missing gets one fix: the install command, or a **Sign in** button that runs the tool's own login (`claude auth login`, `codex login`, `gh auth login`) in a terminal right on the page, so the provider's normal browser login handles it. **Sign in** runs the exact copy CodeDen found, by its full path.
+Anything that passes is never asked about. Anything missing gets one fix: the install command, or a **Sign in** button that runs the tool's own login (`claude auth login`, `codex login`, `opencode auth login`, `gh auth login`) in a terminal right on the page, so the provider's normal browser login handles it. **Sign in** runs the exact copy CodeDen found, by its full path.
 
-CodeDen looks for Claude Code, Codex and the GitHub CLI on your PATH, then in their installers' own folders, such as `~/.local/bin`, where the native Claude Code installer puts `claude` even when that folder isn't on your PATH. A copy that doesn't run (for example an npm shim left behind after its package was removed) is skipped and shown as **installed but broken**, with its path; see [Troubleshooting](troubleshooting.md#claude-code-or-codex-is-installed-but-broken). **Re-check** also picks up PATH changes you made after starting CodeDen.
+CodeDen looks for Claude Code, Codex, OpenCode and the GitHub CLI on your PATH, then in their installers' own folders, such as `~/.local/bin`, where the native Claude Code installer puts `claude` even when that folder isn't on your PATH. A copy that doesn't run (for example an npm shim left behind after its package was removed) is skipped and shown as **installed but broken**, with its path; see [Troubleshooting](troubleshooting.md#claude-code-or-codex-is-installed-but-broken). **Re-check** also picks up PATH changes you made after starting CodeDen.
 
 ![The first-run setup checklist](images/setup.png)
 
@@ -79,7 +80,7 @@ Commit this file to tell CodeDen how to prepare a fresh worktree:
 
 - `setup` runs, in order, in every new worktree; the output streams into the session. Setup stops at the first command that fails, and the session starts anyway: the agent's first message then begins with the failed command, its exit code and the end of its output, so it can fix the problem instead of tripping over it.
 - `devServer` (a command string or `{ command, port, cwd }`) records how to start your app, so agents (and the UI review automation) know what to run and where to point the browser. Running dev servers are also discovered automatically.
-- `defaultProvider` (`claude` or `codex`) is the provider new sessions in this project use unless you pick one (a provider chosen in the project's settings wins).
+- `defaultProvider` (`claude`, `codex` or `opencode`) is the provider new sessions in this project use unless you pick one (a provider chosen in the project's settings wins).
 
 ## 5. Start your first session
 
