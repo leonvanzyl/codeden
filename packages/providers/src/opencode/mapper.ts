@@ -1,7 +1,7 @@
-import type { AgentEvent, ErrorKind, Item, ItemOf } from "@codeden/contracts";
+import type { AgentEvent, Item, ItemOf } from "@codeden/contracts";
 import { shorten } from "../util/text";
 import { modelId } from "./config";
-import { classifyOpenCodeError } from "./errors";
+import { failure, type TurnOutcome } from "./errors";
 import {
   contentText,
   diffsOf,
@@ -11,36 +11,11 @@ import {
   todosOf,
   toolCallItem,
 } from "./items";
-import type { OcError, OcEvent, OcEventOf } from "./protocol";
+import type { OcEvent, OcEventOf } from "./protocol";
+import { OpenCodeSubagents, type ThreadCtx } from "./subagents";
 import { TurnUsage } from "./usage";
 
-/** A thread plus the turn running in it. */
-export interface ThreadCtx {
-  threadId: string;
-  turnId: string;
-}
-
-interface Subagent {
-  callId: string;
-  parentSession: string;
-  parent: ThreadCtx;
-  child: ThreadCtx;
-  item: ItemOf<"subagent">;
-  childSession?: string;
-  done: boolean;
-}
-
-type Outcome =
-  | { type: "completed" }
-  | { type: "interrupted"; reason?: "user" | "provider" | "runner_restart" }
-  | {
-      type: "failed";
-      message: string;
-      code?: string;
-      detail?: string;
-      kind?: ErrorKind;
-      retryAt?: string;
-    };
+export type { ThreadCtx };
 
 export interface MapperOptions {
   sessionId: string;
@@ -68,12 +43,14 @@ export class OpenCodeEventMapper {
   private model: string | undefined;
   private readonly open = new Map<string, { ctx: ThreadCtx; item: Item }>();
   private readonly tools = new Map<string, ToolState & { session: string }>();
-  private readonly subagents = new Map<string, Subagent>();
-  private readonly childSessions = new Map<string, Subagent>();
+  private readonly subagents: OpenCodeSubagents;
   private todos: { id: string; ctx: ThreadCtx; item: ItemOf<"todo_list"> } | undefined;
 
   constructor(private readonly opts: MapperOptions) {
     this.rootThreadId = `${opts.sessionId}:thread-root`;
+    this.subagents = new OpenCodeSubagents(opts.sessionId, opts.emit, (threadId, ok) =>
+      this.closeOpen(ok, threadId),
+    );
   }
 
   get currentTurnId(): string | undefined {
@@ -94,8 +71,7 @@ export class OpenCodeEventMapper {
     if (session === this.rootSession) {
       return this.turnId ? { threadId: this.rootThreadId, turnId: this.turnId } : undefined;
     }
-    const run = this.childSessions.get(session);
-    return run && !run.done ? run.child : undefined;
+    return this.subagents.ctxFor(session);
   }
 
   /** The tool call a permission request or form belongs to. */
@@ -116,7 +92,9 @@ export class OpenCodeEventMapper {
   handle(event: OcEvent): void {
     switch (event.type) {
       case "session.created":
-        this.onSessionCreated(event);
+        if (event.data.parentID) {
+          this.subagents.onSessionCreated(event.data.sessionID, event.data.parentID);
+        }
         return;
       case "session.execution.started":
         if (event.data.sessionID === this.rootSession) this.onExecutionStarted();
@@ -187,7 +165,7 @@ export class OpenCodeEventMapper {
         this.onToolCalled(event);
         return;
       case "session.tool.progress":
-        this.onToolProgress(event);
+        this.subagents.onProgress(event.data.id, event.data.metadata);
         return;
       case "session.tool.success":
       case "session.tool.failed":
@@ -206,21 +184,12 @@ export class OpenCodeEventMapper {
   }
 
   /** Close the current turn (also when the server dies or the session closes). */
-  endTurn(outcome: Outcome): void {
+  endTurn(outcome: TurnOutcome): void {
     const turnId = this.turnId;
     if (!turnId) return;
     const ok = outcome.type === "completed";
-    for (const run of this.subagents.values()) {
-      if (!run.done) this.finishSubagent(run, ok ? "completed" : "interrupted");
-    }
-    for (const [id, { ctx, item }] of this.open) {
-      this.opts.emit({
-        type: "item.completed",
-        ...ctx,
-        item: { ...item, status: ok ? "completed" : "cancelled" } as Item,
-      });
-      this.open.delete(id);
-    }
+    this.subagents.endTurn(ok);
+    this.closeOpen(ok);
     if (this.todos) {
       this.opts.emit({
         type: "item.completed",
@@ -234,8 +203,6 @@ export class OpenCodeEventMapper {
     this.usage = undefined;
     this.ended.add(turnId);
     this.tools.clear();
-    this.subagents.clear();
-    this.childSessions.clear();
     if (outcome.type === "completed") {
       this.opts.emit({ type: "turn.completed", ...ctx, stopReason: "end_turn" });
     } else if (outcome.type === "interrupted") {
@@ -270,20 +237,17 @@ export class OpenCodeEventMapper {
     this.opts.emit({ type: "session.updated", model });
   }
 
-  private onSessionCreated(event: OcEventOf<"session.created">): void {
-    const { sessionID, parentID } = event.data;
-    if (!parentID || this.childSessions.has(sessionID)) return;
-    // The subagent tool call in the parent session that has no child session yet.
-    const run = [...this.subagents.values()].find(
-      (r) => !r.done && !r.childSession && r.parentSession === parentID,
-    );
-    if (run) this.linkChild(run, sessionID);
-  }
-
-  private linkChild(run: Subagent, session: string): void {
-    if (run.childSession === session) return;
-    run.childSession = session;
-    this.childSessions.set(session, run);
+  /** Complete the open items (of one thread, or all), as completed or cancelled. */
+  private closeOpen(ok: boolean, threadId?: string): void {
+    for (const [id, { ctx, item }] of this.open) {
+      if (threadId && ctx.threadId !== threadId) continue;
+      this.opts.emit({
+        type: "item.completed",
+        ...ctx,
+        item: { ...item, status: ok ? "completed" : "cancelled" } as Item,
+      });
+      this.open.delete(id);
+    }
   }
 
   private textKey(data: { assistantMessageID: string; ordinal: number }, kind: string): string {
@@ -364,7 +328,7 @@ export class OpenCodeEventMapper {
     const ctx = this.ctxFor(sessionID);
     if (!ctx) return;
     if (state.name === "subagent") {
-      this.startSubagent(state, ctx);
+      this.subagents.start(state, ctx);
       return;
     }
     if (state.name === "todowrite") {
@@ -375,12 +339,6 @@ export class OpenCodeEventMapper {
     if (!item) return;
     this.open.set(id, { ctx, item });
     this.opts.emit({ type: "item.started", ...ctx, item });
-  }
-
-  private onToolProgress(event: OcEventOf<"session.tool.progress">): void {
-    const run = this.subagents.get(event.data.id);
-    const child = event.data.metadata?.sessionID;
-    if (run && typeof child === "string") this.linkChild(run, child);
   }
 
   private onToolEnded(
@@ -401,10 +359,9 @@ export class OpenCodeEventMapper {
     } else {
       state.status = "completed";
     }
-    const run = this.subagents.get(id);
-    if (run) {
-      this.finishSubagent(
-        run,
+    if (this.subagents.has(id)) {
+      this.subagents.finish(
+        id,
         state.status === "completed"
           ? "completed"
           : state.status === "cancelled"
@@ -421,81 +378,6 @@ export class OpenCodeEventMapper {
     if (!ctx || !item) return;
     this.open.delete(id);
     this.opts.emit({ type: "item.completed", ...ctx, item });
-  }
-
-  private startSubagent(state: ToolState & { session: string }, parent: ThreadCtx): void {
-    if (this.subagents.has(state.id)) return;
-    const childThreadId = `${this.opts.sessionId}:thread-${state.id}`;
-    const agentType = typeof state.input.agent === "string" ? state.input.agent : "general";
-    const description =
-      typeof state.input.description === "string" ? state.input.description : undefined;
-    const prompt = typeof state.input.prompt === "string" ? state.input.prompt : undefined;
-    const item: ItemOf<"subagent"> = {
-      id: state.id,
-      kind: "subagent",
-      status: "in_progress",
-      childThreadId,
-      agentType,
-      ...(description ? { description } : {}),
-      ...(prompt ? { prompt } : {}),
-    };
-    const run: Subagent = {
-      callId: state.id,
-      parentSession: state.session,
-      parent,
-      child: { threadId: childThreadId, turnId: `${state.id}-turn` },
-      item,
-      done: false,
-    };
-    this.subagents.set(state.id, run);
-    this.opts.emit({
-      type: "thread.started",
-      thread: {
-        id: childThreadId,
-        parentThreadId: parent.threadId,
-        parentItemId: state.id,
-        agentType,
-        ...(description ? { title: description } : {}),
-      },
-    });
-    this.opts.emit({ type: "item.started", ...parent, item });
-    this.opts.emit({ type: "turn.started", ...run.child });
-  }
-
-  private finishSubagent(
-    run: Subagent,
-    outcome: "completed" | "failed" | "interrupted",
-    summary?: string,
-  ): void {
-    if (run.done) return;
-    run.done = true;
-    for (const [id, open] of this.open) {
-      if (open.ctx.threadId !== run.child.threadId) continue;
-      this.opts.emit({
-        type: "item.completed",
-        ...open.ctx,
-        item: { ...open.item, status: outcome === "completed" ? "completed" : "cancelled" } as Item,
-      });
-      this.open.delete(id);
-    }
-    if (outcome === "completed") {
-      this.opts.emit({ type: "turn.completed", ...run.child, stopReason: "end_turn" });
-    } else if (outcome === "failed") {
-      this.opts.emit({
-        type: "turn.failed",
-        ...run.child,
-        error: { message: summary || "Subagent failed" },
-      });
-    } else {
-      this.opts.emit({ type: "turn.interrupted", ...run.child, reason: "user" });
-    }
-    const status =
-      outcome === "completed" ? "completed" : outcome === "failed" ? "failed" : "cancelled";
-    this.opts.emit({
-      type: "item.completed",
-      ...run.parent,
-      item: { ...run.item, status, ...(summary ? { summary } : {}) },
-    });
   }
 
   private updateTodos(ctx: ThreadCtx, input: Record<string, unknown>): void {
@@ -522,7 +404,7 @@ export class OpenCodeEventMapper {
     cost: number | undefined,
   ): void {
     if (!this.usage || !this.turnId || (!tokens && !cost)) return;
-    if (session !== this.rootSession && !this.childSessions.has(session)) return;
+    if (session !== this.rootSession && !this.subagents.isChildSession(session)) return;
     this.usage.add(tokens, cost, session === this.rootSession);
     this.opts.emit({
       type: "usage.updated",
@@ -548,16 +430,4 @@ export class OpenCodeEventMapper {
       },
     });
   }
-}
-
-/** An OpenCode error as a failed turn outcome. */
-export function failure(error: OcError | undefined): Outcome {
-  const { kind, retryAt } = classifyOpenCodeError(error);
-  return {
-    type: "failed",
-    code: error?.type ? `opencode_${error.type.replace(/[^a-z0-9]+/gi, "_")}` : "turn_failed",
-    message: error?.message || "OpenCode turn failed",
-    kind,
-    ...(retryAt ? { retryAt } : {}),
-  };
 }

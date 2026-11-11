@@ -32,3 +32,28 @@ export function classifyOpenCodeError(
   if (status === 429 || status >= 500 || TRANSIENT.test(text)) return { kind: "transient" };
   return { kind: "fatal" };
 }
+
+/** How a CodeDen turn on OpenCode ended. */
+export type TurnOutcome =
+  | { type: "completed" }
+  | { type: "interrupted"; reason?: "user" | "provider" | "runner_restart" }
+  | {
+      type: "failed";
+      message: string;
+      code?: string;
+      detail?: string;
+      kind?: ErrorKind;
+      retryAt?: string;
+    };
+
+/** An OpenCode error as a failed turn outcome. */
+export function failure(error: OcError | undefined): TurnOutcome {
+  const { kind, retryAt } = classifyOpenCodeError(error);
+  return {
+    type: "failed",
+    code: error?.type ? `opencode_${error.type.replace(/[^a-z0-9]+/gi, "_")}` : "turn_failed",
+    message: error?.message || "OpenCode turn failed",
+    kind,
+    ...(retryAt ? { retryAt } : {}),
+  };
+}
