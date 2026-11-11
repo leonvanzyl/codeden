@@ -320,6 +320,7 @@ export function createServices(opts: ServicesOptions): AppServices {
     settings: opts.settings,
     exec,
     github: opts.factory?.github ?? new GithubFactoryPort(github),
+    complete: (job, system, prompt) => utility.complete(job, system, prompt),
     options: opts.factory,
     log: opts.log,
   });

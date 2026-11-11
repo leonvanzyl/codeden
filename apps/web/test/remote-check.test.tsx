@@ -28,7 +28,7 @@ function LiveGithubTab({ projectId }: { projectId: string }) {
 function LiveAutonomy({ projectId }: { projectId: string }) {
   const project = useProject(projectId);
   return project ? (
-    <AutonomyDialog project={project} open onOpenChange={() => {}} initialMode="autopilot" />
+    <AutonomyDialog project={project} open onOpenChange={() => {}} initialMode="software_factory" />
   ) : null;
 }
 

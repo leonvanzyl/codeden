@@ -6,6 +6,7 @@ import {
   type FactoryLoop,
   FactoryTuning,
   LEGACY_SIZE_LIMITS,
+  ScoutState,
 } from "@codeden/contracts";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import type { Db } from "../../db/client";
@@ -22,7 +23,7 @@ export type NewFactoryItem = Pick<
 
 /** Stages of items that are still moving through the loop. */
 export const ACTIVE_STAGES: FactoryItemStage[] = ["building", "verifying", "watching"];
-/** Stages of items waiting to be built or triaged. */
+/** Stages of items waiting to be classified or for a free agent. */
 export const WAITING_STAGES: FactoryItemStage[] = ["candidate", "backlog"];
 /** Final stages. */
 export const DONE_STAGES: FactoryItemStage[] = [
@@ -49,7 +50,7 @@ export class FactoryStore {
       .from(factoryLoops)
       .where(eq(factoryLoops.projectId, projectId))
       .get()?.loop;
-    return loop ? upgradeSizeLimits(loop) : undefined;
+    return loop ? upgradeLoop(loop) : undefined;
   }
 
   /** The project's loop, or a fresh idle one (not saved). */
@@ -65,6 +66,7 @@ export class FactoryStore {
         discovery: [],
         nextArea: 0,
         lastDiscoveryAt: null,
+        scout: ScoutState.parse({}),
         lastDigestDay: null,
         enabledAt: null,
         seenFailedShas: [],
@@ -84,7 +86,8 @@ export class FactoryStore {
   }
 
   item(id: string): FactoryItem | undefined {
-    return this.db.select().from(factoryItems).where(eq(factoryItems.id, id)).get()?.item;
+    const item = this.db.select().from(factoryItems).where(eq(factoryItems.id, id)).get()?.item;
+    return item ? withItemDefaults(item) : undefined;
   }
 
   items(projectId: string, stages?: FactoryItemStage[]): FactoryItem[] {
@@ -98,7 +101,7 @@ export class FactoryStore {
       .orderBy(desc(factoryItems.updatedAt))
       .limit(500)
       .all()
-      .map((r) => r.item);
+      .map((r) => withItemDefaults(r.item));
   }
 
   /** The item a builder, reviewer or revert session works on. */
@@ -112,6 +115,7 @@ export class FactoryStore {
   createItem(draft: NewFactoryItem): FactoryItem {
     const now = new Date().toISOString();
     const item: FactoryItem = {
+      ...ITEM_DEFAULTS,
       area: null,
       acceptanceCriteria: [],
       score: null,
@@ -170,6 +174,35 @@ export class FactoryStore {
   saveDigest(digest: FactoryDigest): void {
     this.events.append([{ type: "factory.digest.created", sessionId: null, payload: { digest } }]);
   }
+}
+
+/** Fields items saved before 0.6 lack (the projection keeps the JSON as it was written). */
+const ITEM_DEFAULTS = {
+  type: null,
+  classification: null,
+  trust: "trusted",
+  author: null,
+  admittedBy: null,
+  investigation: null,
+  nudges: {},
+  largeChange: null,
+} satisfies Partial<FactoryItem>;
+
+/** An item as read from the projection, with the fields newer versions added. */
+export function withItemDefaults(item: FactoryItem): FactoryItem {
+  return { ...ITEM_DEFAULTS, ...item };
+}
+
+const TUNING_DEFAULTS = FactoryTuning.parse({});
+
+/** A loop as read from the projection: newer tuning knobs and the scout filled in. */
+export function upgradeLoop(loop: FactoryLoop): FactoryLoop {
+  return upgradeSizeLimits({
+    ...loop,
+    discovery: loop.discovery ?? [],
+    scout: ScoutState.parse(loop.scout ?? {}),
+    tuning: { ...TUNING_DEFAULTS, ...loop.tuning },
+  });
 }
 
 /**

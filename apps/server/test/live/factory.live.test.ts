@@ -3,9 +3,9 @@
  * CODEDEN_LIVE because it creates a repository and spends real agent turns:
  *   CODEDEN_LIVE=1 CODEDEN_LIVE_FACTORY=1 pnpm --filter @codeden/server test:live -- factory
  * Creates `codeden-factory-sandbox-<random>` with a tiny Node app, CI (node --test on GitHub
- * Actions) and a VISION.md, switches it to autopilot, opens one issue, and lets the loop run:
- * PM triage (falls back to the API after a few minutes), a real Claude builder, a real Codex
- * reviewer, the merge checks, an automatic squash merge, the main-CI watch and the digest.
+ * Actions) and a VISION.md, switches it to the software factory (auto-merge on), opens one issue, and lets the loop run:
+ * Identify type, a real Claude builder (analyze, then implement), a real Codex reviewer, the
+ * merge checks, an automatic squash merge, the main-CI watch and the digest.
  * The repository is left in place (the gh token may not delete repos); its name is printed.
  */
 import { execFileSync } from "node:child_process";
@@ -157,8 +157,13 @@ describe.skipIf(!LIVE)("live factory", () => {
       expect(project.kind).toBe("github");
       const projectId = project.id;
       const mode = await api("PUT", `/projects/${projectId}/autonomy`, {
-        mode: "autopilot",
-        limits: { maxConcurrentSessions: 2, maxMergesPerDay: 1, dailyBudget: { usd: 10 } },
+        mode: "software_factory",
+        limits: {
+          maxConcurrentSessions: 2,
+          maxMergesPerDay: 1,
+          dailyBudget: { usd: 10 },
+          autoMerge: true,
+        },
         tuning: { builderProvider: "claude", maxFixAttempts: 1 },
       });
       expect(mode.status).toBe(200);
@@ -183,26 +188,15 @@ describe.skipIf(!LIVE)("live factory", () => {
         return factory.data.items(projectId).find((i) => i.issue?.number === issue.number);
       }, 60_000);
 
-      // The PM is woken to triage; if it has not decided after a few minutes, decide via the API.
-      const triaged = await waitUntil(async () => {
+      // Identify type: the issue is ours (the gh account is always trusted), so it is classified
+      // (a feature) and queued for an agent.
+      const classified = await waitUntil(async () => {
+        await tick();
         const i = factory.data.item(candidate.id);
         return i && i.stage !== "candidate" ? i : undefined;
-      }, 240_000).catch(() => undefined);
-      if (triaged)
-        console.log(`[live] PM triaged the issue: ${triaged.stage} (score ${triaged.score})`);
-      else {
-        console.log("[live] PM did not triage in time; accepting via the API");
-        await api("POST", `/projects/${projectId}/factory/triage`, {
-          itemId: candidate.id,
-          decision: "accept",
-          score: 0.8,
-          acceptanceCriteria: [
-            "src/math.js exports clamp(value, min, max) bounding value to [min, max]",
-            "test/math.test.js covers clamp below, inside and above the range",
-            "npm test passes",
-          ],
-        });
-      }
+      }, 120_000);
+      console.log(`[live] classified as ${classified.type} (${classified.classification?.by})`);
+      expect(classified.trust).toBe("trusted");
 
       // Drive the loop until the item is done (merged) or stops somewhere else.
       let last = "";

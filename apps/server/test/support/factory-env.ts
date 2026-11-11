@@ -51,6 +51,8 @@ export interface FactoryEnv {
   /** Session filters the budget asked spend for (null: the whole project). */
   spendFilters: Array<string[] | null>;
   providers: string[];
+  /** The utility model's answer to the "Identify type" call (null: no model). */
+  model: (system: string, prompt: string) => Promise<string | null>;
   /** Shift of the factory clock against real time (day rollover, CI grace). */
   clock: { offsetMs: number };
   now: () => Date;
@@ -128,6 +130,7 @@ export function createFactoryEnv(
     spend: { usd: 0, tokens: 0 },
     spendFilters: [],
     providers: opts.providers ?? ["claude", "codex"],
+    model: async () => null,
     clock: { offsetMs: 0 },
   } as unknown as FactoryEnv;
 
@@ -198,6 +201,7 @@ export function createFactoryEnv(
       settings,
       exec,
       github: gh,
+      complete: (_job, system, prompt) => env.model(system, prompt),
       options: { autoTick: false, now: () => env.now(), ciGraceMs: 60_000 },
     });
   env.factory = build();

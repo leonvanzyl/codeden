@@ -18,10 +18,14 @@ const APPROVE: ReviewVerdictInit = {
 let env: FactoryEnv;
 afterEach(() => env?.close());
 
-const enable = (mode: "autopilot" | "dark_factory" = "autopilot", limits: object = {}) =>
+/** The software factory (auto-merge on unless said otherwise), or the dark factory. */
+const enable = (
+  mode: "software_factory" | "dark_factory" = "software_factory",
+  limits: object = {},
+) =>
   env.factory.setMode(env.project.id, {
     mode,
-    limits: { ...env.project.factoryLimits, ...limits },
+    limits: { ...env.project.factoryLimits, autoMerge: true, ...limits },
   } as Parameters<FactoryEnv["factory"]["setMode"]>[1]);
 
 const tick = () => env.factory.tick(env.project.id);
@@ -29,7 +33,7 @@ const items = (stage?: FactoryItem["stage"]) =>
   env.factory.data.items(env.project.id, stage ? [stage] : undefined);
 const item = (id: string) => env.factory.data.item(id) as FactoryItem;
 
-/** An accepted item waiting to be built. */
+/** A classified feature, already analyzed, waiting for an agent. */
 function backlogItem(title = "Add a counter", score = 0.5): FactoryItem {
   return env.factory.data.createItem({
     projectId: env.project.id,
@@ -38,6 +42,15 @@ function backlogItem(title = "Add a counter", score = 0.5): FactoryItem {
     summary: "Users want to count things",
     source: "discovery",
     stage: "backlog",
+    type: "feature",
+    investigation: {
+      kind: "analysis",
+      outcome: "implement",
+      summary: "Missing",
+      details: "A counter",
+      testPath: null,
+      at: new Date().toISOString(),
+    },
     score,
     acceptanceCriteria: ["Counter increments"],
     issue: { number: 3, url: "https://github.com/acme/app/issues/3", title },
@@ -63,7 +76,7 @@ function review(it: FactoryItem, verdict: ReviewVerdictInit = APPROVE) {
 }
 
 describe("factory modes and vision", () => {
-  it("needs a vision, limits with a budget and a GitHub project for autopilot", async () => {
+  it("needs a vision, limits with a budget and a GitHub project for the software factory", async () => {
     env = createFactoryEnv();
     const fail = (fn: () => unknown) => {
       try {
@@ -73,13 +86,13 @@ describe("factory modes and vision", () => {
       }
       return "ok";
     };
-    expect(fail(() => env.factory.setMode(env.project.id, { mode: "autopilot" }))).toBe(
+    expect(fail(() => env.factory.setMode(env.project.id, { mode: "software_factory" }))).toBe(
       "limits_required",
     );
     expect(
       fail(() =>
         env.factory.setMode(env.project.id, {
-          mode: "autopilot",
+          mode: "software_factory",
           limits: { ...env.project.factoryLimits, dailyBudget: {} },
         }),
       ),
@@ -96,98 +109,21 @@ describe("factory modes and vision", () => {
     expect(env.gh.visionCommits).toHaveLength(1);
     const res = enable("dark_factory");
     expect(res).toMatchObject({ mode: "dark_factory", experimental: true });
-    expect(env.factory.status(env.project.id)).toMatchObject({
+    expect(await env.factory.status(env.project.id)).toMatchObject({
       mode: "dark_factory",
       experimental: true,
       visionExists: true,
     });
     env.gh.githubProjects.clear();
-    expect(fail(() => enable("autopilot"))).toBe("not_a_github_project");
+    expect(fail(() => enable("software_factory"))).toBe("not_a_github_project");
     expect(env.factory.setMode(env.project.id, { mode: "assisted" }).experimental).toBe(false);
   });
 });
 
 describe("factory loop state machine (§10.1)", () => {
-  it("runs one item from discovery to merge and digest, with a cross-provider reviewer", async () => {
-    env = createFactoryEnv();
-    enable("dark_factory");
-    await tick();
-    // Discovery: two improvement finders (maxConcurrentSessions = 2), round-robin areas.
-    expect(env.starts.map((s) => s.workKey)).toEqual([
-      "factory:discover:features",
-      "factory:discover:ux",
-    ]);
-    expect(env.factory.status(env.project.id).loopState).toBe("discovering");
-    const finder = env.repo.get(
-      env.factory.data.loopOrNew(env.project.id).discovery[0]?.sessionId as string,
-    );
-    const reported = env.factory.reportCandidates(finder, [
-      {
-        title: "Add a counter",
-        summary: "Users count things",
-        acceptanceCriteria: ["Counter increments"],
-      },
-    ]);
-    expect(reported.created).toHaveLength(1);
-    await tick();
-    // The PM is asked to triage, with structured instructions.
-    const triageNotice = env.notices.find(
-      (n) => n.type === "factory.update" && n.data.event === "triage_needed",
-    );
-    expect(triageNotice?.target).toBe("pm");
-    const candidate = items("candidate")[0] as FactoryItem;
-    const accepted = await env.factory.triage(env.project.id, {
-      itemId: candidate.id,
-      decision: "accept",
-      score: 0.8,
-    });
-    expect(accepted.stage).toBe("backlog");
-    expect(accepted.workKey).toBe(`issue:${accepted.issue?.number}`);
-    expect(env.gh.issues[0]?.labels).toContain("codeden-factory");
-    expect(env.gh.issues[0]?.body).toContain("- [ ] Counter increments");
-    // Both slots are taken by the finders: no builder yet.
-    await tick();
-    expect(item(accepted.id).stage).toBe("backlog");
-    for (const run of env.factory.data.loopOrNew(env.project.id).discovery)
-      await env.setStatus(run.sessionId, "idle");
-    const verifying = await toVerifying(accepted);
-    expect(verifying.stage).toBe("verifying");
-    expect(verifying.builderProvider).toBe("claude");
-    expect(verifying.reviewerProvider).toBe("codex");
-    expect(verifying.reviewerNote).toBeNull();
-    expect(env.starts.at(-1)?.workKey).toBe(`factory:review:${verifying.pr?.number}`);
-    expect(verifying.checks.find((c) => c.name === "review")?.state).toBe("pending");
-    expect(review(verifying).recorded).toBe(true);
-    await tick();
-    expect(env.gh.merges).toHaveLength(1);
-    expect(item(accepted.id).stage).toBe("watching");
-    expect(env.gh.comments.some((c) => c.body.includes("Merged automatically"))).toBe(true);
-    await tick();
-    expect(item(accepted.id).stage).toBe("merged");
-    const status = env.factory.status(env.project.id);
-    expect(status.mergesToday).toBe(1);
-    expect(status.recent[0]).toMatchObject({ stage: "merged", title: "Add a counter" });
-    expect(
-      status.mergeChecks[0]?.checks.every((c) => c.state === "pass" || c.state === "skipped"),
-    ).toBe(true);
-    const digest = await env.factory.digestNow(env.project.id);
-    expect(digest.shipped.map((s) => s.title)).toEqual(["Add a counter"]);
-    expect(
-      env.inbox
-        .list({ projectId: env.project.id })
-        .some((i) => i.id.startsWith("inbox:factory-digest:")),
-    ).toBe(true);
-    expect(
-      env.notices.some(
-        (n) =>
-          n.type === "factory.update" && n.target === "orchestrator" && n.data.event === "digest",
-      ),
-    ).toBe(true);
-  });
-
   it("respects maxMergesPerDay and maxConcurrentSessions when starting builders", async () => {
     env = createFactoryEnv();
-    enable("autopilot", { maxMergesPerDay: 1 });
+    enable("software_factory", { maxMergesPerDay: 1 });
     const a = backlogItem("First", 0.9);
     const b = backlogItem("Second", 0.1);
     await tick();
@@ -232,8 +168,8 @@ describe("factory loop state machine (§10.1)", () => {
     await tick();
     expect(env.spendFilters.at(-1)).toContain(builder);
     env.factory.setMode(env.project.id, {
-      mode: "autopilot",
-      limits: { ...env.factory.status(env.project.id).limits, budgetScope: "project" },
+      mode: "software_factory",
+      limits: { ...(await env.factory.status(env.project.id)).limits, budgetScope: "project" },
     });
     env.spendFilters = [];
     await tick();
@@ -243,7 +179,10 @@ describe("factory loop state machine (§10.1)", () => {
   it("pauses after consecutive failed merge checks", async () => {
     env = createFactoryEnv({ limits: { pauseAfterConsecutiveFailures: 1 } });
     enable();
-    env.factory.setMode(env.project.id, { mode: "autopilot", tuning: { maxFixAttempts: 0 } });
+    env.factory.setMode(env.project.id, {
+      mode: "software_factory",
+      tuning: { maxFixAttempts: 0 },
+    });
     const it1 = backlogItem();
     await tick();
     const sessionId = item(it1.id).builderSessionId as string;
@@ -285,7 +224,7 @@ describe("factory loop state machine (§10.1)", () => {
     await tick();
     await tick();
     expect(item(it1.id)).toMatchObject({ stage: "building", attempts: 1 });
-    expect(env.messages.at(-1)?.text).toMatch(/merge checks for your pull request/);
+    expect(env.messages.at(-1)?.text).toMatch(/checks for your pull request/);
     pr.checks = "success";
     pr.failedChecks = [];
     await env.setStatus(sessionId, "idle");
@@ -309,6 +248,11 @@ describe("factory loop state machine (§10.1)", () => {
     expect(inboxItem).toMatchObject({ kind: "pr_review", status: "open" });
     // Escalation is not a failure.
     expect(env.factory.data.loopOrNew(env.project.id).consecutiveFailures).toBe(0);
+    // Once a person merges it on GitHub, it is done.
+    const pr = env.gh.prs.get(verifying.pr?.number ?? 0);
+    if (pr) pr.ref = { ...pr.ref, state: "merged" };
+    await tick();
+    expect(item(it1.id)).toMatchObject({ stage: "merged", note: "Merged on GitHub" });
   });
 
   it("falls back to the author's provider for the review when it is the only one", async () => {
@@ -331,7 +275,7 @@ describe("factory loop state machine (§10.1)", () => {
     expect(item(it1.id)).toMatchObject({ stage: "backlog", builderSessionId: null });
     await tick();
     expect(env.starts).toHaveLength(1);
-    expect(env.factory.status(env.project.id)).toMatchObject({
+    expect(await env.factory.status(env.project.id)).toMatchObject({
       loopState: "stopped",
       killSwitch: true,
     });
@@ -343,7 +287,7 @@ describe("factory loop state machine (§10.1)", () => {
     expect(env.settings.get().factory.killSwitch).toBe(true);
     await tick();
     expect(env.starts).toHaveLength(2);
-    expect(env.factory.status(env.project.id)).toMatchObject({
+    expect(await env.factory.status(env.project.id)).toMatchObject({
       loopState: "stopped",
       globalKillSwitch: true,
     });

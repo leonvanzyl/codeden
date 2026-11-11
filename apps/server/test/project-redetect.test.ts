@@ -306,7 +306,7 @@ describe("ProjectService.refresh", () => {
       {
         type: "project.updated",
         sessionId: null,
-        payload: { project: { ...service.get(id), autonomyMode: "autopilot" } },
+        payload: { project: { ...service.get(id), autonomyMode: "software_factory" } },
       },
     ]);
     await expect(service.disconnectGithub(id)).rejects.toMatchObject({ code: "factory_mode" });

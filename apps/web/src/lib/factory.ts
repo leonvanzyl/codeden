@@ -55,7 +55,7 @@ export function useVision(projectId: string) {
 }
 
 const MODE_ERRORS: Record<string, string> = {
-  not_a_github_project: "Autopilot and dark factory need a GitHub project.",
+  not_a_github_project: "The software and dark factory need a GitHub project.",
   vision_required: "Write and save the vision file first.",
   limits_required: "Set the factory limits first.",
   budget_required: "Set a daily budget (dollars or tokens).",

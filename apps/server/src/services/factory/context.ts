@@ -38,6 +38,8 @@ export interface FactoryContext {
   notify: (draft: NoticeDraft, wake?: boolean) => void;
   settings: SettingsStore;
   exec: Exec;
+  /** One call to the utility model (the "Identify type" step); null when none answered. */
+  complete: (job: string, system: string, prompt: string) => Promise<string | null>;
   now: () => Date;
   /** How long a PR may report no CI before "no checks" fails (default 3 minutes). */
   ciGraceMs: number;
@@ -117,7 +119,15 @@ export function factoryNotice(
     id: string;
     projectId: string;
     target: "pm" | "orchestrator";
-    event: "triage_needed" | "digest" | "paused" | "escalated" | "regression" | "merged" | "failed";
+    event:
+      | "triage_needed"
+      | "digest"
+      | "paused"
+      | "escalated"
+      | "regression"
+      | "merged"
+      | "failed"
+      | "ready";
     title: string;
     text: string;
     itemIds?: string[];

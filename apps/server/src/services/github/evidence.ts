@@ -165,6 +165,9 @@ async function currentHead(
 
 const TEST_OUTPUT_LIMIT = 50_000;
 
+/** First line of every evidence comment (the factory's merge checks look for it). */
+export const EVIDENCE_HEADING = "### Evidence from CodeDen";
+
 /** The Markdown comment for published evidence, a summary and optional test output. */
 export function evidenceComment(opts: {
   files: PublishedEvidence[];
@@ -172,7 +175,7 @@ export function evidenceComment(opts: {
   testOutput?: string;
   sessionLabel: string;
 }): string {
-  const parts: string[] = ["### Evidence from CodeDen", ""];
+  const parts: string[] = [EVIDENCE_HEADING, ""];
   if (opts.summary) parts.push(opts.summary.trim(), "");
   for (const file of opts.files) {
     if (file.isImage) {

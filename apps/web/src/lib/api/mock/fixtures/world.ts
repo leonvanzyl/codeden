@@ -55,7 +55,7 @@ export const projects: Project[] = [
       slug: "storefront",
       path: "C:\\Code\\storefront",
       sortOrder: 0,
-      autonomyMode: "autopilot",
+      autonomyMode: "dark_factory",
       factoryLimits: {
         ...limits,
         maxConcurrentSessions: 3,

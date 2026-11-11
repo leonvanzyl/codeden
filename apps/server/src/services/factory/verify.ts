@@ -5,22 +5,29 @@ import {
   type Project,
 } from "@codeden/contracts";
 import { errorMessage } from "../errors";
-import { evaluateChecks, failedChecks, sameChecks } from "./checks";
+import { codeFiles, evaluateChecks, failedChecks, hasTestResults, sameChecks } from "./checks";
 import { type FactoryContext, factoryNotice, visionOf } from "./context";
-import type { FactoryPr } from "./github-port";
+import type { FactoryPr, PrEvidence } from "./github-port";
+import { autoMerge, prDecidedOutside, readyForYou } from "./merge";
 import { escalate, failItem, runAudit } from "./outcomes";
 import { isUiFile, mayMerge, pickReviewer } from "./policy";
 import { fixPrompt, REVIEWER_NUDGE, reReviewPrompt, tooLargePrompt } from "./prompts";
+import { mayAutoMerge } from "./trust";
 
 const ENDED = new Set(["idle", "interrupted", "completed", "failed", "stopped"]);
 
 /** Audit results per item and head commit (re-run after a restart is fine). */
 const auditCache = new Map<string, { ok: boolean; detail: string }>();
+/** Evidence found per item and head commit (only what was found; misses are looked up again). */
+const evidenceCache = new Map<string, PrEvidence>();
+
+/** How often a PR that is ready for a person is read from GitHub again (new commits, CI). */
+export const READY_RECHECK_MS = 5 * 60_000;
 
 /**
- * One verification step for an item with a PR (§10.1 step 4-5): gather the inputs, record the
- * merge checks, start or nudge the independent reviewer, then merge, start a fix round, fail
- * or escalate. Returns the (possibly changed) loop.
+ * One verification step for an item with a PR (§10.1, Review and Merge): gather the inputs,
+ * record the merge checks, start or nudge the independent reviewer, then merge (auto-merge on,
+ * trusted work) or hand it to the user to merge, start a revise round, fail or escalate.
  */
 export async function advanceVerifying(
   ctx: FactoryContext,
@@ -29,6 +36,19 @@ export async function advanceVerifying(
   item: FactoryItem,
 ): Promise<FactoryLoop> {
   if (!item.pr) return failItem(ctx, loop, item, "The item has no pull request");
+  // Ready and waiting for a person: the synced PR says when they merge or close it; GitHub
+  // itself is asked again only every few minutes (new commits, CI), or when auto-merge may act.
+  if (item.nudges.ready && !mayAutoMerge(item, project.factoryLimits)) {
+    const ref = ctx.github.prRef(project.id, item.pr.number);
+    if (ref && (ref.state === "merged" || ref.state === "closed")) {
+      prDecidedOutside(ctx, item, ref);
+      return loop;
+    }
+    const last = Date.parse(item.nudges.ready_checked ?? item.nudges.ready);
+    if (ctx.now().getTime() - last < READY_RECHECK_MS) return loop;
+    const at = ctx.now().toISOString();
+    ctx.store.updateItem(item.id, (i) => ({ ...i, nudges: { ...i.nudges, ready_checked: at } }));
+  }
   let pr: FactoryPr;
   try {
     pr = await ctx.github.prDetails(project.id, item.pr.number);
@@ -39,41 +59,31 @@ export async function advanceVerifying(
     }));
     return loop;
   }
-  if (pr.ref.state === "merged") {
-    ctx.store.updateItem(item.id, (i) => ({
-      ...i,
-      pr: pr.ref,
-      stage: "merged",
-      note: "Merged outside the factory",
-      mergedAt: i.mergedAt ?? ctx.now().toISOString(),
-      finishedAt: ctx.now().toISOString(),
-    }));
+  if (pr.ref.state === "merged" || pr.ref.state === "closed") {
+    prDecidedOutside(ctx, item, pr.ref);
     return loop;
   }
-  if (pr.ref.state === "closed") return failItem(ctx, loop, item, "The pull request was closed");
 
   const vision = visionOf(project);
   const now = ctx.now();
   const builder = item.builderSessionId ? ctx.repo.find(item.builderSessionId)?.session : undefined;
   const worktree = builder?.worktreePath ?? null;
   const auditConfigured = Boolean(loop.tuning.auditCommand && worktree);
-  const auditKey = `${item.id}:${pr.headSha ?? ""}`;
-  if (auditConfigured && worktree && loop.tuning.auditCommand && !auditCache.has(auditKey)) {
-    auditCache.set(auditKey, await runAudit(ctx, loop.tuning.auditCommand, worktree));
+  const headKey = `${item.id}:${pr.headSha ?? ""}`;
+  if (auditConfigured && worktree && loop.tuning.auditCommand && !auditCache.has(headKey)) {
+    auditCache.set(headKey, await runAudit(ctx, loop.tuning.auditCommand, worktree));
   }
-  const evidence = pr.files.some(isUiFile)
-    ? await ctx.github
-        .hasScreenshotEvidence(project.id, pr.ref.number, item.issue?.number ?? null)
-        .catch(() => false)
-    : null;
+  const evidence = await gatherEvidence(ctx, project, item, pr, headKey);
   const since = Date.parse(item.nudges.verifying ?? item.updatedAt);
   const { checks, outcome } = evaluateChecks({
     pr,
     issueTitle: item.issue?.title ?? item.title,
     review: item.review,
     reviewer: item.reviewerProvider,
-    evidence,
-    audit: auditCache.get(auditKey) ?? null,
+    type: item.type,
+    evidence: evidence.screenshots,
+    testOutput: evidence.testOutput,
+    audit: auditCache.get(headKey) ?? null,
     auditConfigured,
     ciGraceOver: now.getTime() - since > ctx.ciGraceMs,
     limits: project.factoryLimits,
@@ -91,22 +101,21 @@ export async function advanceVerifying(
   if (outcome === "escalate") return escalate(ctx, loop, current, checks);
   if (outcome === "fail") return handleFailure(ctx, project, loop, current);
   if (outcome === "pending") {
+    const reviewed = checks.find((c) => c.name === "review")?.state !== "skipped";
+    if (!reviewed) return loop;
     current = await ensureReviewer(ctx, current, vision.text);
     return reviewerStalled(ctx, project, loop, current);
   }
 
-  // Every check passed: merge, within the limits.
+  // Every check passed.
+  if (!mayAutoMerge(current, project.factoryLimits) || !isFactoryMode(project.autonomyMode)) {
+    await readyForYou(ctx, project, current);
+    return loop;
+  }
   if (loop.state === "paused" && current.source !== "revert") {
     ctx.store.updateItem(current.id, (i) => ({
       ...i,
       note: "Checks passed; waiting while the loop is paused",
-    }));
-    return loop;
-  }
-  if (!isFactoryMode(project.autonomyMode)) {
-    ctx.store.updateItem(current.id, (i) => ({
-      ...i,
-      note: "Checks passed; this mode does not merge automatically",
     }));
     return loop;
   }
@@ -117,48 +126,33 @@ export async function advanceVerifying(
     }));
     return loop;
   }
-  const title = `${current.title} (#${pr.ref.number})`;
-  const res = await ctx.github
-    .merge(project.id, pr.ref.number, { sha: pr.headSha, title })
-    .catch((error: unknown) => ({ merged: false, sha: null, error: errorMessage(error) }));
-  if (!res.merged) {
-    const why = "error" in res ? res.error : "GitHub did not merge it";
-    ctx.store.updateItem(current.id, (i) => ({ ...i, note: `Merge failed: ${why}` }));
-    return loop;
+  return autoMerge(ctx, project, loop, current, pr, checks);
+}
+
+/** Screenshots (UI changes) and test output (code changes), cached once found. */
+async function gatherEvidence(
+  ctx: FactoryContext,
+  project: Project,
+  item: FactoryItem,
+  pr: FactoryPr,
+  headKey: string,
+): Promise<{ screenshots: boolean | null; testOutput: boolean | null }> {
+  const wantScreens = pr.files.some(isUiFile);
+  const wantTests = codeFiles(pr.files).length > 0 && !hasTestResults(pr.body);
+  if (!wantScreens && !wantTests) return { screenshots: null, testOutput: null };
+  let found = evidenceCache.get(headKey);
+  if (!found || (wantScreens && !found.screenshots) || (wantTests && !found.testOutput)) {
+    const looked = await ctx.github
+      .evidence(project.id, pr.ref.number, item.issue?.number ?? null)
+      .catch(() => null);
+    if (!looked) return { screenshots: null, testOutput: null };
+    found = looked;
+    if (found.screenshots || found.testOutput) evidenceCache.set(headKey, found);
   }
-  const at = ctx.now().toISOString();
-  ctx.store.updateItem(current.id, (i) => ({
-    ...i,
-    stage: "watching",
-    pr: { ...pr.ref, state: "merged" },
-    mergeSha: res.sha,
-    mergedAt: at,
-    note: "Merged; watching CI on the default branch",
-  }));
-  if (current.issue && current.source !== "revert") {
-    const passed = checks
-      .filter((c) => c.state === "pass")
-      .map((c) => c.name)
-      .join(", ");
-    await ctx.github
-      .comment(
-        project.id,
-        current.issue.number,
-        `Merged automatically by the CodeDen factory in #${pr.ref.number} after every merge check passed (${passed}).`,
-      )
-      .catch((error: unknown) => ctx.log?.(`factory: comment: ${errorMessage(error)}`));
-  }
-  factoryNotice(ctx, {
-    id: `factory.merged:${current.id}`,
-    projectId: project.id,
-    target: "pm",
-    event: "merged",
-    title: `Factory merged #${pr.ref.number}: ${current.title}`,
-    text: `Merged ${pr.ref.url} (${res.sha ?? "unknown sha"}); watching CI on the default branch.`,
-    itemIds: [current.id],
-    wake: false,
-  });
-  return { ...loop, mergesToday: loop.mergesToday + 1, consecutiveFailures: 0 };
+  return {
+    screenshots: wantScreens ? found.screenshots : null,
+    testOutput: wantTests ? found.testOutput : false,
+  };
 }
 
 /** Start the independent reviewer (another provider when possible), or ask it to look again. */
@@ -180,7 +174,7 @@ async function ensureReviewer(
   if (ctx.sessions.activeCount(item.projectId) >= project.factoryLimits.maxConcurrentSessions) {
     return ctx.store.updateItem(item.id, (i) => ({
       ...i,
-      note: "Waiting for a session slot for the review",
+      note: "Waiting for a free agent for the review",
     }));
   }
   const choice = pickReviewer(item.builderProvider, ctx.sessions.providers());
@@ -192,7 +186,14 @@ async function ensureReviewer(
       head = { headBranch: details.headBranch, baseBranch: project.defaultBranch ?? "main" };
     }
   }
-  const res = await ctx.sessions.startReviewer(item, vision, choice.provider, choice.note, head);
+  const res = await ctx.sessions.startReviewer(
+    item,
+    vision,
+    choice.provider,
+    choice.note,
+    head,
+    mayAutoMerge(item, project.factoryLimits),
+  );
   if (res.status !== "started") {
     return ctx.store.updateItem(item.id, (i) => ({
       ...i,
@@ -258,7 +259,7 @@ function failReview(
   return handleFailure(ctx, project, loop, current);
 }
 
-/** Failed checks: one more fix round if allowed, otherwise the item fails (and may pause). */
+/** Failed checks: a revise round if allowed, otherwise the item fails (and may pause). */
 async function handleFailure(
   ctx: FactoryContext,
   project: Project,
@@ -266,7 +267,7 @@ async function handleFailure(
   item: FactoryItem,
 ): Promise<FactoryLoop> {
   const failed = failedChecks(item.checks);
-  // A fix round can't make work smaller without cutting scope: the PM splits it or allows it.
+  // A revise round can't make work smaller without cutting scope: the PM splits or allows it.
   if (failed.some((c) => c.name === "size")) return tooLarge(ctx, project, loop, item);
   const builder = item.builderSessionId ? ctx.repo.find(item.builderSessionId)?.session : undefined;
   const fixable =
@@ -277,18 +278,21 @@ async function handleFailure(
     item.review?.verdict !== "reject";
   if (fixable && builder) {
     const at = ctx.now().toISOString();
-    ctx.store.updateItem(item.id, (i) => ({
-      ...i,
-      stage: "building",
-      attempts: i.attempts + 1,
-      review: null,
-      note: `Fix round ${i.attempts + 1}: ${failed.map((c) => c.name).join(", ")}`,
-      nudges: {
-        ...i.nudges,
-        [`fix_${i.attempts + 1}`]: at,
-        ...(i.reviewerSessionId ? { rereview_pending: at } : {}),
-      },
-    }));
+    ctx.store.updateItem(item.id, (i) => {
+      const { ready: _ready, ...nudges } = i.nudges;
+      return {
+        ...i,
+        stage: "building",
+        attempts: i.attempts + 1,
+        review: null,
+        note: `Revise round ${i.attempts + 1}: ${failed.map((c) => c.name).join(", ")}`,
+        nudges: {
+          ...nudges,
+          [`fix_${i.attempts + 1}`]: at,
+          ...(i.reviewerSessionId ? { rereview_pending: at } : {}),
+        },
+      };
+    });
     await ctx.sessions.message(builder.id, fixPrompt(item, failed));
     return loop;
   }
@@ -300,7 +304,7 @@ async function handleFailure(
       .comment(
         project.id,
         item.pr.number,
-        `The CodeDen factory's merge checks failed, so this PR is left for a human:\n\n${failed.map((c) => `- **${c.name}**: ${c.detail ?? "failed"}`).join("\n")}`,
+        `The CodeDen factory's checks failed, so this PR is left for a human:\n\n${failed.map((c) => `- **${c.name}**: ${c.detail ?? "failed"}`).join("\n")}`,
       )
       .catch((error: unknown) => ctx.log?.(`factory: comment: ${errorMessage(error)}`));
   }
@@ -309,8 +313,8 @@ async function handleFailure(
 
 /**
  * The size check failed. That isn't a quality failure, so it doesn't count towards pausing
- * the loop, and no fix round runs. The PM is woken to split the work into smaller issues or,
- * when it can't be split, to allow it with `factory_allow_large_change`. The PR stays open.
+ * the loop, and no revise round runs. The PM is woken to split the work into smaller issues
+ * or, when it can't be split, to allow it with `factory_allow_large_change`. The PR stays open.
  */
 async function tooLarge(
   ctx: FactoryContext,
@@ -327,7 +331,7 @@ async function tooLarge(
     projectId: item.projectId,
     target: "pm",
     event: "failed",
-    title: `Too large to merge automatically: ${item.title}`,
+    title: `Too large for the factory: ${item.title}`,
     text: tooLargePrompt(item, size?.detail ?? "over the size limit", failed),
     itemIds: [item.id],
   });
@@ -336,7 +340,7 @@ async function tooLarge(
       .comment(
         project.id,
         item.pr.number,
-        `This PR is larger than the CodeDen factory's size limit (${size?.detail ?? "over the limit"}), so it isn't merged automatically yet. The project manager will split the work into smaller issues or allow it as one change.`,
+        `This PR is larger than the CodeDen factory's size limit (${size?.detail ?? "over the limit"}). The project manager will split the work into smaller issues or allow it as one change.`,
       )
       .catch((error: unknown) => ctx.log?.(`factory: comment: ${errorMessage(error)}`));
   }

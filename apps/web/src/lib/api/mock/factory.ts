@@ -1,4 +1,5 @@
 import {
+  AutonomyMode,
   type FactoryItem,
   FactoryLimits,
   FactoryLoop,
@@ -19,6 +20,7 @@ const delay = <T>(value: T, ms = 120): Promise<T> =>
 const now = () => new Date().toISOString();
 
 function work(w: FixtureWorkItem): FactoryWorkItem {
+  const done = ["merged", "reverted", "rejected"].includes(w.stage);
   return {
     id: w.id,
     title: w.title,
@@ -27,10 +29,22 @@ function work(w: FixtureWorkItem): FactoryWorkItem {
     pr: w.pr,
     score: w.score ?? null,
     sessionId: w.sessionId ?? null,
+    reviewerSessionId: null,
+    activeSessionId: w.sessionId ?? null,
     stage: w.stage,
+    step: w.step ?? (done ? (w.stage === "merged" ? "done" : "stopped") : "queued"),
+    type: w.type ?? (done ? "feature" : null),
+    trust: w.trust ?? "trusted",
+    author: w.author ?? "hearth-co",
     source: w.workKey.startsWith("issue:") ? "issue" : "discovery",
-    reason: w.stage === "rejected" ? "Out of scope for the vision" : null,
-    note: null,
+    attempts: w.attempts ?? 0,
+    reason:
+      w.stage === "rejected"
+        ? "Out of scope for the vision"
+        : w.stage === "ignored"
+          ? `Opened by @${w.author ?? "someone"}, who is not a trusted author`
+          : null,
+    note: w.step === "merge" ? "Ready to merge: every check passed (auto-merge is off)" : null,
     updatedAt: now(),
   };
 }
@@ -54,10 +68,28 @@ export function mockFactoryApi(world: MockWorld): FactoryApi {
       pausedReason: null,
       globalKillSwitch: world.snapshot.settings.factory.killSwitch,
       tuning: FactoryTuning.parse({}),
-      activeSessions: f.inProgress.length,
+      activeSessions: Math.min(f.inProgress.length, f.limits.maxConcurrentSessions),
       backlog: f.backlog.map(work),
       inProgress: f.inProgress.map(work),
       recent: f.recent.map(work),
+      ignored: f.ignored.map(work),
+      githubLogin: "hearth-co",
+      scout:
+        f.mode === "dark_factory"
+          ? {
+              phase: "reviewing",
+              sessionId: "s-audit",
+              lenses: [
+                { area: "ux", sessionId: "s-a11y", reported: true, active: false },
+                { area: "performance", sessionId: "s-search", reported: false, active: true },
+              ],
+              findings: 3,
+              filed: 0,
+              lastRoundAt: null,
+              nextRoundAt: null,
+              rounds: 4,
+            }
+          : null,
       mergeChecks: f.mergeChecks.map((c, i) => ({
         itemId: f.inProgress[i]?.id ?? `fw-c${i}`,
         prNumber: c.prNumber,
@@ -75,13 +107,20 @@ export function mockFactoryApi(world: MockWorld): FactoryApi {
   };
   const item = (projectId: string, itemId: string): FactoryItem => {
     const s = status(projectId);
-    const w = [...s.backlog, ...s.inProgress, ...s.recent].find((x) => x.id === itemId);
+    const w = [...s.backlog, ...s.inProgress, ...s.recent, ...s.ignored].find(
+      (x) => x.id === itemId,
+    );
     if (!w) throw new Error(`No factory item ${itemId}`);
     return {
       ...w,
       projectId,
       summary: `Work item "${w.title}" from the ${w.source}.`,
       area: null,
+      classification: w.type
+        ? { type: w.type, confidence: "high", rationale: "From its label", by: "label", at: now() }
+        : null,
+      admittedBy: null,
+      investigation: null,
       acceptanceCriteria: ["Behaviour covered by tests", "No visual regressions"],
       builderSessionId: w.sessionId,
       builderProvider: "claude",
@@ -90,7 +129,7 @@ export function mockFactoryApi(world: MockWorld): FactoryApi {
       reviewerNote: null,
       review: null,
       checks: s.mergeChecks.find((c) => c.itemId === itemId)?.checks ?? [],
-      attempts: 0,
+      attempts: w.attempts,
       mergeSha: null,
       revertOf: null,
       triageRequestedAt: null,
@@ -125,13 +164,14 @@ export function mockFactoryApi(world: MockWorld): FactoryApi {
       const p = project(projectId);
       if (!p) throw new Error(`No project ${projectId}`);
       const limits = FactoryLimits.parse(req.limits ?? p.factoryLimits);
+      const mode = AutonomyMode.parse(req.mode);
       world.emitDomain({
         type: "project.updated",
         sessionId: null,
-        payload: { project: { ...p, autonomyMode: req.mode, factoryLimits: limits } },
+        payload: { project: { ...p, autonomyMode: mode, factoryLimits: limits } },
       });
       world.factory.delete(projectId);
-      return { projectId, mode: req.mode, limits, experimental: isFactoryMode(req.mode) };
+      return { projectId, mode, limits, experimental: isFactoryMode(mode) };
     },
     async vision(projectId) {
       const contents = visions.get(projectId) ?? visionDoc;
@@ -181,6 +221,13 @@ export function mockFactoryApi(world: MockWorld): FactoryApi {
         createdAt: now(),
       };
     },
-    triage: async (id, req) => item(id, req.itemId),
+    admit: async (id, req) => ({
+      ...item(id, req.itemId),
+      stage: "candidate",
+      trust: "admitted",
+      admittedBy: "user",
+    }),
+    setType: async (id, req) => ({ ...item(id, req.itemId), type: req.type }),
+    retry: async (id, itemId) => ({ ...item(id, itemId), stage: "backlog" }),
   };
 }

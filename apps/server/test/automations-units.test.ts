@@ -419,8 +419,8 @@ describe("issue intake ownership (§10.1)", () => {
   const start = automation();
   const message = automation({ action: { type: "message_pm", message: "New issue" } });
 
-  it("gives issue events to the factory in autopilot and dark factory", () => {
-    for (const mode of ["autopilot", "dark_factory"] as const) {
+  it("gives issue events to the factory in the software and dark factory", () => {
+    for (const mode of ["software_factory", "dark_factory"] as const) {
       expect(factoryOwnsIntake(triage, event("issue.opened"), project(mode))).toBe(true);
       expect(factoryOwnsIntake(start, event("issue.labeled"), project(mode))).toBe(true);
       expect(factoryOwnsIntake(message, event("issue.opened"), project(mode))).toBe(false);

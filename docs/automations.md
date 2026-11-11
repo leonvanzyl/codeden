@@ -82,7 +82,7 @@ In files, the editor's choices are stored as one of three trigger types. Schedul
 | **Event** | `type: event`, `event`, optional `filter` | See the event list below |
 | **Manual** | `type: manual` | Runs only when you (or a PM) start it |
 
-In a project in **Manual** [autonomy mode](autonomy-and-dark-factory.md), scheduled and event automations don't fire on their own (the Now / Next strip is empty); you can still run any automation by hand.
+In a project in **Manual** [autonomy mode](software-factory.md), scheduled and event automations don't fire on their own (the Now / Next strip is empty); you can still run any automation by hand.
 
 **Events:**
 
@@ -300,4 +300,4 @@ A triage run stays **running** until the PM reports its decision, and fails if n
 
 ## Automations and the factory
 
-In **Autopilot** and **Dark factory** projects the [factory loop](autonomy-and-dark-factory.md) owns issue intake. Automations triggered by `issue.opened` or `issue.labeled` whose action is `triage` or `start_session` are recorded as skipped (`factory_intake`) instead, so an issue is never taken on twice. Scheduled automations, `message_pm` automations and manual runs keep working alongside the loop.
+In **Software factory** and **Dark factory** projects the [factory loop](software-factory.md) owns issue intake. Automations triggered by `issue.opened` or `issue.labeled` whose action is `triage` or `start_session` are recorded as skipped (`factory_intake`) instead, so an issue is never taken on twice. Scheduled automations, `message_pm` automations and manual runs keep working alongside the loop.

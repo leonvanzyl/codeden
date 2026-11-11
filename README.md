@@ -95,11 +95,11 @@ Background work you switch on per project: **security audit**, **refactor sweep*
 
 ![A project's automations with their schedules and the next runs](docs/images/automations.png)
 
-### Autonomy modes, including an experimental dark factory
+### A software factory, and an experimental dark factory
 
-Each project climbs a ladder: **Manual** → **Assisted** (the default) → **Autopilot** → **Dark factory**. In the last two (both **experimental**), a factory loop takes in work from issues, failed checks and improvement finders, builds it in agent sessions, and merges a PR automatically only when every merge check passes: green CI, tests, an independent review by a separate agent session, a security scan, UI evidence, a size limit and no protected areas touched. Limits you set (concurrent sessions, merges per day, a daily budget, pause after repeated failures) are enforced by the server, and a kill switch stops everything with one click. [Autonomy and the dark factory](docs/autonomy-and-dark-factory.md).
+Each project climbs a ladder: **Manual** → **Assisted** (the default) → **Software factory** → **Dark factory**. In a **software factory**, the GitHub issues you and the people you trust file are classified as a bug, a feature or a docs change, and a pool of agents runs each through its pipeline: reproduce, fix and review a bug; analyze, implement and review a feature; change the docs. Every pull request carries its test results, and screenshots for UI changes; you merge it, or turn on auto-merge. Issues from anyone else (on a public repository, anyone at all) are ignored until you let one in, and what you let in is never merged automatically. A **dark factory** adds a scheduled scout that reviews the app against your vision with a few long-lived reviewer agents and files the issues itself. The project page draws the pipelines live: click an issue to open the agent working on it. Limits (agents at once, a daily budget, pause after repeated failures) are enforced by the server, and a kill switch stops everything with one click. Both are **experimental**. [The software factory and the dark factory](docs/software-factory.md).
 
-![The factory panel: loop stages, budget meters, backlog, merge checks and recent merges](docs/images/factory-panel.png)
+![The factory panel: the live Bug, Feature and Docs pipelines, the agent pool, budget, merge checks and ignored issues](docs/images/factory-panel.png)
 
 ### Workbench
 
@@ -186,7 +186,7 @@ Details and how to report a vulnerability: [docs/security.md](docs/security.md) 
 | API keys | Settings, stored in the OS keychain |
 | Per-project setup | `.codeden/project.json` in the repo: worktree setup commands and the dev server |
 | Automations | `~/.codeden/automations/*.md` (all projects) and `<repo>/.codeden/automations/*.md` |
-| Project vision | `<repo>/.codeden/VISION.md` (autopilot and dark factory) |
+| Project vision | `<repo>/.codeden/VISION.md` (software and dark factory) |
 
 Inside the data directory:
 
@@ -284,7 +284,7 @@ Windows, macOS and Linux. Windows is tested first.
 Yes. Turn on **Settings › Network access**, set a password, and scan the QR code with your phone on the same Wi-Fi (or over your own VPN such as Tailscale). The UI adapts to phones and tablets, and **Add to Home Screen** opens it full screen. Plain http addresses mean no notifications or microphone on the phone. See [Phones, tablets and network access](docs/remote-access.md).
 
 **Is the dark factory safe to leave running?**
-It's experimental. Read [Autonomy and the dark factory](docs/autonomy-and-dark-factory.md) first, start with Autopilot on a sandbox repository, set a budget and protected areas, and keep the kill switch in reach.
+It's experimental. Read [The software factory and the dark factory](docs/software-factory.md) first, start with the software factory on a sandbox repository with auto-merge off, set a budget, trusted authors and protected areas, and keep the kill switch in reach.
 
 ## Documentation
 
@@ -295,7 +295,7 @@ It's experimental. Read [Autonomy and the dark factory](docs/autonomy-and-dark-f
 | [Orchestration](docs/orchestration.md) | Orchestrator, PMs, agents, work keys, conflicts and notices |
 | [GitHub](docs/github.md) | Issues, PRs, checks, reviews and the evidence branch |
 | [Automations](docs/automations.md) | Triggers, guards, templates and writing your own |
-| [Autonomy and the dark factory](docs/autonomy-and-dark-factory.md) | Modes, the vision file, merge checks, limits and the kill switch |
+| [The software factory and the dark factory](docs/software-factory.md) | Modes, pipelines, trusted authors, the scout, the vision file, merge checks, limits and the kill switch |
 | [Workbench](docs/workbench.md) | Diffs, checkpoints, files, terminal, browser, composer, shortcuts |
 | [Agent configuration](docs/agent-config.md) | Memory, skills, subagents and MCP servers |
 | [Voice and images](docs/voice-and-images.md) | Dictation, read-aloud and image generation |

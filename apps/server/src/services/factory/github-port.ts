@@ -6,6 +6,7 @@ import {
   githubPrId,
 } from "@codeden/contracts";
 import { errorMessage } from "../errors";
+import { EVIDENCE_HEADING } from "../github/evidence";
 import type { GithubService } from "../github/github-service";
 
 /** A pull request as the merge checks read it. */
@@ -28,12 +29,22 @@ export interface FactoryPr {
 /** Commit-level CI state, for watching main after a merge. */
 export type CommitChecks = ChecksState;
 
+/** Evidence attached to a PR (or its issue) through `attach_evidence`. */
+export interface PrEvidence {
+  /** Screenshots or other images. */
+  screenshots: boolean;
+  /** Raw test output (`attach_evidence` with `testOutput`). */
+  testOutput: boolean;
+}
+
 /**
  * What the factory needs from GitHub (§9), as a port so tests can run the loop against a
  * scripted GitHub. `GithubFactoryPort` implements it over `GithubService`.
  */
 export interface FactoryGithub {
   isGithubProject(projectId: string): boolean;
+  /** The login of the account CodeDen uses on GitHub (always trusted); null when unknown. */
+  viewerLogin(): Promise<string | null>;
   createIssue(
     projectId: string,
     req: { title: string; body: string; labels: string[] },
@@ -42,15 +53,15 @@ export interface FactoryGithub {
   comment(projectId: string, number: number, body: string): Promise<void>;
   /** Open issues (projection), for intake. */
   openIssues(projectId: string): GithubIssue[];
+  /** One issue from the projection (open or closed); null when it was never synced. */
+  issue(projectId: string, number: number): GithubIssue | null;
+  /** A PR as last synced (projection, no API call); null when unknown. */
+  prRef(projectId: string, number: number): GitHubPrRef | null;
   /** The PR a session opened (or whose head is its branch), if known. */
   prForSession(projectId: string, sessionId: string, branch: string | null): GitHubPrRef | null;
   prDetails(projectId: string, number: number): Promise<FactoryPr>;
-  /** Whether screenshots were attached to the PR (or its issue) through `attach_evidence`. */
-  hasScreenshotEvidence(
-    projectId: string,
-    prNumber: number,
-    issueNumber: number | null,
-  ): Promise<boolean>;
+  /** Screenshots and test output attached to the PR (or its issue) with `attach_evidence`. */
+  evidence(projectId: string, prNumber: number, issueNumber: number | null): Promise<PrEvidence>;
   merge(
     projectId: string,
     number: number,
@@ -78,10 +89,25 @@ export interface FactoryGithub {
 export const VISION_BRANCH = "codeden/vision";
 
 const IMAGE_LINK = /\.(png|jpe?g|gif|webp)\?raw=true/i;
+const TEST_OUTPUT = /<summary>Test output<\/summary>/i;
+const LOGIN_TTL_MS = 10 * 60_000;
 
 /** `FactoryGithub` over the real `GithubService` (Octokit, the PR/issue projections). */
 export class GithubFactoryPort implements FactoryGithub {
+  private login: { value: string | null; at: number } | null = null;
+
   constructor(private readonly github: GithubService) {}
+
+  async viewerLogin(): Promise<string | null> {
+    if (this.login && Date.now() - this.login.at < LOGIN_TTL_MS) return this.login.value;
+    const value = await this.github
+      .connection()
+      .then((c) => c.login)
+      .catch(() => null);
+    // Remember a failure only briefly, so trust comes back as soon as GitHub does.
+    this.login = { value, at: value ? Date.now() : Date.now() - LOGIN_TTL_MS + 30_000 };
+    return value;
+  }
 
   isGithubProject(projectId: string): boolean {
     try {
@@ -107,6 +133,15 @@ export class GithubFactoryPort implements FactoryGithub {
 
   openIssues(projectId: string): GithubIssue[] {
     return this.github.data.issues(projectId, "open", 200);
+  }
+
+  issue(projectId: string, number: number): GithubIssue | null {
+    return this.github.data.issue(projectId, number) ?? null;
+  }
+
+  prRef(projectId: string, number: number): GitHubPrRef | null {
+    const pr = this.github.data.pr(projectId, number);
+    return pr ? { number: pr.number, url: pr.url, state: pr.state, title: pr.title } : null;
   }
 
   prForSession(projectId: string, sessionId: string, branch: string | null): GitHubPrRef | null {
@@ -135,12 +170,14 @@ export class GithubFactoryPort implements FactoryGithub {
     };
   }
 
-  async hasScreenshotEvidence(
+  async evidence(
     projectId: string,
     prNumber: number,
     issueNumber: number | null,
-  ): Promise<boolean> {
+  ): Promise<PrEvidence> {
     const repo = this.github.githubRepo(projectId);
+    const found: PrEvidence = { screenshots: false, testOutput: false };
+    const viewer = (await this.viewerLogin())?.toLowerCase() ?? null;
     for (const number of [prNumber, ...(issueNumber ? [issueNumber] : [])]) {
       const comments = await this.github.client.run(async (o) =>
         o.paginate(o.rest.issues.listComments, {
@@ -150,9 +187,17 @@ export class GithubFactoryPort implements FactoryGithub {
           per_page: 100,
         }),
       );
-      if (comments.some((c) => IMAGE_LINK.test(c.body ?? ""))) return true;
+      // Only CodeDen's own evidence comments count (anyone can comment on a public repo).
+      for (const c of comments) {
+        const body = c.body ?? "";
+        if (!body.startsWith(EVIDENCE_HEADING)) continue;
+        if (viewer && c.user?.login?.toLowerCase() !== viewer) continue;
+        if (IMAGE_LINK.test(body)) found.screenshots = true;
+        if (TEST_OUTPUT.test(body)) found.testOutput = true;
+      }
+      if (found.screenshots && found.testOutput) break;
     }
-    return false;
+    return found;
   }
 
   async merge(projectId: string, number: number, opts: { sha: string | null; title: string }) {

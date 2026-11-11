@@ -6,7 +6,7 @@ import { badRequest } from "../errors";
 export { parseProtectedAreas, parseVision } from "@codeden/contracts";
 
 /**
- * The project vision (§10.1): `.codeden/VISION.md`, required for autopilot and dark factory.
+ * The project vision (§10.1): `.codeden/VISION.md`, required for the software and dark factory.
  * Sections are `##` headings; bullets under them are the entries. Protected areas become path
  * globs (anything in backticks, or that looks like a path) and topics (plain words).
  */

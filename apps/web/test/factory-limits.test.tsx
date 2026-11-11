@@ -9,8 +9,8 @@ import { renderWithClient } from "./utils";
 
 const storefront = projects.find((p) => p.id === "p-storefront") as Project;
 
-describe("factory merge-check limits in the autonomy dialog", () => {
-  it("shows the size limits and saves an empty box as no limit", async () => {
+describe("factory settings in the autonomy dialog", () => {
+  it("shows the size limits, saves an empty box as no limit and keeps valid trusted authors", async () => {
     const success = vi.spyOn(toast, "success").mockImplementation(() => "t");
     const client = createMockClient();
     const setMode = vi.spyOn(client.factory, "setMode");
@@ -27,11 +27,14 @@ describe("factory merge-check limits in the autonomy dialog", () => {
 
     fireEvent.change(lines, { target: { value: "" } });
     fireEvent.change(files, { target: { value: "120" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save limits" }));
+    const authors = screen.getByLabelText("Trusted authors") as HTMLTextAreaElement;
+    fireEvent.change(authors, { target: { value: "@octocat\n-not-a-login!\nmy-teammate" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
 
     await waitFor(() => expect(setMode).toHaveBeenCalled());
     expect(setMode.mock.calls[0]?.[1]).toMatchObject({
-      mode: "autopilot",
+      mode: "dark_factory",
+      limits: { autoMerge: false, trustedAuthors: ["octocat", "my-teammate"] },
       tuning: { maxChangedLines: null, maxChangedFiles: 120, requireCi: true },
     });
     success.mockRestore();

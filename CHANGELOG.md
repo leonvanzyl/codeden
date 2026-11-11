@@ -6,6 +6,12 @@ All notable changes to CodeDen are documented here. The format follows [Keep a C
 
 ### Added
 
+- **The software factory.** File GitHub issues (you, or people you trust) and the factory runs them through a pipeline: each issue is classified as a **bug**, a **feature** or a **docs** change, then a pool of agents takes it. A bug is reproduced with a failing test before it is fixed, a feature is analyzed against the vision (with a spec posted on the issue) before it is built, a docs change goes straight to the edit; an independent reviewer then checks bugs and features and sends them back for a revision when needed. Every pull request carries its test results, and screenshots for UI changes. Set how many agents may work at once in the factory settings.
+- **The pipelines, live on the project page.** The factory panel draws the pipelines (Issue, Identify type, the Bug, Feature and Docs lanes, Merge) with every issue on the step it's at. Click an issue to open the agent session working on it.
+- **Trusted authors.** On a public repository anyone can open an issue, so the factory only takes on issues by the account CodeDen uses on GitHub and the logins you list under **Trusted authors**. Everyone else's are listed as ignored, untouched, until you click **Let in**; work let in that way is never merged automatically.
+- **The dark factory's scout.** A dark factory now has a scheduled scout: one long-lived agent that, when the queue runs low, reviews the app against the vision with a few long-lived reviewer agents (lenses for UI, performance, security, features, bugs, code quality, tests and docs) and files the work worth doing as issues. Lenses per round and issues per round are capped, and the scout and its lenses reuse their sessions round after round instead of starting new ones.
+- **Retry, change the pipeline, or let an issue in** from a factory item's page.
+
 - **A real browser in the desktop app.** The browser panel now shows the session's browser as a native browser view instead of a streamed picture: native scrolling, text selection, typing with your input method, a right-click menu, full frame rate, and **⋯ › Inspect** for DevTools. Agents keep driving the same tabs, and the **Agent is acting** chip still shows when they do. Each session has its own cookies and storage. A phone or a plain browser tab watching the same session sees it streamed, as before. Browsers opened from a plain browser tab or a phone keep using the streamed view.
 - **Quitting the desktop app keeps your session browsers.** Each open tab moves to CodeDen's background browser at the same address, with its cookies, so agents can carry on. Anything you typed into a page and didn't save is lost. When you open the app again, those sessions stay on the streamed view; browsers you open from then on are native again.
 - **Settings › App › Native browser** turns native views on or off (on by default). Off brings back the streamed view for browsers opened from then on.
@@ -20,6 +26,10 @@ All notable changes to CodeDen are documented here. The format follows [Keep a C
 - **Claude Fable 5.2 is priced** in usage reports ($8 / $40 per million input / output tokens), and so is the `fable` alias.
 
 ### Changed
+
+- **Autopilot is now the Software factory, and you merge.** Factory pull requests now stop at **Ready to merge** (an inbox item and a comment on the PR) until you merge them on GitHub. Turn on **Merge automatically** in the factory settings to let CodeDen merge trusted work once every check passes, as before. Projects on Autopilot become software factories with auto-merge off; their issues from authors you haven't trusted are no longer taken on.
+- **Factory issues are classified, not triaged.** The project manager no longer scores each new issue; the factory classifies it and queues it straight away. The PM can still move an item to another pipeline, or let an ignored issue in when you ask it to.
+- **A new merge check: test results.** A pull request that changes code needs a `## Test results` section or test output attached as evidence. Revise rounds default to two.
 
 - **The browser panel is a real browser surface.** The page now fills the panel edge to edge and is laid out at the panel's own size, instead of a fixed 1280×800 page shrunk into a small card. It re-flows as you resize the panel, and it's sharp on HiDPI screens (rendered at your screen's pixel ratio, up to 2×). Pick a fixed device size under **⋯ › Viewport** if you want one; **Fit to panel** is the default.
 - **No more "Take over".** Clicks, typing and scrolling always go straight to the page, even while an agent is using it. An **Agent is acting** chip in the toolbar shows when an agent drives the browser.

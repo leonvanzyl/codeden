@@ -11,7 +11,7 @@ import { errorMessage } from "../errors";
 import type { RunnerPort } from "../runner-port";
 import type { SessionRepo } from "../sessions/repo";
 import type { SessionService } from "../sessions/session-service";
-import { builderPrompt, discoveryPrompt, revertPrompt, reviewerPrompt } from "./prompts";
+import { builderPrompt, revertPrompt, reviewerPrompt } from "./prompts";
 
 /** Who starts factory sessions; `id: "factory"` marks them for limits and the kill switch. */
 export const FACTORY_STARTER: StartedBy = { kind: "pm", id: "factory" };
@@ -23,6 +23,16 @@ const LIVE_STATUSES = new Set([...SLOT_STATUSES, "idle", "interrupted"]);
 
 export function isFactorySession(s: Session): boolean {
   return s.startedBy.kind === FACTORY_STARTER.kind && s.startedBy.id === FACTORY_STARTER.id;
+}
+
+/** Work key of the dark factory's scout (one long-lived session per project). */
+export const SCOUT_WORK_KEY = "factory:scout";
+/** Work key prefix of the scout's lenses (one long-lived session per area). */
+export const LENS_WORK_KEY_PREFIX = "factory:lens:";
+
+/** Whether a session is busy with a turn (or about to start one). */
+export function isBusy(s: Session): boolean {
+  return SLOT_STATUSES.has(s.status);
 }
 
 export interface FactorySessionsDeps {
@@ -53,27 +63,47 @@ export class FactorySessions {
     return real.length > 0 ? real : ids;
   }
 
-  startDiscovery(
-    projectId: string,
-    area: DiscoveryArea,
-    vision: string,
-    known: string[],
-  ): Promise<StartSessionResponse> {
+  /**
+   * A long-lived session the scout uses round after round, if it can take another message:
+   * it exists, isn't archived and didn't fail.
+   */
+  reusable(sessionId: string | null | undefined): Session | undefined {
+    if (!sessionId) return undefined;
+    const s = this.deps.repo.find(sessionId)?.session;
+    if (!s || s.status === "failed" || s.archivedAt) return undefined;
+    return s;
+  }
+
+  /** Start the dark factory's scout with its first round's brief. */
+  startScout(projectId: string, text: string): Promise<StartSessionResponse> {
     return this.start({
       projectId,
-      purpose: `Factory: find ${area.replace("_", " ")} improvements`,
-      workKey: `factory:discover:${area}`,
-      scope: { area: `factory-discover-${area}` },
-      title: `Factory discovery: ${area}`,
-      input: { text: discoveryPrompt({ area, vision, known }), attachments: [] },
+      purpose: "Factory scout: review the app against the vision and file the work",
+      workKey: SCOUT_WORK_KEY,
+      scope: { area: "factory-scout" },
+      title: "Factory scout",
+      input: { text, attachments: [] },
+    });
+  }
+
+  /** Start one of the scout's lenses (long-lived, one per area). */
+  startLens(projectId: string, area: DiscoveryArea, text: string): Promise<StartSessionResponse> {
+    return this.start({
+      projectId,
+      purpose: `Factory lens: review ${area.replace("_", " ")}`,
+      workKey: `${LENS_WORK_KEY_PREFIX}${area}`,
+      scope: { area: `factory-lens-${area}` },
+      title: `Factory lens: ${area.replace("_", " ")}`,
+      input: { text, attachments: [] },
     });
   }
 
   startBuilder(item: FactoryItem, vision: string, provider: string): Promise<StartSessionResponse> {
+    const step = item.type ? ` (${item.type})` : "";
     return this.start({
       projectId: item.projectId,
       provider,
-      purpose: `Factory: ${item.title}`.slice(0, 300),
+      purpose: `Factory${step}: ${item.title}`.slice(0, 300),
       workKey: item.workKey,
       title: item.title.slice(0, 200),
       issue: item.issue ?? undefined,
@@ -91,7 +121,8 @@ export class FactorySessions {
     vision: string,
     provider: string,
     note: string | null,
-    pr?: { headBranch: string; baseBranch: string } | null,
+    pr: { headBranch: string; baseBranch: string } | null,
+    autoMerge: boolean,
   ): Promise<StartSessionResponse> {
     const builder = item.builderSessionId
       ? this.deps.repo.find(item.builderSessionId)?.session
@@ -119,7 +150,7 @@ export class FactorySessions {
       title: `Review: ${item.title}`.slice(0, 200),
       issue: item.issue ?? undefined,
       workspace,
-      input: { text: reviewerPrompt(item, vision, note, localBase), attachments: [] },
+      input: { text: reviewerPrompt(item, vision, note, localBase, autoMerge), attachments: [] },
     });
   }
 

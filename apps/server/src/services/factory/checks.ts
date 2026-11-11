@@ -6,6 +6,7 @@ import type {
   MergeCheckState,
   ProtectedAreas,
   ReviewVerdict,
+  WorkType,
 } from "@codeden/contracts";
 import type { FactoryPr } from "./github-port";
 import { isNonCodeFile, isTestFile, isUiFile, protectedHits } from "./policy";
@@ -18,8 +19,12 @@ export interface CheckInputs {
   review: ReviewVerdict | null;
   /** Provider of the reviewer, for the pending message. */
   reviewer: string | null;
+  /** The item's pipeline; a docs change that touches no code needs no agent review. */
+  type: WorkType | null;
   /** Screenshots attached; null when not looked up (no UI files). */
   evidence: boolean | null;
+  /** Test output attached with `attach_evidence`; null when not looked up. */
+  testOutput: boolean | null;
   /** Result of the configured audit command; null while not run (or not configured). */
   audit: { ok: boolean; detail: string } | null;
   auditConfigured: boolean;
@@ -42,9 +47,23 @@ const ORDER: MergeCheckName[] = [
   "ci",
   "review",
   "tests",
+  "test_results",
   "security",
   "ui_evidence",
 ];
+
+/** A `## Test results` section in the PR description. */
+const TEST_RESULTS_HEADING = /^#{1,6}\s*test results\b/im;
+
+/** Whether the PR description reports test results. */
+export function hasTestResults(body: string): boolean {
+  return TEST_RESULTS_HEADING.test(body);
+}
+
+/** Code files of a change (not tests, docs, config or assets). */
+export function codeFiles(files: readonly string[]): string[] {
+  return files.filter((f) => !isTestFile(f) && !isNonCodeFile(f));
+}
 
 function list(items: string[], max = 5): string {
   return items.length > max
@@ -104,12 +123,17 @@ export function evaluateChecks(i: CheckInputs): { checks: MergeCheck[]; outcome:
       break;
   }
 
-  if (!i.review)
+  const code = codeFiles(files);
+  // The docs pipeline has no agent review (Implement docs change -> Merge), as long as the
+  // change really is docs only; anything touching code is reviewed like any other change.
+  const reviewed = !(i.type === "docs" && code.length === 0);
+  if (!reviewed)
+    set("review", "skipped", "Docs-only change: the docs pipeline has no agent review");
+  else if (!i.review)
     set("review", "pending", `Waiting for the review${i.reviewer ? ` (${i.reviewer})` : ""}`);
   else if (i.review.verdict === "approve") set("review", "pass", i.review.summary);
   else set("review", "fail", `${i.review.verdict}: ${i.review.summary}`);
 
-  const code = files.filter((f) => !isTestFile(f) && !isNonCodeFile(f));
   const tests = files.filter(isTestFile);
   if (code.length === 0) set("tests", "pass", "No code changed");
   else if (!i.review)
@@ -135,10 +159,27 @@ export function evaluateChecks(i: CheckInputs): { checks: MergeCheck[]; outcome:
       tests.length ? `${tests.length} test files changed` : "Reviewer: no tests needed",
     );
 
+  if (hasTestResults(i.pr.body)) set("test_results", "pass", "Test results in the PR description");
+  else if (i.testOutput === true) set("test_results", "pass", "Test output attached");
+  else if (code.length === 0) set("test_results", "skipped", "No code changed");
+  else if (i.testOutput === null) set("test_results", "pending", "Checking for test results");
+  else
+    set(
+      "test_results",
+      "fail",
+      "No test results: add a `## Test results` section to the PR or attach the test output with attach_evidence",
+    );
+
   const concerns = i.review?.security.concerns ?? [];
   if (i.auditConfigured && i.audit && !i.audit.ok)
     set("security", "fail", `Audit failed: ${i.audit.detail}`);
   else if (concerns.length > 0) set("security", "fail", `Reviewer: ${concerns.join("; ")}`);
+  else if (!reviewed && !(i.auditConfigured && !i.audit))
+    set(
+      "security",
+      "pass",
+      i.auditConfigured ? "Audit clean; docs-only change" : "Docs-only change",
+    );
   else if ((i.auditConfigured && !i.audit) || !i.review)
     set(
       "security",

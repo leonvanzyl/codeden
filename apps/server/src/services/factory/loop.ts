@@ -6,24 +6,16 @@ import {
   type Project,
 } from "@codeden/contracts";
 import { errorMessage } from "../errors";
-import { budgetSpend, type FactoryContext, factoryNotice, visionOf } from "./context";
-import {
-  budgetExceeded,
-  discoveryDue,
-  freeSlots,
-  localDay,
-  mayBuild,
-  nextAreas,
-  slugify,
-} from "./policy";
+import { budgetSpend, type FactoryContext, visionOf } from "./context";
+import { classifyPending, intakeFailedChecks, intakeIssues } from "./intake";
+import { advanceEscalated } from "./merge";
+import { budgetExceeded, freeSlots, localDay, mayBuild } from "./policy";
 import { advanceBuilding, advanceWatching } from "./progress";
-import { triageInstructions } from "./prompts";
-import { sizeLimitText } from "./size";
-import { WAITING_STAGES } from "./store";
+import { advanceScout } from "./scout";
+import { mayAutoMerge } from "./trust";
 import { advanceVerifying } from "./verify";
 
-/** Label on issues the factory created or accepted. */
-export const FACTORY_LABEL = "codeden-factory";
+export { FACTORY_LABEL } from "./intake";
 
 /** What a tick needs besides the context: the daily digest hook. */
 export interface TickHooks {
@@ -33,8 +25,12 @@ export interface TickHooks {
 
 /**
  * One step of a project's factory loop (§10.1). The server drives the state machine and
- * enforces the limits; the PM and the agents only do the judgement. Safe to call at any time
- * and after a restart: every step reads the persisted state and moves it forward.
+ * enforces the limits; agents only do the judgement. Safe to call at any time and after a
+ * restart: every step reads the persisted state and moves it forward.
+ *
+ * Order: work in flight moves first (watch, build, verify), then intake (new issues, failed
+ * checks on main), Identify type, the free agents take the queue, and last the dark factory's
+ * scout gets whatever agents are still free.
  */
 export async function runTick(
   ctx: FactoryContext,
@@ -46,11 +42,10 @@ export async function runTick(
   let loop = ctx.store.loopOrNew(projectId, now);
   const killed = project.killSwitch || ctx.settings.get().factory.killSwitch;
   if (!isFactoryMode(project.autonomyMode) || project.archivedAt) {
-    if (loop.state !== "idle" && loop.state !== "stopped")
-      loop = { ...loop, state: "idle", discovery: [] };
+    if (loop.state !== "idle" && loop.state !== "stopped") loop = { ...loop, state: "idle" };
     return save(ctx, loop, now);
   }
-  if (killed) return save(ctx, { ...loop, state: "stopped", discovery: [] }, now);
+  if (killed) return save(ctx, { ...loop, state: "stopped" }, now);
   if (loop.state === "stopped") loop = { ...loop, state: "idle" };
 
   // Day rollover: digest for the day that ended, fresh counters; a budget pause ends.
@@ -67,7 +62,6 @@ export async function runTick(
   }
 
   // Items already in flight move on even while paused (merges stay blocked, reverts excepted).
-  loop = dropFinishedDiscovery(ctx, loop);
   // Watch merges first, then builds, then verification, so a PR found while building is
   // verified in the same step and a fresh merge is watched from the next one.
   for (const stage of ["watching", "building", "verifying"] as const) {
@@ -85,6 +79,8 @@ export async function runTick(
       }
     }
   }
+  for (const item of ctx.store.items(projectId, ["escalated"]))
+    advanceEscalated(ctx, project, item);
 
   if (loop.state !== "paused") {
     const spend = budgetSpend(ctx, projectId, today, project.factoryLimits);
@@ -93,13 +89,11 @@ export async function runTick(
   }
   if (loop.state === "paused") return save(ctx, loop, now);
 
-  loop = intakeIssues(ctx, project, loop);
-  await intakeFailedChecks(ctx, project, loop).then((l) => {
-    loop = l;
-  });
-  if (project.autonomyMode === "dark_factory") loop = await discover(ctx, project, loop, now);
-  requestTriage(ctx, project);
-  loop = await build(ctx, project, loop);
+  loop = await intakeIssues(ctx, project, loop);
+  loop = await intakeFailedChecks(ctx, project, loop);
+  await classifyPending(ctx, project);
+  await assignAgents(ctx, project, loop);
+  if (project.autonomyMode === "dark_factory") loop = await advanceScout(ctx, project, loop);
   return save(ctx, { ...loop, state: deriveState(ctx, projectId, loop) }, now);
 }
 
@@ -112,155 +106,41 @@ function deriveState(ctx: FactoryContext, projectId: string, loop: FactoryLoop):
   const active = ctx.store.items(projectId, ["building", "verifying", "watching"]);
   if (active.some((i) => i.stage === "verifying" || i.stage === "watching")) return "verifying";
   if (active.some((i) => i.stage === "building")) return "building";
-  if (loop.discovery.length > 0) return "discovering";
+  if (loop.scout.round) return "discovering";
   return "idle";
 }
 
-/** Forget discovery runs whose sessions ended (their candidates arrive through the tool). */
-function dropFinishedDiscovery(ctx: FactoryContext, loop: FactoryLoop): FactoryLoop {
-  const running = loop.discovery.filter((d) => {
-    const s = ctx.repo.find(d.sessionId)?.session;
-    return (
-      s !== undefined && ["created", "queued", "starting", "running", "waiting"].includes(s.status)
-    );
-  });
-  return running.length === loop.discovery.length ? loop : { ...loop, discovery: running };
+/** Queue order: priority (the scout's, failed checks), then arrival. */
+function queueOrder(a: FactoryItem, b: FactoryItem): number {
+  return (b.score ?? 0.5) - (a.score ?? 0.5) || a.createdAt.localeCompare(b.createdAt);
 }
 
-/** New issues (opened after the factory was enabled, or labelled for it) become candidates. */
-function intakeIssues(ctx: FactoryContext, project: Project, loop: FactoryLoop): FactoryLoop {
-  const known = new Set(
-    ctx.store.items(project.id).flatMap((i) => (i.issue ? [i.issue.number] : [])),
-  );
-  // GitHub timestamps have second precision and clocks drift: allow a minute of slack.
-  const since = loop.enabledAt ? Date.parse(loop.enabledAt) - 60_000 : Number.POSITIVE_INFINITY;
-  for (const issue of ctx.github.openIssues(project.id)) {
-    if (known.has(issue.number)) continue;
-    const opened = issue.createdAt ? Date.parse(issue.createdAt) : 0;
-    const labelled = issue.labels.includes(FACTORY_LABEL);
-    if (!labelled && opened < since) continue;
-    ctx.store.createItem({
-      projectId: project.id,
-      workKey: `issue:${issue.number}`,
-      title: issue.title,
-      summary: (issue.body ?? "").slice(0, 4_000),
-      source: "issue",
-      stage: "candidate",
-      issue: { number: issue.number, url: issue.url, title: issue.title },
-    });
-  }
-  return loop;
-}
-
-/** A failed check on the default branch becomes a candidate (once per commit). */
-async function intakeFailedChecks(
-  ctx: FactoryContext,
-  project: Project,
-  loop: FactoryLoop,
-): Promise<FactoryLoop> {
-  // Regressions after factory merges are handled by the watch step.
-  if (ctx.store.items(project.id, ["watching"]).length > 0) return loop;
-  let head: Awaited<ReturnType<typeof ctx.github.mainHead>>;
-  try {
-    head = await ctx.github.mainHead(project.id);
-  } catch {
-    return loop;
-  }
-  if (head.checks !== "failure" || loop.seenFailedShas.includes(head.sha)) return loop;
-  const failing = head.failed.join(", ") || "CI";
-  ctx.store.createItem({
-    projectId: project.id,
-    workKey: `factory:fix-main-${head.sha.slice(0, 7)}`,
-    title: `Fix failing ${failing} on the default branch`,
-    summary: `Checks failing on ${head.sha}: ${failing}.`,
-    source: "failed_check",
-    area: "tech_debt",
-    acceptanceCriteria: [`${failing} passes on the default branch`],
-    stage: "candidate",
-  });
-  return { ...loop, seenFailedShas: [...loop.seenFailedShas, head.sha].slice(-20) };
-}
-
-/** Dark factory: improvement finders per area when the backlog runs low. */
-async function discover(
-  ctx: FactoryContext,
-  project: Project,
-  loop: FactoryLoop,
-  now: Date,
-): Promise<FactoryLoop> {
-  const waiting = ctx.store.items(project.id, WAITING_STAGES).length;
-  if (!discoveryDue(loop, waiting, now.getTime())) return loop;
-  const slots = freeSlots(ctx.sessions.activeCount(project.id), project.factoryLimits);
-  const areas = nextAreas(
-    loop.tuning.areas,
-    loop.nextArea,
-    Math.min(slots, loop.tuning.discoveryPerRound),
-  );
-  if (areas.length === 0) return loop;
+/**
+ * The orchestrator of the swarm: give queued items to free agents, within the agent limit and,
+ * while auto-merge is on, the daily merge cap. An item whose issue was closed meanwhile stops.
+ */
+async function assignAgents(ctx: FactoryContext, project: Project, loop: FactoryLoop) {
+  const queue = ctx.store.items(project.id, ["backlog"]).sort(queueOrder);
   const vision = visionOf(project).text;
-  const known = ctx.store
-    .items(project.id)
-    .slice(0, 40)
-    .map((i) => i.title);
-  const runs = [...loop.discovery];
-  for (const area of areas) {
-    try {
-      const res = await ctx.sessions.startDiscovery(project.id, area, vision, known);
-      if (res.status === "started")
-        runs.push({ sessionId: res.sessionId, area, startedAt: now.toISOString() });
-    } catch (error) {
-      ctx.log?.(`factory: discovery ${area}: ${errorMessage(error)}`);
-    }
-  }
-  return {
-    ...loop,
-    discovery: runs,
-    nextArea: (loop.nextArea + areas.length) % Math.max(1, loop.tuning.areas.length),
-    lastDiscoveryAt: now.toISOString(),
-  };
-}
-
-/** Wake the PM once for candidates it has not been asked about. */
-function requestTriage(ctx: FactoryContext, project: Project): void {
-  const fresh = ctx.store.items(project.id, ["candidate"]).filter((i) => !i.triageRequestedAt);
-  if (fresh.length === 0) return;
-  const at = ctx.now().toISOString();
-  factoryNotice(ctx, {
-    id: `factory.triage:${project.id}:${fresh.map((i) => i.id.slice(0, 8)).join(",")}`.slice(
-      0,
-      200,
-    ),
-    projectId: project.id,
-    target: "pm",
-    event: "triage_needed",
-    title: `Factory: ${fresh.length} candidate${fresh.length === 1 ? "" : "s"} to triage`,
-    text: triageInstructions(
-      fresh,
-      project.autonomyMode === "dark_factory",
-      sizeLimitText(ctx.store.loopOrNew(project.id).tuning),
-    ),
-    itemIds: fresh.map((i) => i.id),
-  });
-  for (const item of fresh) ctx.store.updateItem(item.id, (i) => ({ ...i, triageRequestedAt: at }));
-}
-
-/** Start builders for the best-scored backlog items, within slots and the merge cap. */
-async function build(
-  ctx: FactoryContext,
-  project: Project,
-  loop: FactoryLoop,
-): Promise<FactoryLoop> {
-  const backlog = ctx.store
-    .items(project.id, ["backlog"])
-    .sort((a, b) => (b.score ?? 0) - (a.score ?? 0) || a.createdAt.localeCompare(b.createdAt));
-  const vision = visionOf(project).text;
-  for (const item of backlog) {
-    const inFlight = ctx.store.items(project.id, ["building", "verifying"]).length;
-    if (!mayBuild(loop.mergesToday, inFlight, project.factoryLimits)) break;
+  for (const item of queue) {
     if (freeSlots(ctx.sessions.activeCount(project.id), project.factoryLimits) === 0) break;
+    if (item.issue && ctx.github.issue(project.id, item.issue.number)?.state === "closed") {
+      ctx.store.updateItem(item.id, (i) => ({
+        ...i,
+        stage: "rejected",
+        reason: "The issue was closed on GitHub",
+        finishedAt: ctx.now().toISOString(),
+      }));
+      continue;
+    }
+    if (mayAutoMerge(item, project.factoryLimits)) {
+      const inFlight = ctx.store
+        .items(project.id, ["building", "verifying"])
+        .filter((i) => mayAutoMerge(i, project.factoryLimits)).length;
+      if (!mayBuild(loop.mergesToday, inFlight, project.factoryLimits)) continue;
+    }
     await startBuilder(ctx, item, vision, loop);
   }
-  return loop;
 }
 
 async function startBuilder(
@@ -295,9 +175,4 @@ async function startBuilder(
       note: `Build not started: ${errorMessage(error)}`,
     }));
   }
-}
-
-/** A work key for a new candidate from its title. */
-export function candidateWorkKey(title: string): string {
-  return `factory:${slugify(title)}`;
 }

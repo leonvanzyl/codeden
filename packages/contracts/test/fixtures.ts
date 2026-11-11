@@ -180,6 +180,8 @@ export const sampleProject: Project = {
     pauseAfterConsecutiveFailures: 3,
     protectedPaths: ["src/auth/**"],
     allowDeploys: false,
+    autoMerge: false,
+    trustedAuthors: [],
   },
   killSwitch: false,
   timezone: null,

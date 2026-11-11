@@ -97,7 +97,7 @@ When you approve, you can approve once or for the rest of the session.
 
 ## Automatic merges
 
-Automatic merging only exists in the experimental Autopilot and Dark factory modes, behind merge checks, protected areas and server-enforced limits, with a kill switch. See [Autonomy and the dark factory](autonomy-and-dark-factory.md).
+Automatic merging only exists in the experimental Software factory and Dark factory modes, and only when you turn **auto-merge** on: then behind merge checks, protected areas and server-enforced limits, with a kill switch. On a public repository anyone can open an issue, so the factory only takes on issues by **trusted authors** (the account CodeDen uses on GitHub and the logins you list); everyone else's are ignored until you let one in, and work let in that way is never merged automatically. See [The software factory and the dark factory](software-factory.md).
 
 ## Data and telemetry
 

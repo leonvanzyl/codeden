@@ -34,6 +34,11 @@ export interface UtilityService {
    * summary mode: without a model answer it is the message's first sentence or two.
    */
   speechSummary(text: string): Promise<SpeechSummaryResponse>;
+  /**
+   * A one-shot answer from the utility model for a server-side job, such as the software
+   * factory's "Identify type" step; null when no model answered.
+   */
+  complete(job: string, system: string, prompt: string): Promise<string | null>;
 }
 
 /** A `UtilityService` that never calls a model (tests, no providers). */
@@ -46,6 +51,9 @@ export class NoopUtilityService implements UtilityService {
   }
   async speechSummary(text: string): Promise<SpeechSummaryResponse> {
     return { text: shortSpeech(plainSpeech(text)), source: "plain" };
+  }
+  async complete(): Promise<string | null> {
+    return null;
   }
 }
 
@@ -180,6 +188,10 @@ export class ProviderUtilityService implements UtilityService {
     if (tldr) return { text: shortSpeech(tldr), source: "utility" };
     this.warn("utility: read-aloud TL;DR unavailable, speaking the message's first sentences");
     return { text: shortSpeech(plain), source: "plain" };
+  }
+
+  complete(job: string, system: string, prompt: string): Promise<string | null> {
+    return this.run(job, system, prompt);
   }
 
   /** One-shot on the configured provider, falling back to the next; null on failure. */

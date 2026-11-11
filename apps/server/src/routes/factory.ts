@@ -1,6 +1,7 @@
 import {
+  FactoryAdmitRequest,
   type FactoryItemResponse,
-  FactoryTriageRequest,
+  FactorySetTypeRequest,
   KillSwitchRequest,
   PutVisionRequest,
   SetAutonomyModeRequest,
@@ -16,7 +17,7 @@ import { jsonBody } from "./validate";
 export function projectFactoryRoutes(s: AppServices) {
   const f = s.factory;
   return new Hono()
-    .get("/:id/factory", (c) => c.json(f.status(c.req.param("id"))))
+    .get("/:id/factory", async (c) => c.json(await f.status(c.req.param("id"))))
     .put("/:id/autonomy", jsonBody(SetAutonomyModeRequest), (c) =>
       c.json(f.setMode(c.req.param("id"), c.req.valid("json"))),
     )
@@ -30,14 +31,24 @@ export function projectFactoryRoutes(s: AppServices) {
     .post("/:id/factory/resume", (c) => c.json(f.resume(c.req.param("id"))))
     .post("/:id/factory/tick", async (c) => {
       await f.tick(c.req.param("id"));
-      return c.json(f.status(c.req.param("id")));
+      return c.json(await f.status(c.req.param("id")));
     })
     .post("/:id/factory/digest", async (c) => c.json(await f.digestNow(c.req.param("id"))))
     .get("/:id/factory/items/:itemId", (c) =>
       c.json<FactoryItemResponse>({ item: f.item(c.req.param("id"), c.req.param("itemId")) }),
     )
-    .post("/:id/factory/triage", jsonBody(FactoryTriageRequest), async (c) =>
-      c.json<FactoryItemResponse>({ item: await f.triage(c.req.param("id"), c.req.valid("json")) }),
+    .post("/:id/factory/admit", jsonBody(FactoryAdmitRequest), async (c) =>
+      c.json<FactoryItemResponse>({
+        item: await f.admit(c.req.param("id"), c.req.valid("json"), "user"),
+      }),
+    )
+    .post("/:id/factory/set-type", jsonBody(FactorySetTypeRequest), async (c) =>
+      c.json<FactoryItemResponse>({
+        item: await f.setType(c.req.param("id"), c.req.valid("json"), "user"),
+      }),
+    )
+    .post("/:id/factory/items/:itemId/retry", (c) =>
+      c.json<FactoryItemResponse>({ item: f.retry(c.req.param("id"), c.req.param("itemId")) }),
     );
 }
 
