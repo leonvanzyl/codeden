@@ -1,5 +1,5 @@
 import { messageFrom, type UserInput } from "@codeden/contracts";
-import { screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { UserMessage } from "@/components/thread/messages";
 import { renderWithClient } from "./utils";
@@ -49,7 +49,7 @@ const reducedMotion = (reduce: boolean) =>
 
 afterEach(() => vi.restoreAllMocks());
 
-describe("messages from a PM or the orchestrator", () => {
+describe("messages from a PM, the orchestrator, the factory, an automation or CodeDen", () => {
   it("renders a PM's message as Markdown under a Project manager header", () => {
     render(messageFrom("pm", body));
     const card = expectSenderCard("Message from the project manager", "Project manager");
@@ -78,6 +78,59 @@ describe("messages from a PM or the orchestrator", () => {
     expect(bubble.className).toContain("bg-message");
     expect(bubble.textContent).toBe(body);
     expect(bubble.querySelector("[data-streamdown]")).toBeNull();
+  });
+
+  it("renders a message from the factory, an automation or CodeDen as Markdown under its sender", () => {
+    // Issue #53: these fell through to the plain-text bubble, showing literal `**` and backticks.
+    const senders = [
+      ["factory", "Message from the factory", "Factory"],
+      ["automation", "Message from an automation", "Automation"],
+      ["codeden", "Message from CodeDen", "CodeDen"],
+    ] as const;
+    for (const [from, name, label] of senders) {
+      const { unmount } = render({ text: body, attachments: [], from });
+      expect(expectSenderCard(name, label).getAttribute("data-sender")).toBe(from);
+      unmount();
+    }
+  });
+
+  it("renders a factory brief's tagged sections as Markdown, with no raw syntax or tags", () => {
+    const brief = [
+      "You are an agent of this project's software factory, working on issue #53: **Transcript**",
+      "",
+      "<issue>",
+      "## Bug",
+      "The first message shows **raw Markdown**.",
+      "</issue>",
+      "",
+      "<vision>",
+      "- It scales with the user",
+      "</vision>",
+    ].join("\n");
+    render({ text: brief, attachments: [], from: "factory" });
+    const card = screen.getByRole("article", { name: "Message from the factory" });
+    expect(within(card).getByRole("heading", { name: "Bug" })).toBeTruthy();
+    expect(within(card).getByText("raw Markdown").getAttribute("data-streamdown")).toBe("strong");
+    expect(within(card).getByRole("listitem").textContent).toBe("It scales with the user");
+    for (const raw of ["**", "## ", "<issue>", "</vision>", "- It"]) {
+      expect(card.textContent).not.toContain(raw);
+    }
+  });
+
+  it("collapses a long brief after about 12 lines, with Show more", async () => {
+    const long = Array.from({ length: 30 }, (_, i) => `${i + 1}. Step **${i + 1}**`).join("\n");
+    render({ text: long, attachments: [], from: "pm" });
+    const card = screen.getByTestId("sender-message");
+    const toggle = within(card).getByRole("button", { name: "Show more" });
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(card.querySelector("[data-clipped]")?.className).toContain("max-h-64");
+    fireEvent.click(toggle);
+    expect(within(card).getByRole("button", { name: "Show less" })).toBeTruthy();
+    expect(card.querySelector("[data-clipped]")).toBeNull();
+    // A short message has nothing to collapse.
+    cleanup();
+    render(messageFrom("pm", body));
+    expect(screen.queryByRole("button", { name: "Show more" })).toBeNull();
   });
 
   it("trusts a recorded sender over the text", () => {

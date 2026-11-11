@@ -7,6 +7,7 @@ import {
   QueueSender,
   RunnerCommand,
   SENDER_LINES,
+  StartSessionRequest,
   splitSender,
   UserInput,
 } from "../src";
@@ -43,6 +44,24 @@ describe("message senders", () => {
       payload: { type: "item.completed", threadId: "t1", turnId: "u1", item },
     });
     expect(envelope.type).toBe("agent.item.completed");
+  });
+
+  it("round-trips the sender of a session's opening brief", () => {
+    const req = roundTrip(StartSessionRequest, {
+      projectId: "p1",
+      purpose: "Factory (bug): Fix the transcript",
+      input: { text: "## Goal\n\nFix **it**", from: "factory" },
+    });
+    expect(req.input?.from).toBe("factory");
+    for (const from of ["factory", "automation", "codeden"] as const) {
+      const item = roundTrip(Item, {
+        id: "u1",
+        kind: "user_message",
+        status: "completed",
+        input: { text: "Brief", attachments: [], from },
+      });
+      expect(item.kind === "user_message" && item.input.from).toBe(from);
+    }
   });
 
   it("still loads user messages stored before senders were recorded", () => {

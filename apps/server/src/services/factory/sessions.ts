@@ -6,6 +6,7 @@ import {
   StartSessionRequest,
   type StartSessionRequestInit,
   type StartSessionResponse,
+  type UserInput,
 } from "@codeden/contracts";
 import { errorMessage } from "../errors";
 import type { RunnerPort } from "../runner-port";
@@ -15,6 +16,14 @@ import { builderPrompt, revertPrompt, reviewerPrompt } from "./prompts";
 
 /** Who starts factory sessions; `id: "factory"` marks them for limits and the kill switch. */
 export const FACTORY_STARTER: StartedBy = { kind: "pm", id: "factory" };
+
+/**
+ * A brief or follow-up from the factory loop, recorded as the factory's so the transcript shows
+ * it as a Markdown card headed "Factory" instead of the user's plain text.
+ */
+function brief(text: string): UserInput {
+  return { text, attachments: [], from: "factory" };
+}
 
 /** Statuses that hold a session slot (`maxConcurrentSessions`). */
 const SLOT_STATUSES = new Set(["created", "queued", "starting", "running", "waiting"]);
@@ -82,7 +91,7 @@ export class FactorySessions {
       workKey: SCOUT_WORK_KEY,
       scope: { area: "factory-scout" },
       title: "Factory scout",
-      input: { text, attachments: [] },
+      input: brief(text),
     });
   }
 
@@ -95,7 +104,7 @@ export class FactorySessions {
       workKey: `${LENS_WORK_KEY_PREFIX}${area}`,
       scope: { area: `factory-lens-${area}` },
       title: `Factory area reviewer: ${name}`,
-      input: { text, attachments: [] },
+      input: brief(text),
     });
   }
 
@@ -108,7 +117,7 @@ export class FactorySessions {
       workKey: item.workKey,
       title: item.title.slice(0, 200),
       issue: item.issue ?? undefined,
-      input: { text: builderPrompt(item, vision), attachments: [] },
+      input: brief(builderPrompt(item, vision)),
     });
   }
 
@@ -151,7 +160,7 @@ export class FactorySessions {
       title: `Review: ${item.title}`.slice(0, 200),
       issue: item.issue ?? undefined,
       workspace,
-      input: { text: reviewerPrompt(item, vision, note, localBase, autoMerge), attachments: [] },
+      input: brief(reviewerPrompt(item, vision, note, localBase, autoMerge)),
     });
   }
 
@@ -164,17 +173,13 @@ export class FactorySessions {
       purpose: `Factory: revert #${merge.prNumber} after a CI regression`,
       workKey: `factory:revert:${merge.sha.slice(0, 7)}`,
       title: `Revert #${merge.prNumber}`,
-      input: { text: revertPrompt(merge), attachments: [] },
+      input: brief(revertPrompt(merge)),
     });
   }
 
   /** Send a follow-up to a session (queued behind a running turn). */
   async message(sessionId: string, text: string): Promise<void> {
-    await this.deps.sessions.send(
-      sessionId,
-      { input: { text, attachments: [] }, whenBusy: "queue" },
-      "codeden",
-    );
+    await this.deps.sessions.send(sessionId, { input: brief(text), whenBusy: "queue" }, "factory");
   }
 
   /** Stop every live factory session of a project (kill switch). Returns the stopped ids. */

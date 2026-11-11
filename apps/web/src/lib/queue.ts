@@ -31,6 +31,7 @@ const SENDERS: Record<QueueSender, string | null> = {
   user: null,
   orchestrator: "From the orchestrator",
   pm: "From the PM",
+  factory: "From the factory",
   automation: "From an automation",
   codeden: "From CodeDen",
 };
