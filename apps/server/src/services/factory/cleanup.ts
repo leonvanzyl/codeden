@@ -12,7 +12,7 @@ import { FINISHED_STAGES } from "./store";
  * worktree) back. A session that is busy is never cut off: the item waits for it.
  */
 
-/** The scout and its lenses are long-lived: never archived with an item. */
+/** The scout and its area reviewers ("lenses") are long-lived: never archived with an item. */
 function longLived(s: Session): boolean {
   return s.workKey === SCOUT_WORK_KEY || s.workKey.startsWith(LENS_WORK_KEY_PREFIX);
 }

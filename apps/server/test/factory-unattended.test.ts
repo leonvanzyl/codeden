@@ -3,7 +3,13 @@ import { FactoryLimits } from "@codeden/contracts";
 import { describe, expect, it, vi } from "vitest";
 import { buildDigest } from "../src/services/factory/digest";
 import { builderPrompt, reviewerPrompt } from "../src/services/factory/prompts";
-import { lensPrompt, scoutPlanPrompt } from "../src/services/factory/prompts-scout";
+import {
+  LENS_NUDGE,
+  lensPrompt,
+  SCOUT_PLAN_NUDGE,
+  scoutFilePrompt,
+  scoutPlanPrompt,
+} from "../src/services/factory/prompts-scout";
 import { FACTORY_STARTER } from "../src/services/factory/sessions";
 import {
   answerProviderQuestion,
@@ -174,7 +180,7 @@ describe("factory prompts", () => {
     expect(reviewerPrompt(item(), "v", null, "main", false)).toMatch(/goes to a person to merge/);
   });
 
-  it("tells the scout, lenses and builders not to stop for the user", () => {
+  it("tells the scout, area reviewers and builders not to stop for the user", () => {
     const plan = scoutPlanPrompt({
       round: 1,
       vision: "v",
@@ -188,17 +194,51 @@ describe("factory prompts", () => {
     expect(plan).toMatch(/Don't ask the user anything/);
     expect(plan).toContain("factory_plan_round");
     expect(plan).toMatch(/vision wins over the current code/);
-    expect(
-      lensPrompt({
-        area: "ux",
-        focus: "forms",
-        vision: "v",
-        defaultBranch: "main",
-        known: [],
-        firstRun: true,
-      }),
-    ).toMatch(/Don't ask the user anything/);
+    const reviewer = lensPrompt({
+      area: "ux",
+      focus: "forms",
+      vision: "v",
+      defaultBranch: "main",
+      known: [],
+      firstRun: true,
+    });
+    expect(reviewer).toMatch(/Don't ask the user anything/);
     expect(builderPrompt(item(), "v")).toMatch(/Don't stop to ask the user/);
+
+    // The scout's prompts use the plain term ("review area", "area reviewer"), never "lens".
+    const solo = scoutPlanPrompt({
+      round: 2,
+      vision: "v",
+      defaultBranch: "main",
+      areas: [],
+      maxLenses: 0,
+      maxIssues: 1,
+      known: [],
+      firstRound: false,
+    });
+    const filing = [
+      scoutFilePrompt({ findings: [], maxIssues: 3, known: [] }),
+      scoutFilePrompt({
+        findings: [
+          {
+            id: "ux-1",
+            area: "ux",
+            title: "Explain the form",
+            summary: "s",
+            type: "feature",
+            severity: "low",
+            acceptanceCriteria: ["a"],
+          },
+        ],
+        maxIssues: 3,
+        known: [],
+      }),
+    ];
+    for (const text of [plan, solo, reviewer, ...filing, SCOUT_PLAN_NUDGE, LENS_NUDGE]) {
+      expect(text).not.toMatch(/\blens/i);
+    }
+    expect(plan).toMatch(/review areas? this round/);
+    expect(reviewer).toMatch(/area reviewer/);
   });
 });
 

@@ -197,11 +197,14 @@ export const FactoryTuning = z.object({
   minBacklog: z.int().nonnegative().default(2),
   /** Dark factory: minutes between the scout's review rounds. */
   discoveryIntervalMin: z.int().positive().default(360),
-  /** Dark factory: most lenses (long-lived reviewer sessions) the scout may use per round. */
+  /**
+   * Dark factory: most review areas the scout may use per round, each with its own long-lived
+   * area reviewer session ("Review areas per round" in the UI).
+   */
   discoveryPerRound: z.int().nonnegative().default(2),
   /** Dark factory: most issues the scout may file per round. */
   maxIssuesPerRound: z.int().positive().default(3),
-  /** Dark factory: the areas the scout's lenses may review. */
+  /** Dark factory: the review areas the scout may use. */
   areas: z.array(DiscoveryArea).default(DiscoveryArea.options),
   /** Provider for builders (`auto`: the project/role default). */
   builderProvider: z.union([z.literal("auto"), ProviderId]).default("auto"),

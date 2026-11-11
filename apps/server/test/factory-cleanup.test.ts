@@ -152,7 +152,7 @@ describe("archiving finished factory work (§10.1)", () => {
     expect(env.archived).toEqual([failed.builderSessionId]);
   });
 
-  it("archives earlier reviewers in the builder's worktree, never the scout's lenses", async () => {
+  it("archives earlier reviewers in the builder's worktree, never the scout's area reviewers", async () => {
     env = createFactoryEnv();
     enable();
     const verifying = await toVerifying(backlogItem());
@@ -165,7 +165,7 @@ describe("archiving finished factory work (§10.1)", () => {
     expect(second).toBeTruthy();
     expect(second).not.toBe(first);
     expect(session(second).cwd).toBe(session(builder).worktreePath);
-    // A lens is long-lived, even in the same folder.
+    // An area reviewer (a "lens") is long-lived, even in the same folder.
     const lens = await env.factory.ctx.sessions.startLens(env.project.id, "security", "Look");
     const lensId = lens.status === "started" ? lens.sessionId : "";
     env.repo.update(lensId, (s) => ({

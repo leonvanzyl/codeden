@@ -12,9 +12,10 @@ import { ACTIVE_STAGES, WAITING_STAGES } from "./store";
  * waiting) and `discoveryIntervalMin` has passed, one round runs:
  *
  * 1. planning: the scout (one long-lived session per project) looks at the app and asks for at
- *    most `discoveryPerRound` lenses with `factory_plan_round`;
- * 2. reviewing: each lens (one long-lived session per area, reused round after round) reviews
- *    its area and reports findings with `factory_report_findings`;
+ *    most `discoveryPerRound` review areas with `factory_plan_round`;
+ * 2. reviewing: each area reviewer (a "lens" in the code: one long-lived session per area,
+ *    reused round after round) reviews its area and reports findings with
+ *    `factory_report_findings`;
  * 3. filing: the scout files at most `maxIssuesPerRound` issues with `factory_file_issue`,
  *    which enter the pipelines like any trusted issue.
  *

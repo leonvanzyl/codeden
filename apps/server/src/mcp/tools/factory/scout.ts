@@ -7,13 +7,13 @@ import { z } from "zod";
 import { defineTool } from "../../define";
 import { asTool, forSession } from "./shared";
 
-/** The dark factory's scout and lens tools (§10.1). */
+/** The dark factory's scout and area reviewer tools (§10.1). */
 
-/** `factory_plan_round`: the scout picks this round's lenses. */
+/** `factory_plan_round`: the scout picks this round's review areas. */
 export const factoryPlanRound = defineTool({
   name: "factory_plan_round",
   description:
-    "Plan this review round: the lenses (long-lived reviewer agents, one per area) you want, each with a focus specific to this app. CodeDen starts or wakes them within the factory's limits and tells you which ran. An empty list means you review by yourself this round. Call once per round.",
+    "Plan this review round: the review areas you want, each with a focus specific to this app. Each gets an area reviewer (a long-lived reviewer agent for that one area); CodeDen starts or wakes them within the factory's limits and tells you which ran. An empty list means you review by yourself this round. Call once per round.",
   roles: ["agent"],
   scope: "session",
   alwaysLoad: true,
@@ -37,7 +37,7 @@ export const factoryFileIssue = defineTool({
     asTool(() => services.factory.fileIssue(services.sessionRepo.get(sessionId), input)),
 });
 
-/** `factory_report_findings`: a lens reports what it found this round. */
+/** `factory_report_findings`: an area reviewer reports what it found this round. */
 export const factoryReportFindings = defineTool({
   name: "factory_report_findings",
   description:

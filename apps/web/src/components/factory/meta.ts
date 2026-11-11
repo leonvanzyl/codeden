@@ -139,6 +139,74 @@ export function stepLabel(step: PipelineStep, type: WorkType | null): string {
   }
 }
 
+// ---------------------------------------------------------------- plain-language hints
+
+const LANE_INTRO = "Each issue is sorted into a lane by type, and each lane has its own steps.";
+
+/** What a lane of the pipeline diagram is (the "?" by the lane's name). */
+export const LANE_HELP: Record<WorkType, string> = {
+  bug: `${LANE_INTRO} Bugs are reproduced first, so the fix is proven against a failing test.`,
+  feature: `${LANE_INTRO} Features are analyzed first: does it exist already, and does it fit the vision?`,
+  docs: `${LANE_INTRO} Documentation changes go straight to implementation and only need the automated checks.`,
+};
+
+/** Where the work comes from (the diagram's first node). */
+export function issueHelp(dark: boolean): string {
+  return dark
+    ? "Work starts as a GitHub issue, filed by the scout, by you or by a trusted author. Issues from anyone else are ignored until you let them in."
+    : "Work starts as a GitHub issue filed by you or a trusted author. Issues from anyone else are ignored until you let them in.";
+}
+
+/** What happens at a pipeline step and what moves the work on (the diagram's node hints). */
+export function stepHelp(step: PipelineStep, type: WorkType | null, autoMerge: boolean): string {
+  switch (step) {
+    case "intake":
+      return "One quick model call reads each new issue and sorts it into the Bug, Feature or Documentation lane (a type label on the issue decides it instead). It then waits for a free agent.";
+    case "queued":
+      return "Waiting for a free agent. Items are picked by priority, then age, within the number of agents allowed at once.";
+    case "reproduce":
+      return "An agent writes a failing test or probe that shows the bug. Once it's reproduced, the same agent moves on to the fix; if it can't be, the work stops and the issue asks for more information.";
+    case "analyze":
+      return "An agent checks whether the feature exists already and fits the vision, then posts a spec with acceptance criteria on the issue. An accepted spec moves it on to Implement; otherwise the work stops with the reason.";
+    case "implement":
+      return type === "bug"
+        ? "The same agent fixes the bug in its own worktree and opens a pull request with its test results. The pull request moves it on to review."
+        : type === "docs"
+          ? "An agent makes the documentation change in its own worktree and opens a pull request. The pull request moves it on to the checks."
+          : "The same agent builds the feature to the spec in its own worktree and opens a pull request with test results, and screenshots for UI changes. The pull request moves it on to review.";
+    case "review":
+      return type === "docs"
+        ? "The merge checks run on the pull request; a change that touches only documentation skips the agent review. With every check green it moves on to Merge."
+        : "A separate reviewer agent checks the pull request while the merge checks run. Approved with every check green, it moves on to Merge; otherwise it goes back to the builder to revise.";
+    case "merge":
+      return autoMerge
+        ? "With every check green, CodeDen merges the pull request itself and watches CI on main; a regression opens a revert and pauses the factory. Work let in from an untrusted author always waits for you."
+        : "With every check green, the pull request is ready for you: review it and merge it on GitHub.";
+    case "ignored":
+      return "Opened by someone who isn't a trusted author, so the factory leaves it alone until you let it in.";
+    case "done":
+      return "Merged.";
+    case "stopped":
+      return "The work stopped: not reproduced, declined, failed or closed. You can run it again from its page.";
+  }
+}
+
+/** The revise loop under each review node. */
+export const REVISE_HELP =
+  "When the reviewer asks for changes or a merge check fails, the work goes back to the same builder to revise it, a few times at most. The number is how many are being revised now.";
+
+/** The dark factory's scout. */
+export const SCOUT_HELP =
+  "An agent that periodically reviews the app against your vision and files issues for the work worth doing. It only looks when fewer than two issues are waiting.";
+
+/** One review round of the scout. */
+export const ROUND_HELP =
+  "One pass of the scout: it plans what to look at, its area reviewers review, then it files the findings most worth doing as issues. A round starts on the schedule you set, once the queue runs low.";
+
+/** The scout's review areas (one long-lived reviewer agent per area). */
+export const REVIEW_AREAS_HELP =
+  "How many focused reviewer agents the scout may use in a round, each looking at one area of the app: security, UI & UX, performance, docs and so on. Each costs tokens; 0 means the scout reviews by itself.";
+
 export const CHECK_LABEL: Record<MergeCheckName, string> = {
   ci: "CI",
   tests: "Tests",

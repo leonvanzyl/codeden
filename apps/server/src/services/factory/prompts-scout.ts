@@ -4,8 +4,8 @@ import { UNTRUSTED_INPUT, visionBlock } from "./prompts";
 /**
  * Prompts of the dark factory's scout (§10.1): a long-lived agent that, on a schedule, reviews
  * the app against the vision and files the work worth doing as GitHub issues. It may ask for a
- * few lenses: long-lived reviewer sessions, one per area, that keep what they learned between
- * rounds so nothing is read twice.
+ * few area reviewers: long-lived reviewer sessions, one per review area, that keep what they
+ * learned between rounds so nothing is read twice. (The code calls them lenses.)
  */
 
 export const AREA_BRIEF: Record<DiscoveryArea, string> = {
@@ -32,7 +32,7 @@ function knownList(known: readonly string[]): string {
     : "";
 }
 
-/** Start of a round: the scout looks at the app and picks this round's lenses. */
+/** Start of a round: the scout looks at the app and picks this round's review areas. */
 export function scoutPlanPrompt(opts: {
   round: number;
   vision: string;
@@ -55,12 +55,12 @@ export function scoutPlanPrompt(opts: {
   const lenses =
     opts.maxLenses > 0
       ? [
-          `You may ask for up to ${opts.maxLenses} lens${opts.maxLenses === 1 ? "" : "es"} this round: long-lived reviewer agents, one per area, that keep their own context between rounds. Each lens costs tokens, so ask only for areas that need a closer look now, and give each a specific focus for this app (a CLI has no UI to review; a library cares most about its API and docs). Areas you may use:`,
+          `You may ask for up to ${opts.maxLenses} review area${opts.maxLenses === 1 ? "" : "s"} this round. Each gets an area reviewer: a long-lived reviewer agent for that one area, which keeps its own context between rounds. Each area reviewer costs tokens, so ask only for areas that need a closer look now, and give each a specific focus for this app (a CLI has no UI to review; a library cares most about its API and docs). Areas you may use:`,
           ...opts.areas.map((a) => `- \`${a}\`: ${AREA_BRIEF[a]}`),
-          "Call `factory_plan_round` once with your lenses, or with an empty list to review by yourself this round.",
+          "Call `factory_plan_round` once with your review areas, or with an empty list to review by yourself this round.",
         ]
       : [
-          "No lenses this round: review by yourself. Call `factory_plan_round` with an empty list, then file issues as below.",
+          "No area reviewers this round: review by yourself. Call `factory_plan_round` with an empty list, then file issues as below.",
         ];
   return [
     ...intro,
@@ -71,14 +71,14 @@ export function scoutPlanPrompt(opts: {
     "",
     ...lenses,
     "",
-    `**Step 2, file** (after the lenses report, or straight away if you review by yourself): file at most ${opts.maxIssues} issue${opts.maxIssues === 1 ? "" : "s"} with \`factory_file_issue\`: the type (bug, feature or docs), a clear title, the body, testable acceptance criteria and a priority. Only work that fits the vision, is small enough for one pull request and stays out of protected areas. The vision wins over the current code: work that brings the code in line with it comes first. Then end your turn with a one-line summary.`,
+    `**Step 2, file** (after the area reviewers report, or straight away if you review by yourself): file at most ${opts.maxIssues} issue${opts.maxIssues === 1 ? "" : "s"} with \`factory_file_issue\`: the type (bug, feature or docs), a clear title, the body, testable acceptance criteria and a priority. Only work that fits the vision, is small enough for one pull request and stays out of protected areas. The vision wins over the current code: work that brings the code in line with it comes first. Then end your turn with a one-line summary.`,
     "Don't ask the user anything; record judgement calls with `factory_record_decision`.",
   ]
     .filter((l) => l !== "")
     .join("\n");
 }
 
-/** The lenses reported: the scout decides what to file. */
+/** The area reviewers reported: the scout decides what to file. */
 export function scoutFilePrompt(opts: {
   findings: readonly ScoutFinding[];
   maxIssues: number;
@@ -90,8 +90,8 @@ export function scoutFilePrompt(opts: {
   );
   return [
     opts.findings.length > 0
-      ? `The lenses reported ${opts.findings.length} finding${opts.findings.length === 1 ? "" : "s"}:`
-      : "The lenses found nothing worth doing this round.",
+      ? `The area reviewers reported ${opts.findings.length} finding${opts.findings.length === 1 ? "" : "s"}:`
+      : "The area reviewers found nothing worth doing this round.",
     ...list,
     "",
     knownList(opts.known),
@@ -101,7 +101,7 @@ export function scoutFilePrompt(opts: {
     .join("\n");
 }
 
-/** A lens's brief for this round (the whole context on its first round). */
+/** An area reviewer's brief for this round (the whole context on its first round). */
 export function lensPrompt(opts: {
   area: DiscoveryArea;
   focus: string;
@@ -112,7 +112,7 @@ export function lensPrompt(opts: {
 }): string {
   const intro = opts.firstRun
     ? [
-        `You are the **${opts.area}** lens of this project's dark factory: a long-lived reviewer of ${AREA_BRIEF[opts.area]}. Each round the scout gives you a focus; you review that part of the code and report findings. Keep what you learn between rounds and don't report the same thing twice.`,
+        `You are the **${opts.area}** area reviewer of this project's dark factory: a long-lived reviewer of ${AREA_BRIEF[opts.area]}. Each round the scout gives you a focus; you review that part of the code and report findings. Keep what you learn between rounds and don't report the same thing twice.`,
         "",
         visionBlock(opts.vision),
         "",

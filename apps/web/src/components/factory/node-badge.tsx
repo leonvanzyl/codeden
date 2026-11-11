@@ -1,3 +1,5 @@
+import type { ReactNode } from "react";
+import { InfoHint } from "@/components/common/info-hint";
 import { cn } from "@/lib/utils";
 
 /** The small label on a pipeline diagram node: who does the step (§10.1). */
@@ -22,7 +24,8 @@ const KIND_LABEL: Record<Kind, string> = {
   checks: "CI checks",
 };
 
-export function Badge({ kind }: { kind: Kind }) {
+/** `hint` turns the label into a tooltip that explains it. */
+export function Badge({ kind, hint }: { kind: Kind; hint?: ReactNode }) {
   return (
     <span
       className={cn(
@@ -34,7 +37,13 @@ export function Badge({ kind }: { kind: Kind }) {
             : "border-border text-muted-foreground",
       )}
     >
-      {KIND_LABEL[kind]}
+      {hint ? (
+        <InfoHint label={KIND_LABEL[kind]} term={KIND_LABEL[kind]}>
+          {hint}
+        </InfoHint>
+      ) : (
+        KIND_LABEL[kind]
+      )}
     </span>
   );
 }

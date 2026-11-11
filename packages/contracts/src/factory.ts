@@ -45,7 +45,7 @@ const GithubLogin = z
  * agent judgement).
  */
 export const FactoryLimits = z.object({
-  /** Agents working at once (the swarm size): builders, reviewers, the scout and its lenses. */
+  /** Agents working at once (the swarm): builders, reviewers, the scout and area reviewers. */
   maxConcurrentSessions: z.int().positive().default(2),
   /** Automatic merges per day (only while `autoMerge` is on). */
   maxMergesPerDay: z.int().nonnegative().default(5),
