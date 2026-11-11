@@ -13,7 +13,7 @@ apps/
   desktop/    The desktop app (Electron): main process, preload bridge, server host, electron-builder packaging
 packages/
   contracts/  zod schemas for everything that crosses a boundary (events, entities, protocols, settings)
-  providers/  ProviderAdapter / ProviderSession interfaces, the Fake provider, Claude/Codex stubs
+  providers/  ProviderAdapter / ProviderSession interfaces, the Fake provider, the Claude Code, Codex and OpenCode adapters
 docs/DESIGN.md
 ```
 
