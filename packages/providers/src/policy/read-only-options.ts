@@ -18,6 +18,19 @@ interface Rule {
   words?: string[];
   /** Refuse any `+command` argument (pagers run `+` arguments as their own commands). */
   plusCommands?: boolean;
+  /** Windows `/switch` forms that write (the program may be the native Windows one). */
+  slashSwitches?: RegExp[];
+}
+
+/**
+ * A Windows `/switch`, matched case-insensitively by any prefix the program accepts
+ * (`/O`, `/OUT`, `/OUTPUT`), alone or with a `:value` (`/O:file`). The prefix must end the switch
+ * name, so POSIX paths such as `/opt/x` or `/tmp/x` are not mistaken for `/O` or `/T`.
+ */
+function slashSwitch(name: string): RegExp {
+  let prefix = "";
+  for (const c of name.slice(1).split("").reverse()) prefix = `(?:${c}${prefix})?`;
+  return new RegExp(`^/${name[0]}${prefix}(?![a-z0-9])`, "i");
 }
 
 const RULES: Record<string, Rule> = {
@@ -25,6 +38,8 @@ const RULES: Record<string, Rule> = {
     short: "oT",
     valued: "kStT",
     long: ["--output", "--compress-program", "--temporary-directory"],
+    // Windows sort.exe: `/O[UTPUT] file` writes the result, `/T[EMPORARY] dir` its work files.
+    slashSwitches: [slashSwitch("output"), slashSwitch("temporary")],
   },
   // `-R` reruns tree at each level with `-o 00Tree.html`.
   tree: { short: "oR", valued: "LPIHT", long: ["--output"] },
@@ -112,6 +127,7 @@ export function writingOptionDenial(name: string, args: string[]): string | unde
     if (rule.long?.some((long) => matchesLong(arg, long))) {
       return refused(arg.split("=")[0] ?? arg);
     }
+    if (rule.slashSwitches?.some((re) => re.test(arg))) return refused(arg.split(":")[0] ?? arg);
   }
   return undefined;
 }

@@ -99,6 +99,10 @@ describe("read-only sessions (orchestrator and PMs, §11.2)", () => {
     for (const ok of [
       "sort -u names.txt",
       "sort -k1,1 -t, data.csv | uniq -c",
+      // POSIX paths that only look like Windows sort switches.
+      "sort /opt/data/names.txt",
+      "sort /tmp/names.txt",
+      "sort /R /unique README.md",
       "uniq -c names.txt",
       "uniq -f 1 names.txt",
       "tree -L 2 -I node_modules",
@@ -119,6 +123,18 @@ describe("read-only sessions (orchestrator and PMs, §11.2)", () => {
     }
     for (const bad of [
       "sort -o src/plan-bypass.txt README.md",
+      // Windows sort.exe: /O[UTPUT] writes the result, /T[EMPORARY] its work files.
+      "sort.exe /O src/plan-bypass.txt README.md",
+      "sort /o src/plan-bypass.txt README.md",
+      "sort /OUT src/plan-bypass.txt README.md",
+      "sort /OUTPUT src/plan-bypass.txt README.md",
+      "sort /output src/plan-bypass.txt README.md",
+      "sort /O:src/plan-bypass.txt README.md",
+      "sort /OUTPUT:src/plan-bypass.txt README.md",
+      'sort "/O" src/plan-bypass.txt README.md',
+      String.raw`C:\Windows\System32\sort.exe /O src\plan-bypass.txt README.md`,
+      String.raw`sort /T C:\scratch README.md`,
+      "sort /temporary . README.md",
       "sort -uo out.txt names.txt",
       "sort -oout.txt names.txt",
       "sort --output=out.txt names.txt",
