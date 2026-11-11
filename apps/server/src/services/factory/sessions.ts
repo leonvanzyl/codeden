@@ -27,7 +27,7 @@ export function isFactorySession(s: Session): boolean {
 
 /** Work key of the dark factory's scout (one long-lived session per project). */
 export const SCOUT_WORK_KEY = "factory:scout";
-/** Work key prefix of the scout's lenses (one long-lived session per area). */
+/** Work key prefix of the scout's area reviewers ("lenses": one long-lived session per area). */
 export const LENS_WORK_KEY_PREFIX = "factory:lens:";
 
 /** Whether a session is busy with a turn (or about to start one). */
@@ -86,14 +86,15 @@ export class FactorySessions {
     });
   }
 
-  /** Start one of the scout's lenses (long-lived, one per area). */
+  /** Start one of the scout's area reviewers (long-lived, one per review area). */
   startLens(projectId: string, area: DiscoveryArea, text: string): Promise<StartSessionResponse> {
+    const name = area.replace("_", " ");
     return this.start({
       projectId,
-      purpose: `Factory lens: review ${area.replace("_", " ")}`,
+      purpose: `Factory area reviewer: review ${name}`,
       workKey: `${LENS_WORK_KEY_PREFIX}${area}`,
       scope: { area: `factory-lens-${area}` },
-      title: `Factory lens: ${area.replace("_", " ")}`,
+      title: `Factory area reviewer: ${name}`,
       input: { text, attachments: [] },
     });
   }

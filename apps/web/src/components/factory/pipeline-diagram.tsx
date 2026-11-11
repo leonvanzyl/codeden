@@ -2,11 +2,12 @@ import type { FactoryStatus, FactoryWorkItem, PipelineStep, WorkType } from "@co
 import { useNavigate } from "@tanstack/react-router";
 import { AlertTriangle, ArrowRight, RotateCcw, ShieldAlert } from "lucide-react";
 import type { ReactNode } from "react";
+import { InfoHint } from "@/components/common/info-hint";
 import { StatusDot } from "@/components/common/status-dot";
 import { statusTone, type Tone } from "@/lib/format";
 import { useSnapshot } from "@/lib/queries";
 import { cn } from "@/lib/utils";
-import { stepLabel } from "./meta";
+import { issueHelp, LANE_HELP, REVISE_HELP, stepHelp, stepLabel, TYPE_LABEL } from "./meta";
 import { Badge, type Kind } from "./node-badge";
 import { ScoutNode } from "./scout-node";
 
@@ -93,6 +94,7 @@ function Chip({
 function Node({
   kind,
   title,
+  hint,
   items,
   queued = [],
   projectId,
@@ -102,6 +104,8 @@ function Node({
 }: {
   kind: Kind;
   title: string;
+  /** What happens at this step, from the title (a tooltip). */
+  hint: string;
   items: FactoryWorkItem[];
   queued?: FactoryWorkItem[];
   projectId: string;
@@ -123,7 +127,11 @@ function Node({
       data-node={title}
     >
       <Badge kind={kind} />
-      <span className="text-[12px] leading-tight font-medium">{title}</span>
+      <span className="text-[12px] leading-tight font-medium">
+        <InfoHint label={title} term={title}>
+          {hint}
+        </InfoHint>
+      </span>
       {shown.length > 0 && (
         <div className="flex w-full flex-wrap justify-center gap-1">
           {items.slice(0, MAX_CHIPS).map((w) => (
@@ -179,11 +187,19 @@ function Fan({ side }: { side: "out" | "in" }) {
   );
 }
 
-function Lane({ label, children }: { label: string; children: ReactNode }) {
+function Lane({ type, children }: { type: WorkType; children: ReactNode }) {
+  const label = TYPE_LABEL[type];
   return (
-    <div className="relative flex items-center gap-1 rounded-lg border border-border bg-[repeating-linear-gradient(135deg,transparent,transparent_6px,var(--color-muted)_6px,var(--color-muted)_7px)] px-2 pt-5 pb-2">
-      <span className="absolute top-1 left-2 font-mono text-[9.5px] tracking-widest text-muted-foreground uppercase">
+    <div
+      className="relative flex items-center gap-1 rounded-lg border border-border bg-[repeating-linear-gradient(135deg,transparent,transparent_6px,var(--color-muted)_6px,var(--color-muted)_7px)] px-2 pt-5 pb-2"
+      data-testid="pipeline-lane"
+      data-lane={type}
+    >
+      <span className="absolute top-1 left-2 flex items-center gap-1 font-mono text-[9.5px] tracking-widest text-muted-foreground uppercase">
         {label}
+        <InfoHint label={`the ${label} lane`} side="right">
+          {LANE_HELP[type]}
+        </InfoHint>
       </span>
       {children}
     </div>
@@ -199,9 +215,11 @@ function Revise({ count }: { count: number }) {
           ? "border-status-waiting/60 text-status-waiting"
           : "border-border text-muted-foreground",
       )}
-      title="A failed review or failed checks send the work back to the builder"
     >
       <RotateCcw className="size-2.5" /> Revise{count > 0 && ` · ${count}`}
+      <InfoHint label="Revise" className="size-3 text-current [&_svg]:size-2.5">
+        {REVISE_HELP}
+      </InfoHint>
     </span>
   );
 }
@@ -234,6 +252,7 @@ export function PipelineDiagram({ f }: { f: FactoryStatus }) {
     <Node
       kind={kind}
       title={stepLabel(step, lane)}
+      hint={stepHelp(step, lane, f.limits.autoMerge)}
       items={at(lane, step)}
       queued={queuedAt(lane, step)}
       projectId={projectId}
@@ -257,6 +276,7 @@ export function PipelineDiagram({ f }: { f: FactoryStatus }) {
           <Node
             kind={dark ? "humanOrScout" : "human"}
             title="Issue"
+            hint={issueHelp(Boolean(dark))}
             items={[]}
             projectId={projectId}
             toneOf={toneOf}
@@ -276,7 +296,8 @@ export function PipelineDiagram({ f }: { f: FactoryStatus }) {
           <Arrow dashed />
           <Node
             kind="llm"
-            title="Identify type"
+            title={stepLabel("intake", null)}
+            hint={stepHelp("intake", null, f.limits.autoMerge)}
             items={at(null, "intake")}
             projectId={projectId}
             toneOf={toneOf}
@@ -285,7 +306,7 @@ export function PipelineDiagram({ f }: { f: FactoryStatus }) {
         </div>
         <Fan side="out" />
         <div className="grid min-w-0 flex-1 grid-rows-3 gap-2.5">
-          <Lane label="Bug">
+          <Lane type="bug">
             {node("bug", "reproduce", "workspace")}
             <Arrow />
             {node("bug", "implement", "workspace")}
@@ -295,7 +316,7 @@ export function PipelineDiagram({ f }: { f: FactoryStatus }) {
               <Revise count={revising("bug")} />
             </div>
           </Lane>
-          <Lane label="Feature">
+          <Lane type="feature">
             {node("feature", "analyze", "agent")}
             <Arrow />
             {node("feature", "implement", "workspace")}
@@ -305,7 +326,7 @@ export function PipelineDiagram({ f }: { f: FactoryStatus }) {
               <Revise count={revising("feature")} />
             </div>
           </Lane>
-          <Lane label="Documentation">
+          <Lane type="docs">
             {node("docs", "implement", "workspace", "flex-[2]")}
             <Arrow dashed />
             {node("docs", "review", "checks", "flex-1")}
@@ -315,7 +336,8 @@ export function PipelineDiagram({ f }: { f: FactoryStatus }) {
         <div className="flex items-center">
           <Node
             kind={f.limits.autoMerge ? "auto" : "human"}
-            title="Merge"
+            title={stepLabel("merge", null)}
+            hint={stepHelp("merge", null, f.limits.autoMerge)}
             items={merge}
             projectId={projectId}
             toneOf={toneOf}

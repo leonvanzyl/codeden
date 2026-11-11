@@ -1,9 +1,11 @@
 import type { FactoryLimits, FactoryTuning } from "@codeden/contracts";
 import { useId, useState } from "react";
 import { Field } from "@/components/automations/form-bits";
+import { InfoHint } from "@/components/common/info-hint";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { REVIEW_AREAS_HELP, SCOUT_HELP } from "./meta";
 
 /** The tuning knobs the editor exposes (the rest keep their defaults). */
 export type TuningDraft = Pick<
@@ -182,7 +184,11 @@ export function LimitsEditor({
             className="text-[13px]"
           />
         </Field>
-        <Field label="Auto-merges per day" htmlFor={`${id}-merges`}>
+        <Field
+          label="Auto-merges per day"
+          htmlFor={`${id}-merges`}
+          hint="With auto-merge on, the most pull requests CodeDen merges by itself in a day. Once it's reached, more work waits for tomorrow."
+        >
           <Input
             id={`${id}-merges`}
             type="number"
@@ -192,7 +198,11 @@ export function LimitsEditor({
             className="text-[13px]"
           />
         </Field>
-        <Field label="Pause after failures" htmlFor={`${id}-fails`}>
+        <Field
+          label="Pause after failures"
+          htmlFor={`${id}-fails`}
+          hint="The factory pauses after this many failed merge checks or reverts in a row, so a broken setup doesn't keep spending. Resume it from the factory panel."
+        >
           <Input
             id={`${id}-fails`}
             type="number"
@@ -243,14 +253,22 @@ export function LimitsEditor({
       {dark && tuning && onTuningChange && (
         <div className="space-y-3 border-t border-border pt-4" data-testid="scout-tuning">
           <div>
-            <p className="text-[13px] font-medium">The scout</p>
+            <p className="flex items-center gap-1 text-[13px] font-medium">
+              The scout
+              <InfoHint label="the scout">{SCOUT_HELP}</InfoHint>
+            </p>
             <p className="text-3xs text-muted-foreground">
               It reviews the app against the vision when fewer than two issues wait, using a few
-              long-lived lenses, and files the work worth doing.
+              long-lived area reviewers (one reviewer agent per review area, such as security or
+              UX), and files the work worth doing.
             </p>
           </div>
           <div className="grid gap-3 sm:grid-cols-3">
-            <Field label="Every (hours)" htmlFor={`${id}-every`}>
+            <Field
+              label="Every (hours)"
+              htmlFor={`${id}-every`}
+              hint="How often the scout runs a review round: it plans what to look at, its area reviewers review, and it files issues. It also waits until fewer than two issues are queued."
+            >
               <Input
                 id={`${id}-every`}
                 type="number"
@@ -265,9 +283,9 @@ export function LimitsEditor({
                 className="text-[13px]"
               />
             </Field>
-            <Field label="Lenses per round" htmlFor={`${id}-lenses`}>
+            <Field label="Review areas per round" htmlFor={`${id}-areas`} hint={REVIEW_AREAS_HELP}>
               <Input
-                id={`${id}-lenses`}
+                id={`${id}-areas`}
                 type="number"
                 min={0}
                 max={8}
@@ -278,7 +296,11 @@ export function LimitsEditor({
                 className="text-[13px]"
               />
             </Field>
-            <Field label="Issues per round" htmlFor={`${id}-issues`}>
+            <Field
+              label="Issues per round"
+              htmlFor={`${id}-issues`}
+              hint="The most issues the scout files from one round. It files only what is most worth doing, so a round can file fewer or none."
+            >
               <Input
                 id={`${id}-issues`}
                 type="number"

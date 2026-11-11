@@ -19,8 +19,8 @@ import { defaultBranch, knownTitles } from "./scout";
 import { ACTIVE_STAGES, WAITING_STAGES } from "./store";
 
 /**
- * What the scout and its lenses report (§10.1): the scout's plan for the round, the lenses'
- * findings and the issues the scout files. Each changes the loop record, so the service runs
+ * What the scout and its area reviewers (`lenses` in the code) report (§10.1): the scout's plan
+ * for the round, the area reviewers' findings and the issues the scout files. Each changes the loop record, so the service runs
  * them one at a time with the loop's ticks.
  */
 
@@ -41,7 +41,7 @@ function scoutRound(
   return { loop, projectId: session.projectId };
 }
 
-/** `factory_plan_round`: start (or wake) the lenses the scout asked for, within the limits. */
+/** `factory_plan_round`: start (or wake) the area reviewers the scout asked for, within the limits. */
 export async function planRound(
   ctx: FactoryContext,
   session: Session,
@@ -97,7 +97,7 @@ export async function planRound(
         nudgedAt: null,
       });
     } catch (error) {
-      ctx.log?.(`factory: lens ${lens.area}: ${errorMessage(error)}`);
+      ctx.log?.(`factory: area reviewer ${lens.area}: ${errorMessage(error)}`);
     }
   }
   ctx.store.saveLoop({
@@ -114,23 +114,26 @@ export async function planRound(
     },
   });
   const skipped = wanted.length - started.length + (req.lenses.length - wanted.length);
-  const note = skipped > 0 ? ` ${skipped} lens request(s) were over the limit or not allowed.` : "";
+  const note =
+    skipped > 0 ? ` ${skipped} review area request(s) were over the limit or not allowed.` : "";
   return {
     lenses: started.map((l) => ({ area: l.area, sessionId: l.sessionId })),
     next:
       started.length > 0
         ? `Started ${started.map((l) => l.area).join(", ")}.${note} End your turn now: CodeDen sends you their findings when they are done.`
-        : `No lenses this round.${note} Review by yourself now and file at most ${loop.tuning.maxIssuesPerRound} issues with \`factory_file_issue\`, then end your turn.`,
+        : `No area reviewers this round.${note} Review by yourself now and file at most ${loop.tuning.maxIssuesPerRound} issues with \`factory_file_issue\`, then end your turn.`,
   };
 }
 
-/** `factory_report_findings`: a lens reports what it found this round. */
+/** `factory_report_findings`: an area reviewer reports what it found this round. */
 export function reportFindings(
   ctx: FactoryContext,
   session: Session,
   findings: FactoryFinding[],
 ): { recorded: number; skipped: string[]; message: string } {
-  if (!session.projectId) throw badRequest("Only a scout lens can report findings", "not_a_lens");
+  if (!session.projectId) {
+    throw badRequest("Only one of the scout's area reviewers can report findings", "not_a_lens");
+  }
   const loop = ctx.store.loopOrNew(session.projectId, ctx.now());
   const round = loop.scout.round;
   const lens = round?.lenses.find((l) => l.sessionId === session.id);
@@ -188,7 +191,7 @@ export async function fileIssue(
   if (!round) throw conflict("No scout round is running", "no_round");
   if (round.phase === "reviewing") {
     throw conflict(
-      "The lenses are still reviewing; end your turn and wait for their findings",
+      "The area reviewers are still reviewing; end your turn and wait for their findings",
       "lenses_reviewing",
     );
   }

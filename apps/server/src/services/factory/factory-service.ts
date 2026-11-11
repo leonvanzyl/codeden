@@ -371,13 +371,13 @@ export class FactoryService {
     return res;
   }
 
-  /** `factory_plan_round`: the scout's lenses for this round. */
+  /** `factory_plan_round`: the scout's review areas for this round. */
   planRound(session: Session, req: FactoryPlanRoundRequest) {
     const projectId = session.projectId ?? "";
     return this.serialize(projectId, "plan round", () => planRound(this.ctx, session, req));
   }
 
-  /** `factory_report_findings`: a lens's findings. */
+  /** `factory_report_findings`: an area reviewer's findings. */
   async reportFindings(session: Session, findings: FactoryFinding[]) {
     const projectId = session.projectId ?? "";
     const res = await this.serialize(projectId, "findings", () =>
@@ -410,7 +410,7 @@ export class FactoryService {
     return s !== undefined && isFactorySession(s) && s.workKey === SCOUT_WORK_KEY;
   }
 
-  /** Whether a session is one of the scout's lenses. */
+  /** Whether a session is one of the scout's area reviewers (lenses). */
   isLens(sessionId: string): boolean {
     const s = this.deps.repo.find(sessionId)?.session;
     return s !== undefined && isFactorySession(s) && s.workKey.startsWith(LENS_WORK_KEY_PREFIX);
