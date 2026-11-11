@@ -163,6 +163,11 @@ export const FactoryItem = z.object({
    * session someone unarchives stays unarchived. Retry clears it.
    */
   sessionsArchivedAt: Timestamp.nullable().default(null),
+  /**
+   * Sessions of attempts before a retry that weren't archived yet. The factory archives them
+   * once none of them is busy (a turn is never cut off), then empties the list.
+   */
+  earlierSessionIds: z.array(Id).default([]),
   createdAt: Timestamp,
   updatedAt: Timestamp,
   mergedAt: Timestamp.nullable(),

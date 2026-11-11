@@ -42,10 +42,9 @@ export interface FactoryContext {
   complete: (job: string, system: string, prompt: string) => Promise<string | null>;
   /**
    * Archive sessions of finished work in the background, in order, which removes their
-   * worktrees (see `cleanup.ts`). Sessions gone or archived by then are left alone, and busy
-   * ones too unless `evenIfBusy`.
+   * worktrees (see `cleanup.ts`). Sessions gone, archived or busy by then are left alone.
    */
-  archiveSessions: (sessionIds: string[], opts?: { evenIfBusy?: boolean }) => void;
+  archiveSessions: (sessionIds: string[]) => void;
   now: () => Date;
   /** How long a PR may report no CI before "no checks" fails (default 3 minutes). */
   ciGraceMs: number;

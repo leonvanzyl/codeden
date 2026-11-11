@@ -8,7 +8,7 @@ import {
   LEGACY_SIZE_LIMITS,
   ScoutState,
 } from "@codeden/contracts";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, or, sql } from "drizzle-orm";
 import type { Db } from "../../db/client";
 import { factoryDigests, factoryItems, factoryLoops } from "../../db/schema-factory";
 import type { EventStore } from "../../events/store";
@@ -25,6 +25,8 @@ export type NewFactoryItem = Pick<
 export const ACTIVE_STAGES: FactoryItemStage[] = ["building", "verifying", "watching"];
 /** Stages of items waiting to be classified or for a free agent. */
 export const WAITING_STAGES: FactoryItemStage[] = ["candidate", "backlog"];
+/** Stages after which an item's sessions have nothing left to do (see `cleanup.ts`). */
+export const FINISHED_STAGES: FactoryItemStage[] = ["merged", "reverted", "rejected", "failed"];
 /** Final stages. */
 export const DONE_STAGES: FactoryItemStage[] = [
   "merged",
@@ -100,6 +102,29 @@ export class FactoryStore {
       .where(where)
       .orderBy(desc(factoryItems.updatedAt))
       .limit(500)
+      .all()
+      .map((r) => withItemDefaults(r.item));
+  }
+
+  /**
+   * Items with sessions still to archive (`cleanup.ts`): finished ones not cleaned up yet, and
+   * any holding an earlier attempt's sessions. Not capped like `items` (the newest only), so an
+   * old item is reached however much work came after it.
+   */
+  itemsToClean(projectId: string): FactoryItem[] {
+    const field = (path: string) => sql`json_extract(${factoryItems.item}, ${path})`;
+    const pending = or(
+      and(
+        inArray(factoryItems.stage, FINISHED_STAGES),
+        sql`${field("$.sessionsArchivedAt")} is null`,
+      ),
+      sql`json_array_length(${field("$.earlierSessionIds")}) > 0`,
+    );
+    return this.db
+      .select()
+      .from(factoryItems)
+      .where(and(eq(factoryItems.projectId, projectId), pending))
+      .orderBy(asc(factoryItems.updatedAt))
       .all()
       .map((r) => withItemDefaults(r.item));
   }
@@ -195,6 +220,7 @@ const ITEM_DEFAULTS = {
   nudges: {},
   largeChange: null,
   sessionsArchivedAt: null,
+  earlierSessionIds: [],
 } satisfies Partial<FactoryItem>;
 
 /** An item as read from the projection, with the fields newer versions added. */

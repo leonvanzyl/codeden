@@ -6,7 +6,7 @@ All notable changes to CodeDen are documented here. The format follows [Keep a C
 
 ### Changed
 
-- **The factory cleans up finished work.** When a work item is merged, reverted, rejected or failed, the factory archives its builder and reviewer sessions. They leave the sidebar and their worktrees are removed right away, instead of staying until the 7-day cleanup. The branch, checkpoints and transcript stay, and messaging a session brings it back. **Retry** archives the earlier attempt's sessions too. Escalated work, merges whose CI is still being watched, and the scout and its lenses are left alone.
+- **The factory cleans up finished work.** When a work item is merged, reverted, rejected or failed, the factory archives its builder and reviewer sessions. They leave the sidebar and their worktrees are removed right away, instead of staying until the 7-day cleanup. The branch, checkpoints and transcript stay, and messaging a session brings it back. A session is never cut off mid-turn, and one you unarchive stays. After a **Retry**, the earlier attempt's sessions are cleaned up too. Escalated work, merges whose CI is still being watched, and the scout and its lenses are left alone.
 
 ## [0.6.0] - 2026-11-11
 

@@ -14,7 +14,7 @@ import {
   type WorkSummary,
   type WorkspaceRequest,
 } from "@codeden/contracts";
-import { and, asc, desc, eq, gt, inArray, lt, type SQL } from "drizzle-orm";
+import { and, asc, type Column, desc, eq, gt, inArray, lt, or, type SQL, sql } from "drizzle-orm";
 import type { Db } from "../../db/client";
 import { rowToItemRecord, rowToSession } from "../../db/rows";
 import { automationRuns, items, sessions, turns } from "../../db/schema";
@@ -36,6 +36,17 @@ export type StoredStartMeta = SessionStartMeta & {
   pending?: PendingStart | null;
   prFeedback?: Record<string, { rounds: number; keys: string[] }>;
 };
+
+/**
+ * A folder as `SessionRepo.inFolder` compares it: forward slashes, no trailing slash, ASCII
+ * lower case (what SQLite's `lower()` does).
+ */
+export function folderKey(folder: string): string {
+  return folder
+    .replace(/\\/g, "/")
+    .replace(/\/+$/, "")
+    .replace(/[A-Z]/g, (c) => c.toLowerCase());
+}
 
 /** Session rows and transcript reads. Every session change goes through the event log. */
 export class SessionRepo {
@@ -107,6 +118,23 @@ export class SessionRepo {
       .where(and(...conditions))
       .orderBy(desc(sessions.createdAt))
       .limit(1000)
+      .all()
+      .map(rowToSession);
+  }
+
+  /**
+   * Every session working in `folder` (its cwd or its worktree), compared without ASCII case,
+   * slash style or a trailing slash. Not capped like `list`: cleanup must see each one.
+   */
+  inFolder(folder: string): Session[] {
+    const target = folderKey(folder);
+    const key = (column: Column) => sql`lower(rtrim(replace(${column}, ${"\\"}, '/'), '/'))`;
+    return this.db
+      .select()
+      .from(sessions)
+      .where(
+        or(sql`${key(sessions.cwd)} = ${target}`, sql`${key(sessions.worktreePath)} = ${target}`),
+      )
       .all()
       .map(rowToSession);
   }

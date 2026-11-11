@@ -1,7 +1,9 @@
+import { join } from "node:path";
 import type { FactoryItem, ReviewVerdictInit, Session } from "@codeden/contracts";
 import { ReviewVerdict } from "@codeden/contracts";
 import { afterEach, describe, expect, it } from "vitest";
 import { SessionArchiver, type SessionArchiverDeps } from "../src/services/factory/cleanup";
+import { FACTORY_STARTER } from "../src/services/factory/sessions";
 import { sampleSession } from "./helpers";
 import { createFactoryEnv, type FactoryEnv } from "./support/factory-env";
 
@@ -181,7 +183,7 @@ describe("archiving finished factory work (§10.1)", () => {
     expect(session(lensId).archivedAt).toBeNull();
   });
 
-  it("archives the earlier attempt's sessions on retry, even one finishing its turn", async () => {
+  it("archives the earlier attempt's sessions after a retry once their turn is over", async () => {
     env = createFactoryEnv();
     enable();
     const bug = env.gh.openIssue({
@@ -205,19 +207,134 @@ describe("archiving finished factory work (§10.1)", () => {
     await tick();
     expect(env.archived).toEqual([]);
 
+    // Retried at once: the earlier builder is remembered, not archived mid-turn.
     env.factory.retry(env.project.id, it1.id);
     await env.factory.archiver.idle();
-    expect(env.archived).toEqual([builder]);
+    expect(env.archived).toEqual([]);
     expect(item(it1.id)).toMatchObject({
       stage: "backlog",
       builderSessionId: null,
       sessionsArchivedAt: null,
+      earlierSessionIds: [builder],
     });
     await tick();
     const next = item(it1.id).builderSessionId;
     expect(next).toBeTruthy();
     expect(next).not.toBe(builder);
+    expect(env.archived).toEqual([]);
+
+    // Its turn ends: now it is archived, and only it.
+    await env.setStatus(builder, "idle");
+    await tick();
+    expect(env.archived).toEqual([builder]);
+    expect(item(it1.id).earlierSessionIds).toEqual([]);
     expect(session(next).archivedAt).toBeNull();
+    await tick();
+    expect(env.archived).toEqual([builder]);
+  });
+
+  it("leaves a session restored after its cleanup alone when the item is retried", async () => {
+    env = createFactoryEnv();
+    enable();
+    const it1 = backlogItem();
+    await tick();
+    const builder = item(it1.id).builderSessionId as string;
+    await env.setStatus(builder, "failed");
+    await tick();
+    expect(item(it1.id).stage).toBe("failed");
+    expect(env.archived).toEqual([builder]);
+    // You restore the builder to look into it, then retry the item.
+    env.repo.update(builder, (s) => ({ ...s, archivedAt: null }));
+    env.factory.retry(env.project.id, it1.id);
+    expect(item(it1.id).earlierSessionIds).toEqual([]);
+    await tick();
+    expect(item(it1.id).stage).toBe("building");
+    expect(env.archived).toEqual([builder]);
+    expect(session(builder).archivedAt).toBeNull();
+  });
+
+  it("reaches old work past the newest 500 items and 1,000 sessions", async () => {
+    env = createFactoryEnv();
+    enable();
+    const old = "2026-01-01T00:00:00.000Z";
+    const worktree = join(env.dir, "wt", "old-builder");
+    const factorySession = (id: string, patch: Partial<Session>): Session => ({
+      ...sampleSession,
+      id,
+      projectId: env.project.id,
+      role: "agent",
+      startedBy: FACTORY_STARTER,
+      status: "idle",
+      createdAt: old,
+      updatedAt: old,
+      ...patch,
+    });
+    const meta = { workspaceMode: "worktree", workspaceFallback: null, forced: null } as const;
+    // An old failed item: its builder, and a reviewer of it restarted long ago (the item no
+    // longer points at it), in the builder's worktree with Windows-style slashes.
+    env.repo.create(
+      factorySession("old-builder", {
+        workKey: "issue:7",
+        cwd: worktree,
+        worktreePath: worktree,
+      }),
+      { ...meta, queuedBehind: [] },
+    );
+    env.repo.create(
+      factorySession("old-reviewer", {
+        workKey: "factory:review:7",
+        cwd: `${worktree.replace(/\//g, "\\").toUpperCase()}\\`,
+        worktreePath: null,
+      }),
+      { ...meta, workspaceMode: "existing", queuedBehind: [] },
+    );
+    const oldItem = env.factory.data.createItem({
+      projectId: env.project.id,
+      workKey: "issue:7",
+      title: "An old item",
+      summary: "Failed long ago",
+      source: "issue",
+      stage: "failed",
+      builderSessionId: "old-builder",
+    });
+    env.factory.data.updateItem(oldItem.id, (i) => ({ ...i, updatedAt: old }), { touch: false });
+    // Then 1,000 newer sessions and 500 newer finished items, already cleaned up.
+    const now = new Date().toISOString();
+    env.store.append(
+      Array.from({ length: 1_000 }, (_, n) => ({
+        type: "session.created" as const,
+        sessionId: `newer-${n}`,
+        payload: {
+          session: factorySession(`newer-${n}`, {
+            workKey: `issue:${100 + n}`,
+            cwd: join(env.dir, "wt", `newer-${n}`),
+            status: "completed",
+            createdAt: now,
+            updatedAt: now,
+          }),
+        },
+      })),
+    );
+    env.store.append(
+      Array.from({ length: 500 }, (_, n) => ({
+        type: "factory.item.updated" as const,
+        sessionId: null,
+        payload: {
+          item: {
+            ...oldItem,
+            id: `newer-item-${n}`,
+            stage: "merged",
+            builderSessionId: null,
+            sessionsArchivedAt: now,
+          },
+        },
+      })),
+    );
+    expect(env.factory.data.items(env.project.id).map((i) => i.id)).not.toContain(oldItem.id);
+
+    await tick();
+    expect(env.archived).toEqual(["old-reviewer", "old-builder"]);
+    expect(item(oldItem.id).sessionsArchivedAt).not.toBeNull();
   });
 });
 
@@ -249,9 +366,9 @@ describe("SessionArchiver", () => {
       log: (m) => log.push(m),
     });
     archiver.push(["broken", "gone", "busy", "archived", "idle"]);
-    archiver.push(["busy"], { evenIfBusy: true });
+    archiver.push(["busy"]);
     await archiver.idle();
-    expect(archived).toEqual(["idle", "busy"]);
+    expect(archived).toEqual(["idle"]);
     expect(log).toEqual(["factory: archiving session broken: runner gone"]);
   });
 });

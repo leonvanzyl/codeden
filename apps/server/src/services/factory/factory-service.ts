@@ -127,7 +127,7 @@ export class FactoryService {
       settings: deps.settings,
       exec: deps.exec,
       complete: deps.complete ?? (async () => null),
-      archiveSessions: (ids, opts) => this.archiver.push(ids, opts),
+      archiveSessions: (ids) => this.archiver.push(ids),
       now: deps.options?.now ?? (() => new Date()),
       ciGraceMs: deps.options?.ciGraceMs ?? 3 * 60_000,
       log: deps.log,
@@ -359,7 +359,7 @@ export class FactoryService {
     return item;
   }
 
-  /** Run a stopped item again (the earlier attempt's sessions are archived). */
+  /** Run a stopped item again (the loop archives the earlier attempt's sessions). */
   retry(projectId: string, itemId: string): FactoryItem {
     const item = decisions.retry(this.ctx, projectId, itemId);
     this.soon(projectId);

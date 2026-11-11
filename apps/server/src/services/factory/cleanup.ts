@@ -1,28 +1,25 @@
-import type { FactoryItem, FactoryItemStage, Session } from "@codeden/contracts";
+import type { FactoryItem, Session } from "@codeden/contracts";
 import { errorMessage } from "../errors";
 import type { SessionRepo } from "../sessions/repo";
 import type { FactoryContext } from "./context";
 import { isBusy, isFactorySession, LENS_WORK_KEY_PREFIX, SCOUT_WORK_KEY } from "./sessions";
+import { FINISHED_STAGES } from "./store";
 
 /**
  * Cleaning up finished work (§10.1, §9): once an item is done, the factory archives its builder
  * and reviewer sessions through the normal archive path, which removes their worktrees. The
  * branch, checkpoints and transcript stay, and a message to a session brings it (and its
- * worktree) back.
+ * worktree) back. A session that is busy is never cut off: the item waits for it.
  */
-
-/** Stages after which an item's sessions have nothing left to do. */
-export const FINISHED_STAGES: FactoryItemStage[] = ["merged", "reverted", "rejected", "failed"];
-
-const normPath = (p: string) =>
-  p
-    .replace(/[\\/]+$/, "")
-    .replace(/\\/g, "/")
-    .toLowerCase();
 
 /** The scout and its lenses are long-lived: never archived with an item. */
 function longLived(s: Session): boolean {
   return s.workKey === SCOUT_WORK_KEY || s.workKey.startsWith(LENS_WORK_KEY_PREFIX);
+}
+
+/** Factory sessions an item may archive: not archived yet, and not long-lived. */
+function archivable(s: Session | undefined): s is Session {
+  return s !== undefined && !s.archivedAt && isFactorySession(s) && !longLived(s);
 }
 
 /**
@@ -34,17 +31,16 @@ function longLived(s: Session): boolean {
 export function sessionsToArchive(ctx: FactoryContext, item: FactoryItem): Session[] {
   const find = (id: string | null) => (id ? ctx.repo.find(id)?.session : undefined);
   const builder = find(item.builderSessionId);
-  const worktree = builder?.worktreePath ? normPath(builder.worktreePath) : null;
-  const inWorktree = worktree
-    ? ctx.sessions
-        .list(item.projectId)
-        .filter((s) => s.id !== builder?.id && normPath(s.cwd) === worktree)
+  const inWorktree = builder?.worktreePath
+    ? ctx.repo
+        .inFolder(builder.worktreePath)
+        .filter((s) => s.id !== builder.id && s.projectId === item.projectId)
     : [];
   const seen = new Set<string>();
   return [...inWorktree, find(item.reviewerSessionId), builder].filter((s): s is Session => {
     if (!s || seen.has(s.id)) return false;
     seen.add(s.id);
-    return !s.archivedAt && isFactorySession(s) && !longLived(s);
+    return archivable(s);
   });
 }
 
@@ -60,20 +56,39 @@ export function waitingOnLargeChange(ctx: FactoryContext, item: FactoryItem): bo
 }
 
 /**
- * Archive the sessions of the project's finished items, once per item. An item waits while one
- * of its sessions is busy (a turn is never cut off) or while the PM may still allow it over the
- * size limit. Escalated items and merges whose main CI is still watched aren't finished. The
- * archives run in the background, so a slow worktree removal never holds up the loop.
+ * The loop's cleanup step. A finished item's sessions are archived once (`sessionsArchivedAt`),
+ * so a session someone restores stays; it waits while one of them is busy, or while the PM may
+ * still allow it over the size limit. An earlier attempt's sessions (after a retry) are
+ * archived once none of them is busy. Escalated items and merges whose main CI is still
+ * watched aren't finished. The archives run in the background, so a slow worktree removal
+ * never holds up the loop.
  */
 export function archiveFinished(ctx: FactoryContext, projectId: string): void {
-  for (const item of ctx.store.items(projectId, FINISHED_STAGES)) {
-    if (item.sessionsArchivedAt || waitingOnLargeChange(ctx, item)) continue;
+  for (const item of ctx.store.itemsToClean(projectId)) {
+    if (item.earlierSessionIds.length > 0) archiveEarlier(ctx, item);
+    if (!FINISHED_STAGES.includes(item.stage) || item.sessionsArchivedAt) continue;
+    if (waitingOnLargeChange(ctx, item)) continue;
     const sessions = sessionsToArchive(ctx, item);
     if (sessions.some(isBusy)) continue;
     const at = ctx.now().toISOString();
     ctx.store.updateItem(item.id, (i) => ({ ...i, sessionsArchivedAt: at }), { touch: false });
     if (sessions.length > 0) ctx.archiveSessions(sessions.map((s) => s.id));
   }
+}
+
+/** Archive the sessions of attempts before a retry, once none of them is busy. */
+function archiveEarlier(ctx: FactoryContext, item: FactoryItem): void {
+  const sessions = item.earlierSessionIds
+    .map((id) => ctx.repo.find(id)?.session)
+    .filter(archivable);
+  if (sessions.some(isBusy)) return;
+  const handled = new Set(item.earlierSessionIds);
+  ctx.store.updateItem(
+    item.id,
+    (i) => ({ ...i, earlierSessionIds: i.earlierSessionIds.filter((id) => !handled.has(id)) }),
+    { touch: false },
+  );
+  if (sessions.length > 0) ctx.archiveSessions(sessions.map((s) => s.id));
 }
 
 export interface SessionArchiverDeps {
@@ -85,22 +100,21 @@ export interface SessionArchiverDeps {
 
 /**
  * Archives finished work's sessions one at a time, in the order queued. Removing a worktree can
- * take a while, so this never runs inside a tick. A session that is gone or archived already by
- * its turn is left alone, and so is one that is busy again (someone messaged it) unless
- * `evenIfBusy` (a retry abandons the earlier attempt: archiving stops it). Failures are logged;
- * the hourly worktree sweep retries removals that failed.
+ * take a while, so this never runs inside a tick. A session that is gone, archived already or
+ * busy again (someone messaged it) by its turn is left alone. Failures are logged; the hourly
+ * worktree sweep retries removals that failed.
  */
 export class SessionArchiver {
   private chain: Promise<void> = Promise.resolve();
 
   constructor(private readonly deps: SessionArchiverDeps) {}
 
-  push(sessionIds: string[], opts: { evenIfBusy?: boolean } = {}): void {
+  push(sessionIds: string[]): void {
     this.chain = this.chain
       .then(async () => {
         for (const id of sessionIds) {
           const s = this.deps.repo.find(id)?.session;
-          if (!s || s.archivedAt || (isBusy(s) && !opts.evenIfBusy)) continue;
+          if (!s || s.archivedAt || isBusy(s)) continue;
           await this.deps
             .archive(id)
             .catch((error: unknown) =>

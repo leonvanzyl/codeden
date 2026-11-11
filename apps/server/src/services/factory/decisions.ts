@@ -100,15 +100,17 @@ export async function setType(
 
 /**
  * Run an item that stopped (not reproduced, declined, failed checks, closed) again, with fresh
- * sessions. The earlier attempt's sessions are archived, so none is left behind.
+ * sessions. The earlier attempt's sessions go to `earlierSessionIds`, which the loop archives
+ * once none of them is busy, so none is left behind. If they were archived already, nothing
+ * is: a session someone restored since stays.
  */
 export function retry(ctx: FactoryContext, projectId: string, itemId: string): FactoryItem {
   const item = projectItem(ctx, projectId, itemId);
   if (item.stage !== "rejected" && item.stage !== "failed") {
     throw conflict(`Only stopped items can be retried (this one is ${item.stage})`, "not_stopped");
   }
-  const earlier = sessionsToArchive(ctx, item).map((s) => s.id);
-  const retried = ctx.store.updateItem(item.id, (i) => ({
+  const earlier = item.sessionsArchivedAt ? [] : sessionsToArchive(ctx, item).map((s) => s.id);
+  return ctx.store.updateItem(item.id, (i) => ({
     ...i,
     stage: i.type ? "backlog" : "candidate",
     investigation: null,
@@ -125,11 +127,9 @@ export function retry(ctx: FactoryContext, projectId: string, itemId: string): F
     reason: null,
     note: "Retried",
     sessionsArchivedAt: null,
+    earlierSessionIds: [...new Set([...i.earlierSessionIds, ...earlier])],
     finishedAt: null,
   }));
-  // The earlier attempt is abandoned: a session still finishing its turn is stopped too.
-  ctx.archiveSessions(earlier, { evenIfBusy: true });
-  return retried;
 }
 
 /** `factory_submit_review`: the independent reviewer's structured verdict. */
