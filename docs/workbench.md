@@ -16,7 +16,7 @@ Everything an agent touches sits next to its chat. Open the right panel with **C
 - Streaming Markdown with syntax-highlighted code.
 - Tool calls are grouped into collapsible **work blocks** ("Ran 2 commands and called 1 tool") with live command output.
 - **Plans and todos**, **subagents**, **approvals** and **questions** get their own cards. Approvals and questions are answered right in the card (or from the inbox).
-- **Subagents** run as child threads. Their card shows live status; click it to open the child thread in a side panel. Approvals raised inside a subagent surface in the parent and in the inbox.
+- **Subagents** run as child threads. Their card shows live status and, once the subagent finishes, the tokens, tool calls and time it used (e.g. `48.2k tokens · 23 tool calls · 1m 12s`) when the provider reports them; click it to open the child thread in a side panel. Approvals raised inside a subagent surface in the parent and in the inbox.
 - Each turn's footer shows how long it worked and, where available, its cost and tokens. The session header shows the running total.
 
 ## The composer

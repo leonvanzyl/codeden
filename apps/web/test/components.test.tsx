@@ -5,6 +5,7 @@ import { VoiceButton } from "@/components/composer/voice-button";
 import { ConflictCard } from "@/components/project/conflict-card";
 import { ApprovalCard } from "@/components/thread/cards/approval-card";
 import { QuestionCard } from "@/components/thread/cards/question-card";
+import { SubagentCard } from "@/components/thread/cards/subagent-card";
 import { WorkGroup } from "@/components/thread/work/work-group";
 import { createMockClient } from "@/lib/api/mock";
 import { conflicts } from "@/lib/api/mock/fixtures/sessions";
@@ -347,6 +348,46 @@ describe("WorkGroup", () => {
     ];
     renderWithClient(<WorkGroup entries={live} live />);
     expect(screen.getAllByText("pnpm build").length).toBeGreaterThan(0);
+  });
+});
+
+describe("SubagentCard", () => {
+  const sub: ItemOf<"subagent"> = {
+    id: "sa",
+    kind: "subagent",
+    status: "completed",
+    childThreadId: "s1:thread-sa",
+    agentType: "Explore",
+    description: "Find the flaky test",
+    summary: "Found it in useCart.test.ts",
+  };
+
+  it("shows a finished subagent's figures beside its summary, in place of the steps", () => {
+    const stats = { totalTokens: 48_213, toolUses: 23, durationMs: 72_000 };
+    renderWithClient(<SubagentCard item={{ ...sub, stats }} sessionId="s1" />);
+    const figures = screen.getByText("· 48.2k tokens · 23 tool calls · 1m 12s");
+    expect(figures.getAttribute("title")).toBe(
+      "48,213 tokens · 23 tool calls · 1m 12s (72,000 ms)",
+    );
+    // Same row as the summary, which truncates first.
+    expect(figures.parentElement).toBe(screen.getByText(sub.summary ?? "").parentElement);
+    expect(figures.className).toContain("shrink-0");
+  });
+
+  it("shows only the figures reported, each exact in the tooltip", () => {
+    renderWithClient(
+      <SubagentCard item={{ ...sub, stats: { durationMs: 4210 } }} sessionId="s1" />,
+    );
+    expect(screen.getByText("· 4.2s").getAttribute("title")).toBe("4.2s (4,210 ms)");
+  });
+
+  it("shows no stats while running or when the provider reported none", () => {
+    const { unmount } = renderWithClient(<SubagentCard item={sub} sessionId="s1" />);
+    expect(screen.queryByText(/tool call/)).toBeNull();
+    unmount();
+    const running = { ...sub, status: "in_progress" as const, stats: { totalTokens: 10 } };
+    renderWithClient(<SubagentCard item={running} sessionId="s1" />);
+    expect(screen.queryByText(/tokens/)).toBeNull();
   });
 });
 

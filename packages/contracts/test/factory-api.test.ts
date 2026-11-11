@@ -62,6 +62,8 @@ const item: FactoryItem = {
   triageRequestedAt: ts,
   nudges: { verifying: ts },
   largeChange: null,
+  sessionsArchivedAt: null,
+  earlierSessionIds: [],
   createdAt: ts,
   updatedAt: ts,
   mergedAt: null,
@@ -71,6 +73,13 @@ const item: FactoryItem = {
 describe("factory API contracts (§10.1)", () => {
   it("round-trips items, loops and the item event", () => {
     expect(FactoryItem.parse(item)).toEqual(item);
+    const finished = {
+      ...item,
+      stage: "backlog" as const,
+      sessionsArchivedAt: ts,
+      earlierSessionIds: ["s1", "s2"],
+    };
+    expect(FactoryItem.parse(JSON.parse(JSON.stringify(finished)))).toEqual(finished);
     const loop = FactoryLoop.parse({
       projectId: "p1",
       state: "building",
@@ -97,9 +106,12 @@ describe("factory API contracts (§10.1)", () => {
       lastRoundAt: null,
       rounds: 0,
     });
-    // Items stored before `largeChange` and the pipelines existed still parse, as trusted work.
+    // Items stored before `largeChange`, the pipelines and session cleanup existed still parse,
+    // as trusted work whose sessions were not archived yet.
     const {
       largeChange: _l,
+      sessionsArchivedAt: _sa,
+      earlierSessionIds: _es,
       type: _t,
       classification: _c,
       trust: _tr,
@@ -110,6 +122,8 @@ describe("factory API contracts (§10.1)", () => {
     } = item;
     expect(FactoryItem.parse(old)).toMatchObject({
       largeChange: null,
+      sessionsArchivedAt: null,
+      earlierSessionIds: [],
       type: null,
       trust: "trusted",
       investigation: null,

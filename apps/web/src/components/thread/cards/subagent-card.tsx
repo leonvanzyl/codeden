@@ -1,6 +1,7 @@
 import type { ItemOf } from "@codeden/contracts";
 import { ArrowUpRight, Bot, CheckCircle2, Loader2, XCircle } from "lucide-react";
 import { useShallow } from "zustand/react/shallow";
+import { subagentStatsParts, subagentStatsTitle } from "@/lib/format";
 import { threadItems } from "@/lib/transcript/reducer";
 import { cn } from "@/lib/utils";
 import { useLayoutStore } from "@/stores/layout";
@@ -29,12 +30,17 @@ function useChildActivity(
   );
 }
 
-/** Compact subagent card with live status; opens the child thread in the right panel (§7.3). */
+/**
+ * Compact subagent card with live status and, once finished, the tokens, tool calls and
+ * duration its provider reported; opens the child thread in the right panel (§7.3).
+ */
 export function SubagentCard({ item, sessionId }: { item: ItemOf<"subagent">; sessionId: string }) {
   const openChild = useLayoutStore((s) => s.openChildThread);
   const { line, steps } = useChildActivity(sessionId, item.childThreadId);
   const running = item.status === "in_progress";
   const failed = item.status === "failed";
+  // What the finished run used, when the provider reports it (§7.3).
+  const stats = running ? [] : subagentStatsParts(item.stats);
 
   return (
     <button
@@ -75,8 +81,19 @@ export function SubagentCard({ item, sessionId }: { item: ItemOf<"subagent">; se
           <span className={cn("truncate", running && "text-shine")}>
             {running ? (line ?? "Starting…") : (item.summary ?? (failed ? "Failed" : "Finished"))}
           </span>
-          {steps > 0 && (
-            <span className="shrink-0 text-muted-foreground/60 tabular-nums">· {steps} steps</span>
+          {stats.length > 0 ? (
+            <span
+              className="shrink-0 text-muted-foreground/60 tabular-nums"
+              title={subagentStatsTitle(item.stats)}
+            >
+              · {stats.join(" · ")}
+            </span>
+          ) : (
+            steps > 0 && (
+              <span className="shrink-0 text-muted-foreground/60 tabular-nums">
+                · {steps} steps
+              </span>
+            )
           )}
         </span>
       </span>

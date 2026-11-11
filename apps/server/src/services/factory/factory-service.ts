@@ -33,6 +33,7 @@ import type { ProjectService } from "../projects/project-service";
 import type { RunnerPort } from "../runner-port";
 import type { SessionRepo } from "../sessions/repo";
 import type { SessionService } from "../sessions/session-service";
+import { SessionArchiver } from "./cleanup";
 import type { FactoryContext } from "./context";
 import { assertCanEnter, haltProject } from "./controls";
 import * as decisions from "./decisions";
@@ -79,6 +80,8 @@ export interface FactoryServiceDeps {
   github: FactoryGithub;
   /** The utility model, for the "Identify type" step (keywords decide without it). */
   complete?: (job: string, system: string, prompt: string) => Promise<string | null>;
+  /** The session archive path (`WorktreeCleanup.archive`): hides it and removes its worktree. */
+  archiveSession: (sessionId: string) => Promise<unknown>;
   options?: FactoryOptions;
   log?: (message: string) => void;
 }
@@ -94,12 +97,19 @@ export class FactoryService {
   readonly ctx: FactoryContext;
   private readonly chains = new Map<string, Promise<unknown>>();
   private readonly timers = new Map<string, NodeJS.Timeout>();
+  /** Archives finished work's sessions, one at a time, outside the tick chains. */
+  readonly archiver: SessionArchiver;
   private interval: NodeJS.Timeout | undefined;
   private resumeTimer: NodeJS.Timeout | undefined;
   private unsubscribe: (() => void) | undefined;
 
   constructor(private readonly deps: FactoryServiceDeps) {
     this.data = new FactoryStore(deps.db, deps.store);
+    this.archiver = new SessionArchiver({
+      repo: deps.repo,
+      archive: deps.archiveSession,
+      log: deps.log,
+    });
     this.ctx = {
       store: this.data,
       github: deps.github,
@@ -117,6 +127,7 @@ export class FactoryService {
       settings: deps.settings,
       exec: deps.exec,
       complete: deps.complete ?? (async () => null),
+      archiveSessions: (ids) => this.archiver.push(ids),
       now: deps.options?.now ?? (() => new Date()),
       ciGraceMs: deps.options?.ciGraceMs ?? 3 * 60_000,
       log: deps.log,
@@ -348,7 +359,7 @@ export class FactoryService {
     return item;
   }
 
-  /** Run a stopped item again. */
+  /** Run a stopped item again (the loop archives the earlier attempt's sessions). */
   retry(projectId: string, itemId: string): FactoryItem {
     const item = decisions.retry(this.ctx, projectId, itemId);
     this.soon(projectId);

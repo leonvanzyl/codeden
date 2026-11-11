@@ -157,6 +157,17 @@ export const FactoryItem = z.object({
    * work that can't be split). The size check then passes; every other check still applies.
    */
   largeChange: z.string().nullable().default(null),
+  /**
+   * When the factory archived the item's builder and reviewer sessions after it finished, which
+   * removes their worktrees (the branch and transcript stay); null until then. Set once, so a
+   * session someone unarchives stays unarchived. Retry clears it.
+   */
+  sessionsArchivedAt: Timestamp.nullable().default(null),
+  /**
+   * Sessions of attempts before a retry that weren't archived yet. The factory archives them
+   * once none of them is busy (a turn is never cut off), then empties the list.
+   */
+  earlierSessionIds: z.array(Id).default([]),
   createdAt: Timestamp,
   updatedAt: Timestamp,
   mergedAt: Timestamp.nullable(),
