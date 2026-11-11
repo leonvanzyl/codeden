@@ -7,7 +7,7 @@ import {
   pipelineStep,
 } from "@codeden/contracts";
 import { budgetSpend, type FactoryContext, visionOf } from "./context";
-import { localDay } from "./policy";
+import { localDay, queueOrder } from "./policy";
 import { scoutStatus } from "./scout";
 import { ACTIVE_STAGES, DONE_STAGES, WAITING_STAGES } from "./store";
 
@@ -56,9 +56,8 @@ export async function buildStatus(ctx: FactoryContext, projectId: string): Promi
   const project = ctx.projects.get(projectId);
   const loop = ctx.store.loopOrNew(projectId, ctx.now());
   const all = ctx.store.items(projectId);
-  const waiting = all
-    .filter((i) => WAITING_STAGES.includes(i.stage))
-    .sort((a, b) => (b.score ?? -1) - (a.score ?? -1));
+  // In the order free agents take them.
+  const waiting = all.filter((i) => WAITING_STAGES.includes(i.stage)).sort(queueOrder);
   const active = all.filter((i) => ACTIVE_STAGES.includes(i.stage));
   const done = all.filter((i) => DONE_STAGES.includes(i.stage)).slice(0, 30);
   const ignored = all.filter((i) => i.stage === "ignored").slice(0, 30);

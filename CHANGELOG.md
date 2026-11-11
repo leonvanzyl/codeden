@@ -14,6 +14,10 @@ All notable changes to CodeDen are documented here. The format follows [Keep a C
 - **Plainer words in the factory.** The dark factory's scout no longer talks about "lenses": it uses **review areas** (security, UI & UX, performance, docs and so on), each with an **area reviewer**, a long-lived reviewer agent focused on that one area. The setting is now **Review areas per round**, and the scout's prompts and docs use the same words. Existing dark factories keep their reviewer sessions; nothing to migrate.
 - **The factory explains itself.** On the pipeline diagram, each step's name (Identify type, Reproduce, Analyze, Implement, Review, Checks, Merge) is underlined and opens a short explanation of what happens there and what moves the work on. A "?" explains each lane (Bug, Feature, Documentation) and the revise loop. The scout, its rounds and review areas, and the factory settings that aren't self-explanatory (auto-merges per day, pause after failures, the scout's schedule and limits) have the same hints. They open on hover, on keyboard focus, or with a tap on a phone.
 
+### Fixed
+
+- **Your issues no longer wait behind the scout's.** In a dark factory, every issue the scout filed went ahead of every issue you filed, so your bugs could sit in the queue for an hour while agents worked only on the scout's features, and it looked as if everything went down the feature pipeline. Free agents now take a fix for a failing check on the default branch first, then the issues you and trusted authors filed (oldest first), then the scout's (by the priority it gave them). Work already queued is reordered on the next step; nothing to migrate.
+
 ## [0.6.0] - 2026-11-11
 
 Maintenance release.
