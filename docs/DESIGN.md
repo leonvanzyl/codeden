@@ -403,6 +403,8 @@ Issue ─► Identify type ┼─ Feature:  Analyze ───► Implement ─�
 
 **Visibility.** Factory work is ordinary sessions, issues and PRs, so it all stays traceable. The project page shows the **pipelines as a live diagram** (Issue, Identify type, the Bug, Feature and Docs lanes, Merge, and the scout in a dark factory) with each work item on the node of its current step; clicking an item opens the agent session working on it. Around it: spend against budget, agents working, PRs ready for you, merge-check results, recent results, ignored issues with **Let in**, and a daily digest.
 
+**Cleanup.** Finished work gives its space back. Once an item is merged, reverted, rejected or failed, the server archives its builder and reviewer sessions through the normal archive path (§9), which removes their worktrees and keeps the branch, checkpoints and transcript. Work that isn't finished keeps its sessions: escalated items, merges whose main CI is still watched, and an item that failed only on size while its PR is open (the PM may still allow it). A session still in a turn is archived when the turn ends, and **Retry** archives the earlier attempt's sessions. An item's sessions are archived once (`sessionsArchivedAt`), so a session the user unarchives stays. The scout and its lenses are never archived this way.
+
 **Delivery.** Both factory modes ship marked **experimental**. Assisted remains the default for new projects.
 
 ## 11. Human in the loop

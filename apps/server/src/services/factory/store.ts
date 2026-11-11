@@ -147,13 +147,21 @@ export class FactoryStore {
     return item;
   }
 
-  /** Apply a change to an item; writes only when something changed. */
-  updateItem(id: string, change: (item: FactoryItem) => FactoryItem): FactoryItem {
+  /**
+   * Apply a change to an item; writes only when something changed. `touch: false` keeps
+   * `updatedAt`, for bookkeeping that isn't progress (the digest and the recent list go by it).
+   */
+  updateItem(
+    id: string,
+    change: (item: FactoryItem) => FactoryItem,
+    opts: { touch?: boolean } = {},
+  ): FactoryItem {
     const current = this.item(id);
     if (!current) throw new Error(`No factory item ${id}`);
     const changed = change(current);
     if (JSON.stringify(changed) === JSON.stringify(current)) return current;
-    const next = { ...changed, updatedAt: new Date().toISOString() };
+    const next =
+      opts.touch === false ? changed : { ...changed, updatedAt: new Date().toISOString() };
     this.events.append([
       { type: "factory.item.updated", sessionId: null, payload: { item: next } },
     ]);
@@ -186,6 +194,7 @@ const ITEM_DEFAULTS = {
   investigation: null,
   nudges: {},
   largeChange: null,
+  sessionsArchivedAt: null,
 } satisfies Partial<FactoryItem>;
 
 /** An item as read from the projection, with the fields newer versions added. */

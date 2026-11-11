@@ -6,6 +6,7 @@ import {
   type Project,
 } from "@codeden/contracts";
 import { errorMessage } from "../errors";
+import { archiveFinished } from "./cleanup";
 import { budgetSpend, type FactoryContext, visionOf } from "./context";
 import { classifyPending, intakeFailedChecks, intakeIssues } from "./intake";
 import { advanceEscalated } from "./merge";
@@ -28,9 +29,9 @@ export interface TickHooks {
  * enforces the limits; agents only do the judgement. Safe to call at any time and after a
  * restart: every step reads the persisted state and moves it forward.
  *
- * Order: work in flight moves first (watch, build, verify), then intake (new issues, failed
- * checks on main), Identify type, the free agents take the queue, and last the dark factory's
- * scout gets whatever agents are still free.
+ * Order: work in flight moves first (watch, build, verify), finished work's sessions are
+ * archived, then intake (new issues, failed checks on main), Identify type, the free agents
+ * take the queue, and last the dark factory's scout gets whatever agents are still free.
  */
 export async function runTick(
   ctx: FactoryContext,
@@ -81,6 +82,8 @@ export async function runTick(
   }
   for (const item of ctx.store.items(projectId, ["escalated"]))
     advanceEscalated(ctx, project, item);
+  // Finished work gives back its sessions and worktrees, also while paused.
+  archiveFinished(ctx, projectId);
 
   if (loop.state !== "paused") {
     const spend = budgetSpend(ctx, projectId, today, project.factoryLimits);

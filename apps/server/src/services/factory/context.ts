@@ -40,6 +40,12 @@ export interface FactoryContext {
   exec: Exec;
   /** One call to the utility model (the "Identify type" step); null when none answered. */
   complete: (job: string, system: string, prompt: string) => Promise<string | null>;
+  /**
+   * Archive sessions of finished work in the background, in order, which removes their
+   * worktrees (see `cleanup.ts`). Sessions gone or archived by then are left alone, and busy
+   * ones too unless `evenIfBusy`.
+   */
+  archiveSessions: (sessionIds: string[], opts?: { evenIfBusy?: boolean }) => void;
   now: () => Date;
   /** How long a PR may report no CI before "no checks" fails (default 3 minutes). */
   ciGraceMs: number;

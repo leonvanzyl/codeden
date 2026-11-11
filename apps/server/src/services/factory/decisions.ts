@@ -7,6 +7,7 @@ import type {
   Session,
 } from "@codeden/contracts";
 import { badRequest, conflict, notFound } from "../errors";
+import { sessionsToArchive } from "./cleanup";
 import type { FactoryContext } from "./context";
 import { announceType } from "./intake";
 
@@ -97,13 +98,17 @@ export async function setType(
   return updated;
 }
 
-/** Run an item that stopped (not reproduced, declined, failed checks, closed) again. */
+/**
+ * Run an item that stopped (not reproduced, declined, failed checks, closed) again, with fresh
+ * sessions. The earlier attempt's sessions are archived, so none is left behind.
+ */
 export function retry(ctx: FactoryContext, projectId: string, itemId: string): FactoryItem {
   const item = projectItem(ctx, projectId, itemId);
   if (item.stage !== "rejected" && item.stage !== "failed") {
     throw conflict(`Only stopped items can be retried (this one is ${item.stage})`, "not_stopped");
   }
-  return ctx.store.updateItem(item.id, (i) => ({
+  const earlier = sessionsToArchive(ctx, item).map((s) => s.id);
+  const retried = ctx.store.updateItem(item.id, (i) => ({
     ...i,
     stage: i.type ? "backlog" : "candidate",
     investigation: null,
@@ -119,8 +124,12 @@ export function retry(ctx: FactoryContext, projectId: string, itemId: string): F
     nudges: {},
     reason: null,
     note: "Retried",
+    sessionsArchivedAt: null,
     finishedAt: null,
   }));
+  // The earlier attempt is abandoned: a session still finishing its turn is stopped too.
+  ctx.archiveSessions(earlier, { evenIfBusy: true });
+  return retried;
 }
 
 /** `factory_submit_review`: the independent reviewer's structured verdict. */
