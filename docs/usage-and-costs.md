@@ -59,7 +59,7 @@ Add budgets on the Usage page:
 - **Daily** or **monthly**, for **all projects** or one project, in USD.
 - A **warning** share (default 80%) and the limit itself. Crossing either raises an inbox item and a notification, once per budget and period.
 
-Budgets are alerts; they don't stop work. To hard-stop autonomous work on spend, use the [factory's daily budget](autonomy-and-dark-factory.md#limits).
+Budgets are alerts; they don't stop work. To hard-stop autonomous work on spend, use the [factory's daily budget](software-factory.md#settings-and-limits).
 
 ## Where it's stored
 

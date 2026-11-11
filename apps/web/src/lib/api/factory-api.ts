@@ -1,10 +1,11 @@
 import {
+  type FactoryAdmitRequest,
   FactoryDigest,
   type FactoryItem,
   FactoryItemResponse,
   FactoryLoop,
+  type FactorySetTypeRequest,
   FactoryStatus,
-  type FactoryTriageRequest,
   KillSwitchResponse,
   type SetAutonomyModeRequestInit,
   SetAutonomyModeResponse,
@@ -14,7 +15,8 @@ import type { Fetcher } from "./http";
 
 /**
  * `/api/projects/:id/{autonomy,vision,kill-switch,factory/*}` and `/api/factory/kill-switch`
- * (§10.1, experimental): autonomy modes, the vision, the factory panel, its items and controls.
+ * (§10.1, experimental): autonomy modes, the vision, the software/dark factory panel, its
+ * items and controls.
  */
 export interface FactoryApi {
   status(projectId: string): Promise<FactoryStatus>;
@@ -36,7 +38,12 @@ export interface FactoryApi {
   tick(projectId: string): Promise<FactoryStatus>;
   /** Today's digest, now (also raised in the inbox). */
   digest(projectId: string): Promise<FactoryDigest>;
-  triage(projectId: string, req: FactoryTriageRequest): Promise<FactoryItem>;
+  /** Let an issue from an untrusted author in (it is never merged automatically). */
+  admit(projectId: string, req: FactoryAdmitRequest): Promise<FactoryItem>;
+  /** Move an item that hasn't started to another pipeline. */
+  setType(projectId: string, req: FactorySetTypeRequest): Promise<FactoryItem>;
+  /** Run a stopped item again. */
+  retry(projectId: string, itemId: string): Promise<FactoryItem>;
 }
 
 const enc = encodeURIComponent;
@@ -62,6 +69,8 @@ export function httpFactoryApi(http: Fetcher): FactoryApi {
     resume: (id) => post(`${p(id)}/factory/resume`, {}, (v) => FactoryLoop.parse(v)),
     tick: (id) => post(`${p(id)}/factory/tick`, {}, (v) => FactoryStatus.parse(v)),
     digest: (id) => post(`${p(id)}/factory/digest`, {}, (v) => FactoryDigest.parse(v)),
-    triage: (id, req) => post(`${p(id)}/factory/triage`, req, item),
+    admit: (id, req) => post(`${p(id)}/factory/admit`, req, item),
+    setType: (id, req) => post(`${p(id)}/factory/set-type`, req, item),
+    retry: (id, itemId) => post(`${p(id)}/factory/items/${enc(itemId)}/retry`, {}, item),
   };
 }

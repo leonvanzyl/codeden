@@ -1,6 +1,58 @@
 import { randomUUID } from "node:crypto";
-import type { FactoryDigest, FactoryItem, FactoryLimits, InboxItem } from "@codeden/contracts";
+import type {
+  FactoryDigest,
+  FactoryItem,
+  FactoryLimits,
+  FactoryLoop,
+  InboxItem,
+  Project,
+} from "@codeden/contracts";
+import type { InboxService } from "../inbox-service";
+import { budgetSpend, type FactoryContext, factoryNotice, raiseInbox } from "./context";
+import { localDay } from "./policy";
 import { DECISION_INBOX_PREFIX } from "./unattended";
+
+/** Build, store and announce a day's digest: an inbox item and a notice to the orchestrator. */
+export async function writeDigest(
+  ctx: FactoryContext,
+  inbox: InboxService,
+  project: Project,
+  loop: FactoryLoop,
+  day: string,
+): Promise<FactoryDigest> {
+  const items = ctx.store.items(project.id).filter((i) => localDay(new Date(i.updatedAt)) === day);
+  const digest = buildDigest({
+    projectId: project.id,
+    projectName: project.name,
+    day,
+    items,
+    escalated: ctx.store.items(project.id, ["escalated"]),
+    inbox: inbox.list({ projectId: project.id }),
+    spend: budgetSpend(ctx, project.id, day, project.factoryLimits),
+    limits: project.factoryLimits,
+    pausedReason: loop.state === "paused" ? loop.pausedReason : null,
+    now: ctx.now(),
+  });
+  ctx.store.saveDigest(digest);
+  raiseInbox(ctx, {
+    id: `inbox:factory-digest:${project.id}:${day}`,
+    kind: "automation_result",
+    priority: "low",
+    projectId: project.id,
+    title: `Factory digest: ${project.name}, ${day} (${digest.shipped.length} shipped, ${digest.rejected.length} rejected, ${digest.waiting.length} waiting)`,
+    body: digest.text,
+  });
+  factoryNotice(ctx, {
+    id: `factory.digest:${digest.id}`,
+    projectId: project.id,
+    target: "orchestrator",
+    event: "digest",
+    title: `Factory digest for ${project.name} (${day})`,
+    text: digest.text,
+    wake: false,
+  });
+  return digest;
+}
 
 /**
  * The daily digest (§10.1 step 7): what shipped, what was rejected and why, spend against the

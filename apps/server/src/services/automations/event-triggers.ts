@@ -155,8 +155,8 @@ export function startedByAutomation(
 }
 
 /**
- * Intake ownership (§10.1): in autopilot and dark factory the factory loop owns issue intake
- * (new and labelled issues become factory candidates the PM triages). Event automations on
+ * Intake ownership (§10.1): in the software and dark factory the factory loop owns issue intake
+ * (new and labelled issues are classified and run through its pipelines). Event automations on
  * `issue.opened` / `issue.labeled` that would triage or start work are skipped there, so an
  * issue is never taken on twice; `message_pm` automations still fire. Manual runs are unaffected.
  */

@@ -46,11 +46,15 @@ export interface FactoryEnv {
   /** Messages sent to sessions. */
   messages: Array<{ sessionId: string; text: string }>;
   stopped: string[];
+  /** Sessions the factory archived (through `archiveSession`), in order. */
+  archived: string[];
   notices: NoticeDraft[];
   spend: { usd: number; tokens: number };
   /** Session filters the budget asked spend for (null: the whole project). */
   spendFilters: Array<string[] | null>;
   providers: string[];
+  /** The utility model's answer to the "Identify type" call (null: no model). */
+  model: (system: string, prompt: string) => Promise<string | null>;
   /** Shift of the factory clock against real time (day rollover, CI grace). */
   clock: { offsetMs: number };
   now: () => Date;
@@ -124,10 +128,12 @@ export function createFactoryEnv(
     starts: [],
     messages: [],
     stopped: [],
+    archived: [],
     notices: [],
     spend: { usd: 0, tokens: 0 },
     spendFilters: [],
     providers: opts.providers ?? ["claude", "codex"],
+    model: async () => null,
     clock: { offsetMs: 0 },
   } as unknown as FactoryEnv;
 
@@ -136,6 +142,9 @@ export function createFactoryEnv(
       env.starts.push(req);
       const provider =
         req.provider && req.provider !== "auto" ? req.provider : (env.providers[0] ?? "fake");
+      // A reviewer works in the builder's worktree (`existing`): its cwd, not a worktree of its own.
+      const existing = req.workspace?.mode === "existing" ? req.workspace.path : undefined;
+      const worktreePath = existing ? null : join(dir, "wt", randomUUID().slice(0, 6));
       const session: Session = {
         ...sampleSession,
         id: randomUUID(),
@@ -148,7 +157,8 @@ export function createFactoryEnv(
         provider,
         status: "running",
         issue: req.issue ?? null,
-        worktreePath: join(dir, "wt", randomUUID().slice(0, 6)),
+        cwd: existing ?? worktreePath ?? dir,
+        worktreePath,
         branch: "codeden/x",
         pr: null,
         createdAt: new Date().toISOString(),
@@ -198,6 +208,17 @@ export function createFactoryEnv(
       settings,
       exec,
       github: gh,
+      complete: (_job, system, prompt) => env.model(system, prompt),
+      archiveSession: async (sessionId) => {
+        env.archived.push(sessionId);
+        const at = new Date().toISOString();
+        return repo.update(sessionId, (s) => ({
+          ...s,
+          status: s.status === "idle" ? "stopped" : s.status,
+          archivedAt: at,
+          worktreeRemovedAt: s.worktreePath ? at : null,
+        }));
+      },
       options: { autoTick: false, now: () => env.now(), ciGraceMs: 60_000 },
     });
   env.factory = build();

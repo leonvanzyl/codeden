@@ -1,4 +1,9 @@
-import type { FactoryItem, MergeCheck, ReviewVerdict } from "@codeden/contracts";
+import {
+  type FactoryItem,
+  type MergeCheck,
+  pipelineStep,
+  type ReviewVerdict,
+} from "@codeden/contracts";
 import { Link } from "@tanstack/react-router";
 import {
   AlertTriangle,
@@ -7,13 +12,22 @@ import {
   CircleDot,
   Factory,
   GitPullRequest,
+  ShieldAlert,
   X,
 } from "lucide-react";
 import type { ReactNode } from "react";
 import { SectionLabel } from "@/components/common/bits";
 import { StatusDot } from "@/components/common/status-dot";
 import { CheckPill } from "@/components/factory/factory-columns";
-import { CHECK_HELP, CHECK_LABEL, SOURCE_LABEL, STAGE_LABEL } from "@/components/factory/meta";
+import { InvestigationCard, ItemActions } from "@/components/factory/item-parts";
+import {
+  CHECK_HELP,
+  CHECK_LABEL,
+  SOURCE_LABEL,
+  STAGE_LABEL,
+  stepLabel,
+  TYPE_LABEL,
+} from "@/components/factory/meta";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useFactoryItem } from "@/lib/factory";
 import { ago } from "@/lib/format";
@@ -115,13 +129,14 @@ function Verdict({ review, item }: { review: ReviewVerdict; item: FactoryItem })
   );
 }
 
-/** One factory work item (§10.1): what it is, its merge checks, the review and its sessions. */
+/** One factory work item (§10.1): its pipeline, merge checks, the review and its sessions. */
 export function FactoryItemPage({ projectId, itemId }: { projectId: string; itemId: string }) {
   const project = useProject(projectId);
   const { data: item, error } = useFactoryItem(projectId, itemId);
   if (error) return <div className="p-8 text-sm text-muted-foreground">{error.message}</div>;
   if (!item || !project) return <Skeleton className="m-6 h-64 rounded-xl" />;
   const stage = STAGE_LABEL[item.stage];
+  const step = pipelineStep(item);
   const met = new Map(item.review?.criteria.map((c) => [c.criterion, c]) ?? []);
 
   return (
@@ -143,72 +158,94 @@ export function FactoryItemPage({ projectId, itemId }: { projectId: string; item
         meta={
           <span className="flex items-center gap-1.5" data-testid="factory-item-stage">
             <StatusDot tone={stage.tone} /> {stage.label}
+            {item.type && (
+              <span className="text-muted-foreground">
+                · {TYPE_LABEL[item.type]} pipeline · {stepLabel(step, item.type)}
+              </span>
+            )}
           </span>
         }
       />
       <div className="min-h-0 flex-1 overflow-y-auto scroll-thin">
         <div className="mx-auto grid w-full max-w-6xl gap-6 px-6 py-6 lg:grid-cols-[minmax(0,1fr)_300px]">
           <div className="min-w-0 space-y-5">
-            {(item.reason || item.note) && (
+            {(item.reason || item.note) && item.trust !== "untrusted" && (
               <div className="rounded-lg border border-status-waiting/30 bg-status-waiting/[0.06] px-3 py-2 text-2xs">
                 {item.reason ?? item.note}
               </div>
             )}
+            {item.trust !== "trusted" && (
+              <div className="flex items-start gap-2 rounded-lg border border-status-waiting/30 bg-status-waiting/[0.06] px-3 py-2 text-2xs">
+                <ShieldAlert className="mt-px size-3.5 shrink-0 text-status-waiting" />
+                <span>
+                  {item.trust === "untrusted"
+                    ? `@${item.author ?? "unknown"} is not a trusted author, so the factory ignores this issue. Let it in only if you want it done; a person then merges the result.`
+                    : `Let in by ${item.admittedBy === "pm" ? "the PM" : "you"} from an untrusted author: it is never merged automatically.`}
+                </span>
+              </div>
+            )}
             <section>
-              <SectionLabel className="mb-2">Why it matters</SectionLabel>
-              <p className="text-[13px] leading-relaxed">{item.summary}</p>
+              <SectionLabel className="mb-2">The issue</SectionLabel>
+              <p className="text-[13px] leading-relaxed whitespace-pre-wrap">
+                {item.summary || item.title}
+              </p>
             </section>
-            <section>
-              <SectionLabel className="mb-2">Acceptance criteria</SectionLabel>
-              <ul className="space-y-1.5">
-                {item.acceptanceCriteria.map((c) => {
-                  const r = met.get(c);
-                  return (
-                    <li key={c} className="flex items-start gap-2 text-[13px]">
-                      {r ? (
-                        r.met ? (
-                          <Check className="mt-0.5 size-3.5 shrink-0 text-status-done" />
+            <InvestigationCard item={item} />
+            {item.acceptanceCriteria.length > 0 && (
+              <section>
+                <SectionLabel className="mb-2">Acceptance criteria</SectionLabel>
+                <ul className="space-y-1.5">
+                  {item.acceptanceCriteria.map((c) => {
+                    const r = met.get(c);
+                    return (
+                      <li key={c} className="flex items-start gap-2 text-[13px]">
+                        {r ? (
+                          r.met ? (
+                            <Check className="mt-0.5 size-3.5 shrink-0 text-status-done" />
+                          ) : (
+                            <X className="mt-0.5 size-3.5 shrink-0 text-status-failed" />
+                          )
                         ) : (
-                          <X className="mt-0.5 size-3.5 shrink-0 text-status-failed" />
-                        )
-                      ) : (
-                        <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-muted-foreground/50" />
-                      )}
-                      <span>
-                        {c}
-                        {r?.note && (
-                          <span className="block text-2xs text-muted-foreground">{r.note}</span>
+                          <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-muted-foreground/50" />
                         )}
-                      </span>
-                    </li>
-                  );
-                })}
-              </ul>
-            </section>
-            <section>
-              <SectionLabel className="mb-2">
-                Merge checks · {item.checks.filter((c) => c.state === "pass").length} passed
-                {item.checks.some((c) => c.state === "skipped") &&
-                  `, ${item.checks.filter((c) => c.state === "skipped").length} skipped`}
-                {item.checks.some((c) => c.state === "fail") &&
-                  `, ${item.checks.filter((c) => c.state === "fail").length} failed`}
-              </SectionLabel>
-              {item.checks.length === 0 ? (
-                <p className="text-2xs text-muted-foreground">
-                  Checks run once the builder opens a pull request:{" "}
-                  {Object.values(CHECK_LABEL).join(", ")}.
-                </p>
-              ) : (
-                <div
-                  className="overflow-hidden rounded-xl border border-border bg-card"
-                  data-testid="item-checks"
-                >
-                  {item.checks.map((c) => (
-                    <CheckRow key={c.name} check={c} />
-                  ))}
-                </div>
-              )}
-            </section>
+                        <span>
+                          {c}
+                          {r?.note && (
+                            <span className="block text-2xs text-muted-foreground">{r.note}</span>
+                          )}
+                        </span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </section>
+            )}
+            {item.stage !== "ignored" && (
+              <section>
+                <SectionLabel className="mb-2">
+                  Merge checks · {item.checks.filter((c) => c.state === "pass").length} passed
+                  {item.checks.some((c) => c.state === "skipped") &&
+                    `, ${item.checks.filter((c) => c.state === "skipped").length} skipped`}
+                  {item.checks.some((c) => c.state === "fail") &&
+                    `, ${item.checks.filter((c) => c.state === "fail").length} failed`}
+                </SectionLabel>
+                {item.checks.length === 0 ? (
+                  <p className="text-2xs text-muted-foreground">
+                    Checks run once the builder opens a pull request:{" "}
+                    {Object.values(CHECK_LABEL).join(", ")}.
+                  </p>
+                ) : (
+                  <div
+                    className="overflow-hidden rounded-xl border border-border bg-card"
+                    data-testid="item-checks"
+                  >
+                    {item.checks.map((c) => (
+                      <CheckRow key={c.name} check={c} />
+                    ))}
+                  </div>
+                )}
+              </section>
+            )}
             {item.review && (
               <section>
                 <SectionLabel className="mb-2">Independent review</SectionLabel>
@@ -217,13 +254,22 @@ export function FactoryItemPage({ projectId, itemId }: { projectId: string; item
             )}
           </div>
           <aside className="space-y-3 rounded-xl border border-border bg-card p-4 self-start">
+            <ItemActions item={item} projectId={projectId} />
             <Fact label="Source">
               {SOURCE_LABEL[item.source]}
               {item.area && ` · ${item.area.replace("_", " ")}`}
             </Fact>
-            <Fact label="Vision score">
-              {item.score === null ? "Not scored" : item.score.toFixed(2)}
+            <Fact label="Pipeline">
+              {item.type ? TYPE_LABEL[item.type] : "Not classified yet"}
+              {item.classification && (
+                <span className="text-muted-foreground"> · by {item.classification.by}</span>
+              )}
             </Fact>
+            <Fact label="Author">
+              {item.author ? `@${item.author}` : "—"}
+              <span className="text-muted-foreground"> · {item.trust}</span>
+            </Fact>
+            {item.score !== null && <Fact label="Priority">{item.score.toFixed(2)}</Fact>}
             <Fact label="Work key">
               <code className="font-mono text-2xs">{item.workKey}</code>
             </Fact>
@@ -259,7 +305,7 @@ export function FactoryItemPage({ projectId, itemId }: { projectId: string; item
             <Fact label="Reviewer">
               <SessionLink id={item.reviewerSessionId} label={item.reviewerProvider ?? "session"} />
             </Fact>
-            <Fact label="Fix rounds">{item.attempts}</Fact>
+            <Fact label="Revise rounds">{item.attempts}</Fact>
             {item.mergeSha && (
               <Fact label="Merge commit">
                 <code className="font-mono text-2xs">{item.mergeSha.slice(0, 10)}</code>
@@ -278,7 +324,6 @@ export function FactoryItemPage({ projectId, itemId }: { projectId: string; item
             )}
             <div className="space-y-1 border-t border-border pt-3 text-3xs text-muted-foreground">
               <p>Found {ago(item.createdAt)}</p>
-              {item.triageRequestedAt && <p>Sent to the PM {ago(item.triageRequestedAt)}</p>}
               {item.mergedAt && <p>Merged {ago(item.mergedAt)}</p>}
               {item.finishedAt && <p>Finished {ago(item.finishedAt)}</p>}
             </div>

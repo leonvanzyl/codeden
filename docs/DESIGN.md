@@ -1,10 +1,10 @@
 # CodeDen: Design
 
-> Status: **locked for v1**, 2026-11-07. Changes to anything in "Locked decisions" need an explicit design discussion and an update to this file. The desktop app (§17) was approved on 2026-11-08. Opt-in network access for phones and tablets (§15.1) was approved on 2026-11-08.
+> Status: **locked for v1**, 2026-11-07. Changes to anything in "Locked decisions" need an explicit design discussion and an update to this file. The desktop app (§17) was approved on 2026-11-08. Opt-in network access for phones and tablets (§15.1) was approved on 2026-11-08. The software factory and dark factory redesign (§10.1) was approved on 2026-11-11.
 
 ## 1. What CodeDen is
 
-CodeDen is a local-first harness for coding agents (Claude Code, Codex and OpenCode, more later). Lead with this: a beautiful, streamlined coding harness that can also run a small software factory on autopilot. Every piece of work stays visible and traceable in GitHub.
+CodeDen is a local-first harness for coding agents (Claude Code, Codex and OpenCode, more later). Lead with this: a beautiful, streamlined coding harness that can also run a software factory, and a dark factory that finds its own work. Every piece of work stays visible and traceable in GitHub.
 
 - **Orchestrator.** One high-level agent you talk to. It creates projects and hands work to project managers.
 - **Project Managers (PMs).** One long-lived agent per project. It triages GitHub issues, starts agent sessions, follows their progress, and escalates to you when unsure.
@@ -216,7 +216,7 @@ A conversation is a **thread** made of **turns**, and each turn holds **items**.
 
 **Automatic retry** (`settings.sessions.autoRetry`, default on). When an agent session's root turn fails as `transient` or `usage_limit`, the session goes idle with no inbox item, and the server continues it with a `codeden` message ("Previous turn stopped (<reason>); continue where you left off."): after 20 s, 90 s and 5 min for transient failures (at most three in a row), or a minute after a usage limit resets. A notice in the failed turn says when. A user message or Stop cancels a pending retry; pending retries are derived from the turns table, so a restart keeps them. When the retries run out, there is no reset time, or the setting is off, the session fails as before (`failed`, a `run_failed` inbox item and the PM notices that follow). Orchestrator and PM sessions are never retried this way.
 
-**Subagents** are child threads with `parentThreadId` and `parentItemId`. The parent transcript shows a compact subagent card with live status. Clicking it opens the child thread in a side panel or as its own view, and approvals raised inside a subagent surface in the parent and in the inbox.
+**Subagents** are child threads with `parentThreadId` and `parentItemId`. The parent transcript shows a compact subagent card with live status. A finished subagent's item carries `stats` (total tokens, tool calls, duration) when the provider reports them, and the card shows them; providers that report none show none. The figures are display only and never added to usage totals, which come from the provider's own turn figures. Clicking it opens the child thread in a side panel or as its own view, and approvals raised inside a subagent surface in the parent and in the inbox.
 
 ### 7.4 Utility model
 
@@ -285,10 +285,12 @@ defineTool({
     - Issues: `list_issues`, `get_issue`, `triage_issue` (labels, comment, accept/decline), `create_issue`.
     - PRs and escalation: `get_pr_status`, `ask_user`, `message_orchestrator`.
     - Automations and notes: `list_automations`, `run_automation`, `read_project_notes`, `update_project_notes`.
+    - Factory projects (§10.1): `factory_status`, `factory_admit_issue` (only at the user's request), `factory_set_type`, `factory_allow_large_change`.
   - **Agent:**
     - People: `ask_user`, `message_pm`, `report_progress`.
     - Sharing and evidence: `share_to_chat` (file or screenshot), `attach_evidence` (to an issue or PR).
     - Results: `create_pull_request`, `suggest_followups`, `finish` (with a structured result).
+    - Factory sessions (§10.1), listed only to the session in that role: builders `factory_report_reproduction`, `factory_submit_analysis`; reviewers `factory_submit_review`; the scout `factory_plan_round`, `factory_file_issue`; its area reviewers `factory_report_findings`.
     - Browser tools (§12.2).
   - **All roles:** `generate_image` (§12.5).
 
@@ -356,50 +358,61 @@ The orchestrator must always know what's happening across all projects, and each
 - **Issue triage.** The PM reads new issues and classifies them as ready, needs info, unsafe, out of scope or duplicate. It applies labels and comments according to project policy, and either starts a session or puts a decision in your inbox when unsure ("Should I take this on?").
 - **Visibility.** Every automation run is a normal session (or PM turn) with a full transcript, so background work stays visible.
 
-### 10.1 Project autonomy modes and dark-factory mode
+### 10.1 Project autonomy modes, the software factory and the dark factory
+
+(Redesigned 2026-11-11: "Autopilot" became the **software factory**, work runs through typed pipelines, merging is manual unless auto-merge is on, and only trusted authors' issues are taken on.)
 
 Each project has an **autonomy mode**, a ladder you can climb one step at a time:
 
 | Mode | Who finds work | Who merges | You |
 |---|---|---|---|
 | **Manual** | You | You | Drive every session |
-| **Assisted** (default) | You, the PM (triage) and automations | You | Review PRs and answer the inbox |
-| **Autopilot** | The PM, from issues, automations and the vision | CodeDen, automatically, when every merge check passes; anything else comes to you | Check the daily digest and handle exceptions |
-| **Dark factory** | The PM continuously, from the vision | CodeDen, automatically | Set the vision and the limits, then step away |
+| **Assisted** | You, the PM (triage) and automations | You | Review PRs and answer the inbox |
+| **Software factory** | You and trusted authors, as GitHub issues | You; CodeDen with **auto-merge** on | File issues and review PRs |
+| **Dark factory** | The above, plus a scheduled **scout** | As above | Set the vision and the limits, then step away |
 
-**Vision.** Autopilot and dark-factory modes require a project vision in `.codeden/VISION.md`, edited in the UI. It covers:
-- goals, target users and principles
-- what is out of scope
-- quality bar
-- **protected areas** (paths or topics that always need a human: auth, payments, data migrations, infrastructure, licensing)
+The mode id is `software_factory`; `autopilot`, its id before 0.6, is still read as `software_factory`.
 
-**The factory loop.** The PM runs it continuously, paced by a budget:
-1. **Discover.** Improvement-finder automations (feature ideas grounded in the vision, UX review, performance, tech debt, test gaps, security), incoming issues and failed checks become candidate work items, each checked against the vision.
-2. **Prioritise and plan.** The PM scores candidates against the vision and creates a GitHub issue for each accepted item, with a work key and acceptance criteria. That keeps the factory's backlog visible and editable by you.
-3. **Build.** Agent sessions implement the issues in worktrees, with duplicate checks (§8.4) applied.
-4. **Verify (merge checks).** All checks must pass before an automatic merge:
-   - CI green, and the tests the change needs exist and pass
-   - a **review by a separate agent session**, ideally on a different provider from the one that wrote the code, against the acceptance criteria and the vision
-   - security and dependency scans clean
-   - UI changes: browser screenshots as evidence, plus an end-to-end check
-   - the change is under the size limit (reviewable code only: lockfiles and generated files do not count; configurable, or off) and touches no protected area. Work that cannot be split (an initial scaffold, a stack migration) is allowed by the PM as a recorded decision; a size failure never waits on the user
-5. **Merge.** Squash-merge, then link the result back to the issue.
-6. **Watch.** After merging, CI on main is watched. A regression triggers an **automatic revert PR**, which goes through the same merge checks, plus a pause of the factory loop and an inbox item.
-7. **Report.** A daily digest lists what shipped, what was rejected and why, the decisions the factory made on its own, spend, and anything waiting on you.
+**The software factory.** Issues are created outside CodeDen (by you, teammates, or any tool that files GitHub issues). A GitHub repository is required; GitHub is the only forge in v1. Server code, not an agent, runs the loop:
+
+```
+                       ┌─ Bug:      Reproduce ─► Create fix ─► Review fix ─┐
+Issue ─► Identify type ┼─ Feature:  Analyze ───► Implement ──► Review ─────┼─► Merge
+                       └─ Docs:     Implement docs change ─────────────────┘
+                                         ▲    (Revise)    │
+                                         └────────────────┘
+```
+
+1. **Intake.** New issues (opened after the mode was switched on, or labelled `codeden-factory`) become work items.
+2. **Trust.** Only issues by **trusted authors** are taken on: the logins in the project's `trustedAuthors` and the account CodeDen uses on GitHub. On a public repository anyone can open an issue, and an issue is a prompt for an agent, so everyone else's issues are **ignored**: listed, with no model call, session or comment. A person can **let one in** (the UI, or the PM when the user asks it to); such work runs through its pipeline but is **never merged automatically**. Labels never grant trust. The factory never acts on pull requests other people open.
+3. **Identify type.** One call to the utility model (§7.4) classifies each trusted issue as a **bug**, a **feature** or a **docs** change; a GitHub label settles it first, keywords decide when no model answers. The issue is labelled and told its pipeline.
+4. **Assign.** The server is the orchestrator of an agent swarm: queued items go to free agents within **Agents at once** (`maxConcurrentSessions`), by priority, then age. Each item gets one builder session in its own worktree.
+5. **Pipelines.** Bug: **Reproduce** (a failing test or probe, reported with `factory_report_reproduction`; not reproduced stops with a comment) → **Create fix** → **Review fix**. Feature: **Analyze** (does it exist already, does it fit the vision and architecture; a spec and acceptance criteria with `factory_submit_analysis`, posted on the issue) → **Implement** → **Review**. Docs: **Implement docs change**, with no agent review while the change touches only documentation. The builder's report answers with its next step, so one session carries the item.
+6. **Review and revise.** A **review by a separate agent session**, on a different provider from the author when one is available. `request_changes` or any failed merge check sends the work back to the builder: the revise loop, up to `maxFixAttempts` rounds.
+7. **Evidence.** Every pull request carries its **test results** (a `## Test results` section, or test output attached with `attach_evidence`) and, for UI changes, **screenshots**. Both are merge checks.
+8. **Merge.** With every check green the PR is **ready for you** (an inbox item and a PR comment) and you merge it on GitHub. With **auto-merge** on, CodeDen squash-merges trusted work itself, then watches CI on main; a regression opens an **automatic revert PR**, pauses the loop and raises an inbox item.
+
+**Merge checks** (all must pass): CI green; tests the change needs exist; test results reported; the independent review (skipped for docs-only changes); security and dependency scans clean; screenshots for UI changes; under the size limit (reviewable code only; work that cannot be split is allowed by the PM as a recorded decision); no protected area touched (protected changes always come to you).
+
+**The dark factory** adds a **scout**: one long-lived agent session per project that, when fewer than `minBacklog` items wait and `discoveryIntervalMin` has passed, reviews the app against the vision and files the work worth doing as GitHub issues. It may use **review areas** (UI and UX, performance, security, features, bugs, code quality, test gaps, docs), each with an **area reviewer**: a long-lived reviewer session for that one area, reused round after round so it keeps its context. To keep token use down the server enforces: at most `discoveryPerRound` review areas per round (**Review areas per round** in the UI) and only on free agent slots (builders come first), at most one session per area ever, at most `maxIssuesPerRound` issues per round, and no round while the queue is full. Filed issues enter the pipelines already typed.
+
+**Vision.** Both factory modes require a project vision in `.codeden/VISION.md`, edited in the UI. It covers goals, target users and principles; what is out of scope; the quality bar; and **protected areas** (paths or topics that always need a human: auth, payments, data migrations, infrastructure, licensing). Agents get it in their prompts; the analyzer checks requests against it; the scout finds work with it.
 
 **Unattended in dark factory.** Nobody waits on the user in dark-factory mode. A question from the PM or a factory session (through `ask_user` or the provider's own question tool) is answered at once by the server: decide from the vision, which wins over the current code. The agent records each judgement call with `factory_record_decision`, and it reaches the inbox and the digest for review. Protected areas, a missing or self-contradicting vision, and irreversible actions outside the code are flagged at high priority, but the loop never blocks on them. Sessions the user starts still ask as usual. Approvals are never granted on the user's behalf: in a dark factory the PM's and factory sessions' approvals are **denied** at once with the same guidance, and sessions started by an automation, a PM or the factory in other modes wait 30 minutes for the user, then are denied (`decidedBy: policy`), so unattended work never waits forever.
 
 **Limits** (required, enforced by the server, not left to agent judgement):
-- maximum concurrent sessions, maximum PRs merged per day
+- agents at once, automatic merges per day (with auto-merge on)
 - a token or cost budget per day
 - **Pause on repeated failures:** the loop pauses after N failed merge checks or reverts in a row.
 - **Protected areas** always escalate to you.
 - **No deploys or releases** unless they're explicitly enabled as a separate automation.
-- **A kill switch** on the project and globally: one click stops the loop and all its sessions.
+- **A kill switch** on the project and globally: one click stops the loop and all its sessions, the scout and its area reviewers included.
 
-**Visibility.** Factory work is ordinary sessions, issues and PRs, so it all stays traceable. The project shows a **factory panel**: loop state, backlog, items in progress, merge-check results, spend against budget, and recent merges and reverts.
+**Visibility.** Factory work is ordinary sessions, issues and PRs, so it all stays traceable. The project page shows the **pipelines as a live diagram** (Issue, Identify type, the Bug, Feature and Docs lanes, Merge, and the scout in a dark factory) with each work item on the node of its current step; clicking an item opens the agent session working on it. Every lane, step, the scout, its rounds and review areas, and the less obvious limits explain themselves in plain words: a tooltip on the underlined term or a "?" beside it, opened by hover, keyboard focus or a tap. Around it: spend against budget, agents working, PRs ready for you, merge-check results, recent results, ignored issues with **Let in**, and a daily digest.
 
-**Delivery.** Autopilot and dark-factory modes ship in v1 marked **experimental** (milestone M3b). Assisted remains the default for new projects.
+**Cleanup.** Finished work gives its space back. Once an item is merged, reverted, rejected or failed, the server archives its builder and reviewer sessions through the normal archive path (§9), which removes their worktrees and keeps the branch, checkpoints and transcript. Work that isn't finished keeps its sessions: escalated items, merges whose main CI is still watched, and an item that failed only on size while its PR is open (the PM may still allow it). A session is never cut off: the item waits while one of them is in a turn. An item's sessions are archived once (`sessionsArchivedAt`), so a session the user unarchives stays. **Retry** hands the earlier attempt's sessions to the same cleanup (`earlierSessionIds`, archived once none of them is busy), unless they were archived already. The scout and its area reviewers are never archived this way.
+
+**Delivery.** Both factory modes ship marked **experimental**. Assisted remains the default for new projects.
 
 ## 11. Human in the loop
 
@@ -744,4 +757,4 @@ Browser speech recognition doesn't work inside Electron, so dictation there uses
 | Adapters grow large and fragile | Small modules per concern (session, events, approvals, subagents); honest capability flags; Replay tests per adapter |
 | Windows edge cases (ConPTY, path length, process trees, Codex sandbox) | Windows tested first; short worktree paths; process-tree kill; spike 1 |
 | Scope (the full vision for v1) | Strict milestone order; private use from M1; the "Later" list stays out of v1 |
-| Agents acting unsafely on autopilot | Default autonomy asks for risky actions; automations off by default; PMs can't write code; everything traceable |
+| Agents acting unsafely in a factory | Default autonomy asks for risky actions; automations off by default; PMs can't write code; everything traceable |

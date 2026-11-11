@@ -42,7 +42,10 @@ function isInside(root: string, path: string): boolean {
   return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
 }
 
-/** Read evidence sources, confined to the session's worktree, the temp folder and its artifacts. */
+/**
+ * Read evidence sources, confined to the session's worktree, the temp folder and its own
+ * artifacts (by id, or by the path `browser_screenshot` prints).
+ */
 export function readEvidence(
   session: Session,
   artifacts: ArtifactService,
@@ -52,7 +55,9 @@ export function readEvidence(
     throw badRequest(`Attach at most ${MAX_EVIDENCE_FILES} files at once`);
   }
   const cwd = sessionWorkdir(session);
-  const roots = [cwd, tmpdir()].filter(existsSync).map((p) => realpathSync(p));
+  const roots = [cwd, tmpdir(), artifacts.sessionDir(session.id)]
+    .filter(existsSync)
+    .map((p) => realpathSync(p));
   return sources.map((source) => {
     let file: string;
     let name: string;
@@ -72,7 +77,7 @@ export function readEvidence(
       file = realpathSync(absolute);
       if (!roots.some((root) => isInside(root, file))) {
         throw forbidden(
-          "Only files inside your working directory or the temp folder can be attached",
+          "Only files inside your working directory, the temp folder or your own CodeDen artifacts can be attached (or pass an artifactId)",
         );
       }
       name = source.name ?? basename(file);

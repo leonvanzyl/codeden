@@ -36,7 +36,7 @@ export const orchestratorTranscript = buildTranscript(
           "or-a1",
           `Here's where things stand:
 
-**Storefront** · autopilot
+**Storefront** · dark factory
 - 🔧 *Fix flaky checkout test* (#142) is done and **waiting on you** to approve a force push.
 - 🔎 *Product search with filters* (#139) is building; draft PR #57 is open.
 - 🛡️ The weekly *security audit* is running (3 of 7 areas).

@@ -4,12 +4,12 @@ import { automationRuns, projects, sessions } from "../../db/schema";
 import { rateLimitWindows, usageLedger } from "../../db/schema-usage";
 import type { Tx } from "../../events/projection-db";
 
-/** Who started a session, in report terms. Autopilot and dark-factory work is `factory`. */
+/** Who started a session, in report terms. Software- and dark-factory work is `factory`. */
 export function sourceOf(
   startedBy: Session["startedBy"]["kind"],
   autonomyMode: AutonomyMode | null,
 ): UsageSource {
-  const factory = autonomyMode === "autopilot" || autonomyMode === "dark_factory";
+  const factory = autonomyMode === "software_factory" || autonomyMode === "dark_factory";
   if (startedBy === "user") return "user";
   if (factory) return "factory";
   return startedBy;

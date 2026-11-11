@@ -18,7 +18,7 @@ The orchestrator and PMs run **read-only**: Claude gets no edit tools and a poli
 2. **A session starts.** The PM (or you) names a provider, model, brief and optionally an issue. CodeDen creates the worktree and branch and starts the session in the runner.
 3. **The agent works.** It may ask questions or request approvals (both land in your inbox), share screenshots, report progress, and finally open a PR with evidence linked to the issue.
 4. **Notices wake the PM.** Session and GitHub events become typed notices, batched into an "updates since your last turn" summary.
-5. **The PM decides.** It follows up with the agent, reports to the orchestrator, or asks you. It never merges on its own; automatic merges only happen in the [factory modes](autonomy-and-dark-factory.md).
+5. **The PM decides.** It follows up with the agent, reports to the orchestrator, or asks you. It never merges on its own; automatic merges only happen in the [factory modes](software-factory.md).
 6. **The orchestrator wakes only for what matters.** PMs can mark messages as informational so routine updates don't wake it.
 
 ## Talking to them
@@ -54,7 +54,7 @@ Notices are structured records, not text to be parsed back. They render as cards
 | `automation.skipped` | A scheduled run was skipped (overlap, quiet hours, daily cap, ...) |
 | `conflict` | A start request matched running work |
 | `pm.message` | A PM messaged the orchestrator |
-| `factory.update` | The factory loop needs triage, or the daily digest is ready |
+| `factory.update` | Factory events: work ready to merge, failures, escalations, regressions, or the daily digest |
 
 **Wake-ups are rate limited.** Notices about work started by a PM, the orchestrator or an automation wake the PM after a 5-second debounce (30 seconds at most), and each role is woken at most 6 times per 10 minutes. New issues always wake the PM; PRs that don't belong to a session wake it only for openings and reviews.
 
@@ -103,7 +103,7 @@ Agents see only the tools for their role; everything else isn't listed at all. T
 | Agent | `report_progress`, `ask_user`, `share_to_chat`, `suggest_followups`, `finish`, `create_pull_request`, `attach_evidence`, `comment_on_issue`, `get_pr_status`, the `browser_*` tools |
 | Everyone | `generate_image` (when an image engine is available) |
 
-Factory projects add a few more (see [Autonomy and the dark factory](autonomy-and-dark-factory.md)).
+Factory projects add a few more (see [The software factory and the dark factory](software-factory.md)).
 
 ### Asking and answering
 

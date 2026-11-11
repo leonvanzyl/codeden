@@ -35,7 +35,7 @@ function githubRepo(): string {
   return repo;
 }
 
-test("switch a GitHub project to autopilot with a vision and limits; the factory panel runs", async ({
+test("switch a GitHub project to the software factory with a vision and limits; the pipelines show", async ({
   page,
 }) => {
   await page.goto(env("CODEDEN_E2E_LAUNCH_URL"));
@@ -50,16 +50,16 @@ test("switch a GitHub project to autopilot with a vision and limits; the factory
   const base = env("CODEDEN_E2E_URL");
   await page.goto(`${base}/projects/${project.id}`);
 
-  await test.step("autopilot is experimental and lists what is missing", async () => {
+  await test.step("the software factory is experimental and lists what is missing", async () => {
     await page.getByTestId("autonomy-mode-button").click();
     const dialog = page.getByRole("dialog");
-    const autopilot = dialog.getByRole("button", { name: /^Autopilot/ });
-    await expect(autopilot).toContainText("experimental");
-    await autopilot.click();
+    const factory = dialog.getByRole("button", { name: /^Software factory/ });
+    await expect(factory).toContainText("experimental");
+    await factory.click();
     const reqs = dialog.getByTestId("mode-requirements");
     await expect(reqs.locator("li[data-ok=true]")).toContainText("A GitHub project");
     await expect(reqs.locator("li[data-ok=false]")).toHaveCount(2);
-    await expect(dialog.getByRole("button", { name: "Switch to Autopilot" })).toBeDisabled();
+    await expect(dialog.getByRole("button", { name: "Switch to Software factory" })).toBeDisabled();
     await dialog.getByRole("link", { name: "Write the vision →" }).click();
   });
 
@@ -78,25 +78,27 @@ test("switch a GitHub project to autopilot with a vision and limits; the factory
     await page.goto(`${base}/projects/${project.id}`);
     await page.getByTestId("autonomy-mode-button").click();
     const dialog = page.getByRole("dialog");
-    await dialog.getByRole("button", { name: /^Autopilot/ }).click();
+    await dialog.getByRole("button", { name: /^Software factory/ }).click();
     await dialog.getByLabel("Daily budget (USD)").fill("5");
-    await dialog.getByLabel("Merges per day").fill("2");
+    await dialog.getByLabel("Agents at once").fill("2");
     await expect(dialog.getByTestId("mode-requirements").locator("li[data-ok=false]")).toHaveCount(
       0,
     );
-    await dialog.getByRole("button", { name: "Switch to Autopilot" }).click();
-    await expect(page.getByText("is now on autopilot")).toBeVisible();
+    await dialog.getByRole("button", { name: "Switch to Software factory" }).click();
+    await expect(page.getByText("is now a software factory")).toBeVisible();
   });
 
-  await test.step("the factory panel shows the loop, its limits and controls", async () => {
+  await test.step("the factory panel shows the pipelines, the loop, its limits and controls", async () => {
     const panel = page.getByTestId("factory-panel");
     await expect(panel).toBeVisible();
     await expect(panel.getByTestId("factory-loop-state")).toHaveText(
       /^Loop (idle|building|verifying|paused|discovering)$/,
     );
+    await expect(panel.getByTestId("pipeline-diagram")).toBeVisible();
+    await expect(panel.getByTestId("pipeline-diagram")).toContainText("Reproduce");
     await expect(panel).toContainText("$0.00 / $5.00");
     await expect(panel).toContainText("0 / 2");
-    await expect(page.getByTestId("autonomy-mode-button")).toContainText("Autopilot");
+    await expect(page.getByTestId("autonomy-mode-button")).toContainText("Software factory");
     await expect(panel.getByRole("button", { name: "Kill switch" })).toBeVisible();
   });
 

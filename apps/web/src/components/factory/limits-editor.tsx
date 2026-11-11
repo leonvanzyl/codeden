@@ -1,14 +1,22 @@
 import type { FactoryLimits, FactoryTuning } from "@codeden/contracts";
-import { useId } from "react";
+import { useId, useState } from "react";
 import { Field } from "@/components/automations/form-bits";
+import { InfoHint } from "@/components/common/info-hint";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { REVIEW_AREAS_HELP, SCOUT_HELP } from "./meta";
 
 /** The tuning knobs the editor exposes (the rest keep their defaults). */
 export type TuningDraft = Pick<
   FactoryTuning,
-  "requireCi" | "maxChangedLines" | "maxChangedFiles" | "auditCommand"
+  | "requireCi"
+  | "maxChangedLines"
+  | "maxChangedFiles"
+  | "auditCommand"
+  | "discoveryIntervalMin"
+  | "discoveryPerRound"
+  | "maxIssuesPerRound"
 >;
 
 /** The editable tuning knobs of a saved tuning. */
@@ -18,7 +26,22 @@ export function tuningDraft(t: FactoryTuning): TuningDraft {
     maxChangedLines: t.maxChangedLines,
     maxChangedFiles: t.maxChangedFiles,
     auditCommand: t.auditCommand,
+    discoveryIntervalMin: t.discoveryIntervalMin,
+    discoveryPerRound: t.discoveryPerRound,
+    maxIssuesPerRound: t.maxIssuesPerRound,
   };
+}
+
+/** One GitHub login per line (a leading @ is fine), as the limits store them. */
+export function parseLogins(text: string): string[] {
+  return [
+    ...new Set(
+      text
+        .split(/[\s,]+/)
+        .map((l) => l.trim().replace(/^@/, ""))
+        .filter((l) => /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})(?:\[bot\])?$/.test(l)),
+    ),
+  ];
 }
 
 const int = (s: string, min = 0): number | undefined => {
@@ -32,22 +55,30 @@ export function hasBudget(limits: FactoryLimits): boolean {
 }
 
 /**
- * Factory limits (§10.1), enforced by the server rather than left to agents: a daily budget,
- * concurrency, merges per day, the failure streak that pauses the loop, protected paths and
- * deploys. Optionally the main tuning knobs.
+ * Factory settings (§10.1), enforced by the server rather than left to agents: who the factory
+ * works for (trusted authors) and whether it merges by itself, a daily budget, the agent pool,
+ * merges per day, the failure streak that pauses the loop, protected paths and deploys.
+ * Optionally the merge-check tuning and, for a dark factory, the scout's limits.
  */
 export function LimitsEditor({
   limits,
   onChange,
   tuning,
   onTuningChange,
+  githubLogin,
+  dark = false,
 }: {
   limits: FactoryLimits;
   onChange: (l: FactoryLimits) => void;
   tuning?: TuningDraft;
   onTuningChange?: (t: TuningDraft) => void;
+  /** The account CodeDen uses on GitHub (always trusted), when known. */
+  githubLogin?: string | null;
+  /** Show the dark factory's scout limits. */
+  dark?: boolean;
 }) {
   const id = useId();
+  const [authors, setAuthors] = useState(() => limits.trustedAuthors.join("\n"));
   const budget = limits.dailyBudget;
   const setBudget = (patch: Partial<FactoryLimits["dailyBudget"]>) => {
     const next = { ...budget, ...patch };
@@ -56,6 +87,37 @@ export function LimitsEditor({
   };
   return (
     <div className="space-y-4" data-testid="limits-editor">
+      <div className="flex items-start gap-2.5 text-xs">
+        <Switch
+          checked={limits.autoMerge}
+          aria-label="Merge automatically"
+          onCheckedChange={(autoMerge) => onChange({ ...limits, autoMerge })}
+          className="mt-0.5"
+        />
+        <span>
+          Merge automatically when every check passes
+          <span className="block text-3xs text-muted-foreground">
+            Off (recommended to start): every pull request waits for you to review and merge it.
+            Work let in from an untrusted author always waits for you.
+          </span>
+        </span>
+      </div>
+      <Field
+        label="Trusted authors"
+        htmlFor={`${id}-authors`}
+        help={`GitHub logins, one per line. The factory only takes on issues they open${githubLogin ? `, plus @${githubLogin} (the account CodeDen uses)` : " and the account CodeDen uses"}. On a public repository anyone can open an issue: everyone else's are ignored until you let one in.`}
+      >
+        <Textarea
+          id={`${id}-authors`}
+          value={authors}
+          placeholder={"octocat\nmy-teammate"}
+          onChange={(e) => {
+            setAuthors(e.target.value);
+            onChange({ ...limits, trustedAuthors: parseLogins(e.target.value) });
+          }}
+          className="min-h-16 font-mono text-[12.5px]"
+        />
+      </Field>
       <div className="grid gap-3 sm:grid-cols-2">
         <Field
           label="Daily budget (USD)"
@@ -101,12 +163,16 @@ export function LimitsEditor({
         <span>
           Count all spend in this project
           <span className="block text-3xs text-muted-foreground">
-            Off: only the factory's own sessions (discovery, builders, reviewers, reverts) count.
+            Off: only the factory's own sessions (builders, reviewers, the scout, reverts) count.
           </span>
         </span>
       </div>
       <div className="grid gap-3 sm:grid-cols-3">
-        <Field label="Sessions at once" htmlFor={`${id}-conc`}>
+        <Field
+          label="Agents at once"
+          htmlFor={`${id}-conc`}
+          help="The swarm: builders, reviewers and the scout share it."
+        >
           <Input
             id={`${id}-conc`}
             type="number"
@@ -118,7 +184,11 @@ export function LimitsEditor({
             className="text-[13px]"
           />
         </Field>
-        <Field label="Merges per day" htmlFor={`${id}-merges`}>
+        <Field
+          label="Auto-merges per day"
+          htmlFor={`${id}-merges`}
+          hint="With auto-merge on, the most pull requests CodeDen merges by itself in a day. Once it's reached, more work waits for tomorrow."
+        >
           <Input
             id={`${id}-merges`}
             type="number"
@@ -128,7 +198,11 @@ export function LimitsEditor({
             className="text-[13px]"
           />
         </Field>
-        <Field label="Pause after failures" htmlFor={`${id}-fails`}>
+        <Field
+          label="Pause after failures"
+          htmlFor={`${id}-fails`}
+          hint="The factory pauses after this many failed merge checks or reverts in a row, so a broken setup doesn't keep spending. Resume it from the factory panel."
+        >
           <Input
             id={`${id}-fails`}
             type="number"
@@ -176,12 +250,77 @@ export function LimitsEditor({
           </span>
         </span>
       </div>
+      {dark && tuning && onTuningChange && (
+        <div className="space-y-3 border-t border-border pt-4" data-testid="scout-tuning">
+          <div>
+            <p className="flex items-center gap-1 text-[13px] font-medium">
+              The scout
+              <InfoHint label="the scout">{SCOUT_HELP}</InfoHint>
+            </p>
+            <p className="text-3xs text-muted-foreground">
+              It reviews the app against the vision when fewer than two issues wait, using a few
+              long-lived area reviewers (one reviewer agent per review area, such as security or
+              UX), and files the work worth doing.
+            </p>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-3">
+            <Field
+              label="Every (hours)"
+              htmlFor={`${id}-every`}
+              hint="How often the scout runs a review round: it plans what to look at, its area reviewers review, and it files issues. It also waits until fewer than two issues are queued."
+            >
+              <Input
+                id={`${id}-every`}
+                type="number"
+                min={1}
+                value={Math.round(tuning.discoveryIntervalMin / 60)}
+                onChange={(e) =>
+                  onTuningChange({
+                    ...tuning,
+                    discoveryIntervalMin: (int(e.target.value, 1) ?? 1) * 60,
+                  })
+                }
+                className="text-[13px]"
+              />
+            </Field>
+            <Field label="Review areas per round" htmlFor={`${id}-areas`} hint={REVIEW_AREAS_HELP}>
+              <Input
+                id={`${id}-areas`}
+                type="number"
+                min={0}
+                max={8}
+                value={tuning.discoveryPerRound}
+                onChange={(e) =>
+                  onTuningChange({ ...tuning, discoveryPerRound: int(e.target.value) ?? 0 })
+                }
+                className="text-[13px]"
+              />
+            </Field>
+            <Field
+              label="Issues per round"
+              htmlFor={`${id}-issues`}
+              hint="The most issues the scout files from one round. It files only what is most worth doing, so a round can file fewer or none."
+            >
+              <Input
+                id={`${id}-issues`}
+                type="number"
+                min={1}
+                value={tuning.maxIssuesPerRound}
+                onChange={(e) =>
+                  onTuningChange({ ...tuning, maxIssuesPerRound: int(e.target.value, 1) ?? 1 })
+                }
+                className="text-[13px]"
+              />
+            </Field>
+          </div>
+        </div>
+      )}
       {tuning && onTuningChange && (
         <div className="space-y-3 border-t border-border pt-4" data-testid="merge-check-tuning">
           <div>
             <p className="text-[13px] font-medium">Merge checks</p>
             <p className="text-3xs text-muted-foreground">
-              What a pull request must meet before CodeDen merges it on its own.
+              What a pull request must meet before it is ready to merge.
             </p>
           </div>
           <div className="grid gap-3 sm:grid-cols-2">

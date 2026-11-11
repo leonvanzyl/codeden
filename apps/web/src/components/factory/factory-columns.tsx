@@ -1,7 +1,12 @@
 import type { FactoryMergeChecks, FactoryWorkItem, MergeCheck } from "@codeden/contracts";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { AlertTriangle, Check, Clock, GitMerge, Loader2, Minus, Undo2, X } from "lucide-react";
+import { AlertTriangle, Check, Clock, GitMerge, Minus, Undo2, UserCheck, X } from "lucide-react";
 import type { ReactNode } from "react";
+import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import { useClient } from "@/lib/api";
+import { factoryKeys } from "@/lib/factory";
 import { ago } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { CHECK_HELP, CHECK_LABEL, STAGE_LABEL } from "./meta";
@@ -47,49 +52,61 @@ function ItemLink({
   );
 }
 
-export function BacklogColumn({
+/**
+ * Issues the factory ignored because their author isn't trusted (§10.1). Nothing runs on them
+ * until you let one in; what you let in is never merged automatically.
+ */
+export function IgnoredColumn({
   projectId,
-  backlog,
-  inProgress,
+  ignored,
 }: {
   projectId: string;
-  backlog: FactoryWorkItem[];
-  inProgress: FactoryWorkItem[];
+  ignored: FactoryWorkItem[];
 }) {
+  const client = useClient();
+  const queryClient = useQueryClient();
+  const admit = useMutation({
+    mutationFn: (itemId: string) => client.factory.admit(projectId, { itemId }),
+    onSuccess: (item) => {
+      toast.success("Let in", {
+        description: `${item.title} runs through its pipeline; you merge the result.`,
+      });
+      void queryClient.invalidateQueries({ queryKey: factoryKeys.all });
+    },
+    onError: (e: Error) => toast.error("Couldn't let it in", { description: e.message }),
+  });
   return (
-    <Column title="In progress · backlog" count={inProgress.length + backlog.length}>
-      {inProgress.map((w) => (
-        <ItemLink key={w.id} projectId={projectId} item={w}>
-          <Loader2
-            className={cn(
-              "size-3 shrink-0 animate-spin",
-              w.stage === "verifying" ? "text-status-waiting" : "text-status-running",
-            )}
-          />
-          <span className="truncate" title={w.note ?? undefined}>
-            {w.title}
-          </span>
-          <span className="ml-auto shrink-0 text-3xs text-muted-foreground">
-            {STAGE_LABEL[w.stage].label}
-          </span>
-        </ItemLink>
-      ))}
-      {inProgress.length > 0 && backlog.length > 0 && <div className="mx-2 my-1 h-px bg-border" />}
-      {backlog.map((w) => (
-        <ItemLink key={w.id} projectId={projectId} item={w}>
-          <span
-            className="flex h-3 w-7 shrink-0 overflow-hidden rounded-full bg-muted"
-            title={w.score === null ? "Not scored yet" : `Vision score ${w.score.toFixed(2)}`}
+    <Column title="Ignored · untrusted authors" count={ignored.length}>
+      {ignored.map((w) => (
+        <div key={w.id} className={cn(rowCls, "pr-1")} data-testid="ignored-issue">
+          <Link
+            to="/projects/$projectId/factory/$itemId"
+            params={{ projectId, itemId: w.id }}
+            className="flex min-w-0 flex-1 items-center gap-2"
           >
-            <span className="bg-primary/70" style={{ width: `${(w.score ?? 0) * 100}%` }} />
-          </span>
-          <span className="truncate text-muted-foreground">{w.title}</span>
-          {w.issue && (
-            <span className="ml-auto shrink-0 font-mono text-3xs text-muted-foreground">
-              #{w.issue.number}
+            {w.issue && (
+              <span className="shrink-0 font-mono text-3xs text-muted-foreground">
+                #{w.issue.number}
+              </span>
+            )}
+            <span className="truncate text-muted-foreground" title={w.title}>
+              {w.title}
             </span>
-          )}
-        </ItemLink>
+            <span className="ml-auto shrink-0 text-3xs text-muted-foreground/80">
+              @{w.author ?? "unknown"}
+            </span>
+          </Link>
+          <Button
+            size="xs"
+            variant="ghost"
+            className="shrink-0"
+            title="Let the factory take this on. A person merges the result."
+            disabled={admit.isPending}
+            onClick={() => admit.mutate(w.id)}
+          >
+            <UserCheck /> Let in
+          </Button>
+        </div>
       ))}
     </Column>
   );

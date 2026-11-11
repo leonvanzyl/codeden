@@ -8,7 +8,6 @@ import {
   FactoryLimits,
   FactoryLoop,
   FactoryStatus,
-  FactoryTriageRequest,
   isFactoryMode,
   Notice,
   ReviewVerdict,
@@ -27,6 +26,25 @@ const item: FactoryItem = {
   acceptanceCriteria: ["Counter increments"],
   score: 0.8,
   stage: "verifying",
+  type: "feature",
+  classification: {
+    type: "feature",
+    confidence: "high",
+    rationale: "Asks for new behaviour",
+    by: "model",
+    at: ts,
+  },
+  trust: "trusted",
+  author: "octocat",
+  admittedBy: null,
+  investigation: {
+    kind: "analysis",
+    outcome: "implement",
+    summary: "Not there yet",
+    details: "A counter in the header",
+    testPath: null,
+    at: ts,
+  },
   issue: { number: 3, url: "https://github.com/acme/app/issues/3" },
   pr: { number: 4, url: "https://github.com/acme/app/pull/4", state: "open" },
   builderSessionId: "s1",
@@ -44,6 +62,8 @@ const item: FactoryItem = {
   triageRequestedAt: ts,
   nudges: { verifying: ts },
   largeChange: null,
+  sessionsArchivedAt: null,
+  earlierSessionIds: [],
   createdAt: ts,
   updatedAt: ts,
   mergedAt: null,
@@ -53,6 +73,13 @@ const item: FactoryItem = {
 describe("factory API contracts (§10.1)", () => {
   it("round-trips items, loops and the item event", () => {
     expect(FactoryItem.parse(item)).toEqual(item);
+    const finished = {
+      ...item,
+      stage: "backlog" as const,
+      sessionsArchivedAt: ts,
+      earlierSessionIds: ["s1", "s2"],
+    };
+    expect(FactoryItem.parse(JSON.parse(JSON.stringify(finished)))).toEqual(finished);
     const loop = FactoryLoop.parse({
       projectId: "p1",
       state: "building",
@@ -72,9 +99,35 @@ describe("factory API contracts (§10.1)", () => {
     expect(loop.tuning.maxChangedFiles).toBeNull();
     expect(loop.tuning.areas).toContain("security");
     expect(loop.seenFailedShas).toEqual([]);
-    // Items stored before `largeChange` existed still parse.
-    const { largeChange: _l, ...old } = item;
-    expect(FactoryItem.parse(old).largeChange).toBeNull();
+    expect(loop.scout).toEqual({
+      sessionId: null,
+      lensSessions: {},
+      round: null,
+      lastRoundAt: null,
+      rounds: 0,
+    });
+    // Items stored before `largeChange`, the pipelines and session cleanup existed still parse,
+    // as trusted work whose sessions were not archived yet.
+    const {
+      largeChange: _l,
+      sessionsArchivedAt: _sa,
+      earlierSessionIds: _es,
+      type: _t,
+      classification: _c,
+      trust: _tr,
+      author: _a,
+      admittedBy: _ab,
+      investigation: _i,
+      ...old
+    } = item;
+    expect(FactoryItem.parse(old)).toMatchObject({
+      largeChange: null,
+      sessionsArchivedAt: null,
+      earlierSessionIds: [],
+      type: null,
+      trust: "trusted",
+      investigation: null,
+    });
     // A tuning change carries only what it sets: the rest of the saved tuning is kept.
     expect(
       SetAutonomyModeRequest.parse({ mode: "dark_factory", tuning: { maxChangedLines: null } })
@@ -87,13 +140,6 @@ describe("factory API contracts (§10.1)", () => {
     expect(
       FactoryAllowLargeChangeRequest.parse({ itemId: "i1", reason: "Initial scaffold" }),
     ).toEqual({ itemId: "i1", reason: "Initial scaffold" });
-    expect(
-      FactoryTriageRequest.parse({
-        itemId: "i1",
-        decision: "accept",
-        largeChange: "Stack migration",
-      }).largeChange,
-    ).toBe("Stack migration");
     const event = EventEnvelope.parse({
       seq: 1,
       sessionId: null,
@@ -104,7 +150,7 @@ describe("factory API contracts (§10.1)", () => {
     expect(event.type).toBe("factory.item.updated");
   });
 
-  it("validates verdicts, triage and mode requests", () => {
+  it("validates verdicts, reports and mode requests", () => {
     const verdict = ReviewVerdict.parse({
       verdict: "approve",
       summary: "ok",
@@ -115,9 +161,6 @@ describe("factory API contracts (§10.1)", () => {
     expect(verdict.criteria).toEqual([]);
     expect(verdict.security.concerns).toEqual([]);
     expect(ReviewVerdict.safeParse({ verdict: "maybe", summary: "x" }).success).toBe(false);
-    expect(
-      FactoryTriageRequest.safeParse({ itemId: "i1", decision: "accept", score: 2 }).success,
-    ).toBe(false);
     const decision = FactoryDecisionRequest.parse({
       question: "Polish index.html or migrate first?",
       decision: "Migrate first",
@@ -139,13 +182,16 @@ describe("factory API contracts (§10.1)", () => {
       createdAt: ts,
     });
     expect(digest.decisions).toEqual([]);
+    // "autopilot" is the software factory's id from before 0.6.
     const req = SetAutonomyModeRequest.parse({
       mode: "autopilot",
       limits: { dailyBudget: { usd: 5 } },
       tuning: { maxFixAttempts: 2 },
     });
+    expect(req.mode).toBe("software_factory");
     expect(req.limits?.maxConcurrentSessions).toBe(2);
-    expect(isFactoryMode("autopilot")).toBe(true);
+    expect(req.limits?.autoMerge).toBe(false);
+    expect(isFactoryMode("software_factory")).toBe(true);
     expect(isFactoryMode("assisted")).toBe(false);
   });
 

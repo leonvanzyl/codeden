@@ -55,7 +55,7 @@ function Requirement({ ok, children }: { ok: boolean; children: ReactNode }) {
 }
 
 /**
- * Pick a project's autonomy mode (§10.1). Autopilot and dark factory are experimental and need
+ * Pick a project's autonomy mode (§10.1). The software and dark factory are experimental and need
  * a GitHub project, a vision file and limits with a daily budget; the dialog shows what is
  * missing and edits the limits in place.
  */
@@ -104,7 +104,7 @@ export function AutonomyDialog({
       }),
     onSuccess: (res) => {
       toast.success(
-        same ? "Limits saved" : `${project.name} is now on ${MODE_LABEL[res.mode].toLowerCase()}`,
+        same ? "Settings saved" : `${project.name} is now a ${MODE_LABEL[res.mode].toLowerCase()}`,
       );
       void queryClient.invalidateQueries({ queryKey: factoryKeys.all });
       onOpenChange(false);
@@ -184,22 +184,29 @@ export function AutonomyDialog({
                   )}
                 </Requirement>
                 <Requirement ok={budgetOk}>
-                  Limits with a daily budget{" "}
-                  <span className="text-muted-foreground">(set below)</span>
+                  A daily budget <span className="text-muted-foreground">(set below)</span>
                 </Requirement>
               </ul>
+              <p className="mt-3 text-3xs leading-relaxed text-muted-foreground">
+                Issues are classified as a bug, a feature or a docs change and each runs its own
+                pipeline: reproduce, fix and review a bug; analyze, implement and review a feature;
+                change the docs. Every pull request carries its test results, and screenshots for UI
+                changes.
+              </p>
             </div>
             <LimitsEditor
               limits={limits}
               onChange={setLimits}
               tuning={tuning ?? undefined}
               onTuningChange={setTuning}
+              githubLogin={status.data?.githubLogin ?? null}
+              dark={mode === "dark_factory"}
             />
           </div>
         )}
         {!factory && isFactoryMode(project.autonomyMode) && (
           <p className="text-2xs text-muted-foreground">
-            Leaving {MODE_LABEL[project.autonomyMode].toLowerCase()} stops the factory loop; its
+            Leaving the {MODE_LABEL[project.autonomyMode].toLowerCase()} stops the factory loop; its
             open pull requests stay open for you.
           </p>
         )}
@@ -211,7 +218,7 @@ export function AutonomyDialog({
             disabled={!ready || save.isPending || (same && !factory)}
             onClick={() => save.mutate()}
           >
-            {same ? "Save limits" : `Switch to ${MODE_LABEL[mode]}`}
+            {same ? "Save settings" : `Switch to ${MODE_LABEL[mode]}`}
           </Button>
         </DialogFooter>
       </DialogContent>

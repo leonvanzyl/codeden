@@ -23,6 +23,7 @@ export function factoryFor(
       inProgress: [],
       mergeChecks: [],
       recent: [],
+      ignored: [],
       visionExists: false,
     };
   }
@@ -43,8 +44,9 @@ export function factoryFor(
         workKey: "issue:151",
         issue: sf.issue(151, "Dark mode"),
         pr: null,
-        score: 0.82,
         stage: "backlog",
+        type: "feature",
+        step: "queued",
       },
       {
         id: "fw-2",
@@ -52,8 +54,9 @@ export function factoryFor(
         workKey: "issue:153",
         issue: sf.issue(153, "Lazy-load images"),
         pr: null,
-        score: 0.77,
         stage: "backlog",
+        type: "feature",
+        step: "queued",
       },
       {
         id: "fw-3",
@@ -61,8 +64,9 @@ export function factoryFor(
         workKey: "issue:154",
         issue: sf.issue(154, "Discount tests"),
         pr: null,
-        score: 0.64,
         stage: "backlog",
+        type: "bug",
+        step: "queued",
       },
       {
         id: "fw-4",
@@ -70,8 +74,8 @@ export function factoryFor(
         workKey: "issue:149",
         issue: sf.issue(149, "Drop moment"),
         pr: null,
-        score: 0.41,
-        stage: "backlog",
+        stage: "candidate",
+        step: "intake",
       },
     ],
     inProgress: [
@@ -83,6 +87,8 @@ export function factoryFor(
         pr: sf.pr(57, "Search", "draft"),
         sessionId: "s-search",
         stage: "building",
+        type: "feature",
+        step: "implement",
       },
       {
         id: "fw-6",
@@ -92,6 +98,31 @@ export function factoryFor(
         pr: null,
         sessionId: "s-checkout",
         stage: "building",
+        type: "bug",
+        step: "reproduce",
+      },
+      {
+        id: "fw-12",
+        title: "Document the returns API",
+        workKey: "issue:155",
+        issue: sf.issue(155, "Returns API docs"),
+        pr: null,
+        sessionId: "s-export",
+        stage: "building",
+        type: "docs",
+        step: "implement",
+      },
+      {
+        id: "fw-13",
+        title: "Coupon total rounds the wrong way",
+        workKey: "issue:150",
+        issue: sf.issue(150, "Coupon rounding"),
+        pr: sf.pr(59, "Coupon rounding", "open"),
+        sessionId: "s-deps",
+        stage: "verifying",
+        type: "bug",
+        step: "review",
+        attempts: 1,
       },
       {
         id: "fw-7",
@@ -101,6 +132,8 @@ export function factoryFor(
         pr: sf.pr(58, "A11y fixes", "open"),
         sessionId: "s-a11y",
         stage: "verifying",
+        type: "feature",
+        step: "merge",
       },
     ],
     mergeChecks: [
@@ -110,6 +143,7 @@ export function factoryFor(
         checks: [
           { name: "ci", state: "pass" },
           { name: "tests", state: "pass" },
+          { name: "test_results", state: "pass", detail: "Test results in the PR" },
           { name: "review", state: "pass", detail: "Codex review: approved" },
           { name: "security", state: "pass" },
           { name: "ui_evidence", state: "pass", detail: "2 screenshots" },
@@ -161,6 +195,18 @@ export function factoryFor(
         issue: sf.issue(147, "Footer"),
         pr: sf.pr(54, "Footer contrast", "merged"),
         stage: "merged",
+      },
+    ],
+    ignored: [
+      {
+        id: "fw-14",
+        title: "Add a crypto checkout option",
+        workKey: "issue:157",
+        issue: sf.issue(157, "Crypto checkout"),
+        pr: null,
+        stage: "ignored",
+        trust: "untrusted",
+        author: "drive-by-dev",
       },
     ],
   };

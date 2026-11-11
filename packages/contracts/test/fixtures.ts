@@ -119,6 +119,7 @@ export const sampleAgentEvents: AgentEvent[] = [
       childThreadId: "t2",
       agentType: "reviewer",
       summary: "Looks good",
+      stats: { totalTokens: 48213, toolUses: 23, durationMs: 72000 },
     },
   },
   {
@@ -180,6 +181,8 @@ export const sampleProject: Project = {
     pauseAfterConsecutiveFailures: 3,
     protectedPaths: ["src/auth/**"],
     allowDeploys: false,
+    autoMerge: false,
+    trustedAuthors: [],
   },
   killSwitch: false,
   timezone: null,

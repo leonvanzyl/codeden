@@ -2,13 +2,14 @@ import type { FactoryItem, FactoryLoop, Project } from "@codeden/contracts";
 import { errorMessage } from "../errors";
 import { type FactoryContext, factoryNotice, pauseLoop, raiseInbox } from "./context";
 import { failItem } from "./outcomes";
-import { BUILDER_NUDGE } from "./prompts";
+import { ANALYZE_NUDGE, BUILDER_NUDGE, REPRODUCE_NUDGE } from "./prompts";
 
 const BUSY = new Set(["created", "queued", "starting", "running", "waiting"]);
 
 /**
- * Building (§10.1 step 3): wait for the builder's turn to end with an open PR, nudge it once
- * when it ends without one, fail the item when the session dies.
+ * Building (§10.1): wait for the builder's turn to end with its first step reported (bugs and
+ * features) and then an open PR; nudge it once when it ends without, fail the item when the
+ * session dies or ends again without.
  */
 export async function advanceBuilding(
   ctx: FactoryContext,
@@ -36,6 +37,24 @@ export async function advanceBuilding(
   }
   if (s.status === "failed" || s.status === "stopped") {
     return failItem(ctx, loop, item, `The builder session ${s.status} without a pull request`);
+  }
+  const investigating = !item.investigation && (item.type === "bug" || item.type === "feature");
+  if (investigating) {
+    const step = item.type === "bug" ? "reproduction" : "analysis";
+    const asked = item.nudges.builder_investigate;
+    if (!asked) {
+      const at = ctx.now().toISOString();
+      ctx.store.updateItem(item.id, (i) => ({
+        ...i,
+        nudges: { ...i.nudges, builder_investigate: at },
+      }));
+      await ctx.sessions.message(s.id, item.type === "bug" ? REPRODUCE_NUDGE : ANALYZE_NUDGE);
+      return loop;
+    }
+    if (Date.parse(s.updatedAt) > Date.parse(asked)) {
+      return failItem(ctx, loop, item, `The builder ended without reporting its ${step}`);
+    }
+    return loop;
   }
   const nudged = item.nudges.builder_no_pr;
   if (!nudged) {
@@ -133,6 +152,15 @@ async function regression(
     summary: `CI on ${branch} failed after #${prNumber} was merged (${sha}).`,
     source: "revert" as const,
     area: item.area,
+    type: "bug" as const,
+    investigation: {
+      kind: "reproduction" as const,
+      outcome: "reproduced" as const,
+      summary: `CI on ${branch} failed after #${prNumber} was merged.`,
+      details: null,
+      testPath: null,
+      at,
+    },
     acceptanceCriteria: [
       `Restores ${branch} to its state before #${prNumber}`,
       `CI on ${branch} is green again`,

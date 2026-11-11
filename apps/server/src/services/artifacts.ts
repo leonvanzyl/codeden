@@ -70,6 +70,14 @@ export class ArtifactService {
     return this.dir;
   }
 
+  /**
+   * A session's own artifacts folder (`<home>/artifacts/<session>`): its screenshots and pasted
+   * images. Tools that read files a session points at accept paths in it.
+   */
+  sessionDir(sessionId: string): string {
+    return resolveInside(this.dir, sessionId);
+  }
+
   get(id: string): Artifact {
     const artifact = this.find(id);
     if (!artifact) throw notFound(`No artifact ${id}`, "artifact_not_found");

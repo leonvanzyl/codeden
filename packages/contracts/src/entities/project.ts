@@ -30,7 +30,7 @@ const projectBase = {
   autonomy: AutonomyLevel.nullable(),
   /** Project autonomy mode (§10.1). */
   autonomyMode: AutonomyMode.default("assisted"),
-  /** Vision file, relative to the repo root; required for autopilot and dark factory. */
+  /** Vision file, relative to the repo root; required for the software and dark factory. */
   visionPath: z.string().min(1).default(DEFAULT_VISION_PATH),
   factoryLimits: FactoryLimits.prefault({}),
   /** Stops this project's factory loop and all its sessions. */

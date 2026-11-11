@@ -13,7 +13,6 @@ import {
   freeSlots,
   mayBuild,
   mayMerge,
-  nextAreas,
   pickReviewer,
   protectedHits,
   shouldPause,
@@ -41,7 +40,7 @@ function pr(patch: Partial<FactoryPr> = {}): FactoryPr {
   return {
     ref: { number: 7, url: "https://github.com/acme/app/pull/7", state: "open" },
     title: "Add a counter",
-    body: "Fixes #3",
+    body: "Fixes #3\n\n## Test results\n- `pnpm test`: 12 passed",
     headSha: "abc",
     headBranch: "codeden/counter",
     checks: "success",
@@ -59,7 +58,9 @@ function checks(patch: Partial<Parameters<typeof evaluateChecks>[0]> = {}) {
     issueTitle: "Add a counter",
     review: approve,
     reviewer: "codex",
+    type: "feature",
     evidence: null,
+    testOutput: null,
     audit: null,
     auditConfigured: false,
     ciGraceOver: true,
@@ -146,15 +147,11 @@ describe("factory policy (§10.1)", () => {
     expect(custom.protectedAreas.topics).toEqual(["data migrations"]);
   });
 
-  it("rotates discovery areas", () => {
-    const areas = FactoryTuning.parse({}).areas;
-    expect(nextAreas(areas, 0, 2)).toEqual(["features", "ux"]);
-    expect(nextAreas(areas, 5, 2)).toEqual(["security", "features"]);
-  });
-
-  it("requires limits for factory modes in the request shape", () => {
+  it("requires limits for factory modes in the request shape and reads the old mode id", () => {
     expect(SetAutonomyModeRequest.parse({ mode: "dark_factory" }).limits).toBeUndefined();
     expect(SetAutonomyModeRequest.safeParse({ mode: "yolo" }).success).toBe(false);
+    // "autopilot" was the software factory's id before 0.6.
+    expect(SetAutonomyModeRequest.parse({ mode: "autopilot" }).mode).toBe("software_factory");
   });
 });
 
@@ -168,6 +165,7 @@ describe("merge checks (§10.1 step 4)", () => {
       ci: "pass",
       review: "pass",
       tests: "pass",
+      test_results: "pass",
       security: "pass",
       ui_evidence: "skipped",
     });
@@ -228,5 +226,27 @@ describe("merge checks (§10.1 step 4)", () => {
 
   it("accept docs-only changes without tests", () => {
     expect(checks({ pr: pr({ files: ["README.md"] }) }).outcome).toBe("pass");
+  });
+
+  it("need test results for code changes: in the PR description or attached", () => {
+    const bare = pr({ body: "Fixes #3" });
+    const state = (r: ReturnType<typeof checks>) =>
+      r.checks.find((c) => c.name === "test_results")?.state;
+    expect(state(checks({ pr: bare, testOutput: null }))).toBe("pending");
+    expect(state(checks({ pr: bare, testOutput: false }))).toBe("fail");
+    expect(state(checks({ pr: bare, testOutput: true }))).toBe("pass");
+    expect(state(checks({ pr: pr({ body: "Fixes #3", files: ["README.md"] }) }))).toBe("skipped");
+  });
+
+  it("skip the agent review for docs-only changes in the docs pipeline, never for code", () => {
+    const docs = checks({ type: "docs", review: null, pr: pr({ files: ["docs/guide.md"] }) });
+    expect(docs.outcome).toBe("pass");
+    expect(docs.checks.find((c) => c.name === "review")?.state).toBe("skipped");
+    // A "docs" item that changes code is reviewed like anything else.
+    expect(checks({ type: "docs", review: null }).outcome).toBe("pending");
+    // Other pipelines always wait for the reviewer.
+    expect(
+      checks({ type: "bug", review: null, pr: pr({ files: ["docs/guide.md"] }) }).outcome,
+    ).toBe("pending");
   });
 });

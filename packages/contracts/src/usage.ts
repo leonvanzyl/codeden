@@ -19,7 +19,7 @@ export type CostSource = z.infer<typeof CostSource>;
 export const BillingMode = z.enum(["api", "subscription", "unknown"]);
 export type BillingMode = z.infer<typeof BillingMode>;
 
-/** Who started the work a ledger row belongs to. `factory`: autopilot / dark-factory work. */
+/** Who started the work a ledger row belongs to. `factory`: software- and dark-factory work. */
 export const UsageSource = z.enum(["user", "orchestrator", "pm", "automation", "factory"]);
 export type UsageSource = z.infer<typeof UsageSource>;
 

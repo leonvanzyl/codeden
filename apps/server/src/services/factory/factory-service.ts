@@ -1,12 +1,17 @@
 import {
+  type FactoryAdmitRequest,
   type FactoryAllowLargeChangeRequest,
-  type FactoryCandidate,
+  type FactoryAnalysisReport,
   type FactoryDecisionRequest,
   type FactoryDigest,
+  type FactoryFileIssueRequest,
+  type FactoryFinding,
   type FactoryItem,
   type FactoryLoop,
+  type FactoryPlanRoundRequest,
+  type FactoryReproductionReport,
+  type FactorySetTypeRequest,
   type FactoryStatus,
-  type FactoryTriageRequest,
   isFactoryMode,
   type KillSwitchResponse,
   type Project,
@@ -20,7 +25,7 @@ import {
 import type { Db } from "../../db/client";
 import type { EventStore } from "../../events/store";
 import type { SettingsStore } from "../../settings-store";
-import { badRequest, conflict, errorMessage, notFound } from "../errors";
+import { errorMessage, notFound } from "../errors";
 import type { Exec } from "../exec";
 import type { InboxService } from "../inbox-service";
 import type { NoticeDraft } from "../orchestration/notices";
@@ -28,14 +33,23 @@ import type { ProjectService } from "../projects/project-service";
 import type { RunnerPort } from "../runner-port";
 import type { SessionRepo } from "../sessions/repo";
 import type { SessionService } from "../sessions/session-service";
-import { budgetSpend, type FactoryContext, factoryNotice, raiseInbox } from "./context";
+import { SessionArchiver } from "./cleanup";
+import type { FactoryContext } from "./context";
+import { assertCanEnter, haltProject } from "./controls";
 import * as decisions from "./decisions";
-import { buildDigest } from "./digest";
+import { writeDigest } from "./digest";
 import type { FactoryGithub } from "./github-port";
 import { allowLargeChange } from "./large-change";
 import { runTick } from "./loop";
-import { hasBudget, localDay } from "./policy";
-import { FactorySessions, isFactorySession } from "./sessions";
+import { reportReproduction, submitAnalysis } from "./pipeline";
+import { localDay } from "./policy";
+import { fileIssue, planRound, reportFindings } from "./scout-reports";
+import {
+  FactorySessions,
+  isFactorySession,
+  LENS_WORK_KEY_PREFIX,
+  SCOUT_WORK_KEY,
+} from "./sessions";
 import { buildStatus } from "./status";
 import { FactoryStore } from "./store";
 import { answerProviderQuestion, recordDecision, unattendedSession } from "./unattended";
@@ -64,26 +78,38 @@ export interface FactoryServiceDeps {
   settings: SettingsStore;
   exec: Exec;
   github: FactoryGithub;
+  /** The utility model, for the "Identify type" step (keywords decide without it). */
+  complete?: (job: string, system: string, prompt: string) => Promise<string | null>;
+  /** The session archive path (`WorktreeCleanup.archive`): hides it and removes its worktree. */
+  archiveSession: (sessionId: string) => Promise<unknown>;
   options?: FactoryOptions;
   log?: (message: string) => void;
 }
 
 /**
- * Project autonomy modes and dark-factory mode (§10.1, experimental in v1): modes and limits,
- * the vision, kill switches, the server-driven factory loop, daily digests and the status the
- * factory panel shows. The loop state is persisted, so a restart resumes where it stopped.
+ * Project autonomy modes, the software factory and the dark factory (§10.1, experimental):
+ * modes and limits, the vision, kill switches, the server-driven factory loop with its
+ * pipelines and the dark factory's scout, daily digests and the status the factory panel and
+ * its pipeline diagram show. The loop state is persisted, so a restart resumes where it stopped.
  */
 export class FactoryService {
   readonly data: FactoryStore;
   readonly ctx: FactoryContext;
-  private readonly chains = new Map<string, Promise<FactoryLoop>>();
+  private readonly chains = new Map<string, Promise<unknown>>();
   private readonly timers = new Map<string, NodeJS.Timeout>();
+  /** Archives finished work's sessions, one at a time, outside the tick chains. */
+  readonly archiver: SessionArchiver;
   private interval: NodeJS.Timeout | undefined;
   private resumeTimer: NodeJS.Timeout | undefined;
   private unsubscribe: (() => void) | undefined;
 
   constructor(private readonly deps: FactoryServiceDeps) {
     this.data = new FactoryStore(deps.db, deps.store);
+    this.archiver = new SessionArchiver({
+      repo: deps.repo,
+      archive: deps.archiveSession,
+      log: deps.log,
+    });
     this.ctx = {
       store: this.data,
       github: deps.github,
@@ -100,6 +126,8 @@ export class FactoryService {
       notify: deps.notify,
       settings: deps.settings,
       exec: deps.exec,
+      complete: deps.complete ?? (async () => null),
+      archiveSessions: (ids) => this.archiver.push(ids),
       now: deps.options?.now ?? (() => new Date()),
       ciGraceMs: deps.options?.ciGraceMs ?? 3 * 60_000,
       log: deps.log,
@@ -133,16 +161,22 @@ export class FactoryService {
 
   /** Run one loop step for a project (serialized per project). */
   tick(projectId: string): Promise<FactoryLoop> {
+    return this.serialize(projectId, "tick", () =>
+      runTick(this.ctx, projectId, { digest: (p, l, day) => this.writeDigest(p, l, day) }),
+    );
+  }
+
+  /**
+   * Run something that changes a project's loop record after the ticks and reports already
+   * queued for it, so two writers never overwrite each other's changes.
+   */
+  private serialize<T>(projectId: string, what: string, run: () => Promise<T> | T): Promise<T> {
     const prev = this.chains.get(projectId) ?? Promise.resolve(undefined);
-    const next = prev
-      .catch(() => undefined)
-      .then(() =>
-        runTick(this.ctx, projectId, { digest: (p, l, day) => this.writeDigest(p, l, day) }),
-      );
+    const next = prev.catch(() => undefined).then(run);
     this.chains.set(projectId, next);
     void next
       .catch((error: unknown) =>
-        this.deps.log?.(`factory: tick ${projectId}: ${errorMessage(error)}`),
+        this.deps.log?.(`factory: ${what} ${projectId}: ${errorMessage(error)}`),
       )
       .finally(() => {
         if (this.chains.get(projectId) === next) this.chains.delete(projectId);
@@ -180,7 +214,7 @@ export class FactoryService {
 
   // ------------------------------------------------------------ modes, vision, switches
 
-  status(projectId: string): FactoryStatus {
+  status(projectId: string): Promise<FactoryStatus> {
     return buildStatus(this.ctx, projectId);
   }
 
@@ -208,28 +242,17 @@ export class FactoryService {
   }
 
   /**
-   * Change the autonomy mode. Autopilot and dark factory need a GitHub project, a vision file
-   * and limits with a daily budget (in the request, or saved while already in a factory mode).
+   * Change the autonomy mode. The software and dark factory need a GitHub project, a vision
+   * file and limits with a daily budget (in the request, or saved while already in a factory
+   * mode).
    */
   setMode(projectId: string, req: SetAutonomyModeRequest): SetAutonomyModeResponse {
     const project = this.deps.projects.get(projectId);
     const entering = isFactoryMode(req.mode);
     const wasFactory = isFactoryMode(project.autonomyMode);
     const limits = req.limits ?? project.factoryLimits;
-    if (entering) {
-      if (!this.ctx.github.isGithubProject(projectId)) {
-        throw conflict("Autopilot and dark factory need a GitHub project", "not_a_github_project");
-      }
-      if (!readVision(project).exists) {
-        throw conflict(`Write the project vision (${project.visionPath}) first`, "vision_required");
-      }
-      if (!req.limits && !wasFactory) {
-        throw badRequest("Set the factory limits when switching to this mode", "limits_required");
-      }
-      if (!hasBudget(limits)) {
-        throw badRequest("The limits need a daily budget (usd or tokens)", "budget_required");
-      }
-    }
+    if (entering)
+      assertCanEnter(this.ctx, project, { limitsSent: Boolean(req.limits), wasFactory, limits });
     const next = {
       ...project,
       autonomyMode: req.mode,
@@ -251,7 +274,7 @@ export class FactoryService {
             state: "idle" as const,
           }
         : {}),
-      ...(!entering ? { state: "idle" as const, discovery: [] } : {}),
+      ...(!entering ? { state: "idle" as const, scout: { ...loop.scout, round: null } } : {}),
     });
     this.soon(projectId);
     return { projectId, mode: req.mode, limits, experimental: entering };
@@ -312,18 +335,96 @@ export class FactoryService {
     return this.writeDigest(project, loop, localDay(this.ctx.now()));
   }
 
-  // ------------------------------------------------------------ judgement inputs (tools)
+  // ------------------------------------------------------------ decisions (UI, PM)
 
-  reportCandidates(session: Session, candidates: FactoryCandidate[]) {
-    const res = decisions.reportCandidates(this.ctx, session, candidates);
+  /** Let an ignored issue from an untrusted author in (never merged automatically). */
+  async admit(
+    projectId: string,
+    req: FactoryAdmitRequest,
+    by: decisions.DecidedBy,
+  ): Promise<FactoryItem> {
+    const item = await decisions.admit(this.ctx, projectId, req, by);
+    this.soon(projectId);
+    return item;
+  }
+
+  /** Correct the type of an item that hasn't started. */
+  async setType(
+    projectId: string,
+    req: FactorySetTypeRequest,
+    by: decisions.DecidedBy,
+  ): Promise<FactoryItem> {
+    const item = await decisions.setType(this.ctx, projectId, req, by);
+    this.soon(projectId);
+    return item;
+  }
+
+  /** Run a stopped item again (the loop archives the earlier attempt's sessions). */
+  retry(projectId: string, itemId: string): FactoryItem {
+    const item = decisions.retry(this.ctx, projectId, itemId);
+    this.soon(projectId);
+    return item;
+  }
+
+  // ------------------------------------------------------------ agents' reports (tools)
+
+  /** `factory_report_reproduction`; the answer is the builder's next step. */
+  async reportReproduction(session: Session, report: FactoryReproductionReport) {
+    const res = await reportReproduction(this.ctx, session, report);
     if (session.projectId) this.soon(session.projectId);
     return res;
   }
 
-  async triage(projectId: string, req: FactoryTriageRequest): Promise<FactoryItem> {
-    const item = await decisions.triage(this.ctx, projectId, req);
+  /** `factory_submit_analysis`; the answer is the builder's next step. */
+  async submitAnalysis(session: Session, report: FactoryAnalysisReport) {
+    const res = await submitAnalysis(this.ctx, session, report);
+    if (session.projectId) this.soon(session.projectId);
+    return res;
+  }
+
+  /** `factory_plan_round`: the scout's review areas for this round. */
+  planRound(session: Session, req: FactoryPlanRoundRequest) {
+    const projectId = session.projectId ?? "";
+    return this.serialize(projectId, "plan round", () => planRound(this.ctx, session, req));
+  }
+
+  /** `factory_report_findings`: an area reviewer's findings. */
+  async reportFindings(session: Session, findings: FactoryFinding[]) {
+    const projectId = session.projectId ?? "";
+    const res = await this.serialize(projectId, "findings", () =>
+      reportFindings(this.ctx, session, findings),
+    );
     this.soon(projectId);
-    return item;
+    return res;
+  }
+
+  /** `factory_file_issue`: the scout files one piece of work. */
+  async fileIssue(session: Session, req: FactoryFileIssueRequest) {
+    const projectId = session.projectId ?? "";
+    const res = await this.serialize(projectId, "file issue", () =>
+      fileIssue(this.ctx, session, req),
+    );
+    this.soon(projectId);
+    return res;
+  }
+
+  /** Whether a session is a factory builder (it may report a reproduction or analysis). */
+  isBuilder(sessionId: string): boolean {
+    const s = this.deps.repo.find(sessionId)?.session;
+    if (!s?.projectId || !isFactorySession(s)) return false;
+    return this.data.items(s.projectId, ["building"]).some((i) => i.builderSessionId === s.id);
+  }
+
+  /** Whether a session is the dark factory's scout. */
+  isScout(sessionId: string): boolean {
+    const s = this.deps.repo.find(sessionId)?.session;
+    return s !== undefined && isFactorySession(s) && s.workKey === SCOUT_WORK_KEY;
+  }
+
+  /** Whether a session is one of the scout's area reviewers (lenses). */
+  isLens(sessionId: string): boolean {
+    const s = this.deps.repo.find(sessionId)?.session;
+    return s !== undefined && isFactorySession(s) && s.workKey.startsWith(LENS_WORK_KEY_PREFIX);
   }
 
   submitReview(session: Session, verdict: ReviewVerdict) {
@@ -351,22 +452,8 @@ export class FactoryService {
 
   // ------------------------------------------------------------ internals
 
-  private async halt(projectId: string): Promise<string[]> {
-    const stopped = await this.ctx.sessions.stopAll(projectId);
-    for (const item of this.data.items(projectId, ["building", "verifying"])) {
-      this.data.updateItem(item.id, (i) =>
-        i.stage === "building" && !i.pr
-          ? { ...i, stage: "backlog", builderSessionId: null, note: "Stopped by the kill switch" }
-          : {
-              ...i,
-              reviewerSessionId: i.review ? i.reviewerSessionId : null,
-              note: "Stopped by the kill switch",
-            },
-      );
-    }
-    const loop = this.data.loopOrNew(projectId, this.ctx.now());
-    this.data.saveLoop({ ...loop, state: "stopped", discovery: [] });
-    return stopped;
+  private halt(projectId: string): Promise<string[]> {
+    return haltProject(this.ctx, projectId);
   }
 
   private resumeAfterKill(projectId: string): void {
@@ -375,45 +462,8 @@ export class FactoryService {
     this.soon(projectId);
   }
 
-  private async writeDigest(
-    project: Project,
-    loop: FactoryLoop,
-    day: string,
-  ): Promise<FactoryDigest> {
-    const items = this.data
-      .items(project.id)
-      .filter((i) => localDay(new Date(i.updatedAt)) === day);
-    const digest = buildDigest({
-      projectId: project.id,
-      projectName: project.name,
-      day,
-      items,
-      escalated: this.data.items(project.id, ["escalated"]),
-      inbox: this.deps.inbox.list({ projectId: project.id }),
-      spend: budgetSpend(this.ctx, project.id, day, project.factoryLimits),
-      limits: project.factoryLimits,
-      pausedReason: loop.state === "paused" ? loop.pausedReason : null,
-      now: this.ctx.now(),
-    });
-    this.data.saveDigest(digest);
-    raiseInbox(this.ctx, {
-      id: `inbox:factory-digest:${project.id}:${day}`,
-      kind: "automation_result",
-      priority: "low",
-      projectId: project.id,
-      title: `Factory digest: ${project.name}, ${day} (${digest.shipped.length} shipped, ${digest.rejected.length} rejected, ${digest.waiting.length} waiting)`,
-      body: digest.text,
-    });
-    factoryNotice(this.ctx, {
-      id: `factory.digest:${digest.id}`,
-      projectId: project.id,
-      target: "orchestrator",
-      event: "digest",
-      title: `Factory digest for ${project.name} (${day})`,
-      text: digest.text,
-      wake: false,
-    });
-    return digest;
+  private writeDigest(project: Project, loop: FactoryLoop, day: string): Promise<FactoryDigest> {
+    return writeDigest(this.ctx, this.deps.inbox, project, loop, day);
   }
 
   private onEvents(events: RawEventEnvelope[]): void {

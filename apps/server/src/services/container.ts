@@ -307,6 +307,17 @@ export function createServices(opts: ServicesOptions): AppServices {
     options: opts.orchestration,
     log: opts.log,
   });
+  const worktreeCleanup = new WorktreeCleanup({
+    repo: sessionRepo,
+    projects,
+    runner: opts.runner,
+    store: opts.store,
+    settings: () => opts.settings.get(),
+    stopSession: (id) => (sessions as SessionService).stop(id),
+    inbox,
+    ...opts.worktreeCleanup,
+    log: opts.log,
+  });
   const factory = new FactoryService({
     db: opts.db,
     store: opts.store,
@@ -320,18 +331,9 @@ export function createServices(opts: ServicesOptions): AppServices {
     settings: opts.settings,
     exec,
     github: opts.factory?.github ?? new GithubFactoryPort(github),
+    complete: (job, system, prompt) => utility.complete(job, system, prompt),
+    archiveSession: (id) => worktreeCleanup.archive(id),
     options: opts.factory,
-    log: opts.log,
-  });
-  const worktreeCleanup = new WorktreeCleanup({
-    repo: sessionRepo,
-    projects,
-    runner: opts.runner,
-    store: opts.store,
-    settings: () => opts.settings.get(),
-    stopSession: (id) => (sessions as SessionService).stop(id),
-    inbox,
-    ...opts.worktreeCleanup,
     log: opts.log,
   });
   const unwatchedApprovals = new UnwatchedApprovals({

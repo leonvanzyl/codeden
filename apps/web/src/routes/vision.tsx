@@ -92,7 +92,7 @@ function VisionPreview({ parsed, extraPaths }: { parsed: ParsedVision; extraPath
   );
 }
 
-/** Vision editor (§10.1): required for autopilot and dark factory; the PM scores work by it. */
+/** Vision editor (§10.1): required for the software and dark factory; agents work to it. */
 export function VisionPage({ projectId }: { projectId: string }) {
   const client = useClient();
   const queryClient = useQueryClient();

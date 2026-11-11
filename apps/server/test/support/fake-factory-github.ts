@@ -3,12 +3,16 @@ import type {
   CommitChecks,
   FactoryGithub,
   FactoryPr,
+  PrEvidence,
 } from "../../src/services/factory/github-port";
 
 /** A pull request in the scripted GitHub. */
 export interface FakePr extends FactoryPr {
   sessionId: string | null;
+  /** Screenshots attached with `attach_evidence`. */
   evidence: boolean;
+  /** Test output attached with `attach_evidence`. */
+  testOutput: boolean;
 }
 
 /**
@@ -27,7 +31,50 @@ export class FakeFactoryGithub implements FactoryGithub {
   githubProjects = new Set<string>();
   /** When false, `revertMerge` returns null (main moved on). */
   canRevertViaApi = true;
+  /** The account CodeDen uses on GitHub (always trusted); null: unknown. */
+  viewer: string | null = "codeden";
   private next = 100;
+
+  async viewerLogin(): Promise<string | null> {
+    return this.viewer;
+  }
+
+  /** An issue opened on GitHub by `author` (what the sync would project). */
+  openIssue(opts: {
+    projectId: string;
+    title: string;
+    author: string | null;
+    body?: string;
+    labels?: string[];
+  }): GithubIssue {
+    const number = this.next++;
+    const now = new Date().toISOString();
+    const issue: GithubIssue = {
+      projectId: opts.projectId,
+      number,
+      title: opts.title,
+      state: "open",
+      url: `https://github.com/acme/app/issues/${number}`,
+      labels: opts.labels ?? [],
+      author: opts.author,
+      body: opts.body ?? null,
+      comments: 0,
+      createdAt: now,
+      updatedAt: now,
+      closedAt: null,
+      sessionIds: [],
+    };
+    this.issues.push(issue);
+    return issue;
+  }
+
+  issue(_projectId: string, number: number): GithubIssue | null {
+    return this.issues.find((i) => i.number === number) ?? null;
+  }
+
+  prRef(_projectId: string, number: number): GitHubPrRef | null {
+    return this.prs.get(number)?.ref ?? null;
+  }
 
   isGithubProject(projectId: string): boolean {
     return this.githubProjects.has(projectId);
@@ -82,6 +129,9 @@ export class FakeFactoryGithub implements FactoryGithub {
     fileLines?: Array<{ path: string; lines: number }>;
     checks?: ChecksState;
     evidence?: boolean;
+    testOutput?: boolean;
+    /** Default: a description with a `## Test results` section. */
+    body?: string;
   }): FakePr {
     const number = this.next++;
     const ref: GitHubPrRef = {
@@ -93,7 +143,7 @@ export class FakeFactoryGithub implements FactoryGithub {
     const pr: FakePr = {
       ref,
       title: opts.title,
-      body: `Fixes the issue`,
+      body: opts.body ?? "Fixes the issue\n\n## Test results\n- `pnpm test`: passed",
       headSha: `head${number}`,
       headBranch: `codeden/pr-${number}`,
       checks: opts.checks ?? "success",
@@ -104,6 +154,7 @@ export class FakeFactoryGithub implements FactoryGithub {
       ...(opts.fileLines ? { fileLines: opts.fileLines } : {}),
       sessionId: opts.sessionId,
       evidence: opts.evidence ?? false,
+      testOutput: opts.testOutput ?? false,
     };
     this.prs.set(number, pr);
     return pr;
@@ -119,8 +170,9 @@ export class FakeFactoryGithub implements FactoryGithub {
     return { ...pr, ref: { ...pr.ref }, files: [...pr.files] };
   }
 
-  async hasScreenshotEvidence(_projectId: string, prNumber: number): Promise<boolean> {
-    return this.prs.get(prNumber)?.evidence ?? false;
+  async evidence(_projectId: string, prNumber: number): Promise<PrEvidence> {
+    const pr = this.prs.get(prNumber);
+    return { screenshots: pr?.evidence ?? false, testOutput: pr?.testOutput ?? false };
   }
 
   async merge(_projectId: string, number: number, opts: { sha: string | null; title: string }) {

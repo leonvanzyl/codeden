@@ -1,4 +1,4 @@
-import type { SessionStatus } from "@codeden/contracts";
+import type { SessionStatus, SubagentStats } from "@codeden/contracts";
 
 /** "now", "3m", "2h", "4d" — compact age for dense lists. */
 export function ageShort(iso: string, now = Date.now()): string {
@@ -67,6 +67,37 @@ export function usd(n: number): string {
 
 export function plural(n: number, one: string, many = `${one}s`): string {
   return `${n} ${n === 1 ? one : many}`;
+}
+
+/**
+ * A finished subagent's figures, only those its provider reported:
+ * `["48.2k tokens", "23 tool calls", "1m 12s"]`; empty when there are none.
+ */
+export function subagentStatsParts(stats: SubagentStats | undefined): string[] {
+  if (!stats) return [];
+  const parts: string[] = [];
+  const { totalTokens: tokens, toolUses, durationMs } = stats;
+  if (tokens !== undefined)
+    parts.push(`${compact(tokens).replace("K", "k")} ${tokens === 1 ? "token" : "tokens"}`);
+  if (toolUses !== undefined) parts.push(plural(toolUses, "tool call"));
+  if (durationMs !== undefined) parts.push(duration(durationMs));
+  return parts;
+}
+
+/**
+ * The same figures unrounded, for a tooltip:
+ * `"48,213 tokens · 23 tool calls · 1m 12s (72,000 ms)"`; empty when there are none.
+ */
+export function subagentStatsTitle(stats: SubagentStats | undefined): string {
+  if (!stats) return "";
+  const exact = (n: number) => n.toLocaleString("en");
+  const { totalTokens: tokens, toolUses, durationMs } = stats;
+  const parts: string[] = [];
+  if (tokens !== undefined) parts.push(`${exact(tokens)} ${tokens === 1 ? "token" : "tokens"}`);
+  if (toolUses !== undefined)
+    parts.push(`${exact(toolUses)} ${toolUses === 1 ? "tool call" : "tool calls"}`);
+  if (durationMs !== undefined) parts.push(`${duration(durationMs)} (${exact(durationMs)} ms)`);
+  return parts.join(" · ");
 }
 
 export type Tone = "running" | "waiting" | "done" | "failed" | "idle";

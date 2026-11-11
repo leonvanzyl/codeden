@@ -1,4 +1,4 @@
-import type { DiscoveryArea, FactoryLimits, FactoryLoop, ProtectedAreas } from "@codeden/contracts";
+import type { FactoryLimits, ProtectedAreas } from "@codeden/contracts";
 import { matchingGlobs } from "./globs";
 import { DEPLOY_GLOBS, mentionsTopic } from "./vision";
 
@@ -31,7 +31,7 @@ export function budgetExceeded(
   return null;
 }
 
-/** True when limits carry a daily budget (required for autopilot and dark factory). */
+/** True when limits carry a daily budget (required for the software and dark factory). */
 export function hasBudget(limits: FactoryLimits): boolean {
   return limits.dailyBudget.usd !== undefined || limits.dailyBudget.tokens !== undefined;
 }
@@ -41,7 +41,10 @@ export function freeSlots(activeSessions: number, limits: FactoryLimits): number
   return Math.max(0, limits.maxConcurrentSessions - activeSessions);
 }
 
-/** Whether another build may start: merges today plus work in flight stay under the cap. */
+/**
+ * Whether another build may start while auto-merge is on: merges today plus work in flight
+ * stay under the daily merge cap.
+ */
 export function mayBuild(mergesToday: number, inFlight: number, limits: FactoryLimits): boolean {
   return mergesToday + inFlight < limits.maxMergesPerDay;
 }
@@ -120,29 +123,6 @@ export function protectedHits(input: {
     .filter((h) => h.globs.length > 0);
   const topics = input.areas.topics.filter((t) => mentionsTopic(input.text, t));
   return { paths, topics };
-}
-
-/** The next `count` discovery areas, round-robin from `loop.nextArea`. */
-export function nextAreas(
-  areas: readonly DiscoveryArea[],
-  start: number,
-  count: number,
-): DiscoveryArea[] {
-  if (areas.length === 0) return [];
-  const out: DiscoveryArea[] = [];
-  for (let i = 0; i < Math.min(count, areas.length); i++) {
-    const area = areas[(start + i) % areas.length];
-    if (area) out.push(area);
-  }
-  return out;
-}
-
-/** Whether a dark-factory discovery round is due. */
-export function discoveryDue(loop: FactoryLoop, waiting: number, now: number): boolean {
-  if (loop.discovery.length > 0) return false;
-  if (waiting >= loop.tuning.minBacklog) return false;
-  if (!loop.lastDiscoveryAt) return true;
-  return now - Date.parse(loop.lastDiscoveryAt) >= loop.tuning.discoveryIntervalMin * 60_000;
 }
 
 /** A work key slug from a title: `factory:add-dark-mode`. */

@@ -23,7 +23,7 @@ CodeDen polls instead of using webhooks (a local app can't receive them):
 - A new session on the head branch of an open, unlinked PR gets linked within a few seconds.
 - `CODEDEN_GITHUB_SYNC=0` turns polling off.
 
-Sync produces events that the rest of CodeDen reacts to: `issue.opened`, `issue.labeled`, `issue.commented`, `issue.updated`, `pr.opened`, `pr.updated`, `pr.review_requested`, `pr.checks_passed`, `pr.checks_failed`, `pr.merged`, `pr.closed` and `review.submitted`. They feed [notices](orchestration.md#notices), [automation triggers](automations.md#triggers) and the [factory loop](autonomy-and-dark-factory.md). The very first import is silent, so connecting an existing repository doesn't flood your PM.
+Sync produces events that the rest of CodeDen reacts to: `issue.opened`, `issue.labeled`, `issue.commented`, `issue.updated`, `pr.opened`, `pr.updated`, `pr.review_requested`, `pr.checks_passed`, `pr.checks_failed`, `pr.merged`, `pr.closed` and `review.submitted`. They feed [notices](orchestration.md#notices), [automation triggers](automations.md#triggers) and the [factory loop](software-factory.md). The very first import is silent, so connecting an existing repository doesn't flood your PM.
 
 ## Where you see it
 
@@ -52,7 +52,7 @@ When a session's PR is merged, CodeDen:
 1. stops the session's provider if it's idle and marks the session **completed**;
 2. comments "Resolved by #N" on the linked issues.
 
-In **Manual** and **Assisted** projects, nothing is ever merged without you. Automatic merges only happen in the experimental [factory modes](autonomy-and-dark-factory.md), and only after every merge check passes.
+In **Manual** and **Assisted** projects, nothing is ever merged without you. Automatic merges only happen in the experimental [factory modes](software-factory.md) with auto-merge turned on, only for work from trusted authors, and only after every merge check passes.
 
 ### Feedback on your sessions' pull requests
 

@@ -171,13 +171,13 @@ describe("issue triage (§10)", () => {
     expect(auto).toMatchObject({ status: "started", start: { status: "started" } });
   });
 
-  it("leaves issue intake to the factory loop in autopilot and dark factory (§10.1)", async () => {
+  it("leaves issue intake to the factory loop in the software and dark factory (§10.1)", async () => {
     const runsOf = async () =>
       AutomationRun.array().parse(
         (await h.api("GET", `/automations/runs?automationId=${triageId}`)).body,
       );
     const before = (await runsOf()).length;
-    for (const autonomyMode of ["autopilot", "dark_factory"] as const) {
+    for (const autonomyMode of ["software_factory", "dark_factory"] as const) {
       h.server.services.store.append([
         {
           type: "project.updated",
@@ -185,7 +185,7 @@ describe("issue triage (§10)", () => {
           payload: { project: Project.parse({ ...project, autonomyMode }) },
         },
       ]);
-      const number = autonomyMode === "autopilot" ? 50 : 51;
+      const number = autonomyMode === "software_factory" ? 50 : 51;
       h.server.services.store.append([
         { type: "issue.opened", sessionId: null, payload: { issue: issue(number) } },
       ]);

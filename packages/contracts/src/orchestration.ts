@@ -197,6 +197,7 @@ export const Notice = z.discriminatedUnion("type", [
         "regression",
         "merged",
         "failed",
+        "ready",
       ]),
       /** Instructions (for the PM) or a summary (for the orchestrator). */
       text: z.string(),
@@ -251,7 +252,7 @@ export const ProjectStatus = z.object({
     kind: z.enum(["github", "local"]),
     /**
      * The project's autonomy mode: tells the PM who merges pull requests (the user in manual and
-     * assisted, the factory loop in autopilot and dark factory).
+     * assisted, the factory loop in the software and dark factory).
      */
     mode: AutonomyMode,
   }),

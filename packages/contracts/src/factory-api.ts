@@ -1,46 +1,49 @@
 import { z } from "zod";
 import { GitHubIssueRef, GitHubPrRef, Id, ProviderId, Timestamp } from "./common";
 import { AutonomyMode, FactoryLimits, FactoryLoopState } from "./factory";
+import {
+  Classification,
+  DiscoveryArea,
+  Investigation,
+  PipelineStep,
+  ScoutState,
+  ScoutStatus,
+  WorkTrust,
+  WorkType,
+} from "./factory-pipeline";
 
 /**
- * The factory loop of autopilot and dark-factory projects (§10.1): work items, merge checks,
- * the reviewer's verdict, the loop record, the vision and the HTTP shapes of `/api/.../factory`.
- * Autopilot and dark factory are experimental in v1.
+ * The factory loop of software-factory and dark-factory projects (§10.1): work items, merge
+ * checks, the reviewer's verdict, the loop record, the vision and the HTTP shapes of
+ * `/api/.../factory`. Both modes are experimental. The pipelines themselves are in
+ * `factory-pipeline.ts`.
  */
 
-/** Modes in which CodeDen finds work and merges automatically. */
-export const FACTORY_MODES = ["autopilot", "dark_factory"] as const satisfies AutonomyMode[];
+/** Modes in which the factory loop runs. */
+export const FACTORY_MODES = ["software_factory", "dark_factory"] as const satisfies AutonomyMode[];
 
-/** True for autopilot and dark factory. */
+/** True for the software factory and the dark factory. */
 export function isFactoryMode(mode: AutonomyMode): boolean {
   return (FACTORY_MODES as readonly string[]).includes(mode);
 }
 
-/** Areas the improvement finders look at (one discovery session per area). */
-export const DiscoveryArea = z.enum([
-  "features",
-  "ux",
-  "performance",
-  "tech_debt",
-  "test_gaps",
-  "security",
-]);
-export type DiscoveryArea = z.infer<typeof DiscoveryArea>;
-
-/** Where a work item came from. */
+/** Where a work item came from: an issue, the scout, a failed check on main, a revert. */
 export const FactoryItemSource = z.enum(["discovery", "issue", "failed_check", "revert"]);
 export type FactoryItemSource = z.infer<typeof FactoryItemSource>;
 
 /**
- * Where a work item is:
- * - `candidate`: found, waiting for the PM to score it against the vision
- * - `backlog`: accepted (a GitHub issue exists), waiting for a build slot
- * - `building`, `verifying` (merge checks), `watching` (merged, main CI watched)
- * - `merged` (done), `reverted`, `rejected` (by the PM), `failed` (merge checks),
- *   `escalated` (needs a human: protected area or a decision)
+ * Where a work item is in its life (the pipeline step is derived from it, see `pipelineStep`):
+ * - `candidate`: received, waiting to be classified (Identify type)
+ * - `ignored`: an issue by an untrusted author; nothing runs until someone lets it in
+ * - `backlog`: classified, waiting for a free agent
+ * - `building` (reproduce or analyze, then implement), `verifying` (merge checks, the review,
+ *   then ready to merge), `watching` (merged automatically, main CI watched)
+ * - `merged` (done), `reverted`, `rejected` (not reproduced, declined, closed), `failed`
+ *   (merge checks), `escalated` (touches a protected area: yours to merge)
  */
 export const FactoryItemStage = z.enum([
   "candidate",
+  "ignored",
   "backlog",
   "building",
   "verifying",
@@ -57,6 +60,7 @@ export type FactoryItemStage = z.infer<typeof FactoryItemStage>;
 export const MergeCheckName = z.enum([
   "ci",
   "tests",
+  "test_results",
   "review",
   "security",
   "ui_evidence",
@@ -103,17 +107,28 @@ export type ReviewVerdictInit = z.input<typeof ReviewVerdict>;
 export const FactoryItem = z.object({
   id: Id,
   projectId: Id,
-  /** `factory:<slug>` while a candidate; `issue:<n>` once its issue exists. */
+  /** `issue:<n>` once its issue exists (`factory:<slug>` before). */
   workKey: z.string().min(1),
   title: z.string().min(1),
-  /** Why it matters, as the finder or issue described it. */
+  /** The issue body, or why it matters as the scout described it. */
   summary: z.string(),
   source: FactoryItemSource,
   area: DiscoveryArea.nullable(),
   acceptanceCriteria: z.array(z.string()),
-  /** The PM's score against the vision, 0..1. */
+  /** Priority, 0..1 (higher first); null for issues, which queue in order of arrival. */
   score: z.number().min(0).max(1).nullable(),
   stage: FactoryItemStage,
+  /** The pipeline (bug, feature, docs); null until classified. */
+  type: WorkType.nullable().default(null),
+  classification: Classification.nullable().default(null),
+  /** Whether the factory may act on it by itself (see `WorkTrust`). */
+  trust: WorkTrust.default("trusted"),
+  /** GitHub login of the issue's author, when it came from an issue. */
+  author: z.string().nullable().default(null),
+  /** Who let an untrusted issue in. */
+  admittedBy: z.enum(["user", "pm"]).nullable().default(null),
+  /** The bug's reproduction or the feature's analysis, once the builder reported it. */
+  investigation: Investigation.nullable().default(null),
   issue: GitHubIssueRef.nullable(),
   pr: GitHubPrRef.nullable(),
   builderSessionId: Id.nullable(),
@@ -142,6 +157,17 @@ export const FactoryItem = z.object({
    * work that can't be split). The size check then passes; every other check still applies.
    */
   largeChange: z.string().nullable().default(null),
+  /**
+   * When the factory archived the item's builder and reviewer sessions after it finished, which
+   * removes their worktrees (the branch and transcript stay); null until then. Set once, so a
+   * session someone unarchives stays unarchived. Retry clears it.
+   */
+  sessionsArchivedAt: Timestamp.nullable().default(null),
+  /**
+   * Sessions of attempts before a retry that weren't archived yet. The factory archives them
+   * once none of them is busy (a turn is never cut off), then empties the list.
+   */
+  earlierSessionIds: z.array(Id).default([]),
   createdAt: Timestamp,
   updatedAt: Timestamp,
   mergedAt: Timestamp.nullable(),
@@ -165,14 +191,20 @@ export const FactoryTuning = z.object({
   requireCi: z.boolean().default(true),
   /** Security/dependency scan run in the builder's worktree (e.g. `pnpm audit --prod`). */
   auditCommand: z.string().min(1).nullable().default(null),
-  /** Fix rounds after failed merge checks before an item fails. */
-  maxFixAttempts: z.int().nonnegative().default(1),
-  /** Dark factory: start discovery when fewer items than this wait to be built. */
+  /** Revise rounds (failed review or merge checks) before an item fails. */
+  maxFixAttempts: z.int().nonnegative().default(2),
+  /** Dark factory: the scout starts a round when fewer items than this wait for an agent. */
   minBacklog: z.int().nonnegative().default(2),
-  /** Dark factory: minutes between discovery rounds. */
+  /** Dark factory: minutes between the scout's review rounds. */
   discoveryIntervalMin: z.int().positive().default(360),
-  /** Discovery sessions per round (round-robin over the areas). */
-  discoveryPerRound: z.int().positive().default(2),
+  /**
+   * Dark factory: most review areas the scout may use per round, each with its own long-lived
+   * area reviewer session ("Review areas per round" in the UI).
+   */
+  discoveryPerRound: z.int().nonnegative().default(2),
+  /** Dark factory: most issues the scout may file per round. */
+  maxIssuesPerRound: z.int().positive().default(3),
+  /** Dark factory: the review areas the scout may use. */
   areas: z.array(DiscoveryArea).default(DiscoveryArea.options),
   /** Provider for builders (`auto`: the project/role default). */
   builderProvider: z.union([z.literal("auto"), ProviderId]).default("auto"),
@@ -199,7 +231,7 @@ export const FactoryTuningPatch = z.object(
 );
 export type FactoryTuningPatch = z.infer<typeof FactoryTuningPatch>;
 
-/** A running improvement-finder session. */
+/** A discovery session of loops before 0.6 (kept so old loops still parse). */
 export const DiscoveryRun = z.object({ sessionId: Id, area: DiscoveryArea, startedAt: Timestamp });
 export type DiscoveryRun = z.infer<typeof DiscoveryRun>;
 
@@ -212,10 +244,14 @@ export const FactoryLoop = z.object({
   /** Local day (`YYYY-MM-DD`) the counters below belong to. */
   day: z.string(),
   mergesToday: z.int().nonnegative(),
-  discovery: z.array(DiscoveryRun),
-  /** Next area index for round-robin discovery. */
-  nextArea: z.int().nonnegative(),
-  lastDiscoveryAt: Timestamp.nullable(),
+  /** Unused since 0.6 (the scout replaced the discovery sessions). */
+  discovery: z.array(DiscoveryRun).default([]),
+  /** Unused since 0.6. */
+  nextArea: z.int().nonnegative().default(0),
+  /** Unused since 0.6 (see `scout.lastRoundAt`). */
+  lastDiscoveryAt: Timestamp.nullable().default(null),
+  /** The dark factory's scout. */
+  scout: ScoutState.prefault({}),
   /** Day of the last daily digest. */
   lastDigestDay: z.string().nullable(),
   /** Issues opened before this are not picked up automatically. */
@@ -325,8 +361,9 @@ export type PutVisionRequest = z.infer<typeof PutVisionRequest>;
 // ---------------------------------------------------------------- HTTP shapes
 
 /**
- * `PUT /api/projects/:id/autonomy`. Switching to autopilot or dark factory requires a vision
- * file and limits with a daily budget (sent here, or already saved while in a factory mode).
+ * `PUT /api/projects/:id/autonomy`. Switching to the software or dark factory requires a GitHub
+ * project, a vision file and limits with a daily budget (sent here, or already saved while in
+ * a factory mode).
  */
 export const SetAutonomyModeRequest = z.object({
   mode: AutonomyMode,
@@ -334,13 +371,16 @@ export const SetAutonomyModeRequest = z.object({
   tuning: FactoryTuningPatch.optional(),
 });
 export type SetAutonomyModeRequest = z.infer<typeof SetAutonomyModeRequest>;
-export type SetAutonomyModeRequestInit = z.input<typeof SetAutonomyModeRequest>;
+/** What a client sends; `mode` is typed as today's ids (the schema also reads the old one). */
+export type SetAutonomyModeRequestInit = Omit<z.input<typeof SetAutonomyModeRequest>, "mode"> & {
+  mode: AutonomyMode;
+};
 
 export const SetAutonomyModeResponse = z.object({
   projectId: Id,
   mode: AutonomyMode,
   limits: FactoryLimits,
-  /** Autopilot and dark factory are experimental in v1. */
+  /** The software and dark factory are experimental. */
   experimental: z.boolean(),
 });
 export type SetAutonomyModeResponse = z.infer<typeof SetAutonomyModeResponse>;
@@ -356,7 +396,7 @@ export const KillSwitchResponse = z.object({
 });
 export type KillSwitchResponse = z.infer<typeof KillSwitchResponse>;
 
-/** A work item as the factory panel shows it. */
+/** A work item as the factory panel and its pipeline diagram show it. */
 export const FactoryWorkItem = z.object({
   id: Id,
   title: z.string(),
@@ -364,9 +404,20 @@ export const FactoryWorkItem = z.object({
   issue: GitHubIssueRef.nullable(),
   pr: GitHubPrRef.nullable(),
   score: z.number().nullable(),
+  /** The builder session. */
   sessionId: Id.nullable(),
+  /** The independent reviewer's session, once there is one. */
+  reviewerSessionId: Id.nullable().default(null),
+  /** The session working on it right now (the reviewer while reviewing), for the diagram. */
+  activeSessionId: Id.nullable().default(null),
   stage: FactoryItemStage,
+  step: PipelineStep.default("intake"),
+  type: WorkType.nullable().default(null),
+  trust: WorkTrust.default("trusted"),
+  author: z.string().nullable().default(null),
   source: FactoryItemSource,
+  /** Revise rounds so far. */
+  attempts: z.int().nonnegative().default(0),
   reason: z.string().nullable(),
   note: z.string().nullable(),
   updatedAt: Timestamp,
@@ -401,11 +452,18 @@ export const FactoryStatus = z.object({
   mergesToday: z.int().nonnegative(),
   consecutiveFailures: z.int().nonnegative(),
   activeSessions: z.int().nonnegative(),
+  /** Waiting: being classified (`candidate`) or for a free agent (`backlog`). */
   backlog: z.array(FactoryWorkItem),
   inProgress: z.array(FactoryWorkItem),
   mergeChecks: z.array(FactoryMergeChecks),
   /** Merged, reverted, failed, rejected and escalated items, newest first. */
   recent: z.array(FactoryWorkItem),
+  /** Issues by untrusted authors, newest first; nothing runs on them until let in. */
+  ignored: z.array(FactoryWorkItem).default([]),
+  /** The account CodeDen uses on GitHub (always trusted); null when unknown. */
+  githubLogin: z.string().nullable().default(null),
+  /** The dark factory's scout; null in the software factory. */
+  scout: ScoutStatus.nullable().default(null),
   visionExists: z.boolean(),
   lastDigest: FactoryDigest.nullable(),
   lastTickAt: Timestamp.nullable(),
@@ -415,34 +473,6 @@ export type FactoryStatus = z.infer<typeof FactoryStatus>;
 /** `GET /api/projects/:id/factory/items/:itemId`. */
 export const FactoryItemResponse = z.object({ item: FactoryItem });
 export type FactoryItemResponse = z.infer<typeof FactoryItemResponse>;
-
-/** A candidate reported by an improvement finder (`factory_report_candidates`). */
-export const FactoryCandidate = z.object({
-  title: z.string().trim().min(3).max(200),
-  summary: z.string().trim().min(1).max(4_000),
-  acceptanceCriteria: z.array(z.string().trim().min(1).max(500)).min(1).max(12),
-  /** Paths the change would touch, when known. */
-  paths: z.array(z.string()).max(50).optional(),
-});
-export type FactoryCandidate = z.infer<typeof FactoryCandidate>;
-
-/** The PM's decision on a candidate (`factory_triage`). */
-export const FactoryTriageRequest = z.object({
-  itemId: Id,
-  decision: z.enum(["accept", "reject"]),
-  /** Score against the vision, 0..1 (accepts). */
-  score: z.number().min(0).max(1).optional(),
-  /** Replaces the finder's acceptance criteria (accepts). */
-  acceptanceCriteria: z.array(z.string().trim().min(1).max(500)).min(1).max(12).optional(),
-  /** Why (required for rejects). */
-  reason: z.string().trim().min(1).max(1_000).optional(),
-  /**
-   * Accept work that can't be split under the size limit (an initial scaffold, a stack
-   * migration), with the reason. Recorded as a factory decision.
-   */
-  largeChange: z.string().trim().min(1).max(500).optional(),
-});
-export type FactoryTriageRequest = z.infer<typeof FactoryTriageRequest>;
 
 /**
  * `factory_allow_large_change`: the PM lets an item that failed only the size check merge

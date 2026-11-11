@@ -155,7 +155,7 @@ describe("ledger deltas", () => {
   it("classifies who started the work", () => {
     expect(sourceOf("user", "dark_factory")).toBe("user");
     expect(sourceOf("pm", "dark_factory")).toBe("factory");
-    expect(sourceOf("automation", "autopilot")).toBe("factory");
+    expect(sourceOf("automation", "software_factory")).toBe("factory");
     expect(sourceOf("automation", "assisted")).toBe("automation");
     expect(sourceOf("orchestrator", null)).toBe("orchestrator");
   });

@@ -56,10 +56,12 @@ export const shareToChat = defineTool({
         throw new ToolError(`File not found: ${input.path}`);
       }
       const real = realpathSync(absolute);
-      const roots = [session.cwd, tmpdir()].filter(existsSync).map((p) => realpathSync(p));
+      const roots = [session.cwd, tmpdir(), services.artifacts.sessionDir(session.id)]
+        .filter(existsSync)
+        .map((p) => realpathSync(p));
       if (!roots.some((root) => isInside(root, real))) {
         throw new ToolError(
-          "Only files inside your working directory or the temp folder can be shared",
+          "Only files inside your working directory, the temp folder or your own CodeDen artifacts can be shared",
         );
       }
       if (statSync(real).size > MAX_ATTACHMENT_BYTES)

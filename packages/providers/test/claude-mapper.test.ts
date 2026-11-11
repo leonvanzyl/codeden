@@ -235,6 +235,7 @@ describe("ClaudeEventMapper", () => {
       tool_use_id: "a1",
       status: "completed",
       summary: "Output: hi",
+      usage: { total_tokens: 1520, tool_uses: 1, duration_ms: 4210 },
     });
 
     const child = "s1:thread-a1";
@@ -259,6 +260,7 @@ describe("ClaudeEventMapper", () => {
       status: "completed",
       summary: "Output: hi",
       childThreadId: child,
+      stats: { totalTokens: 1520, toolUses: 1, durationMs: 4210 },
     });
     // The root turn completed before the background subagent finished.
     const order = events.map((e) => `${e.type}:${"threadId" in e ? e.threadId : ""}`);
@@ -275,13 +277,54 @@ describe("ClaudeEventMapper", () => {
         { type: "tool_use", id: "a1", name: "Task", input: { description: "Review", prompt: "p" } },
       ]),
     );
+    const trailer = "<usage>total_tokens: 99\ntool_uses: 9\nduration_ms: 999</usage>";
     mapper.handle(
-      toolResult("a1", [{ type: "text", text: "All good\nagentId: abc" }], {
-        tool_use_result: { status: "completed" },
+      toolResult("a1", [{ type: "text", text: `All good\nagentId: abc\n${trailer}` }], {
+        tool_use_result: {
+          status: "completed",
+          totalTokens: 48213,
+          totalToolUseCount: 23,
+          totalDurationMs: 72000,
+        },
       }),
     );
     const sub = events.filter((e) => e.type === "item.completed" && e.item.kind === "subagent");
-    expect(sub[0]?.type === "item.completed" && sub[0].item).toMatchObject({ summary: "All good" });
+    // The structured result wins over the text trailer, which stays out of the summary.
+    expect(sub[0]?.type === "item.completed" && sub[0].item).toMatchObject({
+      summary: "All good",
+      stats: { totalTokens: 48213, toolUses: 23, durationMs: 72000 },
+    });
+  });
+
+  it("reads subagent figures from the usage trailer, and leaves them out when none came", () => {
+    const { mapper, events } = setup();
+    mapper.beginTurn();
+    mapper.handle(
+      assistant("m1", [
+        { type: "tool_use", id: "a1", name: "Agent", input: { description: "One", prompt: "p" } },
+        { type: "tool_use", id: "a2", name: "Agent", input: { description: "Two", prompt: "p" } },
+        { type: "tool_use", id: "a3", name: "Agent", input: { description: "Three", prompt: "p" } },
+      ]),
+    );
+    mapper.handle(
+      toolResult("a1", "Done\nagentId: x\n<usage>total_tokens: 1200\ntool_uses: 3</usage>"),
+    );
+    mapper.handle(toolResult("a2", "Done", { tool_use_result: { status: "completed" } }));
+    mapper.endTurn({ type: "interrupted", reason: "user" });
+
+    const done = new Map(
+      events.flatMap((e) =>
+        e.type === "item.completed" && e.item.kind === "subagent" ? [[e.item.id, e.item]] : [],
+      ),
+    );
+    expect(done.get("a1")).toMatchObject({
+      summary: "Done",
+      stats: { totalTokens: 1200, toolUses: 3 },
+    });
+    expect(done.get("a1")?.stats).not.toHaveProperty("durationMs");
+    expect(done.get("a2")).not.toHaveProperty("stats");
+    expect(done.get("a3")).toMatchObject({ status: "cancelled" });
+    expect(done.get("a3")).not.toHaveProperty("stats");
   });
 
   it("keeps the turn open while queued input is pending, and ends interrupted turns", () => {
