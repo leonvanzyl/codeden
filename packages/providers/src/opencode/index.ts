@@ -20,6 +20,7 @@ export {
   OPENCODE_MIN_VERSION,
   OPENCODE_UPGRADE_COMMAND,
 } from "./detect";
+export { classifyOpenCodeError } from "./errors";
 export { locateOpenCode, nativeBehindShim } from "./locate";
 export { OpenCodeEventMapper } from "./mapper";
 export { fallbackOpenCodeModels, modelInfoFromOpenCode, openCodeModelList } from "./models";

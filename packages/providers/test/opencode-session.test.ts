@@ -407,7 +407,7 @@ describe("OpenCode session", () => {
     const events = await reader.turn("fail");
     expect(events.at(-1)).toMatchObject({
       type: "turn.failed",
-      error: { code: "opencode_provider_auth", message: "Invalid API key" },
+      error: { code: "opencode_provider_auth", message: "Invalid API key", kind: "auth" },
     });
     const retry = await reader.turn("retry");
     expect(
@@ -434,7 +434,10 @@ describe("OpenCode session", () => {
     await reader.turn("hello");
     const token = session.resumeToken();
     const crash = await reader.turn("crash");
-    expect(crash.at(-1)).toMatchObject({ type: "turn.failed", error: { code: "provider_exited" } });
+    expect(crash.at(-1)).toMatchObject({
+      type: "turn.failed",
+      error: { code: "provider_exited", kind: "transient" },
+    });
     const after = await reader.turn("hello");
     expect(after.at(-1)).toMatchObject({ type: "turn.completed" });
     expect(session.resumeToken()).toBe(token);

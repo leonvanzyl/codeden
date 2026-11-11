@@ -398,6 +398,8 @@ export class OpenCodeSession implements ProviderSession {
     this.mapper.endTurn({
       type: "failed",
       code: "provider_exited",
+      // The next message starts a new server and resumes the session.
+      kind: "transient",
       message: `opencode serve exited (code ${code ?? "unknown"})`,
       ...(stderr ? { detail: stderr.slice(-2000) } : {}),
     });

@@ -1,6 +1,7 @@
-import type { AgentEvent, Item, ItemOf } from "@codeden/contracts";
+import type { AgentEvent, ErrorKind, Item, ItemOf } from "@codeden/contracts";
 import { shorten } from "../util/text";
 import { modelId } from "./config";
+import { classifyOpenCodeError } from "./errors";
 import {
   contentText,
   diffsOf,
@@ -32,7 +33,14 @@ interface Subagent {
 type Outcome =
   | { type: "completed" }
   | { type: "interrupted"; reason?: "user" | "provider" | "runner_restart" }
-  | { type: "failed"; message: string; code?: string; detail?: string };
+  | {
+      type: "failed";
+      message: string;
+      code?: string;
+      detail?: string;
+      kind?: ErrorKind;
+      retryAt?: string;
+    };
 
 export interface MapperOptions {
   sessionId: string;
@@ -240,6 +248,8 @@ export class OpenCodeEventMapper {
           code: outcome.code ?? "turn_failed",
           message: outcome.message,
           ...(outcome.detail ? { detail: outcome.detail } : {}),
+          ...(outcome.kind ? { kind: outcome.kind } : {}),
+          ...(outcome.retryAt ? { retryAt: outcome.retryAt } : {}),
         },
       });
     }
@@ -542,11 +552,12 @@ export class OpenCodeEventMapper {
 
 /** An OpenCode error as a failed turn outcome. */
 export function failure(error: OcError | undefined): Outcome {
-  const retryable = error?.status === 429 || (error?.status ?? 0) >= 500;
+  const { kind, retryAt } = classifyOpenCodeError(error);
   return {
     type: "failed",
     code: error?.type ? `opencode_${error.type.replace(/[^a-z0-9]+/gi, "_")}` : "turn_failed",
     message: error?.message || "OpenCode turn failed",
-    ...(retryable && error?.retryAfterMs ? { detail: `Retry after ${error.retryAfterMs} ms` } : {}),
+    kind,
+    ...(retryAt ? { retryAt } : {}),
   };
 }
