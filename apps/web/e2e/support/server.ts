@@ -24,16 +24,6 @@ const here = import.meta.dirname;
 /** The seeded global Claude memory file in the temp user home. */
 export const E2E_CLAUDE_MD = "# Global rules\n\n- Keep answers short.\n";
 const repoRoot = resolve(here, "../../../..");
-/** The scripted OpenCode stand-in from the provider tests (`opencode serve --stdio`). */
-const FAKE_OPENCODE = join(
-  repoRoot,
-  "packages",
-  "providers",
-  "test",
-  "fixtures",
-  "fake-opencode",
-  "opencode.mjs",
-);
 
 /** A small committed git repo in a temp folder. */
 export function makeTempRepo(parent: string): string {
@@ -51,7 +41,7 @@ export function makeTempRepo(parent: string): string {
 }
 
 export interface E2eServerOptions {
-  /** Load the real Claude Code and Codex adapters. */
+  /** Load the real Claude Code, Codex and OpenCode adapters. */
   builtin?: boolean;
   /**
    * Adjust the server's environment, e.g. a PATH with fake CLIs. Gets the run's temp folder
@@ -104,9 +94,6 @@ export async function startE2eServer(opts: E2eServerOptions = {}): Promise<E2eSe
       "--exit-with-stdin",
       ...(opts.builtin ? ["--builtin"] : []),
       ...(opts.pinPath ? ["--no-path-refresh"] : []),
-      // OpenCode runs against the scripted stand-in the provider tests use.
-      "--opencode",
-      FAKE_OPENCODE,
     ],
     {
       cwd: repoRoot,

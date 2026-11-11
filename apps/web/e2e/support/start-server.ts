@@ -4,7 +4,7 @@
  * (with `--exit-with-stdin`) when stdin closes, taking the runner down with it.
  *
  *   node --import tsx apps/web/e2e/support/start-server.ts --home <dir> [--user-home <dir>]
- *     [--port 0] [--builtin] [--opencode <fake opencode>] [--exit-with-stdin] [--no-path-refresh]
+ *     [--port 0] [--builtin] [--exit-with-stdin] [--no-path-refresh]
  */
 import { parseArgs } from "node:util";
 import { ensureHome, ensureInstallToken, startServer } from "@codeden/server";
@@ -17,8 +17,6 @@ const { values } = parseArgs({
     port: { type: "string", default: "0" },
     /** Load the real Claude Code and Codex adapters (screenshots); off for tests. */
     builtin: { type: "boolean", default: false },
-    /** Run OpenCode from this executable (the fake OpenCode server). */
-    opencode: { type: "string" },
     "exit-with-stdin": { type: "boolean", default: false },
     /** Keep the PATH this process was given (no Windows registry refresh on re-checks). */
     "no-path-refresh": { type: "boolean", default: false },
@@ -37,7 +35,6 @@ const server = await startServer({
   token,
   enableFakeProvider: true,
   builtinProviders: values.builtin,
-  ...(values.opencode ? { openCodeExecutable: values.opencode } : {}),
   waitForRunner: true,
   userHome: values["user-home"],
   ...(values["no-path-refresh"] ? { refreshPath: async () => undefined } : {}),

@@ -1,7 +1,6 @@
 /**
  * Runner process entry. Started detached by the server:
  *   node main.js --home <dir> [--fake] [--no-builtin] [--replay <fixture.json>] [--mcp-upstream <url>]
- *     [--opencode <path to the opencode executable>]
  */
 import { parseArgs } from "node:util";
 import { startRunner } from "./runner";
@@ -15,8 +14,6 @@ const { values } = parseArgs({
     /** Serve a recorded fixture as the `replay` provider (repeatable). */
     replay: { type: "string", multiple: true },
     "mcp-upstream": { type: "string" },
-    /** Run OpenCode from this executable (an install outside PATH; the e2e fake). */
-    opencode: { type: "string" },
   },
   allowPositionals: false,
 });
@@ -35,7 +32,6 @@ try {
     enableFakeProvider: values.fake,
     builtinProviders: !values["no-builtin"],
     replayFixtures: values.replay,
-    openCodeExecutable: values.opencode,
     mcpUpstreamUrl: values["mcp-upstream"],
     sweepDescendants: true,
     log,
