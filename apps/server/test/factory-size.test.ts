@@ -17,6 +17,7 @@ const pr = (fileLines: Array<{ path: string; lines: number }> | undefined): Fact
   headBranch: "codeden/scaffold",
   checks: "success",
   failedChecks: [],
+  mergeable: "mergeable",
   additions: 10_000,
   deletions: 797,
   files: (fileLines ?? []).map((f) => f.path),

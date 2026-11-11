@@ -5,13 +5,21 @@ import {
   type Project,
 } from "@codeden/contracts";
 import { errorMessage } from "../errors";
-import { codeFiles, evaluateChecks, failedChecks, hasTestResults, sameChecks } from "./checks";
+import {
+  codeFiles,
+  evaluateChecks,
+  failedChecks,
+  hasTestResults,
+  notAuthorFixable,
+  sameChecks,
+} from "./checks";
 import { type FactoryContext, factoryNotice, visionOf } from "./context";
 import type { FactoryPr, PrEvidence } from "./github-port";
 import { autoMerge, prDecidedOutside, readyForYou } from "./merge";
 import { escalate, failItem, runAudit } from "./outcomes";
 import { isUiFile, mayMerge, pickReviewer } from "./policy";
 import { fixPrompt, REVIEWER_NUDGE, reReviewPrompt, tooLargePrompt } from "./prompts";
+import { advanceConflicting, baseBranchOf, trackHead } from "./rebase";
 import { mayAutoMerge } from "./trust";
 
 const ENDED = new Set(["idle", "interrupted", "completed", "failed", "stopped"]);
@@ -74,7 +82,8 @@ export async function advanceVerifying(
     auditCache.set(headKey, await runAudit(ctx, loop.tuning.auditCommand, worktree));
   }
   const evidence = await gatherEvidence(ctx, project, item, pr, headKey);
-  const since = Date.parse(item.nudges.verifying ?? item.updatedAt);
+  // CI gets its time from when this head first appeared, not from when verification began.
+  const head = trackHead(item.nudges, pr, now.toISOString());
   const { checks, outcome } = evaluateChecks({
     pr,
     issueTitle: item.issue?.title ?? item.title,
@@ -85,7 +94,7 @@ export async function advanceVerifying(
     testOutput: evidence.testOutput,
     audit: auditCache.get(headKey) ?? null,
     auditConfigured,
-    ciGraceOver: now.getTime() - since > ctx.ciGraceMs,
+    ciTimedOut: now.getTime() - Date.parse(head.since) > ctx.ciGraceMs,
     limits: project.factoryLimits,
     tuning: loop.tuning,
     largeChange: item.largeChange ?? null,
@@ -96,11 +105,18 @@ export async function advanceVerifying(
     ...i,
     pr: pr.ref,
     checks: sameChecks(i.checks, checks) ? i.checks : checks,
+    nudges: trackHead(i.nudges, pr, now.toISOString()).nudges,
   }));
 
+  const conflicting = pr.mergeable === "conflicting";
   if (outcome === "escalate") return escalate(ctx, loop, current, checks);
-  if (outcome === "fail") return handleFailure(ctx, project, loop, current);
+  if (outcome === "fail") {
+    return handleFailure(ctx, project, loop, current, conflicting ? baseBranchOf(project) : null);
+  }
   if (outcome === "pending") {
+    // Merge conflicts (another merge came first): the builder rebases, then CI runs again.
+    // A review in progress still counts; a new one waits for the rebased head.
+    if (conflicting) return advanceConflicting(ctx, project, loop, current);
     const reviewed = checks.find((c) => c.name === "review")?.state !== "skipped";
     if (!reviewed) return loop;
     current = await ensureReviewer(ctx, current, vision.text);
@@ -259,18 +275,24 @@ function failReview(
   return handleFailure(ctx, project, loop, current);
 }
 
-/** Failed checks: a revise round if allowed, otherwise the item fails (and may pause). */
+/**
+ * Failed checks: a revise round if allowed, otherwise the item fails (and may pause). CI that
+ * never started is no code problem, so it alone fails the item without a revise round.
+ */
 async function handleFailure(
   ctx: FactoryContext,
   project: Project,
   loop: FactoryLoop,
   item: FactoryItem,
+  /** The base branch, when the PR also has merge conflicts with it. */
+  conflictsWith: string | null = null,
 ): Promise<FactoryLoop> {
   const failed = failedChecks(item.checks);
   // A revise round can't make work smaller without cutting scope: the PM splits or allows it.
   if (failed.some((c) => c.name === "size")) return tooLarge(ctx, project, loop, item);
   const builder = item.builderSessionId ? ctx.repo.find(item.builderSessionId)?.session : undefined;
   const fixable =
+    failed.some((c) => !notAuthorFixable(c)) &&
     item.attempts < loop.tuning.maxFixAttempts &&
     builder !== undefined &&
     builder.status !== "failed" &&
@@ -293,7 +315,7 @@ async function handleFailure(
         },
       };
     });
-    await ctx.sessions.message(builder.id, fixPrompt(item, failed));
+    await ctx.sessions.message(builder.id, fixPrompt(item, failed, conflictsWith));
     return loop;
   }
   const reason =

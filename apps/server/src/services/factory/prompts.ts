@@ -1,4 +1,4 @@
-import type { FactoryItem, MergeCheck, WorkType } from "@codeden/contracts";
+import type { FactoryItem, MergeCheck, ReviewVerdict, WorkType } from "@codeden/contracts";
 
 /**
  * Prompts of the software factory's pipelines (§10.1): the builder's steps (reproduce and fix a
@@ -195,13 +195,49 @@ export function reviewerPrompt(
 }
 
 /** The revise loop: message to the builder after a failed review or merge checks. */
-export function fixPrompt(item: FactoryItem, failed: MergeCheck[]): string {
+export function fixPrompt(
+  item: FactoryItem,
+  failed: MergeCheck[],
+  /** The base branch, when the PR also has merge conflicts with it. */
+  conflictsWith: string | null = null,
+): string {
   return [
     `**Revise**: the checks for your pull request${item.pr ? ` #${item.pr.number}` : ""} failed:`,
     ...failed.map((c) => `- ${c.name}: ${c.detail ?? "failed"}`),
     item.review && item.review.verdict !== "approve" ? `Reviewer: ${item.review.summary}` : "",
+    conflictsWith
+      ? `It also has merge conflicts with \`${conflictsWith}\`: rebase onto the latest \`origin/${conflictsWith}\` first and resolve them, keeping both sides' intent.`
+      : "",
     "",
     "Fix these in the same branch, run the tests, commit and push (call `create_pull_request` again to update the PR), attach fresh test output with `attach_evidence`, then call `finish`.",
+  ]
+    .filter((l) => l !== "")
+    .join("\n");
+}
+
+/** Another merge left the builder's PR conflicting: rebase it (this is not a revise round). */
+export function rebasePrompt(item: FactoryItem, branch: string, ask: number): string {
+  return [
+    `**Rebase**: your pull request${item.pr ? ` #${item.pr.number}` : ""} has merge conflicts with \`${branch}\` (another change merged first), so GitHub runs no CI on it and it can't merge.${ask > 1 ? ` It still has conflicts (request ${ask}).` : ""}`,
+    `Fetch, rebase your branch onto the latest \`origin/${branch}\` and resolve the conflicts, keeping both sides' intent. Run the tests, then push with \`create_pull_request\` (it updates the same PR), and call \`finish\`.`,
+    "Change nothing else. This doesn't count as a revise round; the merge checks run again on the new head.",
+  ].join("\n");
+}
+
+/** A review verdict that arrived after a revise round started: its findings join that round. */
+export function lateReviewPrompt(item: FactoryItem, verdict: ReviewVerdict): string {
+  const unmet = verdict.criteria
+    .filter((c) => !c.met)
+    .map((c) => `- Not met: ${c.criterion}${c.note ? ` (${c.note})` : ""}`);
+  return [
+    `**Also address**: the reviewer's verdict on pull request${item.pr ? ` #${item.pr.number}` : ""} arrived after this revise round started (${verdict.verdict}): ${verdict.summary}`,
+    ...unmet,
+    ...verdict.security.concerns.map((c) => `- Security: ${c}`),
+    verdict.tests.adequate
+      ? ""
+      : `- Tests: not adequate${verdict.tests.note ? ` (${verdict.tests.note})` : ""}`,
+    verdict.vision.aligned ? "" : `- Vision: ${verdict.vision.note ?? "not aligned"}`,
+    "Fix these in the same revise round, before you push. The reviewer looks again afterwards.",
   ]
     .filter((l) => l !== "")
     .join("\n");

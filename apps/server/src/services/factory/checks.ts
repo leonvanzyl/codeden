@@ -28,8 +28,11 @@ export interface CheckInputs {
   /** Result of the configured audit command; null while not run (or not configured). */
   audit: { ok: boolean; detail: string } | null;
   auditConfigured: boolean;
-  /** True once CI had time to register; before that "no checks" counts as pending. */
-  ciGraceOver: boolean;
+  /**
+   * True once CI had its time to start on this head commit (measured from when the factory
+   * first saw the head); before that "no checks" counts as not reported yet.
+   */
+  ciTimedOut: boolean;
   limits: FactoryLimits;
   tuning: FactoryTuning;
   /** Why the PM let this item go over the size limit; null when it didn't. */
@@ -58,6 +61,23 @@ const TEST_RESULTS_HEADING = /^#{1,6}\s*test results\b/im;
 /** Whether the PR description reports test results. */
 export function hasTestResults(body: string): boolean {
   return TEST_RESULTS_HEADING.test(body);
+}
+
+/** The `ci` check's detail while the PR has merge conflicts (the author is asked to rebase). */
+export const CONFLICTS_DETAIL =
+  "Merge conflicts with the base branch: GitHub runs no CI until they are resolved, so the author is rebasing";
+
+const NEVER_STARTED = "CI never started on ";
+
+/** Why the `ci` check failed when no CI ever reported on the head commit. */
+export function ciNeverStarted(headSha: string | null): string {
+  const head = headSha ? headSha.slice(0, 7) : "the head commit";
+  return `${NEVER_STARTED}${head}: is the workflow disabled, or are GitHub Actions turned off for the repository? Fix that and re-run CI, or turn off "Require CI" in the factory settings`;
+}
+
+/** A failed check the author can't fix in code: CI that never started. */
+export function notAuthorFixable(check: MergeCheck): boolean {
+  return check.name === "ci" && (check.detail ?? "").startsWith(NEVER_STARTED);
 }
 
 /** Code files of a change (not tests, docs, config or assets). */
@@ -105,23 +125,32 @@ export function evaluateChecks(i: CheckInputs): { checks: MergeCheck[]; outcome:
   else if (i.largeChange) set("size", "pass", `${measured}; allowed by the PM: ${i.largeChange}`);
   else set("size", "fail", `${measured}, over the limit of ${sizeLimitText(i.tuning)}`);
 
-  switch (i.pr.checks) {
-    case "success":
-      set("ci", "pass", null);
-      break;
-    case "failure":
-      set("ci", "fail", `CI failed: ${list(i.pr.failedChecks) || "see the PR"}`);
-      break;
-    case "pending":
-      set("ci", "pending", "CI is running");
-      break;
-    case "none":
-      if (!i.tuning.requireCi) set("ci", "skipped", "No CI configured (not required)");
-      else if (!i.ciGraceOver) set("ci", "pending", "Waiting for CI to report");
-      else
-        set("ci", "fail", "No CI reported on the head commit; CI is required for automatic merges");
-      break;
-  }
+  // A PR with merge conflicts can't merge and gets no new CI: it waits for the author's rebase
+  // (red CI on it still fails, so the revise round fixes both).
+  if (i.pr.mergeable === "conflicting" && i.pr.checks !== "failure")
+    set("ci", "pending", CONFLICTS_DETAIL);
+  else
+    switch (i.pr.checks) {
+      case "success":
+        set("ci", "pass", null);
+        break;
+      case "failure":
+        set("ci", "fail", `CI failed: ${list(i.pr.failedChecks) || "see the PR"}`);
+        break;
+      case "pending":
+        set("ci", "pending", "CI is running");
+        break;
+      case "none":
+        if (!i.tuning.requireCi) set("ci", "skipped", "No CI configured (not required)");
+        else if (!i.ciTimedOut)
+          set(
+            "ci",
+            "pending",
+            `Waiting for CI to start on ${i.pr.headSha?.slice(0, 7) ?? "the head"}`,
+          );
+        else set("ci", "fail", ciNeverStarted(i.pr.headSha));
+        break;
+    }
 
   const code = codeFiles(files);
   // The docs pipeline has no agent review (Implement docs change -> Merge), as long as the

@@ -128,6 +128,8 @@ export class FakeFactoryGithub implements FactoryGithub {
     /** Lines per file; the size check counts these (minus lockfiles) when given. */
     fileLines?: Array<{ path: string; lines: number }>;
     checks?: ChecksState;
+    /** Default: mergeable. */
+    mergeable?: FactoryPr["mergeable"];
     evidence?: boolean;
     testOutput?: boolean;
     /** Default: a description with a `## Test results` section. */
@@ -148,6 +150,7 @@ export class FakeFactoryGithub implements FactoryGithub {
       headBranch: `codeden/pr-${number}`,
       checks: opts.checks ?? "success",
       failedChecks: opts.checks === "failure" ? ["test"] : [],
+      mergeable: opts.mergeable ?? "mergeable",
       additions: opts.additions ?? 20,
       deletions: opts.deletions ?? 2,
       files: opts.files,
