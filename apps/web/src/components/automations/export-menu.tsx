@@ -9,6 +9,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useClient } from "@/lib/api";
+import { notifyCopyFailed } from "@/lib/copy";
 import { platform } from "@/lib/platform";
 
 /** Save a blob as a file through a temporary link. */
@@ -43,12 +44,17 @@ export function ExportMenu({ automationId }: { automationId: string }) {
       if (how === "download") {
         saveBlob(file.fileName, new Blob([file.markdown], { type: "text/markdown" }));
       } else {
-        await platform.writeClipboard(file.markdown);
+        // Fetched first, so the gesture may have expired; a failed copy says so itself.
+        const copied = await platform.writeClipboard(file.markdown);
+        if (!copied) notifyCopyFailed();
+        return { how, file, copied };
       }
-      return { how, file };
+      return { how, file, copied: false };
     },
-    onSuccess: ({ how, file }) =>
-      toast.success(how === "copy" ? "Copied as Markdown" : `Downloaded ${file.fileName}`),
+    onSuccess: ({ how, file, copied }) => {
+      if (how === "download") toast.success(`Downloaded ${file.fileName}`);
+      else if (copied) toast.success("Copied as Markdown");
+    },
     onError: (e) => toast.error("Couldn't export", { description: e.message }),
   });
   return (

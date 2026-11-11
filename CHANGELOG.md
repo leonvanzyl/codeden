@@ -4,6 +4,10 @@ All notable changes to CodeDen are documented here. The format follows [Keep a C
 
 ## [Unreleased]
 
+### Fixed
+
+- **Copy buttons work on phones and tablets over the local network.** Copying code, commands, messages, links and passwords now works on plain `http://` addresses, where browsers don't offer the usual clipboard access. If a copy still fails, CodeDen tells you so you can select the text and copy it yourself.
+
 ## [0.6.0] - 2026-11-11
 
 Maintenance release.

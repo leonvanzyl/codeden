@@ -29,8 +29,8 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { SessionCostChip } from "@/components/usage/session-cost";
 import { useClient } from "@/lib/api";
+import { copyWithFeedback } from "@/lib/copy";
 import { statusLabel } from "@/lib/format";
-import { platform } from "@/lib/platform";
 import { useProject } from "@/lib/queries";
 import { useSessionActions } from "@/lib/session-actions";
 import { cn } from "@/lib/utils";
@@ -212,11 +212,7 @@ export function ThreadHeader({ session, running }: { session: Session; running: 
           <DropdownMenuContent align="end" className="w-52">
             {session.branch && (
               <DropdownMenuItem
-                onSelect={() =>
-                  void platform
-                    .writeClipboard(session.branch ?? "")
-                    .then(() => toast.success("Branch copied"))
-                }
+                onSelect={() => void copyWithFeedback(session.branch ?? "", "Branch copied")}
               >
                 <Copy /> Copy branch name
               </DropdownMenuItem>

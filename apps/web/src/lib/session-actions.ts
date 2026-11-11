@@ -3,7 +3,7 @@ import { useMutation } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
 import { useClient } from "./api";
-import { platform } from "./platform";
+import { copyWithFeedback } from "./copy";
 
 /** Sessions that can be stopped from a menu: ones with a turn running or a question open. */
 export const canStop = (session: Pick<Session, "status">) =>
@@ -95,12 +95,7 @@ export function useSessionActions(session: Session) {
       if (next && next !== (session.title ?? session.purpose)) rename.mutate(next);
     },
     copyLink: async () => {
-      try {
-        await platform.writeClipboard(sessionLink(session.id));
-        toast.success("Link copied");
-      } catch (error) {
-        onError(error);
-      }
+      await copyWithFeedback(sessionLink(session.id), "Link copied");
     },
     canStop: canStop(session),
     stop: () => stop.mutate(),
