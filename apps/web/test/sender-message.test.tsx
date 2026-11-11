@@ -117,6 +117,28 @@ describe("messages from a PM, the orchestrator, the factory, an automation or Co
     }
   });
 
+  it("keeps the tags inside indented code and list-nested code blocks", () => {
+    const { unmount } = render({
+      text: "Use this JSX:\n\n    <Button>\n      Save\n    </Button>",
+      attachments: [],
+      from: "factory",
+    });
+    const indented = screen.getByTestId("sender-message").querySelector("pre");
+    expect(indented?.textContent).toContain("<Button>");
+    expect(indented?.textContent).toContain("</Button>");
+    unmount();
+
+    render({
+      text: "1. Use this markup:\n\n    ```html\n    <div>\n    ```",
+      attachments: [],
+      from: "factory",
+    });
+    const card = screen.getByTestId("sender-message");
+    const code = card.querySelector("li pre");
+    expect(code?.textContent).toContain("<div>");
+    expect(card.textContent).not.toContain("```");
+  });
+
   it("collapses a long brief after about 12 lines, with Show more", async () => {
     const long = Array.from({ length: 30 }, (_, i) => `${i + 1}. Step **${i + 1}**`).join("\n");
     render({ text: long, attachments: [], from: "pm" });
