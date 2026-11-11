@@ -135,6 +135,7 @@ export function mockFactoryApi(world: MockWorld): FactoryApi {
       triageRequestedAt: null,
       nudges: {},
       largeChange: null,
+      sessionsArchivedAt: null,
       createdAt: w.updatedAt,
       mergedAt: w.stage === "merged" ? w.updatedAt : null,
       finishedAt: null,
