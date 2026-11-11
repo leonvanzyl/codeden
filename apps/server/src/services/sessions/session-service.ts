@@ -442,7 +442,8 @@ export class SessionService {
     const provider = this.resolveProvider(req, project ? projectDefaultProvider(project) : null);
     const autonomy = req.autonomy ?? project?.autonomy ?? settings.autonomy.default;
     this.assertReadOnlySupported(req.role, provider, autonomy);
-    if (req.planMode) this.assertPlanModeSupported(req.role, provider);
+    // Either value is refused where plan mode doesn't exist, as for PATCH.
+    if (req.planMode !== undefined) this.assertPlanModeSupported(req.role, provider);
     return {
       id: randomUUID(),
       projectId: req.projectId,

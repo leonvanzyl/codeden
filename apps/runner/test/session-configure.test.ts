@@ -117,4 +117,17 @@ describe("session.configure", () => {
     ).rejects.toMatchObject({ code: "unsupported" });
     expect((others[0] as FakeSession).autonomy).toBe("auto");
   });
+
+  it("passes on a provider's refusal, so the server keeps the change for a retry", async () => {
+    const sessions: ProviderSession[] = [];
+    const host = await start(fakeAs("fake", sessions));
+    Object.assign(sessions[0] as FakeSession, {
+      setPlanMode: async () => {
+        throw new Error("Cannot set permission mode to plan");
+      },
+    });
+    await expect(
+      host.configure({ name: "session.configure", sessionId: "s1", planMode: true }),
+    ).rejects.toThrow(/permission mode/);
+  });
 });

@@ -95,6 +95,62 @@ describe("read-only sessions (orchestrator and PMs, §11.2)", () => {
     }
   });
 
+  it("refuses the options that make a reading program write or run something", () => {
+    for (const ok of [
+      "sort -u names.txt",
+      "sort -k1,1 -t, data.csv | uniq -c",
+      "uniq -c names.txt",
+      "uniq -f 1 names.txt",
+      "tree -L 2 -I node_modules",
+      "tree -Inode_modules",
+      "date -Iseconds",
+      "date -u +%s",
+      "find src \\( -name '*.ts' -o -name '*.tsx' \\) -print",
+      "fd -e ts -E node_modules",
+      "rg --pre-glob '*.gz' TODO",
+      "less -N README.md",
+      "file -m magic src/a.bin",
+      "git log @{u}..HEAD",
+      "jq '{name: .name}' package.json",
+      "grep -E '(foo)+bar' src/a.ts",
+      "Get-ChildItem src | Select-Object Name",
+    ]) {
+      expect(readOnlyCommandDenial(ok), ok).toBeUndefined();
+    }
+    for (const bad of [
+      "sort -o src/plan-bypass.txt README.md",
+      "sort -uo out.txt names.txt",
+      "sort -oout.txt names.txt",
+      "sort --output=out.txt names.txt",
+      "sort --out out.txt names.txt",
+      "sort --compress-program=sh names.txt",
+      "uniq names.txt out.txt",
+      "uniq -c -- in.txt out.txt",
+      "tree -o tree.txt",
+      "tree -R -H . -o x",
+      "find . -fprint list.txt",
+      "find . -fls list.txt",
+      "find . -ok rm {} ;",
+      "fd -e tmp -x rm",
+      "fd --exec-batch rm",
+      "rg --pre ./run.sh TODO",
+      "rg --pre=./run.sh TODO",
+      "less -o copy.txt README.md",
+      "less --log-file=copy.txt README.md",
+      "less '+!touch x' README.md",
+      "date -s 2020-01-01",
+      "file -C -m magic",
+      // PowerShell runs code in parentheses and script blocks, even after an allowlisted cmdlet.
+      "Write-Output (Remove-Item src -Recurse)",
+      "Get-ChildItem | Where-Object { Remove-Item $_ }",
+      "Get-ChildItem | Select-Object @{n='x';e={Set-Content a b}}",
+      "echo {a,b}",
+    ]) {
+      expect(readOnlyCommandDenial(bad), bad).toBeTruthy();
+      expect(readOnlyCommandDenial(bad, { allowChecks: true }), bad).toBeTruthy();
+    }
+  });
+
   it("denies Claude edit tools and writing commands natively", () => {
     const policy = new ClaudePolicy("auto", { cwd: "/repo", extraRoots: [] }, true);
     expect(policy.denial("Edit", { file_path: "/repo/a.ts" })).toMatch(/read-only/);

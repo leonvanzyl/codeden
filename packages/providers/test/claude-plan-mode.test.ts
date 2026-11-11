@@ -13,12 +13,14 @@ import { KEEP_PLANNING } from "../src/claude/plan-review";
 import { ClaudeSession } from "../src/claude/session";
 
 /**
- * A stand-in for the SDK's `query()`: records options and permission-mode changes, and lets a
- * test deliver SDK messages (`deliver`) as if the CLI sent them.
+ * A stand-in for the SDK's `query()`: records options and the permission modes the CLI took,
+ * refuses the modes in `refuse`, and lets a test deliver SDK messages (`deliver`) as if the CLI
+ * sent them.
  */
 function stubSdk() {
   const launches: Options[] = [];
   const modes: PermissionMode[] = [];
+  const refuse = new Set<PermissionMode>();
   let deliver: (message: unknown) => void = () => {};
   let exit = () => {};
   const query = ((params: { options: Options }) => {
@@ -43,6 +45,7 @@ function stubSdk() {
         },
       }),
       setPermissionMode: async (mode: PermissionMode) => {
+        if (refuse.has(mode)) throw new Error(`Cannot set permission mode to ${mode}`);
         modes.push(mode);
       },
       interrupt: async () => undefined,
@@ -55,6 +58,7 @@ function stubSdk() {
     query,
     launches,
     modes,
+    refuse,
     deliver: (m: unknown) => deliver(m),
     exit: () => exit(),
   };
@@ -162,6 +166,80 @@ describe("Claude plan mode", () => {
     expect(sdk.modes).toEqual(["bypassPermissions"]);
     expect(await preToolUse("Write", inWorktree)).toBe("none");
     expect(await preToolUse("Bash", { command: "rm -rf src" })).toBe("none");
+  });
+
+  it("refuses writing commands at every level, through the hook and canUseTool", async () => {
+    const writes = [
+      "sort -o src/plan-bypass.txt README.md",
+      "sort --output=src/plan-bypass.txt README.md",
+      "uniq README.md src/copy.md",
+      "find . -fprint src/list.txt",
+      "Write-Output (Remove-Item src -Recurse)",
+    ];
+    for (const autonomy of ["read_only", "supervised", "auto", "full"] as const) {
+      const { preToolUse, permission } = open(stubSdk(), { autonomy });
+      for (const command of writes) {
+        expect(await preToolUse("Bash", { command }), `${autonomy}: ${command}`).toBe("deny");
+        expect(await permission("Bash", { command }, `b-${autonomy}`)).toMatchObject({
+          behavior: "deny",
+        });
+      }
+      expect(await preToolUse("Write", inWorktree), autonomy).toBe("deny");
+      expect(await permission("Write", inWorktree, `w-${autonomy}`)).toMatchObject({
+        behavior: "deny",
+      });
+    }
+  });
+
+  it("lets a planning agent write its plan file at every level", async () => {
+    for (const autonomy of ["read_only", "auto", "full"] as const) {
+      const { preToolUse, permission } = open(stubSdk(), { autonomy });
+      expect(await preToolUse("Write", planFile), autonomy).toBe("none");
+      expect(await permission("Write", planFile, `p-${autonomy}`)).toMatchObject({
+        behavior: "allow",
+      });
+    }
+    // Supervised asks for every edit, the plan file too, but never refuses it.
+    const supervised = open(stubSdk(), { autonomy: "supervised" });
+    expect(await supervised.preToolUse("Write", planFile)).toBe("ask");
+  });
+
+  it("keeps the plan file writable when the level drops to read-only while planning", async () => {
+    const { session, preToolUse } = open(stubSdk(), { autonomy: "auto" });
+    await session.setAutonomy("read_only");
+    expect(await preToolUse("Write", planFile)).toBe("none");
+    expect(await preToolUse("Write", inWorktree)).toBe("deny");
+    expect(await preToolUse("Bash", { command: "sort -o src/x.txt README.md" })).toBe("deny");
+    // Out of plan mode the read_only level refuses every edit again, notes included.
+    await session.setPlanMode(false);
+    expect(await preToolUse("Write", planFile)).toBe("deny");
+    // Read-only roles (orchestrator, PMs) never get the notes exception.
+    const role = open(stubSdk(), { autonomy: "auto", readOnly: true, role: "pm" });
+    expect(await role.preToolUse("Write", planFile)).toBe("deny");
+  });
+
+  it("rejects a mode change the CLI refuses, and sends it again when retried", async () => {
+    const sdk = stubSdk();
+    const { session, preToolUse } = open(sdk, { planMode: false });
+    sdk.refuse.add("plan");
+    await expect(session.setPlanMode(true)).rejects.toThrow(/plan/);
+    expect(sdk.modes).toEqual([]);
+    // CodeDen's own policy plans already, so nothing is edited meanwhile.
+    expect(await preToolUse("Write", inWorktree)).toBe("deny");
+    // The retry (CodeDen kept the change pending) reaches the CLI again.
+    sdk.refuse.delete("plan");
+    await session.setPlanMode(true);
+    expect(sdk.modes).toEqual(["plan"]);
+  });
+
+  it("falls back to acceptEdits for Full, and rejects when the fallback is refused too", async () => {
+    const sdk = stubSdk();
+    const { session } = open(sdk, { autonomy: "full" });
+    sdk.refuse.add("bypassPermissions");
+    await session.setPlanMode(false);
+    expect(sdk.modes).toEqual(["acceptEdits"]);
+    sdk.refuse.add("acceptEdits");
+    await expect(session.setAutonomy("full")).rejects.toThrow(/acceptEdits/);
   });
 
   it("approving the plan continues at the session's permission level", async () => {

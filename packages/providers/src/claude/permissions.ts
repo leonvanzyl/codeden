@@ -80,6 +80,9 @@ export class ClaudePolicy {
 
   /** Why a call is refused outright (read-only sessions, plan mode), or undefined. */
   denial(toolName: string, input: Record<string, unknown>): string | undefined {
+    // A planning agent writes its plan into Claude's notes folders, at every level (the
+    // `read_only` level included). Read-only roles (orchestrator, PMs) never plan.
+    if (this.planning && !this.readOnly && this.isNotesEdit(toolName, input)) return undefined;
     if (!this.isReadOnly) return this.planning ? this.planDenial(toolName, input) : undefined;
     if (EDIT_TOOLS.has(toolName)) {
       return this.readOnly
@@ -97,13 +100,11 @@ export class ClaudePolicy {
   }
 
   /**
-   * Plan mode refusals at every level: edits outside Claude's notes folders (where it writes
-   * its plan file) and shell commands outside the read-only allowlist (checks may run).
+   * Plan mode refusals at every level: edits (the plan file in Claude's notes folders was let
+   * through by `denial`) and shell commands outside the read-only allowlist (checks may run).
    */
   private planDenial(toolName: string, input: Record<string, unknown>): string | undefined {
     if (EDIT_TOOLS.has(toolName)) {
-      const target = editPath(input);
-      if (target && isInNotes(target, this.ctx)) return undefined;
       return `Plan mode: don't edit files yet. ${FINISH_PLAN}, you can implement it.`;
     }
     if (COMMAND_TOOLS.has(toolName)) {
@@ -111,6 +112,13 @@ export class ClaudePolicy {
       return reason ? `Plan mode: ${reason}. ${FINISH_PLAN}, you can run it.` : undefined;
     }
     return undefined;
+  }
+
+  /** An edit tool writing inside Claude's notes folders (its plans folder, auto-memory). */
+  private isNotesEdit(toolName: string, input: Record<string, unknown>): boolean {
+    if (!EDIT_TOOLS.has(toolName)) return false;
+    const target = editPath(input);
+    return target !== "" && isInNotes(target, this.ctx);
   }
 
   /**

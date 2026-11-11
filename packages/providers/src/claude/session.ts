@@ -123,6 +123,8 @@ export class ClaudeSession implements ProviderSession {
    * turn) follows the new level; approvals already waiting stay waiting. The CLI's own
    * permission mode follows (`applyPermissionMode`), except while planning: the CLI stays in
    * `plan` and the new level applies once the plan is approved or plan mode is turned off.
+   * Rejects when the CLI refuses the mode, so CodeDen keeps the change pending and sends it
+   * again.
    */
   async setAutonomy(level: AutonomyLevel): Promise<void> {
     this.autonomy = level;
@@ -130,9 +132,12 @@ export class ClaudeSession implements ProviderSession {
     if (!this.planMode) await this.applyPermissionMode();
   }
 
-  /** Turn plan mode on or off, from the next tool call. Off returns to the autonomy level. */
+  /**
+   * Turn plan mode on or off, from the next tool call. Off returns to the autonomy level.
+   * CodeDen's policy follows at once. Rejects when the CLI refuses the mode; the change is never
+   * skipped as already done, so sending it again (CodeDen keeps it pending) retries the CLI.
+   */
   async setPlanMode(on: boolean): Promise<void> {
-    if (on === this.planMode) return;
     this.planMode = on;
     this.policy.setPlanning(on);
     await this.applyPermissionMode();
@@ -217,9 +222,11 @@ export class ClaudeSession implements ProviderSession {
   // ---------------------------------------------------------------- internals
 
   /**
-   * Put the CLI in the permission mode for the current level and plan state. When the CLI
-   * refuses `bypassPermissions` (it needs a launch flag), it keeps `acceptEdits`; CodeDen's
-   * policy decides through the PreToolUse hook and `canUseTool` either way.
+   * Put the CLI in the permission mode for the current level and plan state. Without a running
+   * CLI there is nothing to do: the next query starts in that mode. When the CLI refuses
+   * `bypassPermissions` (it needs a launch flag), `acceptEdits` serves, as CodeDen's policy
+   * decides through the PreToolUse hook and `canUseTool` either way. Any other refusal, or a
+   * refused fallback, rejects.
    */
   private async applyPermissionMode(): Promise<void> {
     const q = this.q;
@@ -227,9 +234,9 @@ export class ClaudeSession implements ProviderSession {
     const mode = permissionModeFor(this.autonomy, this.planMode);
     try {
       await q.setPermissionMode(mode);
-    } catch {
-      if (mode !== "bypassPermissions") return;
-      await q.setPermissionMode("acceptEdits").catch(() => {});
+    } catch (error) {
+      if (mode !== "bypassPermissions") throw error;
+      await q.setPermissionMode("acceptEdits");
     }
   }
 
@@ -250,7 +257,8 @@ export class ClaudeSession implements ProviderSession {
     const id = this.planExitToolUseId;
     if (!id || !carriesToolResult(message, id)) return;
     this.planExitToolUseId = undefined;
-    if (!this.planMode) void this.applyPermissionMode();
+    // Only a guard: the CLI already took the level's mode with the approval.
+    if (!this.planMode) void this.applyPermissionMode().catch(() => {});
   }
 
   /** Say in the transcript when a Stop dropped steered messages the agent never read. */

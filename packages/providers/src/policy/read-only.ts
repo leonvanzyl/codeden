@@ -1,11 +1,14 @@
+import { groupingDenial, writingOptionDenial } from "./read-only-options";
 import { ghDenial, gitDenial, sedDenial } from "./read-only-tools";
 
 /**
  * Read-only sessions (the orchestrator and PMs, and agent sessions with the `read_only`
- * permission level, §11.2) may inspect a repository but never change it. This allowlist decides
- * which shell commands they may run: commands that only read, with no output redirection and no
- * command substitution. Agent sessions may also run the project's checks (tests, lint, type
- * checks) without fix or update flags. Anything else is denied.
+ * permission level, §11.2, and plan mode) may inspect a repository but never change it. This
+ * allowlist decides which shell commands they may run: commands that only read, with no output
+ * redirection, command substitution, grouping or script blocks, and none of the options that
+ * make a reading program write or run something (`read-only-options.ts`). Agent sessions may also
+ * run the project's checks (tests, lint, type checks) without fix or update flags. Anything else
+ * is denied.
  */
 
 /**
@@ -194,6 +197,8 @@ export function readOnlyCommandDenial(
     const tokens = tokenize(simple);
     const name = bin(tokens[0]);
     const args = tokens.slice(1).map((a) => a.toLowerCase());
+    const grouping = groupingDenial(name, simple);
+    if (grouping) return grouping;
     if (name === "git") {
       const reason = gitDenial(tokens.slice(1));
       if (reason) return reason;
@@ -209,13 +214,13 @@ export function readOnlyCommandDenial(
       if (reason) return reason;
       continue;
     }
-    if (name === "find" && args.some((a) => a === "-delete" || a === "-exec" || a === "-execdir")) {
-      return "find with -delete or -exec is not allowed in a read-only session";
-    }
     if (options.allowChecks && isCheck(name, args)) continue;
     if (!READ_ONLY_BINS.has(name)) {
       return `${name || "This command"} is not on the read-only allowlist`;
     }
+    // Allowlisted programs still write or run things with some options (`sort -o`).
+    const writes = writingOptionDenial(name, tokens.slice(1));
+    if (writes) return writes;
   }
   return undefined;
 }

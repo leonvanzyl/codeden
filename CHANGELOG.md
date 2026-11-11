@@ -8,6 +8,10 @@ All notable changes to CodeDen are documented here. The format follows [Keep a C
 
 - **Plan mode.** Turn on **Plan** in the new session dialog or in the composer (next to Permissions) and the agent explores and proposes a plan before it changes anything. The plan arrives as a card: **Approve plan** and the agent carries on and implements it with the session's permissions, or **Keep planning** with a note on what to change and it revises the plan. While planning, file edits and writing commands are refused at every permission level (the agent's own plan file excepted). Plan mode is offered for agent sessions on providers that support it (Claude Code today); turning it off without approving returns the session to its permission level.
 
+### Security
+
+- **Read-only commands are checked more strictly.** Sessions at Read-only, the orchestrator, PMs and agents in plan mode may no longer use the options that make a reading program write or run something (`sort -o`, `uniq` with an output file, `find -fprint`/`-ok`, `fd -x`, `rg --pre`, `less -o`, `tree -o`, `date -s`, `file -C`), nor unquoted parentheses and braces, in which PowerShell runs code even after an allowed cmdlet.
+
 ### Changed
 
 - **Plainer words in the factory.** The dark factory's scout no longer talks about "lenses": it uses **review areas** (security, UI & UX, performance, docs and so on), each with an **area reviewer**, a long-lived reviewer agent focused on that one area. The setting is now **Review areas per round**, and the scout's prompts and docs use the same words. Existing dark factories keep their reviewer sessions; nothing to migrate.
