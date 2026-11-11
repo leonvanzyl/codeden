@@ -6,3 +6,5 @@ CodeDen is the ultimate tool for Agentic Coding.
 - Automations are easy to create and share, allowing users to easily switch on tasks that automatically run in the background
 - CodeDen supports agent skills, memory files, MCP servers and modern agentic coding tech
 - CodeDen does not waste space. Worktrees are automatically cleaned and removed once sessions are archived.
+- CodeDen supports advanced ADE features, like integrated browsers, computer use, dedicated agent computers and much more.
+- Your job is to stay informed and up to date with the tools and features available in modern ADEs.
