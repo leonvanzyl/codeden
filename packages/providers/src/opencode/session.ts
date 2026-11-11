@@ -266,6 +266,7 @@ export class OpenCodeSession implements ProviderSession {
       })
     ).data;
     this.mapper.rootSession = session.id;
+    await this.archive(server, session.id);
     await this.setInstructions(server, session.id);
     const model = ref
       ? modelId(ref)
@@ -278,6 +279,20 @@ export class OpenCodeSession implements ProviderSession {
       resumeToken: session.id,
       ...(model ? { model } : {}),
     });
+  }
+
+  /**
+   * Archive the session in OpenCode's own session list: CodeDen shows it, so it doesn't clutter
+   * the user's OpenCode history. Archived sessions still run prompts. Done on create and on
+   * every resume (a no-op once archived), as its own request so an OpenCode that rejects the
+   * field never breaks the session.
+   */
+  private async archive(server: OpenCodeServer, id: string): Promise<void> {
+    try {
+      await server.client.patch(`/api/session/${seg(id)}`, { archived: true });
+    } catch {
+      // Best effort: the session works the same unarchived.
+    }
   }
 
   /** CodeDen's role prompt as a session instruction; else in front of the first prompt. */

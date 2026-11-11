@@ -157,6 +157,20 @@ describe("OpenCode session", () => {
     const start = logged().find((r) => r.kind === "start");
     expect(start).toMatchObject({ hasPassword: true, electron: null, extraEnv: "yes" });
     expect(session.resumeToken()).toMatch(/^ses_/);
+    // Archived in OpenCode's own session list, right after it is created.
+    const archive = requests(/^\/api\/session\/ses_[^/]+$/, "PATCH");
+    expect(archive.map((r) => [r.path, r.body])).toEqual([
+      [`/api/session/${session.resumeToken()}`, { archived: true }],
+    ]);
+  });
+
+  it("still runs when OpenCode can't archive the session", async () => {
+    process.env.FAKE_OPENCODE_MODE = "no-archive";
+    const { session, reader } = await open();
+    const events = await reader.turn("hello");
+    expect(events.at(-1)).toMatchObject({ type: "turn.completed" });
+    expect(session.resumeToken()).toMatch(/^ses_/);
+    expect(requests(/^\/api\/session\/ses_[^/]+$/, "PATCH")[0]?.body).toEqual({ archived: true });
   });
 
   it("maps a plain turn: reasoning, text, usage with cost", async () => {
@@ -206,6 +220,20 @@ describe("OpenCode session", () => {
       { decision: "once" },
       { decision: "once" },
     ]);
+    // Approved by policy: no approval card, but both calls are in the transcript from start
+    // to finish, like Claude's policy-approved calls.
+    const turns = [...edit, ...shell];
+    expect(
+      turns.some(
+        (e) =>
+          (e.type === "item.started" || e.type === "item.completed") &&
+          e.item.kind === "approval_request",
+      ),
+    ).toBe(false);
+    const started = turns.filter((e) => e.type === "item.started" && e.item.kind === "tool_call");
+    expect(started.map((e) => e.type === "item.started" && e.item.id)).toEqual(
+      [...completed(edit, "tool_call"), ...completed(shell, "tool_call")].map((e) => e.item.id),
+    );
   });
 
   it("asks the user for risky commands; a denial reaches the agent with a message", async () => {
@@ -462,6 +490,10 @@ describe("OpenCode session", () => {
     await resumed.reader.until((e) => e.type === "session.updated" && !!e.resumeToken);
     expect(resumed.session.resumeToken()).toBe(token);
     expect(requests(/^\/api\/session$/, "POST")).toHaveLength(1);
+    // Archived again on resume (a no-op for OpenCode once archived).
+    expect(
+      requests(/^\/api\/session\/ses_[^/]+$/, "PATCH").filter((r) => r.body?.archived === true),
+    ).toHaveLength(2);
     await resumed.session.close();
 
     const fresh = await open({ resumeToken: "ses_missing" }, a);
@@ -494,5 +526,22 @@ describe("OpenCode utility model", () => {
     });
     expect(text).toBe("echo: Be brief\n\n---\n\nSummarise via openai/gpt-5.5");
     expect(util.providerId).toBe("opencode");
+  });
+
+  it("picks the cheapest model of the default's provider when Settings name none", async () => {
+    const util = adapter().utilityModel();
+    // The default is Opus on Anthropic: Haiku is cheaper there (GPT-5.5 is on another provider).
+    expect(await util.runOneShot({ prompt: "Title", model: util.defaultModel })).toBe(
+      "echo: Title via anthropic/claude-haiku-5-5",
+    );
+    expect(await util.runOneShot({ prompt: "Title", model: "default" })).toBe(
+      "echo: Title via anthropic/claude-haiku-5-5",
+    );
+  });
+
+  it("leaves the model to OpenCode when the model list can't be read", async () => {
+    process.env.FAKE_OPENCODE_MODE = "models-error";
+    const util = adapter().utilityModel();
+    expect(await util.runOneShot({ prompt: "Title" })).toBe("echo: Title via default");
   });
 });

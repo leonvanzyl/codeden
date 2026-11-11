@@ -26,7 +26,10 @@ export interface OcError {
   retryAfterMs?: number;
 }
 
-/** `GET /api/model` entry. Costs are USD per million tokens. */
+/**
+ * `GET /api/model` entry. Costs are USD per million tokens: the base price, and entries with a
+ * `tier` for prices that apply above a context size.
+ */
 export interface OcModel {
   id: string;
   providerID: string;
@@ -35,7 +38,12 @@ export interface OcModel {
   status?: string;
   enabled?: boolean;
   variants?: { id: string }[];
-  cost?: { input?: number; output?: number; cache?: { read?: number; write?: number } }[];
+  cost?: {
+    tier?: { type: string; size: number };
+    input?: number;
+    output?: number;
+    cache?: { read?: number; write?: number };
+  }[];
   limit?: { context?: number; output?: number };
   capabilities?: { tools?: boolean; input?: string[] };
 }

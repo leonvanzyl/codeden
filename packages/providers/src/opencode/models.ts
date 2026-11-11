@@ -2,7 +2,7 @@ import type { ModelInfo, ReasoningEffort } from "@codeden/contracts";
 import { ReasoningEffort as ReasoningEffortSchema } from "@codeden/contracts";
 import { DEFAULT_MODEL_ID } from "../util/model";
 import { modelId } from "./config";
-import type { OcModel, OcProvider } from "./protocol";
+import type { OcModel, OcModelRef, OcProvider } from "./protocol";
 
 const CONFIGURED_MODEL =
   "The model configured in OpenCode (opencode.json), or OpenCode's own default";
@@ -82,6 +82,44 @@ export function openCodeModelList(
     if (a.isDefault !== b.isDefault) return a.isDefault ? -1 : 1;
     return providerOrder.indexOf(a.id.split("/")[0]) - providerOrder.indexOf(b.id.split("/")[0]);
   });
+}
+
+/** A model's base price (no context tier): input + output USD per million tokens. */
+function basePrice(m: OcModel): number | undefined {
+  const cost = m.cost?.find((c) => !c.tier) ?? m.cost?.[0];
+  const input = cost?.input;
+  const output = cost?.output;
+  if (typeof input !== "number" || typeof output !== "number") return undefined;
+  const price = input + output;
+  return Number.isFinite(price) && price >= 0 ? price : undefined;
+}
+
+/**
+ * The utility model on OpenCode when Settings name none (§7.4): the cheapest model from the
+ * provider of OpenCode's default model, by listed input + output price per million tokens
+ * (base price). Staying on that provider keeps side jobs on the account and data policy the
+ * user already chose (Sonnet's provider gives Haiku, never another provider's free tier).
+ * Disabled, deprecated and unpriced models are skipped, and the default wins ties. Undefined
+ * when nothing is known (no default, no prices): OpenCode then uses its own default.
+ */
+export function cheapUtilityModel(
+  models: readonly OcModel[],
+  defaultModel: OcModel | null | undefined,
+): OcModelRef | undefined {
+  if (!defaultModel?.providerID || !defaultModel.id) return undefined;
+  const sameProvider = models.filter(
+    (m) =>
+      m.providerID === defaultModel.providerID &&
+      !!m.id &&
+      m.enabled !== false &&
+      m.status !== "deprecated",
+  );
+  let best: { model: OcModel; price: number } | undefined;
+  for (const model of [defaultModel, ...sameProvider]) {
+    const price = basePrice(model);
+    if (price !== undefined && (!best || price < best.price)) best = { model, price };
+  }
+  return best ? { providerID: best.model.providerID, id: best.model.id } : undefined;
 }
 
 /** Efforts of a model in a list, by CodeDen id. */

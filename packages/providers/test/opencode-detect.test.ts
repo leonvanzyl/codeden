@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { OpenCodeAdapter } from "../src/opencode/adapter";
 import { authFromProbe, detectOpenCode } from "../src/opencode/detect";
+import { cheapUtilityModel } from "../src/opencode/models";
 import { probeOpenCode } from "../src/opencode/probe";
 
 const fake = {
@@ -106,6 +107,7 @@ describe("OpenCode model discovery", () => {
       await adapter.refreshModels();
       expect(adapter.models().map((m) => m.id)).toEqual([
         "anthropic/claude-opus-5-5",
+        "anthropic/claude-haiku-5-5",
         "openai/gpt-5.5",
         "lmstudio/openai/gpt-oss-20b",
       ]);
@@ -142,6 +144,45 @@ describe("OpenCode model discovery", () => {
     await adapter.refreshModels();
     expect(Date.now() - started).toBeLessThan(5000);
     expect(adapter.models()[0]?.description).toContain("could not be loaded");
+  });
+
+  it("picks the cheapest model from the default's provider for utility jobs", () => {
+    const cost = (input: number, output: number, tier?: number) => ({
+      ...(tier ? { tier: { type: "context", size: tier } } : {}),
+      input,
+      output,
+    });
+    const opus = { id: "opus", providerID: "anthropic", cost: [cost(5, 25)] };
+    const haiku = {
+      id: "haiku",
+      providerID: "anthropic",
+      // The context tier is not the base price, even when it comes first.
+      cost: [cost(0.01, 0.01, 200_000), cost(1, 5)],
+    };
+    const models = [
+      opus,
+      haiku,
+      { id: "cheaper-elsewhere", providerID: "openai", cost: [cost(0.05, 0.4)] },
+      { id: "retired", providerID: "anthropic", status: "deprecated", cost: [cost(0.1, 0.1)] },
+      { id: "off", providerID: "anthropic", enabled: false, cost: [cost(0.1, 0.1)] },
+      { id: "unpriced", providerID: "anthropic" },
+    ];
+    expect(cheapUtilityModel(models, opus)).toEqual({ providerID: "anthropic", id: "haiku" });
+    // The default wins a tie, and stays when nothing on its provider is cheaper.
+    const twin = { id: "twin", providerID: "anthropic", cost: [cost(1, 5)] };
+    expect(cheapUtilityModel([twin, haiku], haiku)).toEqual({
+      providerID: "anthropic",
+      id: "haiku",
+    });
+    expect(cheapUtilityModel(models, models[2])).toEqual({
+      providerID: "openai",
+      id: "cheaper-elsewhere",
+    });
+    // Nothing known: OpenCode's own default.
+    expect(cheapUtilityModel(models, null)).toBeUndefined();
+    expect(
+      cheapUtilityModel([{ id: "a", providerID: "x" }], { id: "b", providerID: "x" }),
+    ).toBeUndefined();
   });
 
   it("declares honest capabilities", () => {

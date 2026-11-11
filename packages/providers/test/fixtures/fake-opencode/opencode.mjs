@@ -3,7 +3,8 @@
 // are logged to FAKE_OPENCODE_LOG (one JSON line each, with the env CodeDen passed); sessions
 // persist to FAKE_OPENCODE_STATE so a new process can resume them.
 // FAKE_OPENCODE_MODE: "no-providers" (nothing configured), "models-error" (`/api/model` 500),
-// "v1" (`--version` reports 1.19.5), "hang" (never prints its URL).
+// "v1" (`--version` reports 1.19.5), "hang" (never prints its URL), "no-archive" (PATCH
+// rejects `archived`, like an OpenCode without archiving).
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 
@@ -53,6 +54,8 @@ function emit(type, data) {
   for (const res of clients) res.write(line);
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// Costs are USD per million tokens: the base price, then context tiers.
+const price = (input, output, tier) => ({ ...(tier ? { tier: { type: "context", size: tier } } : {}), input, output, cache: { read: input / 10, write: input * 1.25 } });
 const MODELS = [
   {
     id: "claude-opus-5-5",
@@ -61,8 +64,11 @@ const MODELS = [
     variants: [{ id: "low" }, { id: "high" }, { id: "max" }],
     limit: { context: 200000 },
     capabilities: { tools: true },
+    cost: [price(5, 25), price(10, 37.5, 200000)],
   },
-  { id: "gpt-5.5", providerID: "openai", name: "GPT-5.5", variants: [{ id: "none" }, { id: "medium" }] },
+  { id: "claude-haiku-5-5", providerID: "anthropic", name: "Claude Haiku 5.5", cost: [price(0.01, 0.01, 200000), price(1, 5)] },
+  { id: "claude-retired", providerID: "anthropic", name: "Retired", status: "deprecated", cost: [price(0.1, 0.1)] },
+  { id: "gpt-5.5", providerID: "openai", name: "GPT-5.5", variants: [{ id: "none" }, { id: "medium" }], cost: [price(0.05, 0.4)] },
   { id: "old", providerID: "openai", name: "Old", status: "deprecated" },
   { id: "no-tools", providerID: "openai", name: "No tools", capabilities: { tools: false } },
   { id: "openai/gpt-oss-20b", providerID: "lmstudio", name: "GPT OSS 20B" },
@@ -285,7 +291,14 @@ const server = createServer((req, res) => {
     if ((p = m(/^\/api\/session\/([^/]+)$/))) {
       const s = sessions[decodeURIComponent(p[1])];
       if (!s) return send(res, 404, { _tag: "SessionNotFoundError", message: "Session not found" });
-      if (req.method === "PATCH") Object.assign(s, body);
+      if (req.method === "PATCH" && mode === "no-archive" && "archived" in body) {
+        return send(res, 400, { _tag: "InvalidRequestError", message: "Unexpected key archived", kind: "Payload" });
+      }
+      if (req.method === "PATCH") {
+        const { archived, ...rest } = body;
+        Object.assign(s, rest);
+        if (archived !== undefined) s.time = { ...(s.time ?? {}), ...(archived ? { archived: Date.now() } : { archived: undefined }) };
+      }
       save();
       return send(res, 200, { data: s });
     }

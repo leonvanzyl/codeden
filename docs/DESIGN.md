@@ -223,7 +223,7 @@ A conversation is a **thread** made of **turns**, and each turn holds **items**.
 Small side jobs use one configurable **utility model**, so they never need a separate API key:
 
 - **The jobs:** follow-up prompt suggestions (§13), compressing a final message for read-aloud (§11.3), session titles, and short summaries in notices.
-- **How it runs:** a one-shot call through an installed provider with no tools. The default is a small Claude model through the Agent SDK, or a small Codex model when only Codex is set up, or OpenCode's configured model (through its text generation endpoint) when only OpenCode is.
+- **How it runs:** a one-shot call through an installed provider with no tools. The default is a small Claude model through the Agent SDK, or a small Codex model when only Codex is set up, or, when only OpenCode is, the cheapest model OpenCode lists from its default model's provider, by listed price (through its text generation endpoint; OpenCode's default model when no prices are known).
 - **Controls:** the model is chosen in Settings, and each job can be switched off. The read-aloud TL;DR is controlled by `voice.readAloud.content` (§11.3), not by a job toggle.
 - **Failures are visible:** a failed or empty one-shot, and having no provider that can run one, are written to the server log (stderr) whatever the debug setting, and the job falls back as described for it.
 
