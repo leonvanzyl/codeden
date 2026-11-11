@@ -85,6 +85,9 @@ export async function handleMcpRequest(
     return await upstream.forward(request);
   } catch (error) {
     if (request.signal.aborted) return new Response(null, { status: 499 });
-    return jsonRpcError(502, `CodeDen server unreachable: ${(error as Error).message}`);
+    return jsonRpcError(
+      502,
+      `CodeDen server unreachable (it may be restarting; call the same tool again in a few seconds): ${(error as Error).message}`,
+    );
   }
 }

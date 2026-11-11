@@ -6,7 +6,7 @@ import { inGithubProject } from "./available";
 export const attachEvidenceTool = defineTool({
   name: "attach_evidence",
   description:
-    "Attach evidence to your pull request (or issue): screenshots and files are committed to the repository's `codeden/evidence` branch and embedded in one comment (images render inline), with an optional Markdown summary and raw test output in a collapsed block. Files are paths in your worktree or artifact ids (e.g. from browser_screenshot). Defaults to your session's PR, then its issue.",
+    "Attach evidence to your pull request or an issue: screenshots and files are committed to the repository's `codeden/evidence` branch and embedded in one comment (images render inline), with an optional Markdown summary and raw test output in a collapsed block. This is how images reach GitHub: its API (and so `gh`) can't upload them. Files are paths in your worktree or the temp folder, the `File:` path browser_screenshot prints, or artifact ids. Defaults to your session's PR, then its issue; pass `target` for any other issue or PR. The result lists each file's URL, which you can reuse in an issue or PR description.",
   roles: ["agent"],
   scope: "session",
   isAvailable: inGithubProject,
