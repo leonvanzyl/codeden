@@ -31,6 +31,7 @@ const RUNNER_PROCESS_TESTS = [
 const SERVER_PROCESS_TESTS = [
   "test/runner-lifecycle.test.ts",
   "test/runner-e2e.test.ts",
+  "test/opencode-e2e.test.ts",
   "test/restart-recovery.test.ts",
   "test/browser.test.ts",
   "test/browser-native.test.ts",
