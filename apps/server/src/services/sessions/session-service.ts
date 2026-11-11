@@ -310,7 +310,7 @@ export class SessionService {
    */
   async continueAfterRestart(id: string, text: string): Promise<void> {
     const session = this.deps.repo.get(id);
-    await this.sendNow(session, { text, attachments: [] }, "codeden");
+    await this.sendNow(session, { text, attachments: [], from: "codeden" }, "codeden");
   }
 
   sessionsWithQueuedMessages(): string[] {

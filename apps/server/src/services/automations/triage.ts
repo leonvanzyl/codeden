@@ -184,7 +184,8 @@ export class TriageService {
         startedBy,
         title: `#${issue.number} ${title}`.slice(0, 200),
         issue,
-        input: { text: prompt, attachments: [] },
+        // The triage automation wrote the brief, whoever accepted it.
+        input: { text: prompt, attachments: [], from: "automation" },
         conflict: decision,
       }),
     );

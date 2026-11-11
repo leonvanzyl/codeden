@@ -8,6 +8,10 @@ const roleText: Record<Exclude<Role, "agent">, { label: string; short: string }>
   pm: { label: "Project manager", short: "PM" },
 };
 
+/** The pill a role badge is drawn in (also used for the other message senders). */
+export const badgePill =
+  "inline-flex h-5 shrink-0 items-center gap-1 rounded-full border border-primary/25 bg-primary/10 px-1.5 text-3xs font-medium text-primary";
+
 /** Role pill for the orchestrator and PM sessions (§8.1). */
 export function RoleBadge({
   role,
@@ -21,13 +25,7 @@ export function RoleBadge({
   if (role === "agent") return null;
   const text = roleText[role];
   return (
-    <span
-      className={cn(
-        "inline-flex h-5 shrink-0 items-center gap-1 rounded-full border border-primary/25 bg-primary/10 px-1.5 text-3xs font-medium text-primary",
-        className,
-      )}
-      data-role={role}
-    >
+    <span className={cn(badgePill, className)} data-role={role}>
       <Bot className="size-3" />
       {short ? text.short : text.label}
     </span>
