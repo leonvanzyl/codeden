@@ -6,7 +6,7 @@ import { countLines, normalizePatch } from "@/lib/api/mock/fixtures/patches";
 import { inboxItems } from "@/lib/api/mock/fixtures/sessions";
 import { MockWorld } from "@/lib/api/mock/world";
 import { cronError, describeCron, nextRuns } from "@/lib/cron";
-import { ageShort, duration, subagentStatsParts, until } from "@/lib/format";
+import { ageShort, duration, subagentStatsParts, subagentStatsTitle, until } from "@/lib/format";
 import { groupInbox, inboxCounts } from "@/lib/inbox";
 import { matchesCombo } from "@/lib/shortcuts";
 import { applyDomainEvent } from "@/lib/snapshot-reducer";
@@ -151,8 +151,17 @@ describe("formatting", () => {
       "640 tokens",
       "4.2s",
     ]);
+    expect(subagentStatsParts({ totalTokens: 1 })).toEqual(["1 token"]);
     expect(subagentStatsParts({})).toEqual([]);
     expect(subagentStatsParts(undefined)).toEqual([]);
+  });
+  it("gives every reported subagent figure exactly in the tooltip", () => {
+    expect(subagentStatsTitle({ totalTokens: 48_213, toolUses: 23, durationMs: 72_000 })).toBe(
+      "48,213 tokens · 23 tool calls · 1m 12s (72,000 ms)",
+    );
+    expect(subagentStatsTitle({ totalTokens: 1, toolUses: 1 })).toBe("1 token · 1 tool call");
+    expect(subagentStatsTitle({ durationMs: 4210 })).toBe("4.2s (4,210 ms)");
+    expect(subagentStatsTitle(undefined)).toBe("");
   });
   it("describes automation triggers", () => {
     expect(describeTrigger({ type: "cron", expression: "0 9 * * 1" })).toBe(

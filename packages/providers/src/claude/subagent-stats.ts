@@ -34,16 +34,21 @@ export function statsFromTaskNotification(msg: unknown): SubagentStats | undefin
   return stats(u.total_tokens, u.tool_uses, u.duration_ms);
 }
 
+/** A whole decimal number (`12`, `12.7`, `-3`, `1e3`); anything else is not a figure. */
+const NUMBER = /^[+-]?(\d+(\.\d*)?|\.\d+)(e[+-]?\d+)?$/i;
+
 /**
  * Figures from the `<usage>…</usage>` trailer the CLI appends to a subagent's text result
  * (`total_tokens: N`, `tool_uses: N`, `duration_ms: N`), for when no structured result came.
+ * Each value must be a complete number; the same rules as the structured figures then apply
+ * (finite, non-negative, rounded).
  */
 export function statsFromUsageTrailer(text: string): SubagentStats | undefined {
   const block = /<usage>([\s\S]*?)<\/usage>/.exec(text)?.[1];
   if (!block) return undefined;
   const field = (name: string) => {
-    const value = new RegExp(`\\b${name}\\s*[:=]\\s*(\\d+)`).exec(block)?.[1];
-    return value === undefined ? undefined : Number(value);
+    const value = new RegExp(`(?:^|\\s)${name}\\s*[:=][ \\t]*([^\\s<]+)`).exec(block)?.[1];
+    return value !== undefined && NUMBER.test(value) ? Number(value) : undefined;
   };
   return stats(field("total_tokens"), field("tool_uses"), field("duration_ms"));
 }

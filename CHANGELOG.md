@@ -6,7 +6,7 @@ All notable changes to CodeDen are documented here. The format follows [Keep a C
 
 ### Added
 
-- **See what each subagent used.** When a subagent finishes, its card in the transcript shows the tokens it used, how many tool calls it made and how long it ran, e.g. `48.2k tokens · 23 tool calls · 1m 12s` (hover the figures for the exact token count). A turn that cost a lot now shows which subagent spent it. Claude reports these figures for both foreground and background subagents; providers that don't report them show no figures.
+- **See what each subagent used.** When a subagent finishes, its card in the transcript shows the tokens it used, how many tool calls it made and how long it ran, e.g. `48.2k tokens · 23 tool calls · 1m 12s` (hover the figures for the exact numbers). A turn that cost a lot now shows which subagent spent it. Claude reports these figures for both foreground and background subagents; providers that don't report them show no figures.
 
 ### Changed
 

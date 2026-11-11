@@ -296,11 +296,23 @@ describe("SubagentCard", () => {
     summary: "Found it in useCart.test.ts",
   };
 
-  it("shows a finished subagent's tokens, tool calls and duration", () => {
+  it("shows a finished subagent's figures beside its summary, in place of the steps", () => {
     const stats = { totalTokens: 48_213, toolUses: 23, durationMs: 72_000 };
     renderWithClient(<SubagentCard item={{ ...sub, stats }} sessionId="s1" />);
-    const line = screen.getByText("48.2k tokens · 23 tool calls · 1m 12s");
-    expect(line.getAttribute("title")).toBe("48,213 tokens used");
+    const figures = screen.getByText("· 48.2k tokens · 23 tool calls · 1m 12s");
+    expect(figures.getAttribute("title")).toBe(
+      "48,213 tokens · 23 tool calls · 1m 12s (72,000 ms)",
+    );
+    // Same row as the summary, which truncates first.
+    expect(figures.parentElement).toBe(screen.getByText(sub.summary ?? "").parentElement);
+    expect(figures.className).toContain("shrink-0");
+  });
+
+  it("shows only the figures reported, each exact in the tooltip", () => {
+    renderWithClient(
+      <SubagentCard item={{ ...sub, stats: { durationMs: 4210 } }} sessionId="s1" />,
+    );
+    expect(screen.getByText("· 4.2s").getAttribute("title")).toBe("4.2s (4,210 ms)");
   });
 
   it("shows no stats while running or when the provider reported none", () => {
