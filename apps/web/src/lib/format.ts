@@ -1,4 +1,4 @@
-import type { SessionStatus } from "@codeden/contracts";
+import type { SessionStatus, SubagentStats } from "@codeden/contracts";
 
 /** "now", "3m", "2h", "4d" — compact age for dense lists. */
 export function ageShort(iso: string, now = Date.now()): string {
@@ -67,6 +67,20 @@ export function usd(n: number): string {
 
 export function plural(n: number, one: string, many = `${one}s`): string {
   return `${n} ${n === 1 ? one : many}`;
+}
+
+/**
+ * A finished subagent's figures, only those its provider reported:
+ * `["48.2k tokens", "23 tool calls", "1m 12s"]`; empty when there are none.
+ */
+export function subagentStatsParts(stats: SubagentStats | undefined): string[] {
+  if (!stats) return [];
+  const parts: string[] = [];
+  if (stats.totalTokens !== undefined)
+    parts.push(`${compact(stats.totalTokens).replace("K", "k")} tokens`);
+  if (stats.toolUses !== undefined) parts.push(plural(stats.toolUses, "tool call"));
+  if (stats.durationMs !== undefined) parts.push(duration(stats.durationMs));
+  return parts;
 }
 
 export type Tone = "running" | "waiting" | "done" | "failed" | "idle";

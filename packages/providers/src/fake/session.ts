@@ -414,7 +414,12 @@ export class FakeSession implements ProviderSession {
       type: "item.completed",
       threadId,
       turnId,
-      item: { ...base, status: "completed", summary: "No issues found." },
+      item: {
+        ...base,
+        status: "completed",
+        summary: "No issues found.",
+        stats: { totalTokens: 48_213, toolUses: 23, durationMs: 72_000 },
+      },
     });
   }
 

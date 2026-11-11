@@ -242,6 +242,21 @@ export const UserQuestionItem = z.object({
   deferred: z.boolean().optional(),
 });
 
+/**
+ * What a finished subagent used, as its provider reports it (§7.3). Each figure is optional:
+ * a provider that reports none leaves `SubagentItem.stats` out. Display only: never added to
+ * usage totals (`usage.updated`), which come from the provider's own turn figures.
+ */
+export const SubagentStats = z.object({
+  /** Tokens the subagent used in total (input, output and cache). */
+  totalTokens: z.int().nonnegative().optional(),
+  /** Tool calls the subagent made. */
+  toolUses: z.int().nonnegative().optional(),
+  /** How long the subagent ran, in milliseconds. */
+  durationMs: z.int().nonnegative().optional(),
+});
+export type SubagentStats = z.infer<typeof SubagentStats>;
+
 /** A subagent run; its transcript lives in the child thread `childThreadId` (§7.3). */
 export const SubagentItem = z.object({
   ...itemBase,
@@ -253,6 +268,8 @@ export const SubagentItem = z.object({
   prompt: z.string().optional(),
   /** Final result summary when completed. */
   summary: z.string().optional(),
+  /** Tokens, tool calls and duration of the finished run, when the provider reports them. */
+  stats: SubagentStats.optional(),
 });
 
 /** One suggested next prompt (§7.5). */

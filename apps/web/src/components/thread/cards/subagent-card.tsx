@@ -1,6 +1,7 @@
 import type { ItemOf } from "@codeden/contracts";
 import { ArrowUpRight, Bot, CheckCircle2, Loader2, XCircle } from "lucide-react";
 import { useShallow } from "zustand/react/shallow";
+import { subagentStatsParts } from "@/lib/format";
 import { threadItems } from "@/lib/transcript/reducer";
 import { cn } from "@/lib/utils";
 import { useLayoutStore } from "@/stores/layout";
@@ -29,12 +30,18 @@ function useChildActivity(
   );
 }
 
-/** Compact subagent card with live status; opens the child thread in the right panel (§7.3). */
+/**
+ * Compact subagent card with live status and, once finished, the tokens, tool calls and
+ * duration its provider reported; opens the child thread in the right panel (§7.3).
+ */
 export function SubagentCard({ item, sessionId }: { item: ItemOf<"subagent">; sessionId: string }) {
   const openChild = useLayoutStore((s) => s.openChildThread);
   const { line, steps } = useChildActivity(sessionId, item.childThreadId);
   const running = item.status === "in_progress";
   const failed = item.status === "failed";
+  // What the finished run used, when the provider reports it (§7.3).
+  const stats = running ? [] : subagentStatsParts(item.stats);
+  const exactTokens = item.stats?.totalTokens;
 
   return (
     <button
@@ -75,10 +82,22 @@ export function SubagentCard({ item, sessionId }: { item: ItemOf<"subagent">; se
           <span className={cn("truncate", running && "text-shine")}>
             {running ? (line ?? "Starting…") : (item.summary ?? (failed ? "Failed" : "Finished"))}
           </span>
-          {steps > 0 && (
+          {stats.length === 0 && steps > 0 && (
             <span className="shrink-0 text-muted-foreground/60 tabular-nums">· {steps} steps</span>
           )}
         </span>
+        {stats.length > 0 && (
+          <span
+            className="mt-0.5 block truncate pl-4.5 text-3xs text-muted-foreground/70 tabular-nums"
+            title={
+              exactTokens === undefined
+                ? undefined
+                : `${exactTokens.toLocaleString("en")} tokens used`
+            }
+          >
+            {stats.join(" · ")}
+          </span>
+        )}
       </span>
       <span className="flex shrink-0 items-center gap-1 self-center text-2xs text-muted-foreground opacity-70 transition-opacity group-hover:opacity-100">
         Open <ArrowUpRight className="size-3.5" />
