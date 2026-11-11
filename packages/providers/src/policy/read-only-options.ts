@@ -3,7 +3,8 @@
  * (`sort -o out`, `find -fprint out`, `rg --pre cmd`, `uniq in out`). The read-only allowlist
  * (`read-only.ts`) admits these programs only without them. Matching errs on the side of
  * refusing: short options are found inside clusters (`-uo`, `-oout.txt`), long options also by
- * the abbreviations GNU tools accept (`--out=x` for `--output`).
+ * the abbreviations GNU tools accept (`--out=x` for `--output`), and every word is checked, also
+ * after `--` (find's expression goes on after it, and a refused file name is harmless).
  */
 
 interface Rule {
@@ -48,19 +49,21 @@ const RULES: Record<string, Rule> = {
   file: { short: "C", valued: "mfFeP", long: ["--compile"] },
 };
 
-/** True when a cluster such as `-uo` holds a short option that `rule` refuses. */
-function refusedShort(arg: string, rule: Rule): boolean {
-  if (!rule.short || !/^-[A-Za-z]/.test(arg)) return false;
+/**
+ * True when a cluster of short options such as `-uo` holds one of `short`. Letters in `valued`
+ * take a value, so the rest of the word after them is that value, not more options.
+ */
+export function refusedShort(arg: string, short: string, valued = ""): boolean {
+  if (!/^-[^-]/.test(arg)) return false;
   for (const c of arg.slice(1)) {
-    if (rule.short.includes(c)) return true;
-    // The rest of the word is this option's value.
-    if (rule.valued?.includes(c)) return false;
+    if (short.includes(c)) return true;
+    if (valued.includes(c)) return false;
   }
   return false;
 }
 
 /** True when `arg` names `long`, exactly or by an abbreviation (`--out` for `--output`). */
-function matchesLong(arg: string, long: string): boolean {
+export function matchesLong(arg: string, long: string): boolean {
   if (!arg.startsWith("--")) return false;
   const name = (arg.split("=")[0] ?? "").toLowerCase();
   return name.length > 2 && long.startsWith(name);
@@ -84,17 +87,28 @@ function uniqWrites(args: string[]): boolean {
   return operands > 1;
 }
 
+/** `date MMDDhhmm…` sets the clock: only `+FORMAT` operands read. */
+function dateSets(args: string[]): boolean {
+  const valued = new Set(["-d", "-f", "-r", "--date", "--file", "--reference"]);
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i] as string;
+    if (valued.has(arg)) i += 1;
+    else if (arg !== "--" && !arg.startsWith("-") && !arg.startsWith("+")) return true;
+  }
+  return false;
+}
+
 /** Why `<name> <args>` would write or run something, or undefined. `args` keep their case. */
 export function writingOptionDenial(name: string, args: string[]): string | undefined {
   const refused = (what: string) => `${name} ${what} is not allowed in a read-only session`;
   if (name === "uniq") return uniqWrites(args) ? refused("with an output file") : undefined;
+  if (name === "date" && dateSets(args)) return refused("with a date to set");
   const rule = RULES[name];
   if (!rule) return undefined;
   for (const arg of args) {
-    if (arg === "--") break;
     if (rule.plusCommands && arg.startsWith("+")) return refused(arg);
     if (rule.words?.includes(arg.toLowerCase())) return refused(arg);
-    if (refusedShort(arg, rule)) return refused(arg);
+    if (rule.short && refusedShort(arg, rule.short, rule.valued)) return refused(arg);
     if (rule.long?.some((long) => matchesLong(arg, long))) {
       return refused(arg.split("=")[0] ?? arg);
     }
@@ -102,22 +116,21 @@ export function writingOptionDenial(name: string, args: string[]): string | unde
   return undefined;
 }
 
-/** The command with its quoted parts blanked out (an unterminated quote runs to the end). */
-function unquoted(command: string): string {
-  return command.replace(/"(?:[^"\\]|\\.)*"?|'[^']*'?/g, " ");
+/** True for programs whose options are checked here (and in the git, gh and sed rules). */
+export function optionSensitive(name: string): boolean {
+  return Object.hasOwn(RULES, name) || ["uniq", "date", "git", "gh", "sed"].includes(name);
 }
 
 /**
  * Why a simple command groups or runs code beyond its own words: unquoted `( )` (PowerShell
  * runs a command in parentheses, even as an argument of an allowlisted cmdlet) and `{ }`
  * (script blocks; also bash brace expansion). `find` may use escaped `\( \)`; git's `@{u}`
- * revision syntax is fine.
+ * revision syntax is fine. `bare` is the command with its quoted parts blanked out.
  */
-export function groupingDenial(name: string, command: string): string | undefined {
-  let bare = unquoted(command);
-  if (name === "find") bare = bare.replace(/\\[()]/g, " ");
-  if (/[()]/.test(bare)) return "Parentheses are not allowed in a read-only session";
-  if (/[{}]/.test(bare.replace(/@\{[\w.:/-]*\}/g, " "))) {
+export function groupingDenial(name: string, bare: string): string | undefined {
+  const text = name === "find" ? bare.replace(/\\[()]/g, " ") : bare;
+  if (/[()]/.test(text)) return "Parentheses are not allowed in a read-only session";
+  if (/[{}]/.test(text.replace(/@\{[\w.:/-]*\}/g, " "))) {
     return "Script blocks and braces are not allowed in a read-only session";
   }
   return undefined;

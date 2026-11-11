@@ -1,33 +1,29 @@
-import { groupingDenial, writingOptionDenial } from "./read-only-options";
-import { ghDenial, gitDenial, sedDenial } from "./read-only-tools";
+import { gitDenial } from "./read-only-git";
+import { groupingDenial, optionSensitive, writingOptionDenial } from "./read-only-options";
+import { ghDenial, sedDenial } from "./read-only-tools";
+import { parseShellWords, redirectsToFile, unquoted } from "./shell-words";
 
 /**
  * Read-only sessions (the orchestrator and PMs, and agent sessions with the `read_only`
  * permission level, §11.2, and plan mode) may inspect a repository but never change it. This
  * allowlist decides which shell commands they may run: commands that only read, with no output
- * redirection, command substitution, grouping or script blocks, and none of the options that
- * make a reading program write or run something (`read-only-options.ts`). Agent sessions may also
- * run the project's checks (tests, lint, type checks) without fix or update flags. Anything else
- * is denied.
+ * redirection, command substitution, variable expansion, grouping or script blocks, and none of
+ * the options that make a reading program write or run something (`read-only-options.ts`,
+ * `read-only-git.ts`). Options are read from the words the shell actually passes (`-'o'` is
+ * `-o`, `shell-words.ts`). Agent sessions may also run the project's checks (tests, lint, type
+ * checks) without fix or update flags. Anything else is denied.
  */
 
 /**
- * Split on every `;`, `&&`, `||`, `|` and newline, even inside quotes. Deliberately cruder
- * than the risk classifier's lexer: for an allowlist, over-splitting only denies more.
+ * Split on every `;`, `&&`, `||`, `|`, `&` (but not the `&` of `>&` or `&>`) and newline, even
+ * inside quotes. Deliberately cruder than the risk classifier's lexer: for an allowlist,
+ * over-splitting only denies more.
  */
 function splitCommands(command: string): string[] {
   return command
-    .split(/\r?\n|;|&&|\|\||\|/)
+    .split(/\r?\n|;|&&|\|\||\||(?<![<>&])&(?![>&])/)
     .map((s) => s.trim())
     .filter(Boolean);
-}
-
-/** Tokenize one simple command, honouring single and double quotes. */
-function tokenize(command: string): string[] {
-  const tokens: string[] = [];
-  const re = /"((?:[^"\\]|\\.)*)"|'([^']*)'|(\S+)/g;
-  for (const m of command.matchAll(re)) tokens.push(m[1] ?? m[2] ?? m[3] ?? "");
-  return tokens;
 }
 
 /** Programs that only read (or print). */
@@ -191,14 +187,20 @@ export function readOnlyCommandDenial(
     return "Command substitution is not allowed in a read-only session";
   }
   for (const simple of splitCommands(command)) {
-    if (/(^|[^0-9&<])>>?(?!\s*(&\d|\/dev\/null|nul\b|\$null))/i.test(simple)) {
-      return "Writing files is not allowed in a read-only session";
+    if (redirectsToFile(simple)) return "Writing files is not allowed in a read-only session";
+    const { words, expands } = parseShellWords(simple);
+    if (expands) {
+      return "Variables and $'…' quoting are not allowed in a read-only session; write the value out";
     }
-    const tokens = tokenize(simple);
-    const name = bin(tokens[0]);
+    const name = bin(words[0]?.raw);
+    const tokens = words.map((w) => w.text);
     const args = tokens.slice(1).map((a) => a.toLowerCase());
-    const grouping = groupingDenial(name, simple);
+    const grouping = groupingDenial(name, unquoted(simple));
     if (grouping) return grouping;
+    // A glob could expand to a file named like an option (`-o…`) that no check saw.
+    if (optionSensitive(name) && words.slice(1).some((w) => w.glob && /^[-*?[]/.test(w.text))) {
+      return `${name} with an unquoted pattern is not allowed in a read-only session; quote it`;
+    }
     if (name === "git") {
       const reason = gitDenial(tokens.slice(1));
       if (reason) return reason;

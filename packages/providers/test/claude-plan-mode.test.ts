@@ -171,6 +171,13 @@ describe("Claude plan mode", () => {
   it("refuses writing commands at every level, through the hook and canUseTool", async () => {
     const writes = [
       "sort -o src/plan-bypass.txt README.md",
+      "sort -'o' src/plan-bypass.txt README.md",
+      'sort -"o" src/plan-bypass.txt README.md',
+      "find -- . -fprint src/list.txt",
+      "find -- . -delete",
+      "git diff --output=src/plan-bypass.txt",
+      "git branch feature",
+      "ls & touch src/x.txt",
       "sort --output=src/plan-bypass.txt README.md",
       "uniq README.md src/copy.md",
       "find . -fprint src/list.txt",

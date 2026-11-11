@@ -151,6 +151,115 @@ describe("read-only sessions (orchestrator and PMs, §11.2)", () => {
     }
   });
 
+  it("reads options from the words the shell passes, and refuses what it can't read", () => {
+    for (const ok of [
+      "cat \"README.md\" 'src/a.ts'",
+      "ls src/*.ts",
+      "rg 'TODO' src/*.ts",
+      "rg TODO src 2>/dev/null",
+      "ls 2>&1",
+      "Get-ChildItem src 2>$null",
+      "date +%s",
+      "date -d tomorrow +%F",
+      "find . -name '*.ts'",
+    ]) {
+      expect(readOnlyCommandDenial(ok), ok).toBeUndefined();
+    }
+    for (const bad of [
+      // Quotes and escapes the shell removes.
+      "sort -'o' src/plan-bypass.txt README.md",
+      'sort -"o" src/plan-bypass.txt README.md',
+      'sort "-o" src/plan-bypass.txt README.md',
+      "sort -\\o src/plan-bypass.txt README.md",
+      "sort -o'' src/plan-bypass.txt README.md",
+      // Words that can't be read from the text.
+      "sort $'-o' src/plan-bypass.txt README.md",
+      "sort -$OPT src/plan-bypass.txt README.md",
+      'sort "$OPT" src/plan-bypass.txt README.md',
+      "sort -[o] src/plan-bypass.txt README.md",
+      "sort * README.md",
+      // find's expression goes on after `--`.
+      "find -- . -fprint src/list.txt",
+      "find -- . -delete",
+      "find -- . -fls src/list.txt",
+      // Background jobs and other redirections.
+      "ls & rm -rf src",
+      "ls &> out.txt",
+      "cat <> out.txt",
+      "ls >| out.txt",
+      "date 010100002020",
+    ]) {
+      expect(readOnlyCommandDenial(bad), bad).toBeTruthy();
+      expect(readOnlyCommandDenial(bad, { allowChecks: true }), bad).toBeTruthy();
+    }
+  });
+
+  it("allows git, gh and sed only in their reading forms", () => {
+    for (const ok of [
+      "git branch",
+      "git branch -a -v",
+      "git branch --show-current",
+      "git branch --contains HEAD",
+      "git branch --list 'feat*'",
+      "git tag",
+      "git tag -l 'v*'",
+      "git tag -n5",
+      "git tag --points-at HEAD",
+      "git remote -v",
+      "git remote show origin",
+      "git remote get-url origin",
+      "git worktree list",
+      "git reflog",
+      "git reflog show main",
+      "git diff --output-indicator-new=+ HEAD",
+      "git log --oneline --exclude=refs/stash --all",
+      "git grep -n -e TODO",
+      "git config --get user.name",
+      "gh pr view 5 --comments",
+      "gh -R o/r issue list --label bug",
+      "gh status",
+      "sed -n 1,40p README.md",
+      "sed -ne '1,5p' README.md",
+    ]) {
+      expect(readOnlyCommandDenial(ok), ok).toBeUndefined();
+    }
+    for (const bad of [
+      "git diff --output=src/plan-bypass.txt",
+      "git diff --output src/plan-bypass.txt",
+      "git log -p --out=src/plan-bypass.txt",
+      "git show --ext-diff HEAD",
+      "git grep -O vim TODO",
+      "git grep -nOvim TODO",
+      "git ls-remote --upload-pack=./run.sh origin",
+      "git branch feature",
+      "git branch -c main copy",
+      "git branch -u origin/main",
+      "git branch --set-upstream-to=origin/main",
+      "git tag v1.0",
+      "git tag -a v1 -m release",
+      "git tag -d v1",
+      "git remote remove origin",
+      "git remote set-url origin https://example.invalid/x",
+      "git remote prune origin",
+      "git worktree remove ../x",
+      "git worktree prune",
+      "git reflog expire --all",
+      "git config --unse user.name",
+      "git -'c' core.pager=less log",
+      "gh repo clone o/r list",
+      "gh release download v1 --pattern view",
+      "gh my-extension list",
+      "sed --in=.bak 's/a/b/' file.txt",
+      "sed --exp='w out.txt' README.md",
+      "sed -n'ew out.txt' README.md",
+      "sed -ne 'w out.txt' README.md",
+      "sed -I '' 's/a/b/' file.txt",
+    ]) {
+      expect(readOnlyCommandDenial(bad), bad).toBeTruthy();
+      expect(readOnlyCommandDenial(bad, { allowChecks: true }), bad).toBeTruthy();
+    }
+  });
+
   it("denies Claude edit tools and writing commands natively", () => {
     const policy = new ClaudePolicy("auto", { cwd: "/repo", extraRoots: [] }, true);
     expect(policy.denial("Edit", { file_path: "/repo/a.ts" })).toMatch(/read-only/);
