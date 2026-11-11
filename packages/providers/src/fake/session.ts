@@ -11,6 +11,7 @@ import { type ProviderSession, ProviderSessionError, type SessionConfigChange } 
 import { AsyncQueue } from "../async-queue";
 import type { FakeProviderOptions } from "./adapter";
 import { fakeMcpInput, fakeMcpResult } from "./mcp-result";
+import { type FakeTurn, proposePlan } from "./plan";
 
 class Interrupted extends Error {}
 
@@ -36,6 +37,7 @@ export class FakeSession implements ProviderSession {
     private readonly fake: FakeProviderOptions,
   ) {
     this.autonomy = opts.autonomy;
+    this.planMode = opts.planMode;
     this.token = opts.resumeToken ?? `fake-${opts.sessionId}`;
     this.rootThreadId = `${opts.sessionId}:thread-root`;
     this.events.push({ type: "thread.started", thread: { id: this.rootThreadId } });
@@ -61,6 +63,13 @@ export class FakeSession implements ProviderSession {
 
   async setAutonomy(level: AutonomyLevel): Promise<void> {
     this.autonomy = level;
+  }
+
+  /** Plan mode: the next turn proposes a plan and asks to implement it (`./plan`). */
+  planMode: boolean;
+
+  async setPlanMode(on: boolean): Promise<void> {
+    this.planMode = on;
   }
 
   async send(input: UserInput): Promise<void> {
@@ -160,6 +169,13 @@ export class FakeSession implements ProviderSession {
         return;
       }
 
+      if (this.planMode) {
+        if (!(await proposePlan(this.planTurn(turn), prompt))) {
+          this.emit({ type: "turn.completed", threadId, turnId, stopReason: "end_turn" });
+          return;
+        }
+        this.planMode = false;
+      }
       await this.streamAssistant(turn, threadId, this.replyFor(prompt));
       await this.todoList(turn);
       if (prompt.includes("[mcp]")) await this.mcpToolCall(turn);
@@ -419,6 +435,17 @@ export class FakeSession implements ProviderSession {
   }
 
   // ------------------------------------------------------------------ helpers
+
+  private planTurn(turn: TurnState): FakeTurn {
+    return {
+      threadId: turn.threadId,
+      turnId: turn.turnId,
+      emit: (event) => this.emit(event),
+      step: () => this.step(turn),
+      nextId: (kind) => this.nextId(kind),
+      waitFor: (requestId) => this.waitForResponse(turn, requestId),
+    };
+  }
 
   private waitForResponse(turn: TurnState, requestId: string): Promise<RuntimeResponse> {
     return new Promise((resolve, reject) => {

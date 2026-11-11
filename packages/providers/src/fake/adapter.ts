@@ -31,7 +31,7 @@ const capabilities: ProviderCapabilities = {
   rollback: false,
   fork: false,
   images: false,
-  planMode: false,
+  planMode: true,
   reasoningEffort: false,
   mcp: false,
   skills: false,
@@ -44,7 +44,8 @@ const capabilities: ProviderCapabilities = {
  * user message, assistant message (word deltas), a todo list, a command tool call,
  * optionally an approval request (waits for `respond`) and a subagent child thread,
  * followups, usage, then `turn.completed`. Prompts containing `[fail]` fail the turn;
- * `[mcp]` adds an MCP tool call with a long JSON result before the command.
+ * `[mcp]` adds an MCP tool call with a long JSON result before the command. In plan mode a
+ * turn first proposes a plan and waits for its approval (`./plan`).
  */
 export class FakeProvider implements ProviderAdapter {
   readonly id = "fake";

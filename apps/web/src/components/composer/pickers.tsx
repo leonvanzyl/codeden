@@ -1,5 +1,5 @@
 import type { AutonomyLevel } from "@codeden/contracts";
-import { Check } from "lucide-react";
+import { Check, ClipboardList } from "lucide-react";
 import { AUTONOMY, AUTONOMY_LEVELS } from "@/components/thread/autonomy";
 import { Button } from "@/components/ui/button";
 import {
@@ -9,8 +9,47 @@ import {
   DropdownMenuLabel,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { TRIGGER_CLASS } from "./model-picker/trigger";
+
+/**
+ * Plan mode on or off. Shown only where the provider reports `capabilities.planMode`: the
+ * agent explores and proposes a plan, and edits only once the plan is approved.
+ */
+export function PlanToggle({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: boolean;
+  onChange: (on: boolean) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          variant="ghost"
+          size="sm"
+          className={cn(TRIGGER_CLASS, value && "bg-primary/10 text-primary hover:text-primary")}
+          aria-label="Plan mode"
+          aria-pressed={value}
+          disabled={disabled}
+          onClick={() => onChange(!value)}
+        >
+          <ClipboardList className="size-3.5" />
+          Plan
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent className="max-w-64">
+        {value
+          ? "Plan mode is on: the agent plans without editing, and starts once you approve the plan."
+          : "Plan first: the agent explores and proposes a plan before it changes anything."}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
 
 /**
  * Permissions picker (§11.2): Read-only, Supervised, Auto or Full, one plain line each.

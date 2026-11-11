@@ -10,7 +10,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { toast } from "sonner";
 import { ModelPicker } from "@/components/composer/model-picker/model-picker";
-import { AutonomyPicker } from "@/components/composer/pickers";
+import { AutonomyPicker, PlanToggle } from "@/components/composer/pickers";
 import { supportsReadOnly } from "@/components/thread/autonomy";
 import { Button } from "@/components/ui/button";
 import {
@@ -32,6 +32,8 @@ interface Choice {
   model: string | null;
   effort: ReasoningEffort | null;
   autonomy: AutonomyLevel | null;
+  /** Start in plan mode (only sent when the provider reports `capabilities.planMode`). */
+  planMode: boolean;
 }
 
 /** Start an agent session; shows the conflict card when matching work is already running. */
@@ -60,6 +62,7 @@ export function NewSessionDialog({
     model: null,
     effort: null,
     autonomy: null,
+    planMode: false,
   });
   const [conflict, setConflict] = useState<ConflictRecord | null>(null);
 
@@ -77,6 +80,8 @@ export function NewSessionDialog({
     provider?.models.find((m) => m.isDefault) ??
     provider?.models[0];
   const autonomy = choice.autonomy ?? project?.autonomy ?? defaultAutonomy;
+  const planSupported = provider?.capabilities.planMode ?? false;
+  const planMode = choice.planMode && planSupported;
 
   const start = useMutation({
     mutationFn: async () => {
@@ -84,6 +89,7 @@ export function NewSessionDialog({
         projectId,
         input: { text: prompt.trim() },
         autonomy,
+        ...(planMode ? { planMode: true } : {}),
         ...(providerId ? { provider: providerId } : {}),
         ...(model ? { model: model.id } : {}),
         ...(choice.effort && provider?.capabilities.reasoningEffort
@@ -183,7 +189,14 @@ export function NewSessionDialog({
                 <ModelPicker
                   providers={providers}
                   value={{ provider: provider.id, model: choice.model, effort: choice.effort }}
-                  onChange={(next) => setChoice((c) => ({ ...c, ...next }))}
+                  onChange={(next) =>
+                    setChoice((c) => {
+                      const nextProvider = providers.find((p) => p.id === next.provider);
+                      // Switching to a provider without plan mode turns the toggle off.
+                      const keepPlan = nextProvider?.capabilities.planMode ?? false;
+                      return { ...c, ...next, planMode: c.planMode && keepPlan };
+                    })
+                  }
                 />
               ) : (
                 <span className="px-2 text-xs text-muted-foreground">No agent provider ready</span>
@@ -193,6 +206,12 @@ export function NewSessionDialog({
                 readOnlySupported={supportsReadOnly(provider)}
                 onChange={(a) => setChoice((c) => ({ ...c, autonomy: a }))}
               />
+              {planSupported && (
+                <PlanToggle
+                  value={planMode}
+                  onChange={(on) => setChoice((c) => ({ ...c, planMode: on }))}
+                />
+              )}
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="ns-key">

@@ -60,6 +60,10 @@ Read-only is offered only on providers that report the `readOnly` capability (Cl
 
 Changing the level while a session runs is saved on the session and sent to the running agent. Claude follows it from its next tool call, into and out of Read-only too; Codex from its next turn (the composer tells you which). Approvals that are already waiting stay waiting.
 
+### Plan mode
+
+**Plan** in the composer or the new-session dialog has the agent plan before it builds. While it plans, CodeDen refuses file edits and writing commands at **every** level, Full included: the agent can read, search and run the project's checks, and write only its own plan notes (Claude's plans folder). Claude Code's own plan mode would otherwise send edits to CodeDen's approval policy, which Auto and Full approve, so CodeDen enforces it itself. The plan ends in a **Plan ready** card: approving lets the agent implement at the session's permission level, and **Keep planning** sends your note back so it revises the plan. Turning Plan off without approving returns the session to its permission level straight away.
+
 ## Automations
 
 Automations run unattended, so they use the same permission levels with safer defaults around them: new, imported and PM-created automations always start **off**, an import never runs anything and warns about Full permissions, and imports are parsed with the same validation as automation files, within limits on file count and size. See [Automations](automations.md#sharing-export-and-import).

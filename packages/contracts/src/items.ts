@@ -172,7 +172,11 @@ export type ApprovalDecision = z.infer<typeof ApprovalDecision>;
 export const ApprovalDecider = z.enum(["user", "policy", "pm"]);
 export type ApprovalDecider = z.infer<typeof ApprovalDecider>;
 
-/** What an approval request is about. */
+/**
+ * What an approval request is about. `plan`: the agent finished planning (plan mode) and asks
+ * to start implementing; approving continues at the session's permission level, denying keeps
+ * it planning with the user's `message` as feedback.
+ */
 export const ApprovalAction = z.enum([
   "command",
   "file_change",
@@ -181,6 +185,7 @@ export const ApprovalAction = z.enum([
   "git_destructive",
   "secrets",
   "tool",
+  "plan",
   "other",
 ]);
 export type ApprovalAction = z.infer<typeof ApprovalAction>;

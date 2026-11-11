@@ -166,6 +166,7 @@ interface ProviderSession {
   steer?(input: UserInput): Promise<void>;    // inject into a running turn
   interrupt(): Promise<void>;
   respond(requestId: string, response: RuntimeResponse): Promise<void>; // approvals, questions
+  setPlanMode?(on: boolean): Promise<void>;   // plan mode on/off (capabilities.planMode, §11.2)
   close(): Promise<void>;
   resumeToken(): string | undefined;          // provider session/thread id for resume
 }
@@ -446,6 +447,11 @@ The UI calls these **Permissions** and shows them as a ladder, **Read-only → S
 - **Claude's own notes** (its plans folder, `plansDirectory` or `~/.claude/plans`, and the project's auto-memory folder) count like the temp directory for Claude sessions under Auto and Full: plan mode and memory writes don't ask. Only the user's own Claude settings can move them, never a folder covering Claude's config folder, the home directory or a filesystem root, and a secrets file there still asks.
 - **The classifier reads commands like a shell:** quoted text, heredoc bodies and PowerShell here-strings are data, redirects count only outside quotes, and relative paths resolve from where a `cd` (in the same command, or an earlier one Claude reports) moved the shell.
 - **Changing the level on a running session** saves it on the session (`PATCH /api/sessions/:id`, recorded as `session.updated`) and sends it to the live provider session. Claude applies it from the next tool call (`liveAutonomy`); Codex from the next turn, through per-turn approval and sandbox overrides. Approvals already waiting stay waiting.
+- **Plan mode** sits on top of the level, for agent sessions on providers that report `capabilities.planMode` (Claude today):
+  - Turned on when a session starts or from the composer (`Session.planMode`, sent like the level). The agent explores and proposes a plan.
+  - While planning, file edits and writing commands are refused at every level, Full included; reads and the project's checks run. The agent's own notes stay writable, since Claude writes its plan file there. **Claude:** the `plan` permission mode, plus CodeDen's PreToolUse hook (Claude's plan mode hands edits to `canUseTool`, which Auto and Full would approve).
+  - The plan ends in a `plan` approval. Approving lets the agent implement at the session's level, and the provider reports leaving plan mode (`session.updated { planMode: false }`). Declining keeps it planning, with the user's note as feedback.
+  - Turning plan mode off without approving returns to the level. A resumed session keeps its current plan state.
 
 The orchestrator and PMs have no write access to project code; they act only through CodeDen tools.
 
@@ -582,7 +588,7 @@ Detailed, trustworthy reports on spend and usage across every provider, project 
   - typed notice cards
 - **Composer:**
   - text, pasted images and file attachments, `@` file mentions, `/` commands and skills
-  - provider, model and effort pickers, plus the autonomy level
+  - provider, model and effort pickers, plus the autonomy level and a **Plan** toggle where the provider reports `planMode` (§11.2)
   - queue or steer while a turn runs
   - the voice button
   - **follow-up chips** after a turn completes (§7.5)

@@ -1,5 +1,6 @@
 import type { PermissionMode } from "@anthropic-ai/claude-agent-sdk";
 import type { ApprovalAction, AutonomyLevel } from "@codeden/contracts";
+import { isInNotes } from "../policy/paths";
 import { readOnlyCommandDenial } from "../policy/read-only";
 import type { RiskContext } from "../policy/risk";
 import { str } from "../util/text";
@@ -8,9 +9,12 @@ import {
   COMMAND_TOOLS,
   defaultApprovalAction,
   EDIT_TOOLS,
+  editPath,
   PLAN_TOOL,
   QUESTION_TOOL,
 } from "./tools";
+
+const FINISH_PLAN = "Finish the plan and present it with ExitPlanMode; once the user approves it";
 
 /** The decision for one tool call. */
 export type Gate = { ask: false } | { ask: true; action: ApprovalAction; reason: string };
@@ -39,6 +43,8 @@ export function permissionModeFor(autonomy: AutonomyLevel, planMode: boolean): P
  */
 export class ClaudePolicy {
   private readonly sessionAllow = new Set<string>();
+  /** Plan mode: edits outside Claude's notes and writing commands are refused. */
+  private planning = false;
 
   constructor(
     private autonomy: AutonomyLevel,
@@ -64,9 +70,17 @@ export class ClaudePolicy {
     this.autonomy = level;
   }
 
-  /** Why a call is refused outright (read-only sessions), or undefined. */
+  /**
+   * Plan mode on or off. Claude's `plan` mode hands file edits to `canUseTool`, which Auto and
+   * Full would approve, so CodeDen refuses them itself while the agent plans.
+   */
+  setPlanning(on: boolean): void {
+    this.planning = on;
+  }
+
+  /** Why a call is refused outright (read-only sessions, plan mode), or undefined. */
   denial(toolName: string, input: Record<string, unknown>): string | undefined {
-    if (!this.isReadOnly) return undefined;
+    if (!this.isReadOnly) return this.planning ? this.planDenial(toolName, input) : undefined;
     if (EDIT_TOOLS.has(toolName)) {
       return this.readOnly
         ? "This session is read-only: it cannot edit files. Act through CodeDen tools instead."
@@ -83,6 +97,23 @@ export class ClaudePolicy {
   }
 
   /**
+   * Plan mode refusals at every level: edits outside Claude's notes folders (where it writes
+   * its plan file) and shell commands outside the read-only allowlist (checks may run).
+   */
+  private planDenial(toolName: string, input: Record<string, unknown>): string | undefined {
+    if (EDIT_TOOLS.has(toolName)) {
+      const target = editPath(input);
+      if (target && isInNotes(target, this.ctx)) return undefined;
+      return `Plan mode: don't edit files yet. ${FINISH_PLAN}, you can implement it.`;
+    }
+    if (COMMAND_TOOLS.has(toolName)) {
+      const reason = readOnlyCommandDenial(str(input, "command") ?? "", { allowChecks: true });
+      return reason ? `Plan mode: ${reason}. ${FINISH_PLAN}, you can run it.` : undefined;
+    }
+    return undefined;
+  }
+
+  /**
    * Decide one tool call. `dir` is the shell's current directory as Claude reports it (an
    * earlier `cd` persists between Bash calls); relative paths resolve from it.
    */
@@ -91,7 +122,7 @@ export class ClaudePolicy {
       return { ask: true, action: "other", reason: "The agent is asking a question" };
     }
     if (toolName === PLAN_TOOL) {
-      return { ask: true, action: "other", reason: "The agent finished planning" };
+      return { ask: true, action: "plan", reason: "The agent finished planning" };
     }
     if (this.sessionAllow.has(this.key(toolName, input))) return { ask: false };
     const risk = assessClaudeTool(toolName, input, dir ? { ...this.ctx, dir } : this.ctx);

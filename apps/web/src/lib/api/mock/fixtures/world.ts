@@ -299,6 +299,7 @@ export const providers: ProviderInfo[] = [
       ...caps,
       subagents: false,
       userQuestions: false,
+      planMode: false,
       skills: true,
       liveAutonomy: false,
     },
