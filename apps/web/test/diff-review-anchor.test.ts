@@ -117,11 +117,11 @@ describe("anchorComments", () => {
       ],
       [{ path: "src/cart.ts", patch: shifted }],
     );
-    expect(anchors.byPath["src/cart.ts"]).toEqual([
+    expect(anchors.byPath.get("src/cart.ts")).toEqual([
       { side: "additions", lineNumber: 14, metadata: ["a", "b"] },
       { side: "additions", lineNumber: 33, metadata: ["c"] },
     ]);
-    expect(anchors.ranges.c).toEqual({
+    expect(anchors.ranges.get("c")).toEqual({
       start: 33,
       side: "additions",
       end: 33,
@@ -133,7 +133,9 @@ describe("anchorComments", () => {
       [comment("a", "src/cart.ts", 12)],
       [{ path: "src/cart.ts", patch: reverted }],
     );
-    expect(later).toEqual({ byPath: {}, ranges: {}, outdated: ["a"] });
+    expect(later.byPath.size).toBe(0);
+    expect(later.ranges.size).toBe(0);
+    expect(later.outdated).toEqual(["a"]);
   });
 
   it("lists a comment on a file that became binary as outdated", () => {
@@ -142,6 +144,18 @@ describe("anchorComments", () => {
       [{ path: "src/cart.ts", patch: before, binary: true }],
     );
     expect(anchors.outdated).toEqual(["a"]);
+  });
+
+  it("places comments on files whose names are also Object properties", () => {
+    for (const path of ["constructor", "__proto__", "toString", "hasOwnProperty"]) {
+      const patch = `diff --git a/${path} b/${path}\n--- /dev/null\n+++ b/${path}\n@@ -0,0 +1 @@\n+x\n`;
+      const written = captureRange(patch, { start: 1, side: "additions", end: 1 });
+      const anchors = anchorComments([{ id: "a", path, ...written }], [{ path, patch }]);
+      expect(anchors.byPath.get(path)).toEqual([
+        { side: "additions", lineNumber: 1, metadata: ["a"] },
+      ]);
+      expect(anchors.outdated).toEqual([]);
+    }
   });
 });
 

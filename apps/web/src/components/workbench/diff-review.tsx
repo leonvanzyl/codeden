@@ -12,7 +12,9 @@ import {
   rangeLabel,
 } from "@/lib/diff-review";
 import { sendToSession } from "@/lib/send-to-session";
+import { cn } from "@/lib/utils";
 import {
+  currentRange,
   hasUnsavedEdit,
   isSending,
   isUnsavedEdit,
@@ -24,15 +26,16 @@ import {
 
 const busyStatuses: SessionStatus[] = ["starting", "running", "waiting"];
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
-const noAnchors: ReviewAnchors = { byPath: {}, ranges: {}, outdated: [] };
+const noAnchors: ReviewAnchors = { byPath: new Map(), ranges: new Map(), outdated: [] };
 
 /**
  * Where one view's comments go in its diff as it is now: under the lines they quote, wherever
- * those are after the diff changed, or listed as outdated (`anchorComments`). A comment that
- * moved takes its new range in the store, so it's labelled and sent with today's numbers.
- * Nothing is placed while `files` is null, the diff not loaded. Only comment ids are watched
- * (a range changes only through this hook, the quote never), so typing in a comment never
- * re-renders the diff itself.
+ * those are after the diff changed, or listed as outdated (`anchorComments`). Each is looked
+ * for near where it was last seen, and the store records where it is now (`place`), so it's
+ * labelled and sent with today's numbers; an outdated one goes back to the lines it was
+ * written on. Nothing is placed while `files` is null, the diff not loaded. Only comment ids
+ * are watched (`moved` changes only through this hook, the quote never), so typing in a
+ * comment never re-renders the diff itself.
  */
 export function useReviewAnchors(
   sessionId: string,
@@ -48,14 +51,13 @@ export function useReviewAnchors(
   const anchors = useMemo(() => {
     if (!files || !ids) return noAnchors;
     const wanted = new Set(ids.split(" "));
-    const comments = sessionComments(useDiffReviewStore.getState(), sessionId);
-    return anchorComments(
-      comments.filter((c) => wanted.has(c.id)),
-      files,
-    );
+    const comments = sessionComments(useDiffReviewStore.getState(), sessionId)
+      .filter((c) => wanted.has(c.id))
+      .map((c) => ({ id: c.id, path: c.path, range: currentRange(c), quote: c.quote }));
+    return anchorComments(comments, files);
   }, [ids, files, sessionId]);
   useEffect(() => {
-    useDiffReviewStore.getState().move(sessionId, anchors.ranges);
+    useDiffReviewStore.getState().place(sessionId, anchors);
   }, [sessionId, anchors]);
   return anchors;
 }
@@ -154,7 +156,8 @@ function CommentCard({
   const { setDraft, save, cancel, edit, remove } = useDiffReviewStore.getState();
   // A comment on its way to the agent reads as sent: no editing until the review settles.
   const locked = useDiffReviewStore((s) => isSending(s, sessionId, comment.id));
-  const label = rangeLabel(comment.range);
+  // Where its lines are now; an outdated one names the lines it was written on, as it's sent.
+  const label = rangeLabel(outdated ? comment.range : currentRange(comment));
   const editing = comment.draft !== undefined && !locked;
   return (
     <div
@@ -242,8 +245,9 @@ function CommentCard({
  * The review bar under the Diff panel toolbar while comments are drafted: how many, across
  * every file and view, with Send to agent and Discard. Sending makes them one message, sent
  * now or queued behind a running turn like any message. An unsaved editor holds Send back;
- * when it isn't on screen (another view, or a diff that didn't load), the bar says so and
- * offers Show (`onShow`: switch to its view and scroll to it) and Cancel.
+ * whenever it isn't on screen (another view, or a diff still loading or that didn't load),
+ * the bar says so, even before any comment is saved, and offers Show (`onShow`: switch to its
+ * view and scroll to it) and Cancel.
  */
 export function ReviewBar({
   session,
@@ -253,7 +257,7 @@ export function ReviewBar({
 }: {
   session: Session;
   scopeKey: string;
-  /** Whether this view's diff is on screen, and so its comments (inline or outdated). */
+  /** Whether this view's diff is loaded and on screen, and so its comments (inline or outdated). */
   diffShown?: boolean;
   onShow?: (comment: ReviewComment) => void;
 }) {
@@ -283,52 +287,59 @@ export function ReviewBar({
       })
       .catch((e: Error) => toast.error("Review not sent", { description: e.message }));
   };
-  if (saved.length === 0) return null;
+  if (saved.length === 0 && hidden.length === 0) return null;
   return (
     <div
       className="shrink-0 border-b border-border bg-primary/[0.06]"
       data-testid="diff-review-bar"
     >
-      <div className="flex h-9 items-center gap-1.5 px-3 text-xs pointer-coarse:h-auto pointer-coarse:min-h-11">
-        <MessageSquare className="size-3.5 text-primary" />
-        <span className="font-medium tabular-nums" aria-live="polite">
-          {plural(saved.length, "comment")}
-        </span>
-        {elsewhere > 0 && (
-          <span className="truncate text-2xs text-muted-foreground">
-            ({elsewhere} in another view)
+      {saved.length > 0 && (
+        <div className="flex h-9 items-center gap-1.5 px-3 text-xs pointer-coarse:h-auto pointer-coarse:min-h-11">
+          <MessageSquare className="size-3.5 text-primary" />
+          <span className="font-medium tabular-nums" aria-live="polite">
+            {plural(saved.length, "comment")}
           </span>
-        )}
-        <div className="ml-auto flex items-center gap-1">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="text-xs text-muted-foreground"
-            disabled={sending}
-            onClick={() => {
-              if (window.confirm(`Discard ${plural(all.length, "draft comment")}?`))
-                useDiffReviewStore.getState().clear(session.id);
-            }}
-          >
-            Discard
-          </Button>
-          <Button
-            size="sm"
-            className="text-xs"
-            disabled={sending || unsaved}
-            title={
-              unsaved
-                ? "Save or cancel the comment you're editing first"
-                : "Send every comment to the agent as one message"
-            }
-            onClick={send}
-          >
-            <SendHorizontal /> {sending ? "Sending…" : "Send to agent"}
-          </Button>
+          {elsewhere > 0 && (
+            <span className="truncate text-2xs text-muted-foreground">
+              ({elsewhere} in another view)
+            </span>
+          )}
+          <div className="ml-auto flex items-center gap-1">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-xs text-muted-foreground"
+              disabled={sending}
+              onClick={() => {
+                if (window.confirm(`Discard ${plural(all.length, "draft comment")}?`))
+                  useDiffReviewStore.getState().clear(session.id);
+              }}
+            >
+              Discard
+            </Button>
+            <Button
+              size="sm"
+              className="text-xs"
+              disabled={sending || unsaved}
+              title={
+                unsaved
+                  ? "Save or cancel the comment you're editing first"
+                  : "Send every comment to the agent as one message"
+              }
+              onClick={send}
+            >
+              <SendHorizontal /> {sending ? "Sending…" : "Send to agent"}
+            </Button>
+          </div>
         </div>
-      </div>
+      )}
       {hidden.length > 0 && (
-        <div className="flex min-h-8 items-center gap-1.5 px-3 pb-1.5 text-2xs text-muted-foreground">
+        <div
+          className={cn(
+            "flex min-h-8 items-center gap-1.5 px-3 text-2xs text-muted-foreground",
+            saved.length > 0 ? "pb-1.5" : "py-1",
+          )}
+        >
           <TriangleAlert className="size-3.5 shrink-0 text-status-waiting" />
           <span
             className="min-w-0 flex-1 truncate"

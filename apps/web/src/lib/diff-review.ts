@@ -166,7 +166,8 @@ export function captureRange(
   };
 }
 
-const sameRange = (a: ReviewRange, b: ReviewRange) =>
+/** Whether two ranges cover the same lines. */
+export const sameRange = (a: ReviewRange, b: ReviewRange) =>
   a.start === b.start && a.side === b.side && a.end === b.end && a.endSide === b.endSide;
 
 /**
@@ -218,12 +219,16 @@ export interface CommentAnchor {
   metadata: string[];
 }
 
-/** Where one view's comments go in its diff as it is now. */
+/**
+ * Where one view's comments go in its diff as it is now. Maps, not plain objects: file paths
+ * come from the repository, and a file named `constructor` or `__proto__` must not read
+ * `Object.prototype`.
+ */
 export interface ReviewAnchors {
   /** Per file path: one anchor per line with comments, under the last line each covers. */
-  byPath: Record<string, CommentAnchor[]>;
+  byPath: ReadonlyMap<string, CommentAnchor[]>;
   /** Each placed comment's range in the diff as it is now, by comment id. */
-  ranges: Record<string, ReviewRange>;
+  ranges: ReadonlyMap<string, ReviewRange>;
   /** Comments whose lines, or whole file, are no longer in the diff, in the order given. */
   outdated: string[];
 }
@@ -234,22 +239,24 @@ export function anchorComments(
   files: { path: string; patch: string; binary?: boolean }[],
 ): ReviewAnchors {
   const rowsByPath = new Map(files.map((f) => [f.path, f.binary ? [] : parsePatchRows(f.patch)]));
-  const anchors: ReviewAnchors = { byPath: {}, ranges: {}, outdated: [] };
+  const byPath = new Map<string, CommentAnchor[]>();
+  const ranges = new Map<string, ReviewRange>();
+  const outdated: string[] = [];
   for (const c of comments) {
     const rows = rowsByPath.get(c.path);
     const range = rows ? relocateRange(rows, c.range, c.quote) : null;
     if (!range) {
-      anchors.outdated.push(c.id);
+      outdated.push(c.id);
       continue;
     }
-    anchors.ranges[c.id] = range;
-    anchors.byPath[c.path] ??= [];
-    const list = anchors.byPath[c.path] as CommentAnchor[];
+    ranges.set(c.id, range);
+    const list = byPath.get(c.path) ?? [];
+    byPath.set(c.path, list);
     const spot = list.find((a) => a.side === range.endSide && a.lineNumber === range.end);
     if (spot) spot.metadata.push(c.id);
     else list.push({ side: range.endSide, lineNumber: range.end, metadata: [c.id] });
   }
-  return anchors;
+  return { byPath, ranges, outdated };
 }
 
 const sideWord = (side: DiffSide) => (side === "additions" ? "new" : "old");

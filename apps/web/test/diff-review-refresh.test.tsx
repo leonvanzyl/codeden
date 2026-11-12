@@ -108,9 +108,10 @@ const session = {
 
 /**
  * A Diff panel on a running session. "All changes" and the one turn's view both show
- * `patch.current`; sent messages land in `sendMessage`.
+ * `patch.current`; the turn's view only once `turnDiff` settles, when given. Sent messages
+ * land in `sendMessage`.
  */
-function renderPanel() {
+function renderPanel(opts: { turnDiff?: Promise<void> } = {}) {
   const patch = { current: guarded };
   const base = createMockClient();
   const sendMessage = vi.fn(async (..._args: Parameters<CodeDenClient["sendMessage"]>) => {});
@@ -119,14 +120,17 @@ function renderPanel() {
     sendMessage,
     getSnapshot: async () => ({ sessions: [session] }) as unknown as Snapshot,
     gitStatus: async () => ({ branch: "b", baseBranch: "main", ahead: 0, behind: 0, files: [] }),
-    getDiff: async (_id: string, scope: DiffResult["scope"]): Promise<DiffResult> => ({
-      scope,
-      files:
-        scope.kind === "uncommitted"
-          ? []
-          : [{ path, change: "modify", additions: 1, deletions: 0, patch: patch.current }],
-      turns: [{ id: "t-1", index: 1, label: "Turn 1", at: "2026-11-12T10:00:00.000Z" }],
-    }),
+    getDiff: async (_id: string, scope: DiffResult["scope"]): Promise<DiffResult> => {
+      if (scope.kind === "turn") await opts.turnDiff;
+      return {
+        scope,
+        files:
+          scope.kind === "uncommitted"
+            ? []
+            : [{ path, change: "modify", additions: 1, deletions: 0, patch: patch.current }],
+        turns: [{ id: "t-1", index: 1, label: "Turn 1", at: "2026-11-12T10:00:00.000Z" }],
+      };
+    },
   };
   const view = renderWithClient(<DiffPanel sessionId={sid} />, client);
   /** A new checkpoint: the panel refetches its diff, as `invalidateWorkbench` makes it. */
@@ -217,6 +221,22 @@ describe("Diff review comments when the diff refreshes", () => {
     expect(text).toContain("+  if (items.length === 0) return 0;\n```\nReturn early when empty.");
   });
 
+  it("sends a comment that moved and then left the diff with the lines it was written on", async () => {
+    const { checkpoint, sendMessage } = renderPanel();
+    await commentOn("additions:2", "Return early when empty.");
+    await checkpoint(linesAbove, "additions:7");
+    expect(await screen.findByText("Comment on new line 4")).toBeTruthy();
+
+    await checkpoint(guardGone, "deletions:21");
+
+    expect(outdatedList().getByText(`${path}, new line 2`)).toBeTruthy();
+    fireEvent.click(sendButton());
+    await waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(1));
+    const text = sendMessage.mock.calls[0]?.[1].text ?? "";
+    expect(text).toContain(`${path}, new line 2`);
+    expect(text).not.toContain("new line 4");
+  });
+
   it("lets an outdated comment be edited and deleted on its own", async () => {
     const { checkpoint } = renderPanel();
     await commentOn("additions:2", "Return early when empty.");
@@ -268,6 +288,39 @@ describe("Diff review comments when the diff refreshes", () => {
     const card = scrolled.mock.contexts.at(-1) as HTMLElement;
     expect(card.getAttribute("data-comment-id")).not.toBeNull();
     expect(within(card).getByDisplayValue("Half-written thou")).toBeTruthy();
+  });
+
+  it("keeps a way to the editor while Show waits for its view's diff to load", async () => {
+    let load = () => {};
+    renderPanel({ turnDiff: new Promise<void>((resolve) => (load = resolve)) });
+    await commentOn("additions:2", "Return early when empty.");
+    openEditorInTurnView("Half-written thou");
+
+    fireEvent.click(await screen.findByRole("button", { name: "Show" }));
+
+    // In the Turn 1 view, its diff not loaded yet: no editor, so the bar still offers Cancel.
+    expect(await screen.findByRole("button", { name: /^Turn/ })).toBeTruthy();
+    expect(screen.queryByRole("textbox", { name: /^Comment on/ })).toBeNull();
+    expect(screen.getByRole("status").textContent).toContain("An unsaved comment");
+    expect(screen.getByRole("button", { name: "Cancel edit" })).toBeTruthy();
+
+    load();
+
+    expect(await screen.findByDisplayValue("Half-written thou")).toBeTruthy();
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("points to an unsaved comment in another view before any comment is saved", async () => {
+    renderPanel();
+    await screen.findByRole("button", { name: "+ additions:2" });
+    openEditorInTurnView("Half-written thou");
+
+    const notice = await screen.findByRole("status");
+    expect(notice.textContent).toContain("An unsaved comment in another view");
+    expect(screen.queryByRole("button", { name: /Send to agent/ })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Show" }));
+
+    expect(await screen.findByDisplayValue("Half-written thou")).toBeTruthy();
   });
 
   it("can cancel an editor in another view from the review bar, unblocking Send", async () => {

@@ -99,7 +99,9 @@ export function DiffPanel({ sessionId }: { sessionId: string }) {
   const canRestore = restoreTarget(scope) !== null && files.length > 0;
   const scopeKey = diffScopeKey(scope);
   // Comments go where their lines are in the diff as loaded now, or into the outdated list.
-  const anchors = useReviewAnchors(sessionId, scopeKey, isLoading || failed ? null : files);
+  // Until it's loaded, none are on screen, so the review bar offers a way to every open one.
+  const ready = !isLoading && !failed;
+  const anchors = useReviewAnchors(sessionId, scopeKey, ready ? files : null);
   const body = useRef<HTMLDivElement>(null);
   const [reveal, setReveal] = useState<string | null>(null);
   const show = useCallback((c: ReviewComment) => {
@@ -218,7 +220,7 @@ export function DiffPanel({ sessionId }: { sessionId: string }) {
         </div>
       </div>
       {session && (
-        <ReviewBar session={session} scopeKey={scopeKey} diffShown={!failed} onShow={show} />
+        <ReviewBar session={session} scopeKey={scopeKey} diffShown={ready} onShow={show} />
       )}
       <div ref={body} className="min-h-0 flex-1 overflow-y-auto scroll-thin">
         {anchors.outdated.length > 0 && (
@@ -253,7 +255,7 @@ export function DiffPanel({ sessionId }: { sessionId: string }) {
                 sessionId={sessionId}
                 scopeKey={scopeKey}
                 file={f}
-                annotations={anchors.byPath[f.path] ?? noComments}
+                annotations={anchors.byPath.get(f.path) ?? noComments}
                 ranges={anchors.ranges}
                 options={{ theme, split, wrap }}
                 onRestore={canRestore ? () => restore.mutate([f.path]) : undefined}
@@ -281,7 +283,7 @@ function FilePatch({
   /** This file's lines with comments under them (`useReviewAnchors`). */
   annotations: CommentAnchor[];
   /** Where each placed comment's lines are now, by comment id. */
-  ranges: Record<string, ReviewRange>;
+  ranges: ReadonlyMap<string, ReviewRange>;
   options: { theme: "dark" | "light"; split: boolean; wrap: boolean };
   onRestore?: () => void;
 }) {
@@ -295,7 +297,7 @@ function FilePatch({
         (c) => c.path === file.path && c.scopeKey === scopeKey && c.draft !== undefined,
       )?.id,
   );
-  const editingRange = editingId ? ranges[editingId] : undefined;
+  const editingRange = editingId ? ranges.get(editingId) : undefined;
   const onComment = useCallback(
     (selected: SelectedLineRange) => {
       const { range, quote } = captureRange(file.patch, selected);
