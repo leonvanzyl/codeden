@@ -15,6 +15,7 @@ import {
   mayMerge,
   pickReviewer,
   protectedHits,
+  queueOrder,
   shouldPause,
 } from "../src/services/factory/policy";
 import { parseVision, VISION_TEMPLATE } from "../src/services/factory/vision";
@@ -86,6 +87,24 @@ describe("factory policy (§10.1)", () => {
     expect(mayMerge(3, limits)).toBe(false);
     expect(shouldPause(1, limits)).toBe(false);
     expect(shouldPause(2, limits)).toBe(true);
+  });
+
+  it("queues repairs of main, then people's issues by age, then the scout's by priority", () => {
+    const at = (min: number) => new Date(Date.UTC(2026, 10, 11, 14, min)).toISOString();
+    const queued = [
+      { id: "scout normal", source: "discovery", score: 0.6, createdAt: at(1) },
+      { id: "person later", source: "issue", score: null, createdAt: at(5) },
+      { id: "scout high", source: "discovery", score: 0.9, createdAt: at(2) },
+      { id: "failed check", source: "failed_check", score: 0.9, createdAt: at(9) },
+      { id: "person earlier", source: "issue", score: null, createdAt: at(0) },
+    ] as const;
+    expect([...queued].sort(queueOrder).map((i) => i.id)).toEqual([
+      "failed check",
+      "person earlier",
+      "person later",
+      "scout high",
+      "scout normal",
+    ]);
   });
 
   it("picks a reviewer on a different provider from the author, falling back with a note", () => {

@@ -16,6 +16,10 @@ All notable changes to CodeDen are documented here. The format follows [Keep a C
 - **Briefs read as briefs.** A session's opening brief from a PM (`start_session`), the factory (builders, reviewers, reverts, the scout and its area reviewers), an automation or triage now shows as rendered Markdown in a card headed by its sender (**Project manager**, **Factory**, **Automation**), instead of raw `**`, `##` and `<issue>` tags in a plain bubble. The factory's fix rounds and nudges, CodeDen's retry and pull request feedback, and the orchestrator's questions to a PM get the same card. Briefs longer than about 12 lines are collapsed with **Show more**, so the transcript leads with the agent's work. This works with Codex and OpenCode sessions too. What you type yourself still shows exactly as typed. Older sessions keep showing their first message as before.
 - **The factory explains itself.** On the pipeline diagram, each step's name (Identify type, Reproduce, Analyze, Implement, Review, Checks, Merge) is underlined and opens a short explanation of what happens there and what moves the work on. A "?" explains each lane (Bug, Feature, Documentation) and the revise loop. The scout, its rounds and review areas, and the factory settings that aren't self-explanatory (auto-merges per day, pause after failures, the scout's schedule and limits) have the same hints. They open on hover, on keyboard focus, or with a tap on a phone.
 
+### Fixed
+
+- **Your issues no longer wait behind the scout's.** In a dark factory, every issue the scout filed went ahead of every issue you filed, so your bugs could sit in the queue for an hour while agents worked only on the scout's features, and it looked as if everything went down the feature pipeline. Free agents now take a fix for a failing check on the default branch first, then the issues you and trusted authors filed (oldest first), then the scout's (by the priority it gave them). Work already queued is reordered on the next step; nothing to migrate.
+
 ## [0.6.0] - 2026-11-11
 
 Maintenance release.

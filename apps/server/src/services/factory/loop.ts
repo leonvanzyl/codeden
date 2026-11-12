@@ -10,7 +10,7 @@ import { archiveFinished } from "./cleanup";
 import { budgetSpend, type FactoryContext, visionOf } from "./context";
 import { classifyPending, intakeFailedChecks, intakeIssues } from "./intake";
 import { advanceEscalated } from "./merge";
-import { budgetExceeded, freeSlots, localDay, mayBuild } from "./policy";
+import { budgetExceeded, freeSlots, localDay, mayBuild, queueOrder } from "./policy";
 import { advanceBuilding, advanceWatching } from "./progress";
 import { advanceScout } from "./scout";
 import { mayAutoMerge } from "./trust";
@@ -111,11 +111,6 @@ function deriveState(ctx: FactoryContext, projectId: string, loop: FactoryLoop):
   if (active.some((i) => i.stage === "building")) return "building";
   if (loop.scout.round) return "discovering";
   return "idle";
-}
-
-/** Queue order: priority (the scout's, failed checks), then arrival. */
-function queueOrder(a: FactoryItem, b: FactoryItem): number {
-  return (b.score ?? 0.5) - (a.score ?? 0.5) || a.createdAt.localeCompare(b.createdAt);
 }
 
 /**
