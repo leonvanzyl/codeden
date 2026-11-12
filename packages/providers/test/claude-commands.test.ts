@@ -24,6 +24,19 @@ describe("Claude `/` commands", () => {
     expect(toProviderCommands(undefined)).toEqual([]);
   });
 
+  it("keeps the built-in row when rows share a name, in either order", () => {
+    const builtin = { name: "compact", description: "Free up context", builtin: true };
+    const custom = { name: "compact", description: "My own compact", argumentHint: "" };
+    const kept = [{ name: "compact", description: "Free up context", builtin: true }];
+    expect(toProviderCommands([custom, builtin])).toEqual(kept);
+    expect(toProviderCommands([builtin, custom])).toEqual(kept);
+    // Without a built-in row, the first one is kept.
+    const other = { name: "compact", description: "Another", argumentHint: "" };
+    expect(toProviderCommands([custom, other])).toEqual([
+      { name: "compact", description: "My own compact" },
+    ]);
+  });
+
   it("reports the list on session.updated, and again only when it changes", () => {
     const events: AgentEvent[] = [];
     const mapper = new ClaudeEventMapper({

@@ -32,6 +32,21 @@ export const ProviderCommand = z.object({
 });
 export type ProviderCommand = z.infer<typeof ProviderCommand>;
 
+/**
+ * One command per name, the one `/<name>` runs: a built-in row wins over other rows of its
+ * name (user, project, plugin), otherwise the first row does. Keeps first-appearance order.
+ */
+export function winningCommands<T extends { name: string; builtin?: boolean }>(
+  commands: readonly T[],
+): T[] {
+  const byName = new Map<string, T>();
+  for (const c of commands) {
+    const kept = byName.get(c.name);
+    if (!kept || (c.builtin === true && kept.builtin !== true)) byName.set(c.name, c);
+  }
+  return [...byName.values()];
+}
+
 /** A command the agent runs, or a skill it loads. */
 export const SlashCommandKind = z.enum(["command", "skill"]);
 export type SlashCommandKind = z.infer<typeof SlashCommandKind>;

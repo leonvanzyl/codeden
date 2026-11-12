@@ -38,12 +38,7 @@ import { HookShelf } from "./hook-shelf";
 import { AgentConfigHooks } from "./hooks-service";
 import { applyChange, claudeProjectKey, diffChange, readServers, sourceFor } from "./mcp";
 import { claudeAutoMemoryDir, findGitRoot, mainRepoRoot, readJson } from "./paths";
-import {
-  loadedClaudeCommands,
-  mergeSlashCommands,
-  reportedCommand,
-  skillCommand,
-} from "./slash-commands";
+import { loadedClaudeCommands, mergeSlashCommands, skillCommand } from "./slash-commands";
 
 export interface AgentConfigServiceDeps {
   /** User home (`~`); tests point it at a temp folder. */
@@ -195,7 +190,8 @@ export class AgentConfigService {
   /**
    * The composer's `/` menu for a session (§13): the skills that apply to its working folder
    * (as What's loaded finds them) and its provider's custom command files; once the provider
-   * has reported the commands it runs for the session (built-in ones included), that list.
+   * has reported a non-empty list of what it runs for the session (built-in ones included),
+   * that list (`mergeSlashCommands`).
    * Role sessions get what applies to their own folder: the orchestrator, outside any
    * project, only user-level entries.
    */
@@ -205,10 +201,10 @@ export class AgentConfigService {
       session.provider === "claude"
         ? loadedClaudeCommands(this.deps.home, session.cwd, gitRoot)
         : [];
-    const reported = this.deps.reportedCommands(sessionId);
     return mergeSlashCommands(
       [...files.skills.map(skillCommand), ...custom],
-      reported?.map((c) => reportedCommand(c, session.provider)) ?? null,
+      this.deps.reportedCommands(sessionId),
+      session.provider,
     );
   }
 

@@ -7,6 +7,7 @@ import {
   type ProviderCommand,
   SessionUpdatedEvent,
   type SlashCommand,
+  winningCommands,
 } from "@codeden/contracts";
 import { and, desc, eq, sql } from "drizzle-orm";
 import type { Db } from "../../db/client";
@@ -96,24 +97,44 @@ export function reportedCommand(command: ProviderCommand, provider: string): Sla
   };
 }
 
+const byName = (a: SlashCommand, b: SlashCommand) => a.name.localeCompare(b.name);
+
 /**
- * The `/` list, sorted by name, one entry per name. `discovered` (skills first, then custom
- * commands, in precedence order: the first entry of a name wins) is what the session's files
- * say. Once the provider has reported its own list, that list decides which names exist (it is
- * what `/<name>` runs); discovered entries then only mark its skills and fill in descriptions.
+ * The `/` list, sorted by name, one entry per name.
+ *
+ * `discovered` (skills first, then custom commands, in precedence order: the first entry of a
+ * name wins) is what the session's files say, and is the list until the provider reports a
+ * non-empty one of its own. From then on the provider's list decides which names exist, since
+ * it is what `/<name>` runs:
+ * - a built-in command is shown as the provider reports it, even if a file shares its name;
+ * - any other name keeps what the files say (a skill stays a skill), and the provider fills in
+ *   a description or argument hint the files lack.
  */
 export function mergeSlashCommands(
   discovered: SlashCommand[],
-  reported: SlashCommand[] | null,
+  reported: ProviderCommand[] | null,
+  provider: string,
 ): SlashCommand[] {
-  const byName = new Map<string, SlashCommand>();
-  const names = reported ? new Set(reported.map((c) => c.name)) : null;
-  for (const entry of [...discovered, ...(reported ?? [])]) {
-    if (!COMMAND_NAME.test(entry.name) || byName.has(entry.name)) continue;
-    if (names && !names.has(entry.name)) continue;
-    byName.set(entry.name, entry);
+  const files = new Map<string, SlashCommand>();
+  for (const entry of discovered) {
+    if (COMMAND_NAME.test(entry.name) && !files.has(entry.name)) files.set(entry.name, entry);
   }
-  return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
+  // No report, or an empty one, says nothing about what exists: the files are the list.
+  if (!reported || reported.length === 0) return [...files.values()].sort(byName);
+  return winningCommands(reported)
+    .filter((c) => COMMAND_NAME.test(c.name))
+    .map((c) => {
+      const own = reportedCommand(c, provider);
+      const file = files.get(c.name);
+      if (c.builtin === true || !file) return own;
+      const argumentHint = file.argumentHint ?? own.argumentHint;
+      return {
+        ...file,
+        description: file.description || own.description,
+        ...(argumentHint ? { argumentHint } : {}),
+      };
+    })
+    .sort(byName);
 }
 
 /**

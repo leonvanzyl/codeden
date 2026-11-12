@@ -132,6 +132,56 @@ describe("a session's `/` commands and skills", () => {
     ]);
   });
 
+  it("keeps the discovered skills when the provider reports an empty list", () => {
+    put(
+      join(home, ".claude", "skills", "deploy", "SKILL.md"),
+      "---\nname: deploy\ndescription: Ship the app\n---\n",
+    );
+    reported = [];
+    expect(list()).toEqual([
+      { name: "deploy", description: "Ship the app", kind: "skill", provider: "claude" },
+    ]);
+  });
+
+  it("shows the built-in a name runs, even when a skill or a custom row shares it", () => {
+    put(
+      join(home, ".claude", "skills", "compact", "SKILL.md"),
+      "---\nname: compact\ndescription: My compact skill\n---\n",
+    );
+    const builtin = {
+      name: "compact",
+      description: "Free up context",
+      argumentHint: "<instructions>",
+      builtin: true,
+    };
+    const custom = { name: "compact", description: "My compact skill" };
+    const shown = {
+      name: "compact",
+      description: "Free up context",
+      kind: "command",
+      provider: "claude",
+      argumentHint: "<instructions>",
+    };
+    for (const rows of [[builtin, custom], [custom, builtin], [builtin]]) {
+      reported = rows;
+      expect(list()).toEqual([shown]);
+    }
+  });
+
+  it("fills a description and argument hint the files lack from the provider's row", () => {
+    put(join(repo, ".claude", "skills", "lint", "SKILL.md"), "---\nname: lint\n---\n");
+    reported = [{ name: "lint", description: "Run the linter", argumentHint: "<path>" }];
+    expect(list()).toEqual([
+      {
+        name: "lint",
+        description: "Run the linter",
+        kind: "skill",
+        provider: "claude",
+        argumentHint: "<path>",
+      },
+    ]);
+  });
+
   it("gives a session outside any project only user-level entries", () => {
     put(join(home, ".claude", "commands", "standup.md"), "Write my standup\n");
     put(join(repo, ".claude", "commands", "release.md"), "Cut a release\n");
