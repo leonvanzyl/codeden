@@ -1,4 +1,4 @@
-import { Settings, type SettingsPatch } from "@codeden/contracts";
+import { Settings, type SettingsPatch, utf8ByteLength } from "@codeden/contracts";
 import type { CodeDenClient } from "../client";
 import { startAmbient } from "./ambient";
 import { mockAutomationsApi } from "./automations";
@@ -89,6 +89,12 @@ export function createMockClient(opts: MockClientOptions = {}): CodeDenClient {
         },
         60,
       ),
+    getToolOutput(sessionId, itemId) {
+      const item = world.item(sessionId, itemId);
+      if (item?.kind !== "tool_call") return Promise.reject(new Error("No such tool call"));
+      const text = item.output?.text ?? "";
+      return delay({ itemId, text, totalBytes: utf8ByteLength(text) }, 80);
+    },
 
     async sendMessage(sessionId, input, mode) {
       const active = running.get(sessionId);

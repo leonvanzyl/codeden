@@ -176,7 +176,11 @@ export const checkoutTranscript = buildTranscript(
           0,
           8_900,
         ),
-        cmd("ck-t7", "pnpm test:e2e checkout --repeat-each=50", passingRun, 0, 96_000),
+        {
+          ...cmd("ck-t7", "pnpm test:e2e checkout --repeat-each=50", passingRun, 0, 96_000),
+          // A long run whose transcript copy was cut: its details offer "Show full output".
+          output: { text: passingRun, truncated: true, totalBytes: 1_284_310 },
+        },
         notice("ck-n1", "Turn checkpoint saved · 2 files changed", "info", "checkpoint"),
         assistant("ck-a2", summary),
         followups("ck-f1", [

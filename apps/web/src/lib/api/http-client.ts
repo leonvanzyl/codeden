@@ -26,6 +26,7 @@ import {
   Snapshot,
   SpeechSummaryResponse,
   StartSessionResponse,
+  ToolOutputResponse,
   UpdateStatus,
 } from "@codeden/contracts";
 import { httpAutomationsApi } from "./automations-api";
@@ -93,6 +94,8 @@ export function createHttpClient(origin: string, opts: HttpClientOptions = {}): 
     onConnectionChange: (listener) => socket.onState(listener),
 
     getSessionDetail: (id) => get(`/sessions/${enc(id)}`, (v) => SessionDetail.parse(v)),
+    getToolOutput: (id, itemId) =>
+      get(`/sessions/${enc(id)}/items/${enc(itemId)}/output`, (v) => ToolOutputResponse.parse(v)),
     async sendMessage(id, input, mode) {
       const body: SendMessageRequestInit = { input, whenBusy: whenBusy[mode] };
       await post(`/sessions/${enc(id)}/messages`, body);

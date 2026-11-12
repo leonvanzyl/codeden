@@ -303,7 +303,7 @@ describe("WorkGroup", () => {
   ];
 
   it("collapses into a summary and expands on click", () => {
-    renderWithClient(<WorkGroup entries={entries} live={false} />);
+    renderWithClient(<WorkGroup sessionId="s1" entries={entries} live={false} />);
     expect(screen.getByText("Ran 1 command and read 1 file")).toBeTruthy();
     expect(screen.queryByText("src/a.ts")).toBeNull();
     fireEvent.click(screen.getByRole("button", { expanded: false, name: /Ran 1 command/ }));
@@ -326,7 +326,7 @@ describe("WorkGroup", () => {
       output: { text: output, truncated: false },
       durationMs: 12,
     };
-    renderWithClient(<WorkGroup entries={[mcp]} live={false} />);
+    renderWithClient(<WorkGroup sessionId="s1" entries={[mcp]} live={false} />);
     const row = screen.getByRole("button", { name: /codeden: triage_issue/ });
     expect(row.textContent).toContain("Discover the model list");
     expect(row.textContent).not.toContain("projectId");
@@ -346,7 +346,7 @@ describe("WorkGroup", () => {
         command: "pnpm build",
       },
     ];
-    renderWithClient(<WorkGroup entries={live} live />);
+    renderWithClient(<WorkGroup sessionId="s1" entries={live} live />);
     expect(screen.getAllByText("pnpm build").length).toBeGreaterThan(0);
   });
 });

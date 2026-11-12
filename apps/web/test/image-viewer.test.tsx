@@ -131,7 +131,9 @@ describe("image viewer", () => {
       title: "A hero image",
       output: { text: JSON.stringify({ artifactIds: ["gen-1"] }), truncated: false },
     };
-    const { client } = renderWithClient(<WorkGroup entries={[entry]} live={false} />);
+    const { client } = renderWithClient(
+      <WorkGroup sessionId="s1" entries={[entry]} live={false} />,
+    );
     await user.click(screen.getByRole("button", { name: "View Generated image" }));
     expect(within(viewer()).getByRole("img").getAttribute("src")).toBe(client.artifactUrl("gen-1"));
     await user.keyboard("{Escape}");
