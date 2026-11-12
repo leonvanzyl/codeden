@@ -65,7 +65,8 @@ function seed(): Map<string, MockFile> {
 
 const delay = <T>(value: T, ms = 120): Promise<T> =>
   new Promise((resolve) => setTimeout(() => resolve(structuredClone(value)), ms));
-const norm = (m: string | null | undefined) => (m?.trim() ? m.trim() : null);
+/** Matchers are kept exactly as written; only missing or empty means "match everything". */
+const norm = (m: string | null | undefined) => (m ? m : null);
 
 export function mockHooksApi(
   diff: (path: string, before: string, after: string) => AgentConfigDiff,
@@ -142,38 +143,40 @@ export function mockHooksApi(
   };
   const show = (hooks: Hooks) => JSON.stringify({ hooks }, null, 2);
 
-  return {
-    listHooks: (projectId) => {
-      const scopes: AgentConfigScope[] = projectId ? ["user", "project", "local"] : ["user"];
-      const sources: HookSource[] = [];
-      const hooks: HookEntry[] = [];
-      for (const scope of scopes) {
-        const f = fileOf(scope, projectId);
-        const base = { provider: "claude" as const, scope, projectId: f.projectId, file: f.file };
-        sources.push({ ...base, exists: true, disableAllHooks: false });
-        for (const [event, groups] of Object.entries(f.hooks)) {
-          groups.forEach((g, groupIndex) => {
-            g.hooks.forEach((handler, handlerIndex) => {
-              hooks.push({
-                ...base,
-                event,
-                matcher: norm(g.matcher),
-                handler,
-                enabled: true,
-                groupIndex,
-                handlerIndex,
-              });
+  const list = (projectId: string | null | undefined): HookListResponse => {
+    const scopes: AgentConfigScope[] = projectId ? ["user", "project", "local"] : ["user"];
+    const sources: HookSource[] = [];
+    const hooks: HookEntry[] = [];
+    for (const scope of scopes) {
+      const f = fileOf(scope, projectId);
+      const base = { provider: "claude" as const, scope, projectId: f.projectId, file: f.file };
+      sources.push({ ...base, exists: true, disableAllHooks: false });
+      for (const [event, groups] of Object.entries(f.hooks)) {
+        groups.forEach((g, groupIndex) => {
+          g.hooks.forEach((handler, handlerIndex) => {
+            hooks.push({
+              ...base,
+              event,
+              matcher: norm(g.matcher),
+              handler,
+              enabled: true,
+              groupIndex,
+              handlerIndex,
             });
           });
-        }
+        });
       }
-      for (const s of shelf) {
-        if (s.scope !== "user" && s.projectId !== projectId) continue;
-        const { id, disabledAt: _at, ...rest } = s;
-        hooks.push({ ...rest, enabled: false, shelfId: id });
-      }
-      return delay<HookListResponse>({ sources, hooks });
-    },
+    }
+    for (const s of shelf) {
+      if (s.scope !== "user" && s.projectId !== projectId) continue;
+      const { id, disabledAt: _at, ...rest } = s;
+      hooks.push({ ...rest, enabled: false, shelfId: id });
+    }
+    return { sources, hooks };
+  };
+
+  return {
+    listHooks: (projectId) => delay(list(projectId)),
     diffHook: async (req) => {
       const p = plan(req);
       if (!p.file || !p.next) return delay(diff("disabled-hooks.json", "", ""));
@@ -186,6 +189,7 @@ export function mockHooksApi(
       return delay({
         file: p.file?.file ?? null,
         backupPath: p.file ? "~/.codeden/backups/agent-config/settings.json" : null,
+        hooks: list(req.listProjectId),
       });
     },
   };

@@ -1,3 +1,5 @@
+import { mkdirSync } from "node:fs";
+import { dirname } from "node:path";
 import {
   type AgentConfigDiff,
   type AgentConfigProvider,
@@ -10,7 +12,8 @@ import {
   providersWith,
   type ShelvedHook,
 } from "@codeden/contracts";
-import { badRequest } from "../errors";
+import { badRequest, errorMessage, forbidden } from "../errors";
+import { resolveInside } from "../files/path-guard";
 import { atomicWrite, unifiedDiff } from "./files";
 import type { HookShelf } from "./hook-shelf";
 import {
@@ -20,6 +23,7 @@ import {
   readHookFile,
   removeHook,
   renderHookChange,
+  unusableSource,
   updateHook,
 } from "./hooks";
 
@@ -57,7 +61,15 @@ export class AgentConfigHooks {
     const project = projectId ? this.deps.project(projectId) : null;
     const scopes: AgentConfigScope[] = project ? ["user", "project", "local"] : ["user"];
     const read = providersWith("hooks").flatMap((provider) =>
-      scopes.map((scope) => readHookFile(this.fileFor(provider, scope, project))),
+      scopes.map((scope) => {
+        const file = this.fileFor(provider, scope, project);
+        try {
+          guard(file);
+        } catch (error) {
+          return { source: unusableSource(file, errorMessage(error)), hooks: [] };
+        }
+        return readHookFile(file);
+      }),
     );
     const shelved = this.deps.shelf
       .list()
@@ -78,7 +90,13 @@ export class AgentConfigHooks {
     return unifiedDiff(plan.file.file, existed, before, after);
   }
 
+  /** Apply a change; the response carries the list for `req.listProjectId` afterwards. */
   apply(req: HookChangeRequest): HookWriteResponse {
+    const written = this.write(req);
+    return { ...written, hooks: this.list(req.listProjectId) };
+  }
+
+  private write(req: HookChangeRequest): Pick<HookWriteResponse, "file" | "backupPath"> {
     const plan = this.plan(req);
     if (!plan.file) {
       plan.afterWrite?.();
@@ -91,6 +109,10 @@ export class AgentConfigHooks {
     let backupPath: string | null;
     try {
       backupPath = existed ? this.deps.backup(file) : null;
+      // Check again once the folder exists, right before writing, so a link created since
+      // the plan can't redirect the write.
+      mkdirSync(dirname(file), { recursive: true });
+      guard(plan.file);
       atomicWrite(file, after);
     } catch (error) {
       plan.rollback?.();
@@ -161,7 +183,10 @@ export class AgentConfigHooks {
     }
   }
 
-  /** The settings file a request addresses, after checking the provider has hooks. */
+  /**
+   * The settings file a request addresses, after checking the provider has hooks and that the
+   * file stays inside its scope's folder (so a linked `.claude` can't redirect the edit).
+   */
   private target(provider: AgentConfigProvider, scope: AgentConfigScope, projectId?: string) {
     if (!agentConfigFeatures[provider].hooks) {
       throw badRequest(`CodeDen does not edit ${provider} hooks`, "hooks_unsupported");
@@ -169,7 +194,9 @@ export class AgentConfigHooks {
     if (scope !== "user" && !projectId) {
       throw badRequest("projectId is required for this scope", "project_required");
     }
-    return this.fileFor(provider, scope, projectId ? this.deps.project(projectId) : null);
+    const file = this.fileFor(provider, scope, projectId ? this.deps.project(projectId) : null);
+    guard(file);
+    return file;
   }
 
   private fileFor(
@@ -179,6 +206,21 @@ export class AgentConfigHooks {
   ): HookFile {
     // Only Claude Code has hooks today (`agentConfigFeatures`); its files are the only kind.
     return claudeHookFile(scope, this.deps.home, project);
+  }
+}
+
+/**
+ * Refuse (403 `path_outside_root`) a settings file whose real path, following links on the file
+ * and on every existing ancestor, leaves its scope's folder.
+ */
+function guard(f: HookFile): void {
+  try {
+    resolveInside(f.root, f.file);
+  } catch {
+    throw forbidden(
+      `${f.file} resolves outside ${f.root} through a link; CodeDen won't read or write it`,
+      "path_outside_root",
+    );
   }
 }
 

@@ -52,7 +52,7 @@ The **Hooks** tab lists the hooks in each settings file, grouped by file (user, 
 - **Disable** a hook. Claude Code has no switch for a single hook, so CodeDen takes it out of the settings file and keeps it in `~/.codeden/agent-config/disabled-hooks.json`. It stays in the list, marked **disabled**, and **Enable** writes it back to the same file. The settings file always shows exactly what runs, in CodeDen and in the terminal.
 - **Delete** a hook. Deleting a disabled hook only removes CodeDen's copy.
 
-Only the `hooks` key is written. If a file sets `disableAllHooks: true`, the tab says so: none of that file's hooks run. If a file can't be parsed, the tab shows the error and leaves it alone. The tab appears for providers whose native config has hooks; today that is Claude Code.
+Only the `hooks` key is written, and matchers keep their exact text. If a file sets `disableAllHooks: true`, the tab says so: none of that file's hooks run. If a file can't be parsed, or the project's `.claude` folder or settings file is a link that leads outside the project (or outside your home, for user settings), the tab shows the error and leaves it alone. The tab appears for providers whose native config has hooks; today that is Claude Code.
 
 ## What's loaded
 

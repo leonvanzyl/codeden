@@ -48,23 +48,34 @@ export function entryToForm(e: HookEntry): HookForm {
   };
 }
 
-/** Fields that make sense for every hook type, kept when the type changes. */
-const COMMON = ["if", "statusMessage", "once"];
+/**
+ * Fields that belong to one hook type (from Claude Code's hooks reference). When a hook changes
+ * type, only these are dropped, and only if the new type doesn't have them too.
+ */
+const TYPE_FIELDS: Record<EditableHookType, string[]> = {
+  command: ["command", "args", "async", "asyncRewake", "shell"],
+  http: ["url", "headers", "allowedEnvVars"],
+  prompt: ["prompt", "model"],
+  agent: ["prompt", "model"],
+};
 
 /**
- * The form as a native handler. Editing starts from the previous handler so its other fields
- * (`if`, `statusMessage`, `async`, `headers`, …) and their order survive; when the type
- * changes, only the fields every type shares are kept.
+ * The form as a native handler. Editing starts from the previous handler so every field the
+ * dialog doesn't show (`if`, `statusMessage`, `model`, `headers`, future fields, …) and their
+ * order survive. When the type changes, only the old type's own fields that the new type
+ * doesn't have are dropped (e.g. `command` and `async` going from command to prompt).
  */
 export function formToHandler(form: HookForm, previous?: HookHandler): HookHandler {
-  const sameType = previous?.type === form.type;
   const main = HOOK_TYPE_MAIN_FIELD[form.type];
+  const oldType = previous && isEditableHook(previous) ? previous.type : undefined;
+  const incompatible = oldType
+    ? TYPE_FIELDS[oldType].filter((f) => !TYPE_FIELDS[form.type].includes(f))
+    : [];
   // `type` and the main field first for a new handler; existing keys keep their places.
   const base: Record<string, unknown> = { type: form.type, [main]: "" };
   for (const [k, v] of Object.entries(previous ?? {})) {
-    if (sameType || COMMON.includes(k)) base[k] = v;
+    if (!incompatible.includes(k)) base[k] = v;
   }
-  for (const field of Object.values(HOOK_TYPE_MAIN_FIELD)) if (field !== main) delete base[field];
   base.type = form.type;
   base[main] = form.value.trim();
   const timeout = Number(form.timeout);

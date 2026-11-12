@@ -5,6 +5,7 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -51,6 +52,13 @@ describe("JSON top-level member splice", () => {
     const tricky = '{ "note": "\\"hooks\\": {}", "nested": { "hooks": 1 } }';
     const out = JSON.parse(setTopLevelMember(tricky, "hooks", hooks));
     expect(out).toEqual({ note: '"hooks": {}', nested: { hooks: 1 }, hooks });
+  });
+
+  it("replaces the last of duplicate keys, the one JSON.parse uses", () => {
+    const text = '{"hooks":{"a":1},"x":2,"hooks":{"b":2}}';
+    const out = setTopLevelMember(text, "hooks", { c: 3 });
+    expect(out).toBe('{"hooks":{"a":1},"x":2,"hooks":{"c":3}}');
+    expect(JSON.parse(out).hooks).toEqual({ c: 3 });
   });
 });
 
@@ -152,7 +160,9 @@ describe("hooks in Claude Code settings files", () => {
         handler: { type: "command", command },
       });
     const created = add("local", "Stop", undefined, "notify.sh");
-    expect(created).toEqual({ file: localFile(), backupPath: null });
+    expect(created).toMatchObject({ file: localFile(), backupPath: null });
+    // The response lists the hooks as they are now (user only: no `listProjectId`).
+    expect(created.hooks.sources.map((s) => s.scope)).toEqual(["user"]);
     expect(JSON.parse(readFileSync(localFile(), "utf8"))).toEqual({
       hooks: { Stop: [{ hooks: [{ type: "command", command: "notify.sh" }] }] },
     });
@@ -298,9 +308,140 @@ describe("hooks in Claude Code settings files", () => {
     const before = readFileSync(projectFile(), "utf8");
     const req: HookChangeRequest = { action: "remove", target: { shelfId: again } };
     expect(svc.diff(req).changed).toBe(false);
-    expect(svc.apply(req)).toEqual({ file: null, backupPath: null });
+    const dropped = svc.apply({ ...req, listProjectId: "p1" });
+    expect(dropped).toMatchObject({ file: null, backupPath: null });
+    expect(dropped.hooks.sources.map((s) => s.scope)).toEqual(["user", "project", "local"]);
+    expect(dropped.hooks.hooks).toHaveLength(0);
     expect(readFileSync(projectFile(), "utf8")).toBe(before);
     expect(svc.list("p1").hooks).toHaveLength(0);
+  });
+
+  it("keeps a matcher's exact text through listing, edits and a disable/enable round trip", () => {
+    const handler = { type: "command", command: "guard.sh" };
+    put(
+      projectFile(),
+      JSON.stringify({ hooks: { PreToolUse: [{ matcher: " Bash ", hooks: [handler] }] } }),
+    );
+    const listed = svc.list("p1").hooks[0];
+    expect(listed?.matcher).toBe(" Bash ");
+    const target = {
+      provider: "claude",
+      scope: "project",
+      projectId: "p1",
+      event: "PreToolUse",
+      groupIndex: 0,
+      handlerIndex: 0,
+      expected: handler,
+    };
+    const disabled = apply({ action: "disable", target, listProjectId: "p1" });
+    const shelved = disabled.hooks.hooks.find((h) => !h.enabled);
+    expect(shelved?.matcher).toBe(" Bash ");
+    apply({ action: "enable", target: { shelfId: shelved?.shelfId } });
+    const doc = JSON.parse(readFileSync(projectFile(), "utf8"));
+    expect(doc.hooks.PreToolUse).toEqual([{ matcher: " Bash ", hooks: [handler] }]);
+
+    // An edit that keeps the matcher stays in place; "Bash" without the spaces is another group.
+    const edited = { ...handler, command: "guard2.sh" };
+    apply({ action: "update", target, event: "PreToolUse", matcher: " Bash ", handler: edited });
+    apply({
+      action: "add",
+      provider: "claude",
+      scope: "project",
+      projectId: "p1",
+      event: "PreToolUse",
+      matcher: "Bash",
+      handler,
+    });
+    expect(JSON.parse(readFileSync(projectFile(), "utf8")).hooks.PreToolUse).toEqual([
+      { matcher: " Bash ", hooks: [edited] },
+      { matcher: "Bash", hooks: [handler] },
+    ]);
+  });
+
+  it("edits the effective hooks when the file repeats the hooks key", () => {
+    const guard = { type: "command", command: "guard.sh" };
+    put(userFile(), `{"hooks":{},"hooks":${JSON.stringify({ Stop: [{ hooks: [guard] }] })}}`);
+    const listed = svc.list().hooks;
+    expect(listed.map((h) => h.handler.command)).toEqual(["guard.sh"]);
+    const target = {
+      provider: "claude",
+      scope: "user",
+      event: "Stop",
+      groupIndex: 0,
+      handlerIndex: 0,
+      expected: guard,
+    };
+    expect(svc.diff(HookChange.parse({ action: "remove", target })).changed).toBe(true);
+    apply({ action: "remove", target });
+    const text = readFileSync(userFile(), "utf8");
+    expect(JSON.parse(text).hooks).toEqual({});
+    expect(text).not.toContain("guard.sh");
+    expect(svc.list().hooks).toHaveLength(0);
+  });
+
+  it("refuses settings files that a link takes outside their folder", () => {
+    const outside = join(dir, "outside");
+    mkdirSync(outside, { recursive: true });
+    // A repository whose `.claude` folder links somewhere else (a junction needs no rights on
+    // Windows).
+    symlinkSync(outside, join(repo, ".claude"), "junction");
+    const add = {
+      action: "add",
+      provider: "claude",
+      scope: "project",
+      projectId: "p1",
+      event: "Stop",
+      handler: { type: "command", command: "x" },
+    };
+    expect(errorCode(() => svc.diff(HookChange.parse(add)))).toBe("403 path_outside_root");
+    expect(errorCode(() => apply(add))).toBe("403 path_outside_root");
+    expect(errorCode(() => apply({ ...add, scope: "local" }))).toBe("403 path_outside_root");
+    expect(existsSync(join(outside, "settings.json"))).toBe(false);
+    expect(existsSync(join(outside, "settings.local.json"))).toBe(false);
+
+    put(
+      join(outside, "settings.json"),
+      JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: "command", command: "secret" }] }] } }),
+    );
+    const list = svc.list("p1");
+    const project = list.sources.find((s) => s.scope === "project");
+    expect(project?.error).toContain("resolves outside");
+    expect(list.sources.find((s) => s.scope === "user")?.error).toBeUndefined();
+    expect(list.hooks.some((h) => h.handler.command === "secret")).toBe(false);
+    // Changing an outside hook by position is refused too.
+    const target = {
+      provider: "claude",
+      scope: "project",
+      projectId: "p1",
+      event: "Stop",
+      groupIndex: 0,
+      handlerIndex: 0,
+      expected: { type: "command", command: "secret" },
+    };
+    expect(errorCode(() => apply({ action: "remove", target }))).toBe("403 path_outside_root");
+    expect(readFileSync(join(outside, "settings.json"), "utf8")).toContain("secret");
+  });
+
+  it("refuses a settings file that is itself a link to a file outside", (ctx) => {
+    const outsideFile = join(dir, "outside", "settings.json");
+    put(outsideFile, "{}\n");
+    mkdirSync(join(repo, ".claude"), { recursive: true });
+    try {
+      symlinkSync(outsideFile, projectFile(), "file");
+    } catch {
+      // File links need extra rights on Windows; the folder case above covers the guard.
+      ctx.skip();
+    }
+    const add = {
+      action: "add",
+      provider: "claude",
+      scope: "project",
+      projectId: "p1",
+      event: "Stop",
+      handler: { type: "command", command: "x" },
+    };
+    expect(errorCode(() => apply(add))).toBe("403 path_outside_root");
+    expect(readFileSync(outsideFile, "utf8")).toBe("{}\n");
   });
 
   it("refuses unparsable files, missing projects and providers without hooks", () => {

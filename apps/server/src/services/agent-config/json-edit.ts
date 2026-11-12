@@ -111,7 +111,9 @@ function serialise(value: unknown, unit: string, memberIndent: string, eol: stri
 
 /**
  * Set top-level member `key` to `value`: replace its value text if present, otherwise append it
- * as the last member. Everything outside that value is kept byte for byte.
+ * as the last member. Everything outside that value is kept byte for byte. When the key appears
+ * more than once, the last one is replaced: it is the one `JSON.parse` (and so the provider)
+ * uses, so the edit changes the effective setting.
  */
 export function setTopLevelMember(text: string, key: string, value: unknown): string {
   const top = scanTopLevel(text);
@@ -119,7 +121,7 @@ export function setTopLevelMember(text: string, key: string, value: unknown): st
   const multiline = text.slice(top.open, top.close).includes("\n");
   const first = top.members[0];
   const unit = multiline ? (first ? lineIndent(text, first.keyStart) : "") || "  " : "";
-  const existing = top.members.find((m) => m.key === key);
+  const existing = top.members.findLast((m) => m.key === key);
   if (existing) {
     const indent = multiline ? lineIndent(text, existing.keyStart) : "";
     const body = serialise(value, unit, indent, eol);

@@ -53,8 +53,33 @@ describe("HooksList", () => {
     await waitFor(() => expect(confirm.disabled).toBe(false));
     fireEvent.click(confirm);
     await waitFor(() => expect(changeHook).toHaveBeenCalled());
+    // The change asks for this page's list back and shows it without another request.
+    expect(changeHook).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "disable", listProjectId: "p-storefront" }),
+    );
     expect(await screen.findByText("disabled")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Enable PreToolUse Bash" })).toBeTruthy();
+  });
+
+  it("shows a file's disableAllHooks notice even when no hooks are listed", async () => {
+    const client = createMockClient();
+    vi.spyOn(client.agentConfig, "listHooks").mockResolvedValue({
+      sources: [
+        {
+          provider: "claude",
+          scope: "user",
+          projectId: null,
+          file: "C:\\Users\\you\\.claude\\settings.json",
+          exists: true,
+          disableAllHooks: true,
+        },
+      ],
+      hooks: [],
+    });
+    renderWithClient(<HooksList projectId={null} />, client);
+    expect(await screen.findByText("No hooks configured")).toBeTruthy();
+    expect(screen.getByText(/This file sets disableAllHooks/)).toBeTruthy();
+    expect(screen.getByText("C:\\Users\\you\\.claude\\settings.json")).toBeTruthy();
   });
 
   it("keeps a handler's other fields when it is edited", () => {
@@ -64,6 +89,7 @@ describe("HooksList", () => {
       if: "Bash(git *)",
       async: true,
       timeout: 5,
+      custom: { keep: true },
     };
     const form = {
       event: "PreToolUse",
@@ -73,15 +99,33 @@ describe("HooksList", () => {
       timeout: "",
     };
     const edited = formToHandler(form, previous);
-    expect(edited).toEqual({ type: "command", command: "b.sh", if: "Bash(git *)", async: true });
+    expect(edited).toEqual({
+      type: "command",
+      command: "b.sh",
+      if: "Bash(git *)",
+      async: true,
+      custom: { keep: true },
+    });
     expect(Object.keys(formToHandler({ ...form, timeout: "9" }, previous))).toEqual(
       Object.keys(previous),
     );
-    // A new type keeps only the fields every type shares.
+    // A new type drops only the old type's own fields (`command`, `async`); the rest stays.
     expect(formToHandler({ ...form, type: "prompt", value: "Safe?" }, previous)).toEqual({
       type: "prompt",
       prompt: "Safe?",
       if: "Bash(git *)",
+      custom: { keep: true },
+    });
+    // Prompt and agent share `prompt` and `model`, so switching between them keeps both.
+    const prompt = { type: "prompt", prompt: "Safe?", model: "haiku", statusMessage: "Checking" };
+    expect(
+      formToHandler({ ...form, type: "agent", value: "Safe?", timeout: "60" }, prompt),
+    ).toEqual({
+      type: "agent",
+      prompt: "Safe?",
+      model: "haiku",
+      statusMessage: "Checking",
+      timeout: 60,
     });
   });
 });

@@ -58,7 +58,7 @@ export const HookEventName = z
   .string()
   .min(1)
   .max(64)
-  .regex(/^[A-Za-z][A-Za-z0-9]*$/);
+  .regex(/^[A-Za-z]+$/);
 
 /**
  * One hook handler, as stored natively. `type` is `command`, `http`, `mcp_tool`, `prompt`,
@@ -108,7 +108,10 @@ export const HookSource = z.object({
   exists: z.boolean(),
   /** The file sets `disableAllHooks: true`: none of its hooks run. */
   disableAllHooks: z.boolean(),
-  /** Set when the file could not be parsed; its hooks are then not listed. */
+  /**
+   * Set when the file can't be used: it doesn't parse, or it resolves (through a link) outside
+   * its scope's folder. Its hooks are then not listed and it can't be written.
+   */
   error: z.string().optional(),
 });
 export type HookSource = z.infer<typeof HookSource>;
@@ -124,7 +127,10 @@ export const HookEntry = z.object({
   /** The settings file it is (or, when disabled, was) defined in. */
   file: z.string(),
   event: z.string(),
-  /** Tool name or regex the group matches; null when the group has none (matches all). */
+  /**
+   * Tool name or regex the group matches, exactly as written; null when the group has none or
+   * an empty one (matches all).
+   */
   matcher: z.string().nullable(),
   handler: HookHandler,
   /** False for a hook CodeDen took out of the file; it does not run. */
@@ -164,9 +170,18 @@ export type ShelvedHookRef = z.infer<typeof ShelvedHookRef>;
 /** Where a hook goes: event, optional matcher, handler. */
 const HookPlacement = {
   event: HookEventName,
-  /** Omitted or empty: the group has no matcher (matches everything). */
+  /**
+   * Tool name or regex, written exactly as given (whitespace can matter in a regex). Omitted or
+   * empty: the group has no matcher (matches everything).
+   */
   matcher: z.string().max(1_000).optional(),
   handler: HookHandlerInput,
+};
+
+/** Every change also says which list to return in `HookWriteResponse.hooks`. */
+const HookListView = {
+  /** The project whose hooks to list in the response (the page's selection); user only if absent. */
+  listProjectId: Id.optional(),
 };
 
 /**
@@ -185,11 +200,21 @@ export const HookChangeRequest = z.discriminatedUnion("action", [
     scope: AgentConfigScope,
     projectId: Id.optional(),
     ...HookPlacement,
+    ...HookListView,
   }),
-  z.object({ action: z.literal("update"), target: HookTarget, ...HookPlacement }),
-  z.object({ action: z.literal("remove"), target: z.union([HookTarget, ShelvedHookRef]) }),
-  z.object({ action: z.literal("disable"), target: HookTarget }),
-  z.object({ action: z.literal("enable"), target: ShelvedHookRef }),
+  z.object({
+    action: z.literal("update"),
+    target: HookTarget,
+    ...HookPlacement,
+    ...HookListView,
+  }),
+  z.object({
+    action: z.literal("remove"),
+    target: z.union([HookTarget, ShelvedHookRef]),
+    ...HookListView,
+  }),
+  z.object({ action: z.literal("disable"), target: HookTarget, ...HookListView }),
+  z.object({ action: z.literal("enable"), target: ShelvedHookRef, ...HookListView }),
 ]);
 export type HookChangeRequest = z.infer<typeof HookChangeRequest>;
 
@@ -217,5 +242,7 @@ export const HookWriteResponse = z.object({
   /** The settings file written, or null when only the shelf changed. */
   file: z.string().nullable(),
   backupPath: z.string().nullable(),
+  /** The hooks after the change, for the request's `listProjectId`. */
+  hooks: HookListResponse,
 });
 export type HookWriteResponse = z.infer<typeof HookWriteResponse>;

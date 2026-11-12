@@ -1,5 +1,11 @@
-import type { AgentConfigDiff, HookChangeRequest, HookEntry, HookSource } from "@codeden/contracts";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import type {
+  AgentConfigDiff,
+  HookChangeRequest,
+  HookEntry,
+  HookListResponse,
+  HookSource,
+} from "@codeden/contracts";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, Pencil, Plus, Power, PowerOff, Trash2, Webhook } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -40,10 +46,12 @@ interface Pending {
 /** Hooks from each provider's settings files, by file (§12.4). */
 export function HooksList({ projectId }: { projectId: string | null }) {
   const client = useClient();
-  const list = useQuery({
-    queryKey: ["agent-config-hooks", projectId],
-    queryFn: () => client.agentConfig.listHooks(projectId),
-  });
+  const queryClient = useQueryClient();
+  const queryKey = ["agent-config-hooks", projectId];
+  const list = useQuery({ queryKey, queryFn: () => client.agentConfig.listHooks(projectId) });
+  /** Every change returns the list as it is now, for this page's project. */
+  const setHooks = (hooks: HookListResponse) => queryClient.setQueryData(queryKey, hooks);
+  const view = projectId ? { listProjectId: projectId } : {};
   const [dialog, setDialog] = useState<{ editing: HookEntry | null } | null>(null);
   const [pending, setPending] = useState<Pending | null>(null);
   const [diff, setDiff] = useState<AgentConfigDiff | undefined>();
@@ -65,7 +73,7 @@ export function HooksList({ projectId }: { projectId: string | null }) {
     onSuccess: (res, p) => {
       setPending(null);
       setForgetting(null);
-      void list.refetch();
+      setHooks(res.hooks);
       toast.success(p.done, {
         description: res.backupPath ? `Backup: ${res.backupPath}` : (res.file ?? undefined),
       });
@@ -85,7 +93,7 @@ export function HooksList({ projectId }: { projectId: string | null }) {
       title: `Delete the ${label(h)}`,
       confirmLabel: "Delete hook",
       done: `Deleted the ${label(h)}`,
-      req: { action: "remove", target: hookTarget(h) },
+      req: { action: "remove", target: hookTarget(h), ...view },
     });
   };
   const toggle = (h: HookEntry) =>
@@ -95,13 +103,13 @@ export function HooksList({ projectId }: { projectId: string | null }) {
             title: `Enable the ${label(h)}`,
             confirmLabel: "Enable hook",
             done: `Enabled the ${label(h)}`,
-            req: { action: "enable", target: { shelfId: h.shelfId } },
+            req: { action: "enable", target: { shelfId: h.shelfId }, ...view },
           }
         : {
             title: `Disable the ${label(h)}`,
             confirmLabel: "Disable hook",
             done: `Disabled the ${label(h)}`,
-            req: { action: "disable", target: hookTarget(h) },
+            req: { action: "disable", target: hookTarget(h), ...view },
           },
     );
 
@@ -137,7 +145,10 @@ export function HooksList({ projectId }: { projectId: string | null }) {
       <div className="space-y-4">
         {sources.map((source) => {
           const own = hooks.filter((h) => sourceKey(h) === sourceKey(source));
-          if (own.length === 0 && !source.error && hooks.length === 0) return null;
+          // With no hooks at all, only files with something to say (an error, or
+          // disableAllHooks) are shown under the empty state.
+          const notice = source.error || source.disableAllHooks;
+          if (own.length === 0 && !notice && hooks.length === 0) return null;
           return (
             <section
               key={sourceKey(source)}
@@ -187,9 +198,10 @@ export function HooksList({ projectId }: { projectId: string | null }) {
       <HookDialog
         open={dialog !== null}
         onOpenChange={(open) => !open && setDialog(null)}
+        projectId={projectId}
         sources={sources}
         editing={dialog?.editing ?? null}
-        onSaved={() => void list.refetch()}
+        onSaved={setHooks}
       />
       <PatchDialog
         open={pending !== null}
@@ -220,7 +232,7 @@ export function HooksList({ projectId }: { projectId: string | null }) {
                   title: "",
                   confirmLabel: "",
                   done: `Deleted the ${label(forgetting)}`,
-                  req: { action: "remove", target: { shelfId: forgetting.shelfId } },
+                  req: { action: "remove", target: { shelfId: forgetting.shelfId }, ...view },
                 })
               }
             >

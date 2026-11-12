@@ -349,12 +349,26 @@ describe("agent configuration API", () => {
       expected: hook?.handler,
     };
     const disabled = HookWriteResponse.parse(
-      (await h.api("POST", "/agent-config/hooks", { action: "disable", target })).body,
+      (
+        await h.api("POST", "/agent-config/hooks", {
+          action: "disable",
+          target,
+          listProjectId: h.projectId,
+        })
+      ).body,
     );
     expect(disabled.backupPath).toBeTruthy();
     expect(existsSync(h.server.paths.disabledHooks)).toBe(true);
+    // The response carries the refreshed list for the page's project.
+    expect(disabled.hooks.sources.map((s) => s.scope)).toEqual(["user", "project", "local"]);
+    expect(disabled.hooks.hooks.find((x) => x.scope === "project")).toMatchObject({
+      event: "PreToolUse",
+      enabled: false,
+    });
     const bad = await h.api("POST", "/agent-config/hooks", { ...add, event: "Not an event" });
     expect(bad.status).toBe(400);
+    const digits = await h.api("POST", "/agent-config/hooks", { ...add, event: "Stop2" });
+    expect(digits.status).toBe(400);
   });
 
   it("reports what a session loads, including CodeDen's MCP server", async () => {

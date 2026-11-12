@@ -70,7 +70,7 @@ describe("agent configuration contracts", () => {
       if: "Edit(*.ts)",
       statusMessage: "Formatting",
     };
-    roundTrip(HookListResponse, {
+    const list: HookListResponse = {
       sources: [
         {
           provider: "claude",
@@ -115,7 +115,8 @@ describe("agent configuration contracts", () => {
           shelfId: "h1",
         },
       ],
-    });
+    };
+    roundTrip(HookListResponse, list);
     const target = {
       provider: "claude",
       scope: "project",
@@ -129,13 +130,16 @@ describe("agent configuration contracts", () => {
       action: "update",
       target,
       event: "PreToolUse",
-      matcher: "Bash",
+      matcher: " Bash ",
       handler,
+      listProjectId: "p1",
     });
     roundTrip(HookChangeRequest, { action: "remove", target });
     roundTrip(HookChangeRequest, { action: "remove", target: { shelfId: "h1" } });
     roundTrip(HookChangeRequest, { action: "enable", target: { shelfId: "h1" } });
-    roundTrip(HookWriteResponse, { file: null, backupPath: null });
+    roundTrip(HookWriteResponse, { file: null, backupPath: null, hooks: list });
+    // The refreshed list is part of the contract, not stripped.
+    expect(HookWriteResponse.safeParse({ file: null, backupPath: null }).success).toBe(false);
     expect(providersWith("hooks")).toEqual(["claude"]);
   });
 
@@ -149,6 +153,7 @@ describe("agent configuration contracts", () => {
     expect(ok({ type: "http" })).toBe(false);
     expect(ok({ type: "agent", prompt: "Check it", timeout: 0 })).toBe(false);
     expect(ok({ type: "command", command: "x" }, "Pre Tool")).toBe(false);
+    expect(ok({ type: "command", command: "x" }, "Stop2")).toBe(false);
   });
 
   it("validates locators and server names", () => {

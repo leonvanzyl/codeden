@@ -26,15 +26,20 @@ export interface HookFile {
   provider: AgentConfigProvider;
   scope: AgentConfigScope;
   projectId: string | null;
+  /** The folder the file must stay inside, links included: the home or the project checkout. */
+  root: string;
   file: string;
 }
 
 const isRecord = (v: unknown): v is Native =>
   typeof v === "object" && v !== null && !Array.isArray(v);
 const isGroup = (v: unknown): v is Group => isRecord(v) && Array.isArray(v.hooks);
-/** A group's matcher; missing or empty means "match everything". */
+/**
+ * A group's matcher exactly as written (whitespace can matter in a regex); missing or empty
+ * means "match everything".
+ */
 export const matcherOf = (m: unknown): string | null =>
-  typeof m === "string" && m.trim() !== "" ? m.trim() : null;
+  typeof m === "string" && m !== "" ? m : null;
 
 const unparsable = (file: string, why: string) =>
   new ServiceError(422, "config_unparsable", `${file} could not be parsed: ${why}`);
@@ -50,6 +55,7 @@ export function claudeHookFile(
       provider: "claude",
       scope: "user",
       projectId: null,
+      root: home,
       file: join(home, ".claude", "settings.json"),
     };
   }
@@ -58,7 +64,21 @@ export function claudeHookFile(
     provider: "claude",
     scope,
     projectId: project.id,
+    root: project.path,
     file: join(project.path, ".claude", name),
+  };
+}
+
+/** A source that can't be read or written, with why (unparsable, or outside its folder). */
+export function unusableSource(f: HookFile, error: string): HookSource {
+  return {
+    provider: f.provider,
+    scope: f.scope,
+    projectId: f.projectId,
+    file: f.file,
+    exists: existsSync(f.file),
+    disableAllHooks: false,
+    error,
   };
 }
 
@@ -91,7 +111,7 @@ export function readHookFile(f: HookFile): { source: HookSource; hooks: HookEntr
     loaded = load(f.file);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    return { source: { ...base, exists: true, disableAllHooks: false, error: message }, hooks: [] };
+    return { source: unusableSource(f, message), hooks: [] };
   }
   const { text, doc } = loaded;
   const source = { ...base, exists: text !== null, disableAllHooks: doc.disableAllHooks === true };

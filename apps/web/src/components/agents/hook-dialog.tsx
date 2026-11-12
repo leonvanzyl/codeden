@@ -4,6 +4,7 @@ import {
   type AgentConfigScope,
   type HookChangeRequest,
   type HookEntry,
+  type HookListResponse,
   type HookSource,
   KNOWN_CLAUDE_HOOK_EVENTS,
 } from "@codeden/contracts";
@@ -94,17 +95,21 @@ function Field({
 export function HookDialog({
   open,
   onOpenChange,
+  projectId,
   sources,
   editing,
   onSaved,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** The project picked on the page (the list returned after saving is for it). */
+  projectId: string | null;
   /** Settings files that can take hooks (from `listHooks`). */
   sources: HookSource[];
   /** The hook being edited (its file is then fixed). */
   editing: HookEntry | null;
-  onSaved: () => void;
+  /** Called with the hooks as they are after the save. */
+  onSaved: (hooks: HookListResponse) => void;
 }) {
   const client = useClient();
   const writable = sources.filter((s) => !s.error);
@@ -126,7 +131,13 @@ export function HookDialog({
   const scopes = writable.filter((s) => s.provider === source?.provider);
   const handler = formToHandler(form, editing?.handler);
   const request = (): HookChangeRequest | null => {
-    const placement = { event: form.event, matcher: form.matcher.trim() || undefined, handler };
+    // The matcher is sent exactly as typed: whitespace can matter in a regex.
+    const placement = {
+      event: form.event,
+      matcher: form.matcher === "" ? undefined : form.matcher,
+      handler,
+      ...(projectId ? { listProjectId: projectId } : {}),
+    };
     if (editing) return { action: "update", target: hookTarget(editing), ...placement };
     if (!source) return null;
     return {
@@ -165,7 +176,7 @@ export function HookDialog({
       });
       setReview(false);
       onOpenChange(false);
-      onSaved();
+      onSaved(res.hooks);
     },
     onError: (e) => toast.error("Not saved", { description: e.message }),
   });
