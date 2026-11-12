@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type {
   AgentEvent,
@@ -5,9 +6,16 @@ import type {
   RunnerCommandOf,
   RunnerEventMessage,
 } from "@codeden/contracts";
-import { FakeProvider, type ProviderAdapter, type ProviderSession } from "@codeden/providers";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import {
+  FakeProvider,
+  type ProviderAdapter,
+  ProviderRegistry,
+  type ProviderSession,
+} from "@codeden/providers";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Journal, type RunningRunner, startRunner } from "../src";
+import { DeltaBatcher } from "../src/delta-batcher";
+import { SessionHost } from "../src/session-host";
 import { makeRepo, removeDir, TestServer, tempDir } from "./helpers";
 
 const THREAD = "t-root";
@@ -74,10 +82,10 @@ function stallingProvider(events: AgentEvent[]): {
   return { adapter, streamed };
 }
 
-const start = (cwd: string): RunnerCommandOf<"session.start"> => ({
+const start = (cwd: string, providerId = "stalling"): RunnerCommandOf<"session.start"> => ({
   name: "session.start",
   sessionId: "s1",
-  providerId: "stalling",
+  providerId,
   checkpoints: false,
   options: {
     sessionId: "s1",
@@ -144,66 +152,133 @@ describe("streamed deltas through the runner", () => {
       event: delta("m1", "Hello"),
     });
   });
+});
 
-  it("are replayed in full and in order after the runner is killed mid-stream", async () => {
-    const { adapter, streamed } = stallingProvider([
-      ...opening,
-      { type: "item.completed", ...at, item: message("m1", "Hello", "completed") },
+/**
+ * A provider whose session streams whatever the test feeds it. `feed` resolves once the
+ * session host has taken every event (the generator only moves on once the previous event was
+ * handled), so the test knows exactly what has reached the batcher.
+ */
+function fedProvider(): {
+  adapter: ProviderAdapter;
+  feed: (...events: AgentEvent[]) => Promise<void>;
+} {
+  const queue: AgentEvent[] = [];
+  let wake: () => void = () => {};
+  let taken: () => void = () => {};
+  async function* stream(): AsyncGenerator<AgentEvent> {
+    for (;;) {
+      for (let next = queue.shift(); next; next = queue.shift()) yield next;
+      taken();
+      await new Promise<void>((resolve) => {
+        wake = resolve;
+      });
+    }
+  }
+  const session: ProviderSession = {
+    events: stream(),
+    send: async () => {},
+    interrupt: async () => {},
+    respond: async () => {},
+    close: async () => {},
+    resumeToken: () => "fed-1",
+  };
+  const adapter: ProviderAdapter = {
+    id: "fed",
+    displayName: "Fed",
+    detect: () => new FakeProvider().detect(),
+    capabilities: () => new FakeProvider().capabilities(),
+    models: () => [],
+    openSession: async () => session,
+  };
+  const feed = (...events: AgentEvent[]) => {
+    const done = new Promise<void>((resolve) => {
+      taken = resolve;
+    });
+    queue.push(...events);
+    wake();
+    return done;
+  };
+  return { adapter, feed };
+}
+
+describe("a runner killed mid-stream", () => {
+  // Batching windows and the journal's persist interval run on controlled time.
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("replays every journaled event the server had not stored, merged deltas included", async () => {
+    // Wired like the runner: session host -> delta batcher -> journal append, then delivery.
+    const dir = join(home, "runner");
+    const journal = new Journal(dir);
+    const delivered: RunnerEventMessage[] = [];
+    const batcher = new DeltaBatcher((event) => delivered.push(journal.append(event)));
+    const { adapter, feed } = fedProvider();
+    const host = new SessionHost(new ProviderRegistry([adapter]), (event) => batcher.push(event));
+    await host.start(start(home, "fed"));
+
+    await feed(...opening); // "Hel" + "lo" wait in the batching window...
+    vi.advanceTimersByTime(50); // ...until it closes: one merged delta
+    const threadStarted = delivered[2]?.seq ?? 0;
+    journal.ack(threadStarted); // the server stored the thread start
+    await feed(delta("m1", " wor"), delta("m1", "ld"));
+    // Another event of the session journals the waiting " wor" + "ld" first.
+    await feed({ type: "item.completed", ...at, item: message("m1", "Hello world", "completed") });
+    vi.advanceTimersByTime(250); // the journal persists that ack
+    const turnStarted = delivered[3]?.seq ?? 0;
+    journal.ack(turnStarted); // acked in memory; its persist is still 250 ms away
+    await feed(
       { type: "item.started", ...at, item: message("m2", "", "in_progress") },
-      delta("m2", "wor"),
-      delta("m2", "ld"),
-    ]);
-    const server = await attach(adapter);
-    await server.request(start(home));
-    await streamed;
-    await server.waitFor(
-      (m) =>
-        m.type === "event" &&
-        m.event.kind === "agent" &&
-        m.event.event.type === "item.started" &&
-        m.event.event.item.id === "m2",
+      delta("m2", "Still"),
+      delta("m2", " typing"), // left waiting in the batching window
     );
-    const received = server.events();
-    expect(received.map(label).slice(2)).toEqual([
+    vi.advanceTimersByTime(30);
+    expect(delivered.map(label)).toEqual([
+      "session.process",
+      "session.process",
       "agent:thread.started",
       "agent:turn.started",
       "agent:item.started",
-      "agent:item.delta", // "Hel" + "lo", merged
+      "agent:item.delta",
+      "agent:item.delta",
       "agent:item.completed",
       "agent:item.started",
     ]);
+    expect(stateOf(dir)).toMatchObject({ ackedSeq: threadStarted });
 
-    // The server stores events up to the merged delta and acks them; the runner only moves its
-    // acked position in memory (the status round trip makes sure it has seen the ack).
-    const stored = received[5]?.seq ?? 0;
-    expect(received[5]?.event).toEqual({
-      kind: "agent",
-      sessionId: "s1",
-      event: delta("m1", "Hello"),
-    });
-    server.send({ type: "ack", seq: stored });
-    const status = await server.request({ name: "runner.status" });
-    expect(status.journal.unacked).toBe(2);
+    // Killed: its timers die with it (the waiting batch and the pending persist), nothing is
+    // closed or flushed, and the host, batcher and journal are never used again. Only the
+    // files on disk survive.
+    vi.clearAllTimers();
 
-    // Killed now: a new runner process loads the journal as it is on disk and the server
-    // resumes from what it stored. "wor" + "ld" were still waiting in the batching window:
-    // never journaled or sent, they end with the runner, as does the turn they belong to.
-    const restarted = new Journal(join(home, "runner"));
-    expect(restarted.lastSeq).toBe(received.at(-1)?.seq);
-    restarted.ack(stored);
-    const replay = restarted.after(stored);
-    expect(replay).toEqual(received.filter((m) => m.seq > stored));
+    const restarted = new Journal(dir);
+    expect(restarted.lastSeq).toBe(delivered.at(-1)?.seq);
+    // The acked position on disk is behind: the turn start still counts as unacked...
+    expect(restarted.unacked).toBe(delivered.length - 3);
+    // ...until the server resumes from the last event it stored.
+    restarted.ack(turnStarted);
+    const replay = restarted.after(turnStarted);
+    expect(replay).toEqual(delivered.slice(4)); // complete messages: seq, ts and payload
+    const agent = (event: AgentEvent) => ({ kind: "agent", sessionId: "s1", event });
     expect(replay.map((m) => m.event)).toEqual([
-      {
-        kind: "agent",
-        sessionId: "s1",
-        event: { type: "item.completed", ...at, item: message("m1", "Hello", "completed") },
-      },
-      {
-        kind: "agent",
-        sessionId: "s1",
-        event: { type: "item.started", ...at, item: message("m2", "", "in_progress") },
-      },
+      agent({ type: "item.started", ...at, item: message("m1", "", "in_progress") }),
+      agent(delta("m1", "Hello")),
+      agent(delta("m1", " world")),
+      agent({ type: "item.completed", ...at, item: message("m1", "Hello world", "completed") }),
+      agent({ type: "item.started", ...at, item: message("m2", "", "in_progress") }),
     ]);
+    // "Still" + " typing" were never journaled or sent, so they are gone, along with the turn
+    // the kill cut off. Seqs carry on after the last journaled event.
+    expect(restarted.append({ kind: "runner.draining", reason: "restarted" }).seq).toBe(
+      (delivered.at(-1)?.seq ?? 0) + 1,
+    );
   });
 });
+
+function stateOf(dir: string): unknown {
+  return JSON.parse(readFileSync(join(dir, "state.json"), "utf8"));
+}
