@@ -1,5 +1,6 @@
 import {
   type ChecksState,
+  GithubAuthorAssociation,
   type GithubCheck,
   type GithubChecksSummary,
   type GithubPr,
@@ -26,7 +27,7 @@ fragment PrFields on PullRequest {
       ... on StatusContext { context state targetUrl }
     } } } } }
   }
-  reviews(last: 20) { nodes { id author { login } state body submittedAt url } }
+  reviews(last: 20) { nodes { id author { login } authorAssociation state body submittedAt url } }
   reviewRequests(first: 20) { nodes { requestedReviewer {
     __typename
     ... on User { login }
@@ -90,6 +91,8 @@ export interface GqlPullRequest {
     nodes: Array<{
       id: string;
       author: { login: string } | null;
+      /** `OWNER`, `MEMBER`, `COLLABORATOR`, `CONTRIBUTOR`, `NONE`, ... */
+      authorAssociation?: string;
       state: string;
       body: string;
       submittedAt: string | null;
@@ -98,29 +101,41 @@ export interface GqlPullRequest {
   };
 }
 
+/** A PR as read, with the account that read it. */
+export interface FetchedPr {
+  node: GqlPullRequest;
+  /**
+   * Login of the account the request ran as (GraphQL `viewer`, answered in the same request, so
+   * it is the credential actually used, after any 401 refresh). Null when GitHub didn't say.
+   */
+  viewer: string | null;
+}
+
 /** Fetch up to `PR_BATCH_SIZE` PRs per request; missing numbers are left out. */
 export async function fetchPullRequests(
   client: GithubClient,
   owner: string,
   repo: string,
   numbers: number[],
-): Promise<GqlPullRequest[]> {
-  const out: GqlPullRequest[] = [];
+): Promise<FetchedPr[]> {
+  const out: FetchedPr[] = [];
   const unique = [...new Set(numbers)];
   for (let i = 0; i < unique.length; i += PR_BATCH_SIZE) {
     const batch = unique.slice(i, i + PR_BATCH_SIZE);
     const fields = batch.map((n) => `pr${n}: pullRequest(number: ${n}) { ...PrFields }`).join("\n");
     const query = `query($owner: String!, $repo: String!) {
+  viewer { login }
   repository(owner: $owner, name: $repo) {
 ${fields}
   }
 }
 ${PR_FIELDS}`;
-    const data = await client.graphql<{ repository: Record<string, GqlPullRequest | null> | null }>(
-      query,
-      { owner, repo },
-    );
-    for (const node of Object.values(data.repository ?? {})) if (node) out.push(node);
+    const data = await client.graphql<{
+      viewer?: { login?: string | null } | null;
+      repository: Record<string, GqlPullRequest | null> | null;
+    }>(query, { owner, repo });
+    const viewer = data.viewer?.login || null;
+    for (const node of Object.values(data.repository ?? {})) if (node) out.push({ node, viewer });
   }
   return out;
 }
@@ -196,6 +211,12 @@ const REVIEW_STATES: Record<string, GithubReview["state"]> = {
   PENDING: "pending",
 };
 
+/** GitHub's `CommentAuthorAssociation`; a value this build doesn't know counts as `none`. */
+function authorAssociation(value: string | undefined): GithubAuthorAssociation {
+  const parsed = GithubAuthorAssociation.safeParse(value?.toLowerCase());
+  return parsed.success ? parsed.data : "none";
+}
+
 /** Issue numbers named by closing keywords in a PR body (`Fixes #12`, `closes #3`). */
 export function closingIssueNumbers(body: string): number[] {
   const out = new Set<number>();
@@ -262,6 +283,7 @@ export function toGithubPr(
       .map((r) => ({
         id: r.id,
         author: r.author?.login ?? null,
+        authorAssociation: authorAssociation(r.authorAssociation),
         state: REVIEW_STATES[r.state] ?? "commented",
         body: r.body,
         submittedAt: r.submittedAt,

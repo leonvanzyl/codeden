@@ -14,6 +14,7 @@ import {
 import type { Db } from "../../db/client";
 import type { EventStore } from "../../events/store";
 import { errorMessage } from "../errors";
+import type { TrustedAuthors } from "../github/review-trust";
 import type { InboxService } from "../inbox-service";
 import type { ProjectService } from "../projects/project-service";
 import type { SessionRepo } from "../sessions/repo";
@@ -61,6 +62,8 @@ export interface OrchestrationDeps {
   projects: ProjectService;
   inbox: InboxService;
   github?: GithubPort;
+  /** The project's trusted authors, whose PR reviews count without write access. Default: none. */
+  trustedAuthors?: TrustedAuthors;
   automation?: AutomationPort;
   options?: OrchestrationOptions;
   log?: (message: string) => void;
@@ -369,7 +372,7 @@ export class OrchestrationService {
             finalMessage: (sessionId, turnId) =>
               finalAssistantMessage(this.deps.db, sessionId, turnId),
           }),
-          ...deriveGithubNotices(events, session),
+          ...deriveGithubNotices(events, session, this.deps.trustedAuthors),
         ];
         for (const { notice, wake } of derived) this.notify(notice, wake);
       } catch (error) {

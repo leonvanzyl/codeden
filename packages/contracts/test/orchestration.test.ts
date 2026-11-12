@@ -133,6 +133,21 @@ describe("orchestration contracts (§8)", () => {
           labels: ["bug"],
         },
       },
+      {
+        ...base,
+        id: "n6",
+        type: "review.submitted",
+        sessionId: null,
+        title: "Review",
+        data: {
+          sessionId: null,
+          pr,
+          reviewer: "stranger",
+          state: "changes_requested",
+          body: "",
+          untrusted: true,
+        },
+      },
     ];
     for (const n of list) expect(Notice.parse(n)).toEqual(n);
     expect(() => Notice.parse({ ...list[3], type: "pr.merged" })).toThrow();

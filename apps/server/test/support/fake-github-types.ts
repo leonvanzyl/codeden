@@ -9,6 +9,8 @@ export interface FakeCheck {
 export interface FakeReview {
   id: string;
   author: string;
+  /** GitHub's `CommentAuthorAssociation`; default `COLLABORATOR`. */
+  authorAssociation?: "OWNER" | "MEMBER" | "COLLABORATOR" | "CONTRIBUTOR" | "NONE";
   state: "APPROVED" | "CHANGES_REQUESTED" | "COMMENTED";
   body: string;
   submittedAt: string;

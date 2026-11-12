@@ -5,6 +5,7 @@ import {
   GithubIssue,
   GithubListQuery,
   GithubPr,
+  GithubReview,
   githubPrId,
   MergePrRequest,
   parseGithubPrId,
@@ -67,6 +68,23 @@ describe("github contracts", () => {
     expect(GithubPr.parse(JSON.parse(JSON.stringify(pr)))).toEqual(pr);
   });
 
+  it("round-trips a review's author association, and reads reviews stored without it", () => {
+    const review: GithubReview = {
+      id: "r1",
+      author: "lee",
+      authorAssociation: "collaborator",
+      state: "changes_requested",
+      body: "Add a test.",
+      submittedAt: ts,
+      url: null,
+    };
+    const withReview = { ...pr, reviews: [review] };
+    expect(GithubPr.parse(JSON.parse(JSON.stringify(withReview)))).toEqual(withReview);
+    const { authorAssociation: _, ...stored } = review;
+    expect(GithubReview.parse(stored).authorAssociation).toBeUndefined();
+    expect(GithubReview.safeParse({ ...review, authorAssociation: "OWNER" }).success).toBe(false);
+  });
+
   it("parses every GitHub domain event in the envelope union", () => {
     expect(GITHUB_EVENT_TYPES).toContain("pr.checks_failed");
     const base = { seq: 1, sessionId: "s1", ts };
@@ -110,6 +128,20 @@ describe("github contracts", () => {
     expect(requested.type === "pr.review_requested" && requested.payload.reviewers).toEqual([
       "lee",
     ]);
+    const review = {
+      id: "r1",
+      author: "lee",
+      authorAssociation: "none",
+      state: "changes_requested",
+      body: "Fix it",
+      submittedAt: ts,
+      url: null,
+    };
+    // The account the review was read with; older events have none.
+    for (const viewer of [{ viewer: "octo" }, { viewer: null }, {}]) {
+      const submitted = { ...base, type: "review.submitted", payload: { pr, review, ...viewer } };
+      expect(EventEnvelope.parse(submitted)).toEqual(submitted);
+    }
   });
 
   it("builds and parses PR ids", () => {

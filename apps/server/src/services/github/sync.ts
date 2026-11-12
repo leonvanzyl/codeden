@@ -194,7 +194,7 @@ export class GithubSync {
       repo.repo,
       listed.filter((i) => i.pull_request).map((i) => i.number),
     );
-    const prs = prNodes.map((node) => this.prOf(projectId, node, undefined));
+    const prs = prNodes.map(({ node }) => this.prOf(projectId, node, undefined));
     // The import itself is silent, but a PR that already belongs to a session (one started
     // on its head branch before the import) gets a `pr.updated`, so the session's PR link
     // and its review inbox item follow as they would for a PR opened later.
@@ -263,11 +263,13 @@ export class GithubSync {
       if (unsettled || linkable || pr.sessionId !== null || tick % 4 === 0) refresh.add(pr.number);
     }
     if (refresh.size > 0) {
-      const nodes = await fetchPullRequests(this.deps.client, repo.owner, repo.repo, [...refresh]);
-      for (const node of nodes) {
+      const fetched = await fetchPullRequests(this.deps.client, repo.owner, repo.repo, [
+        ...refresh,
+      ]);
+      for (const { node, viewer } of fetched) {
         const prev = this.deps.store.pr(projectId, node.number);
         const next = this.prOf(projectId, node, prev);
-        events.push(...diffPr(prev, next, { importedBefore: state.baselineAt }));
+        events.push(...diffPr(prev, next, { importedBefore: state.baselineAt, viewer }));
       }
     }
     await this.fillNewComments(repo, events);
