@@ -1,6 +1,6 @@
 # CodeDen: Design
 
-> Status: **locked for v1**, 2026-11-07. Changes to anything in "Locked decisions" need an explicit design discussion and an update to this file. The desktop app (§17) was approved on 2026-11-08. Opt-in network access for phones and tablets (§15.1) was approved on 2026-11-08. The software factory and dark factory redesign (§10.1) was approved on 2026-11-11.
+> Status: **locked for v1**, 2026-11-07. Changes to anything in "Locked decisions" need an explicit design discussion and an update to this file. The desktop app (§17) was approved on 2026-11-08. Opt-in network access for phones and tablets (§15.1) was approved on 2026-11-08. The software factory and dark factory redesign (§10.1) was approved on 2026-11-11. Remote runners in sandboxes (§4.2, [remote-runners.md](remote-runners.md)) were proposed on 2026-11-12; the network questions in §15.2 await the user's decision.
 
 ## 1. What CodeDen is
 
@@ -42,9 +42,10 @@ Installed with `npx codeden`, or as the desktop app (§17). Open source under th
 | Database | SQLite through the built-in `node:sqlite` and Drizzle (`drizzle-orm/node-sqlite`), WAL mode |
 | Web UI | React 19 + Vite single-page app; Tailwind v4 + shadcn/ui; TanStack Router + TanStack Query; Zustand. **Not Next.js** |
 | API typing | Hono typed RPC client for HTTP; shared zod schemas for the WebSocket event model |
-| Agents | Claude Code through the **Claude Agent SDK**, using the user's installed `claude` binary. Codex through **`codex app-server`** (JSON-RPC, with types generated from the installed Codex). OpenCode through a private **`opencode serve`** per session (its v2 HTTP API and event stream). A generic **ACP** adapter comes after v1 |
+| Agents | Claude Code through the **Claude Agent SDK**, using the user's installed `claude` binary. Codex through **`codex app-server`** (JSON-RPC, with types generated from the installed Codex). OpenCode through a private **`opencode serve`** per session (its v2 HTTP API and event stream). A generic **ACP** adapter comes after v1. In a sandbox the same adapters run inside the remote runner; batch modes (`claude -p`, `codex exec`) are not used |
 | Agent ↔ app | One internal **MCP server** (Streamable HTTP) with **role-scoped tokens** (orchestrator, PM, agent) |
-| Process model | **Server and runner are separate processes** from day one (§4) |
+| Process model | **Server and runner are separate processes** from day one (§4). The server can drive several runners: the home runner next to it, and one per sandboxed session (§4.2) |
+| Execution backends | `local` (worktrees on this machine) is the default and needs nothing extra. Opt-in per project or session: `docker` (plain Docker Engine, a container per session) and `upstash-box` (a box per session). The whole runner runs inside the sandbox and clones the repo there ([remote-runners.md](remote-runners.md)) |
 | Terminal | node-pty in the runner, xterm.js in the UI |
 | Default autonomy | **Auto, risky actions ask** (§11.2). Overridable per project and per session |
 | Image generation | A pluggable `generate_image` tool available to every agent. Engines: Codex (the default when Codex is logged in), Gemini image models, OpenAI Images. Chosen in Settings (§12.5) |
@@ -53,7 +54,7 @@ Installed with `npx codeden`, or as the desktop app (§17). Open source under th
 | Projects | GitHub repos get the full issue/PR/evidence flow. **Local-only folders are supported** without the GitHub features |
 | Forges | GitHub only in v1 |
 | Platforms | Windows, macOS and Linux. **Windows is tested first** |
-| Network exposure | The runner, its MCP proxy and the server's `/mcp` listen on or answer **127.0.0.1 only**, always. The server's web UI, HTTP API and UI WebSockets are 127.0.0.1 only **by default**; **opt-in network access** (decided 2026-11-08, §15.1) moves just that HTTP listener to `0.0.0.0` on the same port, behind a password sign-in, for phones and tablets on the LAN or the user's own VPN |
+| Network exposure | The runner, its MCP proxy and the server's `/mcp` listen on or answer **127.0.0.1 only**, always. The server's web UI, HTTP API and UI WebSockets are 127.0.0.1 only **by default**; **opt-in network access** (decided 2026-11-08, §15.1) moves just that HTTP listener to `0.0.0.0` on the same port, behind a password sign-in, for phones and tablets on the LAN or the user's own VPN. Sandboxed runners are reached through an exec link, which changes nothing here; any listener for remote runners **needs the user's decision** (§15.2) |
 | Tooling | Biome (lint and format), tsdown (bundling), Vitest, Playwright (end-to-end) |
 
 ## 4. Architecture
@@ -99,7 +100,7 @@ The runner hosts everything that has to sit next to the code: agent processes (t
 - **Survives server restarts.** A server restart (crash, update, dev reload) doesn't touch running agents. The server reconnects and catches up.
 - **Event journal.** The runner keeps events locally until the server acknowledges them by sequence number, so nothing is lost while the server is away.
 - **Upgrades.** On a version mismatch, the runner drains. It finishes or pauses turns, then restarts. Sessions are resumed through their provider's resume support, with an automatic "you were interrupted, continue" message when a turn was cut off.
-- **Remote later.** The same runner package can run inside an Upstash Box, a VPS or a container and connect back over the same protocol. That's the seam for the software factory; no remote backend ships in v1.
+- **Remote runners** ([remote-runners.md](remote-runners.md), phased). The same runner package runs, whole and unchanged, inside a sandbox: a Docker container or an Upstash Box, one per agent session. An **execution backend** makes, pauses and deletes sandboxes. The server reaches each sandboxed runner through an **exec link**: it starts `codeden runner-link` inside the sandbox through the backend's own stdio channel (`docker exec -i`, Upstash `exec.session`), which splices to the runner's loopback WebSocket. No listener is opened anywhere, and a dropped link costs nothing because the runner keeps journaling. In a sandbox the runner clones the repo into a path it chooses instead of making a worktree in `<home>/wt`. The orchestrator and PMs stay on the home runner next to the server. A design spike ran the packed runner in a Linux container with the Fake provider over both an exec link and a dial-out link.
 
 ### 4.3 Runner protocol
 
@@ -108,10 +109,20 @@ A versioned, zod-typed message protocol over one WebSocket:
 - **Server → runner commands:** `workspace.prepare`, `session.start`, `session.send`, `session.steer`, `session.interrupt`, `session.respond` (approval or answer), `session.stop`, `pty.*`, `browser.*`, `git.*`, `mcp.test` (an MCP server connection test, §12.4).
 - **Runner → server events:** normalized agent events (§7.3), process status, terminal output, browser frames. Each event carries a monotonically increasing `seq`, which the server acknowledges. Provider lists (with each provider's models) are sent at the handshake and again whenever a list changes, for example once model discovery finishes.
 - **Handshake:** the protocol version, runner version and capabilities are exchanged on connect.
+- **Transports.** The protocol is JSON messages and doesn't depend on the carrier. The server reaches a runner through a `RunnerTransport`:
+  - `loopback`: the local runner's `127.0.0.1` WebSocket, found through its lock file, as today.
+  - `exec`: newline-delimited JSON on the stdin and stdout of `codeden runner-link`, run inside a sandbox (§4.2).
+  - A `dial-out` transport, where the runner connects to the server, is deferred to the §15.2 decision.
+- **Additions for remote runners** (planned, [remote-runners.md](remote-runners.md) §18):
+  - `welcome` reports `platform`, `arch`, `home` and `backend`.
+  - `workspace.prepare` gains a `clone` strategy whose path the runner chooses.
+  - `fs.list/stat/read/write` and a chunked `transfer.*` stream, so the server never reads a remote worktree from its own disk.
+  - `mcp.request`/`mcp.response` frames tunnel MCP (§4.4).
+  - `runner.credentials` delivers provider credentials into runner memory after each handshake.
 
 ### 4.4 MCP access path
 
-Agents always call a **local MCP proxy inside the runner** (`http://127.0.0.1:<runnerPort>/mcp`). The proxy forwards to the server's `/mcp` over the runner connection, with the session's scoped token. Locally and remotely, agents see the same localhost address and nothing extra is exposed.
+Agents always call a **local MCP proxy inside the runner** (`http://127.0.0.1:<runnerPort>/mcp`), with the session's scoped token. A local runner's proxy forwards over HTTP to the server's loopback `/mcp`. A sandboxed runner's proxy tunnels each request over its runner link instead, and the server answers it in-process with the same token check, so `/mcp` stays loopback-only. Locally and remotely, agents see the same localhost address and nothing extra is exposed.
 
 ## 5. Repository layout
 
@@ -253,7 +264,9 @@ All three roles are the same kind of agent session, differing only in **role**, 
 |---|---|---|---|
 | Orchestrator | 1 | `~/.codeden/orchestrator/` | Your front door. Creates and configures projects, routes requests to PMs, summarises status across projects |
 | Project Manager | 1 per project | Read-only view of the repo | Triages issues, plans work, starts and steers agent sessions, reviews results, escalates to you |
-| Agent | many | Its own worktree and branch | Does the work: code, tests, PRs, evidence |
+| Agent | many | Its own worktree and branch, or its own clone in a sandbox (§4.2) | Does the work: code, tests, PRs, evidence |
+
+The orchestrator and PMs always run on the home runner next to the server: they write no code, need little more than MCP, and are long-lived, so a sandbox each would add cost and no isolation.
 
 ### 8.2 How work flows
 
@@ -681,6 +694,16 @@ The owner can open CodeDen from a phone or tablet on the same network or over th
 - **Signed-in devices** are listed with Sign out and Sign out all; revoking closes remote connections so the device notices at once.
 - **Plain http.** There is no certificate for a LAN address, so phones allow no service worker, push notifications or microphone there; CodeDen ships a manifest and icons for Add to Home Screen, but no service worker. HTTPS (for example behind the user's own reverse proxy) is a later step.
 
+### 15.2 Remote runners and the network rule (**needs the user's decision**)
+
+Details are in [remote-runners.md](remote-runners.md) §7 and §9.2. Nothing here changes the §3 rule until the user decides.
+
+- **Proposed: exec links only.** The server reaches sandboxed runners through the backend's own authenticated stdio channel (the Docker daemon, Upstash's API over TLS). The runner listens on the sandbox's loopback, and the server opens no new listener, so the rule holds unchanged.
+- **Deferred:** a dial-out attach listener for runners the server can't exec into. It would be a separate port, off by default, bound to 127.0.0.1 and exposed through the user's own reverse proxy or tunnel, with per-runner secrets over TLS.
+- **Deferred:** an internet-facing UI for a self-hosted server. The user's VPN works today.
+- **Tokens are the boundary.** Docker Desktop forwards `host.docker.internal` to the host's loopback, so a local container reaches 127.0.0.1 services as a loopback peer (seen in the spike). The install token and the server's own secrets never enter a sandbox. Provider credentials are sent over the link into runner memory only, never into images, snapshots or container config.
+- **GitHub credentials in sandboxes:** brokered per server-initiated git operation (recommended), a token scoped to the repo in the sandbox, or none (git bundles through the server). The user picks one.
+
 ## 16. Distribution and operations
 
 - **Install.** `npx codeden` (or `npm i -g codeden`), or the desktop app's installer from GitHub Releases (§17). The CLI subcommands:
@@ -768,7 +791,8 @@ Browser speech recognition doesn't work inside Electron, so dictation there uses
 | Desktop | Desktop app | The Electron app (§17): installers, tray, notifications, deep links, automatic updates |
 | Browser | Browser panel | Phase 1: the full-panel screencast on every surface. Phase 2: native browser views in the desktop app with a per-session CDP relay (§12.2, §17) |
 | OpenCode | Third provider | OpenCode through a private `opencode serve` per session (§7.2): setup, models, approvals, questions, subagents, steering, resume and usage |
-| Later | | ACP adapter, OpenCode's revert, fork and plan agent, remote runners (Upstash Box, SSH/VPS, Docker), webhooks, GitLab and other forges, remote/mobile access |
+| Remote runners | Sandboxed agent sessions | Eight phases ([remote-runners.md](remote-runners.md) §18): several runners with per-session routing; the exec link (`codeden runner-link`); clone workspaces, file access and MCP over the link; the Docker backend; the runner picker and health; the Upstash Box backend; idle pause, cleanup and compute cost; the self-hosting guide |
+| Later | | ACP adapter, OpenCode's revert, fork and plan agent, more runner backends (Docker Sandboxes, SSH/VPS, a dial-out link), local-only projects in sandboxes, webhooks, GitLab and other forges, remote/mobile access |
 
 ## 20. Spikes before M1 (de-risk first)
 
