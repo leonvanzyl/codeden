@@ -362,3 +362,8 @@ export const ItemDelta = z.discriminatedUnion("type", [
   z.object({ type: z.literal("tool_input"), partialJson: z.string() }),
 ]);
 export type ItemDelta = z.infer<typeof ItemDelta>;
+
+/** The text a delta appends (`partialJson` for tool input). */
+export function itemDeltaText(delta: ItemDelta): string {
+  return delta.type === "tool_input" ? delta.partialJson : delta.text;
+}
