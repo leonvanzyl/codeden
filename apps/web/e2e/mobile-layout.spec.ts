@@ -3,7 +3,8 @@ import { type Browser, expect, type Page, test } from "@playwright/test";
 /**
  * Phone and tablet smoke (§13): the main screens fit without horizontal scroll at 390x844,
  * 820x1180 and 1180x820 on a touch screen, the sidebar is a drawer (or a rail in landscape)
- * and the right panel opens as a sheet.
+ * and the right panel opens as a sheet. Toasts keep clear of the composer at every size,
+ * including a desktop window where the right panel and terminal drawer move it.
  */
 const env = (name: string) => {
   const value = process.env[name];
@@ -189,6 +190,63 @@ for (const size of SIZES) {
     }
   });
 }
+
+test("toasts follow the composer as the panel and terminal move it on a desktop", async ({
+  browser,
+}) => {
+  const viewport = { width: 1600, height: 900 };
+  const context = await browser.newContext({ viewport });
+  const page = await context.newPage();
+  try {
+    await page.goto(env("CODEDEN_E2E_LAUNCH_URL"));
+    await page.goto(`${env("CODEDEN_E2E_URL")}/sessions/${sessionId}`);
+    const composer = page.getByRole("textbox", { name: "Message" }).locator("xpath=..");
+    await composer.waitFor();
+    const toast = page.locator('[data-sonner-toast][data-removed="false"]');
+    /** Raise a toast and wait for it to settle in the corner or just above the composer. */
+    const expectToast = async (where: "in the corner" | "above the composer") => {
+      await page.getByRole("button", { name: "Plan mode" }).click();
+      await expect(toast).toHaveCount(1);
+      await expect
+        .poll(async () => {
+          const c = await composer.boundingBox();
+          const t = await toast.boundingBox();
+          if (!c || !t) return "missing";
+          const bottom = t.y + t.height;
+          const gap = c.y - bottom;
+          if (overlapArea(c, t) === 0 && Math.abs(bottom - (viewport.height - 24)) <= 1) {
+            return "in the corner";
+          }
+          if (overlapArea(c, t) === 0 && gap >= 0 && gap <= 12) return "above the composer";
+          return `toast ${JSON.stringify(t)}, composer ${JSON.stringify(c)}`;
+        })
+        .toBe(where);
+    };
+    const panel = page.getByRole("button", { name: "Toggle right panel" });
+    const terminal = page.getByRole("button", { name: "Toggle terminal" });
+    const at = async () => (await composer.boundingBox()) ?? { x: 0, y: 0, width: 0, height: 0 };
+    const start = await at();
+
+    // The right panel is open, so the composer sits beside the toasts' corner column.
+    await expectToast("in the corner");
+    // Each change below moves the composer without resizing it; toasts follow where it is now.
+    await panel.click(); // closed: the composer re-centres under the corner column
+    await expect.poll(async () => (await at()).x).toBeGreaterThan(start.x + 100);
+    await expectToast("above the composer");
+    await terminal.click(); // open: the composer moves up
+    await expect.poll(async () => (await at()).y).toBeLessThan(start.y - 100);
+    await expectToast("above the composer");
+    await terminal.click(); // closed: the composer moves back down
+    await expect.poll(async () => (await at()).y).toBe(start.y);
+    await expectToast("above the composer");
+    await panel.click(); // open again: the composer is beside the column, toasts go back
+    await expect.poll(async () => (await at()).x).toBe(start.x);
+    await expectToast("in the corner");
+    expect((await at()).width, "the composer kept its size").toBe(start.width);
+  } finally {
+    await context.close();
+  }
+});
 
 test("the app can be added to a home screen", async ({ page }) => {
   await page.goto(env("CODEDEN_E2E_LAUNCH_URL"));

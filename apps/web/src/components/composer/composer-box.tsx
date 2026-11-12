@@ -74,11 +74,10 @@ export function ComposerBox({
   const ownRef = useRef<HTMLTextAreaElement>(null);
   const ref = textareaRef ?? ownRef;
   const fileInput = useRef<HTMLInputElement>(null);
-  const column = useRef<HTMLDivElement>(null);
   const box = useRef<HTMLDivElement>(null);
   const [dragging, setDragging] = useState(false);
   // Toasts are lifted clear of the box (its Send, Stop and pickers) wherever they would cover it.
-  useComposerBounds(box, column);
+  useComposerBounds(box);
 
   useEffect(() => {
     if (focusToken > 0) {
@@ -104,7 +103,7 @@ export function ComposerBox({
   };
 
   return (
-    <div ref={column} className="mx-auto w-full max-w-[46rem] px-3 pb-3 sm:px-6 sm:pb-5">
+    <div className="mx-auto w-full max-w-[46rem] px-3 pb-3 sm:px-6 sm:pb-5">
       <div className="relative">
         {menu}
         {/* biome-ignore lint/a11y/noStaticElementInteractions: drop zone for files; the textarea and attach button stay keyboard accessible. */}

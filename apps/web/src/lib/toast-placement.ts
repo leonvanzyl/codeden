@@ -54,14 +54,16 @@ function measure(box: HTMLElement): ComposerBounds | null {
 }
 
 /**
- * Publish where the composer's `box` is, so the toaster can keep toasts off it. Measured again
- * whenever the box or its column changes size (a longer message, attachments, an opened panel)
- * and when the window resizes. Cleared when the composer goes away.
+ * Publish where the composer's `box` is, so the toaster can keep toasts off it. Cleared when the
+ * composer goes away.
+ *
+ * The box moves whenever the layout around it changes size, often while keeping its own size:
+ * the right panel opening or closing re-centres it, the terminal drawer or a banner pushes it up
+ * or down, the sidebar resizes. The shell is a flex layout that fills the window, so every such
+ * move resizes one of the box's ancestors. The box and each of its ancestors are watched (plus
+ * the window), and the box is measured again whenever any of them changes size.
  */
-export function useComposerBounds(
-  box: RefObject<HTMLElement | null>,
-  column: RefObject<HTMLElement | null>,
-): void {
+export function useComposerBounds(box: RefObject<HTMLElement | null>): void {
   useEffect(() => {
     const el = box.current;
     if (!el) return;
@@ -69,13 +71,12 @@ export function useComposerBounds(
     const publish = () => setComposerBounds(measure(el));
     publish();
     const observer = new ResizeObserver(publish);
-    observer.observe(el);
-    if (column.current) observer.observe(column.current);
+    for (let node: Element | null = el; node; node = node.parentElement) observer.observe(node);
     window.addEventListener("resize", publish);
     return () => {
       observer.disconnect();
       window.removeEventListener("resize", publish);
       setComposerBounds(null);
     };
-  }, [box, column]);
+  }, [box]);
 }
