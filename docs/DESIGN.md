@@ -174,7 +174,7 @@ interface ProviderSession {
 
 **`ProviderCapabilities` flags:** `resume`, `steer`, `interrupt`, `approvals`, `userQuestions`, `subagents`, `rollback`, `fork`, `images`, `planMode`, `reasoningEffort`, `mcp`, `skills`.
 
-**Forking.** An adapter with `fork` implements `forkConversation(resumeToken, { cwd })`. It copies that conversation into a new one at once and returns the copy's resume token, which a session then resumes like any other. The original conversation is never written to. The runner exposes it as `provider.fork`.
+**Forking.** An adapter with `fork` implements `forkConversation(resumeToken, { cwd })`. It copies that conversation into a new one at once and returns the copy's resume token, which a session then resumes like any other. The original conversation is never written to. The runner exposes it as `provider.fork`. `SessionOptions.forkFrom` does the same as a session opens: the adapter copies that conversation and the session resumes the copy. A `resumeToken` wins over it, and a provider without `fork` refuses it.
 
 ### 7.2 Providers
 
@@ -330,7 +330,7 @@ The orchestrator must always know what's happening across all projects, and each
   - **What is copied:** the provider, model, effort, permissions, work key and issue. The fork records `forkedFrom` (the source and the checkpoint it started at).
   - **Code:** the fork's worktree is a new branch created from the source's branch, so it carries the source's real commits and no checkpoint commits. The runner then writes the source's latest checkpoint into it as uncommitted changes, before setup runs (`workspace.prepare` `restoreCheckpoint`). Its pull request targets the source's base branch.
   - **Conversation:** the provider's native fork (`provider.fork`, §7.1). The copy is the fork's resume token from the start, so every start of the fork is a plain resume.
-  - **Same moment for both:** the server asks the runner for the source's checkpoints `settled`, which waits for the checkpoint of a turn that has just ended (the runner queues it before it reports the turn's end). Only then does it copy the conversation. A turn that starts in the source meanwhile fails the fork (409 `turn_running`).
+  - **Same moment for both:** the server asks the runner for the source's checkpoints `settled`, which waits for the checkpoint of a turn that has just ended (the runner queues it before it reports the turn's end). Only then does it copy the conversation. If the source moved on meanwhile, the fork fails and nothing is created: a turn still running gives 409 `turn_running`, and a turn that started (even one that already finished, judged by the source's turn count) gives 409 `source_changed`.
   - **No other place to run:** the fork's workspace plan is kept with its start metadata until the worktree exists. If preparing it fails (a restore that fails removes the new worktree again), any later start of the fork, after a message or a restart, prepares it first. A fork never falls back to the repo root.
   - **When:** only when the provider reports `fork`, no turn is running, and the session has a conversation and a git branch. The source is only read. Forking is an explicit, visible duplicate, so it skips the §8.4 conflict check.
   - **Not yet:** forking at an earlier turn, forking a running turn, and rolling a conversation back.

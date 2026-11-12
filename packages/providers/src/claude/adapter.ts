@@ -5,7 +5,12 @@ import type {
   ReasoningEffort,
   SessionOptions,
 } from "@codeden/contracts";
-import type { ProviderAdapter, ProviderSession, RefreshModelsOptions } from "../adapter";
+import {
+  type ProviderAdapter,
+  type ProviderSession,
+  type RefreshModelsOptions,
+  withFork,
+} from "../adapter";
 import { executableFingerprint, ModelFreshness } from "../freshness";
 import { ModelCatalog } from "../models";
 import type { ResolvedCommand } from "../util/exec";
@@ -129,7 +134,7 @@ export class ClaudeAdapter implements ProviderAdapter {
     const executable = this.executable();
     if (!executable) throw new Error("Claude Code is not installed (no `claude` on PATH)");
     const { query } = await (this.options.loadSdk ?? loadClaudeSdk)();
-    return new ClaudeSession(opts, {
+    return new ClaudeSession(await withFork(this, opts), {
       executable,
       query,
       // Every session start reports the list of the `claude` it runs: the cheapest refresh.

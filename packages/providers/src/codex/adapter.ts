@@ -4,7 +4,12 @@ import type {
   ProviderStatus,
   SessionOptions,
 } from "@codeden/contracts";
-import type { ProviderAdapter, ProviderSession, RefreshModelsOptions } from "../adapter";
+import {
+  type ProviderAdapter,
+  type ProviderSession,
+  type RefreshModelsOptions,
+  withFork,
+} from "../adapter";
 import { executableFingerprint, ModelFreshness } from "../freshness";
 import { ModelCatalog } from "../models";
 import type { ResolvedCommand } from "../util/exec";
@@ -127,7 +132,7 @@ export class CodexAdapter implements ProviderAdapter {
   async openSession(opts: SessionOptions): Promise<ProviderSession> {
     const executable = this.executable();
     if (!executable) throw new Error("Codex is not installed (no `codex` on PATH)");
-    const session = new CodexSession(opts, {
+    const session = new CodexSession(await withFork(this, opts), {
       executable,
       onModels: (models) => {
         const visible = visibleCodexModels(models);

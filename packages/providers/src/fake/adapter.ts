@@ -4,7 +4,7 @@ import type {
   ProviderStatus,
   SessionOptions,
 } from "@codeden/contracts";
-import type { ProviderAdapter, ProviderSession } from "../adapter";
+import { type ProviderAdapter, type ProviderSession, withFork } from "../adapter";
 import { FakeSession } from "./session";
 
 /** Options for the scripted Fake provider. */
@@ -77,7 +77,7 @@ export class FakeProvider implements ProviderAdapter {
   }
 
   async openSession(opts: SessionOptions): Promise<ProviderSession> {
-    return new FakeSession(opts, this.options);
+    return new FakeSession(await withFork(this, opts), this.options);
   }
 
   /** A fork gets a conversation of its own, named after the one it copies. */

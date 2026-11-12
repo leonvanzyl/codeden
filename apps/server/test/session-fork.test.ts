@@ -1,10 +1,11 @@
 import { join } from "node:path";
-import type {
-  ProviderInfo,
-  RunnerCommandName,
-  RunnerCommandOf,
-  Session,
-  UserInput,
+import {
+  agentEventToNewEvent,
+  type ProviderInfo,
+  type RunnerCommandName,
+  type RunnerCommandOf,
+  type Session,
+  type UserInput,
 } from "@codeden/contracts";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { McpTokenStore } from "../src/mcp/tokens";
@@ -270,6 +271,38 @@ describe("forking a session", () => {
     });
     expect(env.repo.list({ projectId: src.projectId ?? undefined })).toHaveLength(1);
     expect(all("workspace.prepare")).toEqual([]);
+  });
+
+  it("fails the fork when a whole source turn runs while it is being copied", async () => {
+    const { sessions } = services();
+    const src = source({ rootThreadId: "t-root" });
+    env.store.append([
+      agentEventToNewEvent(src.id, { type: "thread.started", thread: { id: "t-root" } }),
+    ]);
+    env.repo.update(src.id, (s) => ({ ...s, status: "idle" }));
+    script.checkpoints[src.id] = [0, 1];
+    // A short turn (a queued message, an auto-retry) starts and ends during the copy: the
+    // source is idle again afterwards, but the copy now holds a turn checkpoint 1 doesn't.
+    script.duringFork = () => {
+      env.store.append([
+        agentEventToNewEvent(src.id, { type: "turn.started", threadId: "t-root", turnId: "u2" }),
+        agentEventToNewEvent(src.id, { type: "turn.completed", threadId: "t-root", turnId: "u2" }),
+      ]);
+      script.checkpoints[src.id] = [0, 1, 2];
+    };
+    await expect(sessions.fork(src.id, {})).rejects.toMatchObject({
+      status: 409,
+      code: "source_changed",
+    });
+    expect(env.repo.get(src.id).status).toBe("idle");
+    expect(env.repo.list({ projectId: src.projectId ?? undefined })).toHaveLength(1);
+    expect(all("workspace.prepare")).toEqual([]);
+
+    // Once nothing runs during the copy, the same source forks with that turn's checkpoint.
+    script.duringFork = undefined;
+    const { sessionId } = await sessions.fork(src.id, {});
+    await settle(sessions);
+    expect(env.repo.get(sessionId).forkedFrom).toEqual({ sessionId: src.id, checkpoint: 2 });
   });
 
   it("refuses what it can't fork, before asking the runner anything", async () => {

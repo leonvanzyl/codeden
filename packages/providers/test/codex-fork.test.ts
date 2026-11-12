@@ -52,6 +52,30 @@ describe("Codex fork", () => {
     });
   });
 
+  it("forks forkFrom as a session opens, then resumes the copy (never the original)", async () => {
+    const log = logFile();
+    const adapter = new CodexAdapter({ executable: fakeCodex });
+    const session = await adapter.openSession({
+      sessionId: "s2",
+      role: "agent",
+      cwd: tmpdir(),
+      autonomy: "auto",
+      mcpServers: [],
+      additionalDirectories: [],
+      planMode: false,
+      forkFrom: "thread-source",
+    });
+    try {
+      const threadCalls = requests(log).filter((r) => r.method.startsWith("thread/"));
+      expect(threadCalls.map((r) => [r.method, r.params.threadId])).toEqual([
+        ["thread/fork", "thread-source"],
+        ["thread/resume", "thread-fork-1"],
+      ]);
+    } finally {
+      await session.close();
+    }
+  });
+
   it("says which thread could not be copied", async () => {
     logFile();
     await expect(forkCodexThread(fakeCodex, "missing", { cwd: tmpdir() })).rejects.toThrow(

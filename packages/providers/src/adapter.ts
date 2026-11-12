@@ -93,6 +93,27 @@ export interface SessionConfigChange {
   effort?: ReasoningEffort | null;
 }
 
+/**
+ * Session options ready to open (`SessionOptions.forkFrom`): with `forkFrom` and no
+ * `resumeToken`, the conversation is copied first (`forkConversation`) and the session resumes
+ * the copy. A `resumeToken` wins. A provider that can't fork refuses, rather than quietly
+ * opening a conversation without the history.
+ */
+export async function withFork(
+  adapter: ProviderAdapter,
+  opts: SessionOptions,
+): Promise<SessionOptions> {
+  if (!opts.forkFrom || opts.resumeToken) return opts;
+  if (!adapter.capabilities().fork || !adapter.forkConversation) {
+    throw new ProviderSessionError(
+      "unsupported",
+      `${adapter.displayName} cannot fork a conversation`,
+    );
+  }
+  const resumeToken = await adapter.forkConversation(opts.forkFrom, { cwd: opts.cwd });
+  return { ...opts, resumeToken };
+}
+
 /** Static description of an adapter, as sent in the runner handshake. */
 export function providerInfo(adapter: ProviderAdapter): ProviderInfo {
   return {

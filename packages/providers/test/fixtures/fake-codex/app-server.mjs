@@ -9,6 +9,7 @@
 // every turn, one after the other (`notify: true` ones as notifications); each answer is logged as `{ method: "answer:<method>", params }`
 // and the turn completes once all are answered.
 // FAKE_CODEX_TURN=hang starts turns that never complete and never answers `turn/interrupt`.
+// FAKE_CODEX_ECHO=1 echoes each turn/start and turn/steer input as a userMessage item.
 import { appendFileSync, readFileSync } from "node:fs";
 import { createInterface } from "node:readline";
 
@@ -76,6 +77,28 @@ function modelList(msg) {
   });
 }
 
+/**
+ * FAKE_CODEX_ECHO=1: echo each input as a `userMessage` item, as the real server does, with the
+ * request's `clientUserMessageId` as its `clientId`.
+ */
+function echoUserMessage(turnId, params) {
+  if (process.env.FAKE_CODEX_ECHO !== "1") return;
+  send({
+    method: "item/completed",
+    params: {
+      threadId: "thread-1",
+      turnId,
+      item: {
+        type: "userMessage",
+        id: `${turnId}-user-${++echoes}`,
+        clientId: params.clientUserMessageId ?? null,
+        content: params.input,
+      },
+    },
+  });
+}
+let echoes = 0;
+
 createInterface({ input: process.stdin }).on("line", (line) => {
   const msg = JSON.parse(line);
   if (msg.id !== undefined && !msg.method && waiting.has(msg.id)) {
@@ -103,6 +126,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
     case "turn/start": {
       const turn = { id: `turn-${++turns}`, status: "completed", items: [], error: null };
       send({ id: msg.id, result: { turn: { ...turn, status: "inProgress" } } });
+      echoUserMessage(turn.id, msg.params);
       if (turnMode === "hang") return;
       // Like the real server: the turn completes after the response has been handled.
       setTimeout(async () => {
@@ -125,6 +149,9 @@ createInterface({ input: process.stdin }).on("line", (line) => {
       }, 50);
       return;
     }
+    case "turn/steer":
+      send({ id: msg.id, result: { turnId: msg.params.expectedTurnId } });
+      return echoUserMessage(msg.params.expectedTurnId, msg.params);
     case "turn/interrupt":
       if (turnMode === "hang") return;
       return send({ id: msg.id, result: {} });

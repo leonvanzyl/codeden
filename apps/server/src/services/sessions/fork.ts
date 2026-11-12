@@ -80,8 +80,9 @@ export function forkTitle(source: Session): string {
  * 1. the source's latest checkpoint, once the runner has written the one for a turn that has
  *    just ended (`checkpoint.list` `settled`);
  * 2. a copy of its conversation, made now by the provider (`provider.fork`).
- * The source is only read. A turn that started meanwhile would make the two disagree, so that
- * fails the fork (the unused copy is left behind, never resumed). Throws `ServiceError`s.
+ * The source is only read. A turn that started meanwhile, even one that has already finished,
+ * would make the two disagree, so that fails the fork (`sourceMoved`; the unused copy is left
+ * behind, never resumed). Throws `ServiceError`s.
  */
 export async function planFork(
   deps: { repo: SessionRepo; projects: ProjectService; runner: RunnerPort },
@@ -92,6 +93,7 @@ export async function planFork(
   const source = repo.get(sourceId);
   const provider = runner.providers().find((p) => p.id === source.provider);
   const project = forkProject(deps.projects, source, provider);
+  const turns = repo.turnCount(source.id);
   const { checkpoints } = await runner
     .request(
       { name: "checkpoint.list", cwd: project.path, sessionId: source.id, settled: true },
@@ -110,9 +112,32 @@ export async function planFork(
       FORK_TIMEOUT_MS,
     )
     .catch(rethrow);
-  const late = forkBlocker(repo.get(sourceId), provider);
+  const late = sourceMoved(repo, source, turns, provider);
   if (late) throw late;
   return forkPlan(source, project, { checkpoint, resumeToken }, req);
+}
+
+/**
+ * Whether the source moved on while it was being forked: a turn running now, or one that
+ * started (and maybe finished) since `turns` was counted, or a new conversation. The copy
+ * could then hold a turn the checkpoint doesn't.
+ */
+function sourceMoved(
+  repo: SessionRepo,
+  source: Session,
+  turns: number,
+  provider: ProviderInfo | undefined,
+): ServiceError | null {
+  const now = repo.get(source.id);
+  const blocker = forkBlocker(now, provider);
+  if (blocker) return blocker;
+  if (repo.turnCount(source.id) !== turns || now.resumeToken !== source.resumeToken) {
+    return conflict(
+      "The session ran a turn while it was being forked. Fork it again.",
+      "source_changed",
+    );
+  }
+  return null;
 }
 
 /** The source's project, after checking the source can be forked at all. */

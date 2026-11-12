@@ -309,6 +309,10 @@ describe("provider contracts", () => {
       mcpServers: [{ transport: "http", name: "codeden", url: "http://127.0.0.1:1234/mcp" }],
     });
     expect(opts.planMode).toBe(false);
+    expect(opts.forkFrom).toBeUndefined();
+    const fork = roundTrip(SessionOptions, { ...opts, forkFrom: "claude-session-1" });
+    expect(fork.forkFrom).toBe("claude-session-1");
+    expect(SessionOptions.safeParse({ ...opts, forkFrom: "" }).success).toBe(false);
     roundTrip(ProviderStatus, {
       providerId: "claude",
       installed: true,

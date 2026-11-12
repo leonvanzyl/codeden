@@ -313,6 +313,19 @@ export class SessionRepo {
     };
   }
 
+  /**
+   * How many turns the session has had, subagent turns included. It only grows (a turn's row is
+   * written when it starts and kept), so two equal counts mean no turn started in between.
+   */
+  turnCount(sessionId: string): number {
+    const row = this.db
+      .select({ n: sql<number>`count(*)` })
+      .from(turns)
+      .where(eq(turns.sessionId, sessionId))
+      .get();
+    return row?.n ?? 0;
+  }
+
   /** Follow-ups of the latest root-thread turn that produced some (§7.5). */
   latestFollowups(session: Session): ItemOf<"followups"> | null {
     if (!session.rootThreadId) return null;

@@ -127,9 +127,11 @@ export class CodexSession implements ProviderSession {
         this.nextTurn.effort !== undefined ? (this.nextTurn.effort ?? undefined) : this.opts.effort,
         inUse ? this.config.modelEfforts?.(inUse) : undefined,
       );
+      const clientUserMessageId = this.mapper.clientMessageId(input);
       const res = await rpc.request<TurnStartResponse>("turn/start", {
         threadId: this.threadId(),
         input: toCodexInput(input),
+        ...(clientUserMessageId ? { clientUserMessageId } : {}),
         ...(effort ? { effort } : {}),
         ...(model !== undefined ? { model } : {}),
         ...(this.autonomyChanged ? this.policyOverride() : {}),
@@ -144,10 +146,12 @@ export class CodexSession implements ProviderSession {
   async steer(input: UserInput): Promise<void> {
     const turnId = this.mapper.currentTurnId;
     if (!turnId || !this.rpc) throw new ProviderSessionError("no_turn", "No turn is running");
+    const clientUserMessageId = this.mapper.clientMessageId(input);
     await this.rpc.request("turn/steer", {
       threadId: this.threadId(),
       input: toCodexInput(input),
       expectedTurnId: turnId,
+      ...(clientUserMessageId ? { clientUserMessageId } : {}),
     });
   }
 
