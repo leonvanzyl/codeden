@@ -201,6 +201,7 @@ Inside the data directory:
   artifacts/            screenshots and files shared in chat
   orchestrator/         the orchestrator's working directory
   backups/              copies of config files taken before CodeDen overwrote them
+  agent-config/         hooks you switched off on the Agents page (until you enable them)
   logs/runner.log       runner output
   deps/                 Claude Code support, installed on demand
   app/<version>/        CodeDen versions installed by one-click updates

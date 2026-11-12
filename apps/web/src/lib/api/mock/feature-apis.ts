@@ -10,6 +10,7 @@ import type { CodeDenClient } from "../client";
 import type { AgentConfigApi, ImagesApi, SecretsApi, VoiceApi } from "../feature-apis";
 import { mockBrowserApi } from "./browser";
 import { configContents, configFiles, mcpServers } from "./fixtures/config";
+import { mockHooksApi } from "./hooks";
 import { mockLocalStt } from "./local-stt";
 import type { MockWorld } from "./world";
 
@@ -113,6 +114,7 @@ function mockAgentConfig(world: MockWorld): AgentConfigApi {
       const show = (v: unknown) => (v ? JSON.stringify({ [req.name]: v }, null, 2) : "");
       return delay(naiveDiff("mcp", show(before?.spec), show(req.spec)));
     },
+    ...mockHooksApi(naiveDiff),
     loaded: (sessionId) => {
       const files = configFiles.filter((f) => f.exists);
       return delay({

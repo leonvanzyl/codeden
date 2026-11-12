@@ -60,9 +60,10 @@ export class FactorySessions {
     return this.deps.repo.list({ projectId, role: "agent" }).filter(isFactorySession);
   }
 
-  /** Factory sessions holding a slot right now. */
-  activeCount(projectId: string): number {
-    return this.list(projectId).filter((s) => SLOT_STATUSES.has(s.status)).length;
+  /** Factory sessions holding a slot right now, leaving out `except` (a session's own slot). */
+  activeCount(projectId: string, except?: string): number {
+    return this.list(projectId).filter((s) => s.id !== except && SLOT_STATUSES.has(s.status))
+      .length;
   }
 
   /** Providers the runner offers (the Fake provider only when nothing else is there). */

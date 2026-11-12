@@ -46,6 +46,7 @@ packages/
   contracts/  zod schemas for everything that crosses a boundary
   providers/  Provider adapters (Claude, Codex, Fake, Replay) and image engines
 docs/         User docs and DESIGN.md
+changes/      Changelog fragments for the next release (see changes/README.md)
 ```
 
 Package READMEs go deeper: [apps/server](apps/server/README.md), [packages/providers](packages/providers/README.md), [the runner's browser engine](apps/runner/src/browser/README.md).
@@ -82,6 +83,17 @@ Before you push: **`pnpm typecheck && pnpm lint && pnpm test`** must pass. CI ru
 
 - [Conventional commits](https://www.conventionalcommits.org/): `feat(server): ...`, `fix(runner): ...`, `docs: ...`, `chore: ...`. One logical change per commit.
 - Keep pull requests focused, describe the behaviour change and how you tested it, and include screenshots for UI changes.
+- **Changelog notes go in `changes/`, not in `CHANGELOG.md`.** A user-facing change adds its own file, `changes/<issue>-<slug>.md`, with front matter naming its section and one or more bullets:
+
+  ```md
+  ---
+  section: fixed
+  ---
+
+  - **A bold lead.** What changed, written for people who use CodeDen.
+  ```
+
+  The section is one of `added`, `changed`, `deprecated`, `removed`, `fixed` or `security`. Every pull request writes its own file, so they never conflict on the changelog; the release assembles them. Docs-only and internal changes need no note. `pnpm test` checks the format; see [changes/README.md](changes/README.md).
 
 ## Testing
 
@@ -113,7 +125,7 @@ To re-record the Replay fixtures or regenerate the Codex protocol types, see [pa
 
 ## Releasing (maintainers)
 
-The published package is `apps/cli` (`codeden` on npm). Bump the version in `apps/cli/package.json` **and** `CODEDEN_VERSION` in `packages/contracts/src/version.ts` (a test keeps them in sync), update [CHANGELOG.md](CHANGELOG.md), commit, then tag and push `vX.Y.Z`. The release workflow builds, tests, checks the tag against the version, publishes with provenance and creates a GitHub Release. Packing copies the root README into the package (`apps/cli/scripts/copy-readme.mjs`).
+The published package is `apps/cli` (`codeden` on npm). Run **Actions › Release › Run workflow** on `main` and pick **patch**, **minor** or **major**. The workflow runs `scripts/release/bump-version.mjs`, which bumps the version in `apps/cli/package.json`, `apps/desktop/package.json` and `SOURCE_VERSION` in `packages/contracts/src/version.ts` (a test keeps them in sync), assembles the fragments in `changes/` into the new version's section of [CHANGELOG.md](CHANGELOG.md) and deletes them. Once the checks and the build pass, it commits `chore(release): X.Y.Z`, tags it, publishes with provenance and creates a GitHub Release. **dry-run** builds and packs without releasing. `pnpm changelog:preview` prints the changelog section the next release would add, without changing anything. To release by hand, run `node scripts/release/bump-version.mjs <patch|minor|major>`, commit what it changed and staged, then tag and push `vX.Y.Z`. Packing copies the root README into the package (`apps/cli/scripts/copy-readme.mjs`).
 
 ## Reporting security issues
 

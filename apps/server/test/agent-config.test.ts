@@ -5,6 +5,8 @@ import {
   AgentConfigFileContent,
   AgentConfigListResponse,
   AgentConfigWriteResponse,
+  HookListResponse,
+  HookWriteResponse,
   LoadedAgentConfig,
   McpServerListResponse,
   McpServerWriteResponse,
@@ -307,6 +309,74 @@ describe("agent configuration API", () => {
     ]);
     const backups = readdirSync(join(h.server.paths.backups, "agent-config"));
     expect(backups.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it("lists, previews, edits and disables Claude hooks over the API", async () => {
+    const settings = join(h.repo, ".claude", "settings.json");
+    put(settings, '{\n  "permissions": { "allow": ["Bash(ls)"] }\n}\n');
+    const add = {
+      action: "add",
+      provider: "claude",
+      scope: "project",
+      projectId: h.projectId,
+      event: "PreToolUse",
+      matcher: "Bash",
+      handler: { type: "command", command: "guard.sh", timeout: 5 },
+    };
+    const preview = AgentConfigDiff.parse(
+      (await h.api("POST", "/agent-config/hooks/diff", add)).body,
+    );
+    expect(preview.patch).toContain('"command": "guard.sh"');
+    expect((await h.api("POST", "/agent-config/hooks", add)).status).toBe(200);
+    expect(readFileSync(settings, "utf8")).toContain(
+      '{\n  "permissions": { "allow": ["Bash(ls)"] },',
+    );
+
+    const list = HookListResponse.parse(
+      (await h.api("GET", `/agent-config/hooks?projectId=${h.projectId}`)).body,
+    );
+    expect(list.sources.map((s) => s.scope)).toEqual(["user", "project", "local"]);
+    const hook = list.hooks.find((x) => x.scope === "project");
+    expect(hook).toMatchObject({ event: "PreToolUse", matcher: "Bash", enabled: true });
+
+    const target = {
+      provider: "claude",
+      scope: "project",
+      projectId: h.projectId,
+      event: "PreToolUse",
+      groupIndex: hook?.groupIndex,
+      handlerIndex: hook?.handlerIndex,
+      expected: hook?.handler,
+    };
+    const disabled = HookWriteResponse.parse(
+      (
+        await h.api("POST", "/agent-config/hooks", {
+          action: "disable",
+          target,
+          listProjectId: h.projectId,
+        })
+      ).body,
+    );
+    expect(disabled.backupPath).toBeTruthy();
+    expect(existsSync(h.server.paths.disabledHooks)).toBe(true);
+    // The response carries the refreshed list for the page's project.
+    expect(disabled.hooks.sources.map((s) => s.scope)).toEqual(["user", "project", "local"]);
+    expect(disabled.hooks.hooks.find((x) => x.scope === "project")).toMatchObject({
+      event: "PreToolUse",
+      enabled: false,
+    });
+    const bad = await h.api("POST", "/agent-config/hooks", { ...add, event: "Not an event" });
+    expect(bad.status).toBe(400);
+    const digits = await h.api("POST", "/agent-config/hooks", { ...add, event: "Stop2" });
+    expect(digits.status).toBe(400);
+    // An unknown list project is refused before anything is written.
+    const before = readFileSync(settings, "utf8");
+    const unknown = await h.api("POST", "/agent-config/hooks", {
+      ...add,
+      listProjectId: "missing-project",
+    });
+    expect(unknown.status).toBe(404);
+    expect(readFileSync(settings, "utf8")).toBe(before);
   });
 
   it("reports what a session loads, including CodeDen's MCP server", async () => {
