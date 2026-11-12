@@ -282,6 +282,17 @@ describe("a worktree moved to the trash before the restart (#99, P2 review)", ()
         cwd: original,
         startedAt: trashedAt + 30 * MINUTE,
       }),
+      // An old watcher that has started a new server in the recreated worktree since.
+      row(70000, 69999, {
+        exe: NODE,
+        commandLine: `node ${join(original, "watcher.js")}`,
+        startedAt: trashedAt - 60 * MINUTE,
+      }),
+      row(70001, 70000, {
+        exe: NODE,
+        commandLine: `node ${join(original, "new-server.js")}`,
+        startedAt: trashedAt + 40 * MINUTE,
+      }),
       // The user's editor, open on a file there since before the move.
       row(5100, 5000, {
         exe: p("C:\\Users\\leon\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe"),
@@ -314,7 +325,52 @@ describe("a worktree moved to the trash before the restart (#99, P2 review)", ()
     expect([...withDescendants(killed, table)].sort((a, b) => a - b)).toEqual([82596, 84536]);
     expect(existsSync(entry)).toBe(false);
     expect(existsSync(original)).toBe(true);
-    expect(alive.has(90001)).toBe(true);
-    expect(alive.has(5100)).toBe(true);
+    for (const pid of [90001, 70000, 70001, 5100]) expect(alive.has(pid)).toBe(true);
+  });
+});
+
+describe("ending what holds a trashed worktree, by age (#99, second review)", () => {
+  const original = HOOKS_WT;
+  const entry = p("C:\\Users\\leon\\.codeden\\wt\\.trash\\codeden-c761f1f5-mwdd7vow8zv4");
+  const MOVED_AT = 1000;
+  /** An orphaned watcher from before the move, and a child it started at `childAt`. */
+  const watcher = (childAt: number | null): ProcessRow[] => [
+    ...codeden,
+    row(100, 99, {
+      exe: NODE,
+      commandLine: `node ${join(original, "watcher.js")}`,
+      startedAt: 100,
+    }),
+    row(101, 100, {
+      exe: NODE,
+      commandLine: `node ${join(original, "new-server.js")}`,
+      startedAt: childAt,
+    }),
+  ];
+  /** What `endProcessesInside` ends, as its tree kills would (`taskkill /T`). */
+  async function ended(rows: ProcessRow[]): Promise<number[]> {
+    const killed: number[] = [];
+    await endProcessesInside([original, entry], {
+      home: HOME,
+      removing: true,
+      startedBefore: MOVED_AT,
+      table: async () => rows,
+      kill: async (pid) => {
+        killed.push(pid);
+      },
+    });
+    return [...withDescendants(killed, rows)].sort((a, b) => a - b);
+  }
+
+  it("never ends an old process with a child started since the move", async () => {
+    expect(await ended(watcher(2000))).toEqual([]);
+  });
+
+  it("nor one with a child whose start time is unknown", async () => {
+    expect(await ended(watcher(null))).toEqual([]);
+  });
+
+  it("still ends a leftover tree that is old all the way down", async () => {
+    expect(await ended(watcher(500))).toEqual([100, 101]);
   });
 });

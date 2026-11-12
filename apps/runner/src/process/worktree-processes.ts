@@ -21,9 +21,10 @@ export interface EndProcessesOptions {
    */
   removing?: boolean;
   /**
-   * Only processes known to have started at or before this time (ms since the epoch): for a
-   * folder moved away at that time, so nothing started since (such as what runs in a worktree
-   * recreated at the same path) is ever chosen.
+   * For a folder moved away at this time (ms since the epoch): only processes known to have
+   * started at or before it may be ended, with their whole tree, so a process with anything
+   * started since (or at an unknown time) running under it is never chosen either. Nothing in
+   * a worktree recreated at the same path is touched, even when an old launcher started it.
    */
   startedBefore?: number;
   /** Also allowed: processes seen as the runner's descendants earlier (`runnerDescendants`). */
@@ -99,20 +100,20 @@ export async function endProcessesInside(
   const server = serverPid(opts.home);
   const windows = process.platform === "win32";
   const protect = [process.pid, ...(server !== undefined ? [server] : [])];
-  const spare = opts.spare ? withDescendants(opts.spare, rows) : undefined;
+  const spare = new Set(opts.spare ? withDescendants(opts.spare, rows) : []);
+  // A folder moved away at `startedBefore`: what started since, or at an unknown time, is kept
+  // like a spared terminal, so neither it nor a process it runs under (whose tree kill would
+  // end it) is chosen.
   const { startedBefore } = opts;
-  const startedInTime = new Set(
-    rows
-      .filter((r) => startedBefore === undefined || (r.startedAt ?? Infinity) <= startedBefore)
-      .map((r) => r.pid),
-  );
+  if (startedBefore !== undefined) {
+    for (const r of rows) if (!((r.startedAt ?? Infinity) <= startedBefore)) spare.add(r.pid);
+  }
   const victims = new Set<number>();
   for (const folder of dirs) {
     const allowed = opts.removing
       ? endableForRemoval({ rows, runnerPid: process.pid, protect, dir: folder, windows })
       : startedByAgents(rows, process.pid, RUNNER_STARTED_AT);
     for (const pid of opts.seen ?? []) allowed.add(pid);
-    for (const pid of allowed) if (!startedInTime.has(pid)) allowed.delete(pid);
     const chosen = processesToEnd({ dir: folder, rows, windows, protect, allowed, spare });
     for (const pid of chosen) victims.add(pid);
   }
