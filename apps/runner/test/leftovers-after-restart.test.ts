@@ -1,22 +1,29 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { CommandError } from "../src/errors";
 import { type ProcessRow, withDescendants } from "../src/process/inside";
 import { endProcessesInside } from "../src/process/worktree-processes";
 import { deleteTree } from "../src/workspace/delete-tree";
 import { removeWithLeftovers } from "../src/workspace/leftover-processes";
 import { emptyTrash, trashDir, trashOrigin } from "../src/workspace/trash";
-import { makeRepo, removeDir, sh, tempDir } from "./helpers";
+import { makeRepo, removeDir, setPlatform, sh, tempDir } from "./helpers";
 
 /**
  * Issue #99: on Windows, finished factory items ended with "Couldn't remove the worktree: The
  * worktree is in use". The rows below are the process table captured on the machine that hit
  * it (2026-11-12): the desktop app restarted the runner at 09:42:19, then archived the items
  * that had finished; dev servers the agents had started before the restart still ran in their
- * worktrees, so moving the folders failed. Paths are spelled for the platform the test runs on.
+ * worktrees, so moving the folders failed. Paths are spelled for the platform the test runs on,
+ * and `process.platform` reads "win32" while the tests run: the rule is Windows' (#109), and is
+ * tested on every host.
  */
 const windows = process.platform === "win32";
+let realPlatform = () => {};
+beforeAll(() => {
+  realPlatform = setPlatform("win32");
+});
+afterAll(() => realPlatform());
 const p = (win: string) => (windows ? win : win.replace(/^C:/, "").replace(/\\/g, "/"));
 
 const HOME = p("C:\\Users\\leon\\.codeden");

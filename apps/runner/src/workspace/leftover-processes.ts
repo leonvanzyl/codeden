@@ -63,8 +63,9 @@ export interface RemoveContext {
 
 /**
  * `workspace.remove` as the runner runs it. Refuses first, so a kept worktree's terminals and
- * processes keep running. Then closes its terminals and ends everything else still running in
- * it, also what an agent started before the runner restarted (`removing`), and deletes it.
+ * processes keep running. Then closes its terminals and ends what agents left running in it (on
+ * Windows, where that keeps the folder from being moved, also what an agent started before the
+ * runner restarted: `removing`), and deletes it.
  * When something still holds the folder, the error names what runs there.
  */
 export async function removeWithLeftovers(

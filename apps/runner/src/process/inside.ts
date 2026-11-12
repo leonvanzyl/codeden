@@ -100,24 +100,34 @@ export function withDescendants(roots: Iterable<number>, rows: readonly ProcessR
 }
 
 /**
- * Processes CodeDen's agents (or terminals) started: the runner's descendants, plus whatever
- * descends from a process that lost its parent after the runner started, such as the shell an
- * agent ran a dev server in, left behind when the agent exited. Only rows with start times can
- * be judged orphaned (a parent missing, or younger than its child: a reused pid), so a user's
- * own long-running programs, whose parents went away before the runner started, never count.
+ * Processes CodeDen's agents (or terminals) started: the runner's descendants. On Windows, also
+ * whatever descends from a process that lost its parent after the runner started, such as the
+ * shell an agent ran a dev server in, left behind when the agent exited (a process there keeps
+ * the pid of a parent that exited). Only rows with start times can be judged orphaned (a parent
+ * missing, or younger than its child: a reused pid), so a user's own long-running programs,
+ * whose parents went away before the runner started, never count.
+ *
+ * Linux and macOS give an orphan a new parent (init, or the closest subreaper), so there a
+ * parent missing from the table is one the runner can't see, not one that exited: a person's
+ * SSH login under root's sshd (`/proc` mounted with `hidepid`), or a `docker exec` shell (its
+ * parent is outside the container). Only the runner's descendants count there; what an agent
+ * started is remembered before it stops (`runnerDescendants`).
  */
 export function startedByAgents(
   rows: readonly ProcessRow[],
   runnerPid: number,
   runnerStartedAt: number,
+  windows: boolean,
 ): Set<number> {
   const byPid = new Map(rows.map((r) => [r.pid, r]));
   const roots = [runnerPid];
-  for (const r of rows) {
-    if (r.startedAt === null || r.startedAt < runnerStartedAt) continue;
-    const parent = byPid.get(r.ppid);
-    const orphaned = !parent || (parent.startedAt !== null && parent.startedAt > r.startedAt);
-    if (orphaned) roots.push(r.pid);
+  if (windows) {
+    for (const r of rows) {
+      if (r.startedAt === null || r.startedAt < runnerStartedAt) continue;
+      const parent = byPid.get(r.ppid);
+      const orphaned = !parent || (parent.startedAt !== null && parent.startedAt > r.startedAt);
+      if (orphaned) roots.push(r.pid);
+    }
   }
   const out = withDescendants(roots, rows);
   out.delete(runnerPid);
@@ -279,14 +289,25 @@ const USER_APPS = new Set([
   "screen",
 ]);
 
-/** The program a process runs (its executable, else the command line's first word). */
+/**
+ * An unquoted command line that runs a program from a macOS app bundle, whose path may have
+ * spaces (`/Applications/Visual Studio Code.app/Contents/MacOS/Electron --type=gpu`): an absolute
+ * path up to the bundle's `Contents/MacOS/`, where no space comes before what reads as an
+ * argument (another path, an option or a quote). Matches that folder.
+ */
+const BUNDLE_PROGRAM = /^\/(?:[^\s"']|\s(?![/"']|-\S))*?\.app\/Contents\/MacOS\//;
+
+/**
+ * The program a process runs: its executable, else the command line's (quoted) first word. Only
+ * the command line is known on macOS, so a line running a program from an app bundle, whose path
+ * may have spaces, yields the bundle's `Contents/MacOS/` folder instead (`BUNDLE_PROGRAM`).
+ */
 function programPath(row: ProcessRow): string | null {
   if (row.exe) return row.exe;
   const line = row.commandLine?.trim();
   if (!line) return null;
-  return line.startsWith('"')
-    ? line.slice(1, line.indexOf('"', 1))
-    : (line.split(/\s+/)[0] ?? null);
+  if (line.startsWith('"')) return line.slice(1, line.indexOf('"', 1));
+  return BUNDLE_PROGRAM.exec(line)?.[0] ?? line.split(/\s+/)[0] ?? null;
 }
 
 /** Whether `row` is an app a person works in (see `USER_APPS`), outside the worktree. */

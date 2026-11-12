@@ -15,9 +15,12 @@ export interface EndProcessesOptions {
   /** The CodeDen home: its `server.json` names the server process, which is never ended. */
   home: string;
   /**
-   * The folder is about to be deleted: also end what agents of an earlier runner (or anyone
-   * else) left running there, except what a person started from an editor, terminal or file
-   * manager (`endableForRemoval`). Without it, only what this runner's agents started.
+   * The folder is about to be deleted. On Windows, where a process using a folder keeps it from
+   * being moved, also end what agents of an earlier runner (or anyone else) left running there,
+   * except what a person started from an editor, terminal or file manager
+   * (`endableForRemoval`). Linux and macOS delete a folder while processes use it, so there, as
+   * without it, only what this runner's agents started is ended (`startedByAgents`), and a
+   * person's own shells and dev servers keep running wherever they were started from.
    */
   removing?: boolean;
   /**
@@ -78,12 +81,12 @@ function describe(row: ProcessRow): string {
  *
  * A process counts when its executable or its working directory is inside `dir`, or its
  * command line names something inside it, matched as whole paths; and it was started by
- * CodeDen's agents or terminals (`startedByAgents`), or, when `removing`, by anyone but a person
- * in an editor, terminal or file manager (`endableForRemoval`). CodeDen itself is never ended:
- * not the runner, not the server, and not their ancestors (the CLI, the desktop app). Each is
- * ended with its whole tree, so nothing with one of those, or a person's app, running under it
- * is chosen (`processesToEnd`). `dir` may name several folders (one moved away, by both its
- * paths). Returns the pids it ended; never throws.
+ * CodeDen's agents or terminals (`startedByAgents`), or, when `removing` on Windows, by anyone
+ * but a person in an editor, terminal or file manager (`endableForRemoval`). CodeDen itself is
+ * never ended: not the runner, not the server, and not their ancestors (the CLI, the desktop
+ * app). Each is ended with its whole tree, so nothing with one of those, or a person's app,
+ * running under it is chosen (`processesToEnd`). `dir` may name several folders (one moved
+ * away, by both its paths). Returns the pids it ended; never throws.
  */
 export async function endProcessesInside(
   dir: string | readonly string[],
@@ -108,11 +111,13 @@ export async function endProcessesInside(
   if (startedBefore !== undefined) {
     for (const r of rows) if (!((r.startedAt ?? Infinity) <= startedBefore)) spare.add(r.pid);
   }
+  // Only Windows refuses to move a folder something runs in (see `removing`).
+  const removing = opts.removing === true && windows;
   const victims = new Set<number>();
   for (const folder of dirs) {
-    const allowed = opts.removing
+    const allowed = removing
       ? endableForRemoval({ rows, runnerPid: process.pid, protect, dir: folder, windows })
-      : startedByAgents(rows, process.pid, RUNNER_STARTED_AT);
+      : startedByAgents(rows, process.pid, RUNNER_STARTED_AT, windows);
     for (const pid of opts.seen ?? []) allowed.add(pid);
     const chosen = processesToEnd({ dir: folder, rows, windows, protect, allowed, spare });
     for (const pid of chosen) victims.add(pid);

@@ -92,7 +92,7 @@ describe("choosing which processes to end", () => {
   ];
 
   it("ends only what CodeDen's agents started inside the worktree", () => {
-    const allowed = startedByAgents(rows, RUNNER, 1500);
+    const allowed = startedByAgents(rows, RUNNER, 1500, true);
     expect([...allowed].sort((a, b) => a - b)).toEqual([30, 31, 40, 41, 60, 70]);
     const ended = processesToEnd({
       dir: WT,
@@ -141,7 +141,7 @@ describe("choosing which processes to end", () => {
       later(84, { exe: `${WT}\\node_modules\\electron\\dist\\electron.exe` }),
       later(85, { commandLine: `node ${WT}\\node_modules\\vite\\bin\\vite.js` }),
     ];
-    const allowed = startedByAgents(apps, RUNNER, 1500);
+    const allowed = startedByAgents(apps, RUNNER, 1500, true);
     expect([...allowed].sort((a, b) => a - b)).toEqual([80, 81, 82, 83, 84, 85]);
     const ended = processesToEnd({
       dir: WT,
