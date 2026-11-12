@@ -215,11 +215,24 @@ export function fixPrompt(
     .join("\n");
 }
 
-/** Another merge left the builder's PR conflicting: rebase it (this is not a revise round). */
-export function rebasePrompt(item: FactoryItem, branch: string, ask: number): string {
+/** Why the builder is asked to rebase, completing "your pull request #N …". */
+export const REBASE_WHY = {
+  conflicts: (branch: string) =>
+    `has merge conflicts with \`${branch}\` (another change merged first), so GitHub runs no CI on it and it can't merge.`,
+  recovered:
+    "failed earlier because no CI reported on it, which is what GitHub does while a PR has merge conflicts. It is back in verification.",
+  worktree:
+    "is in verification and your worktree had been cleaned up; this message brings it back, because the factory's audit runs there.",
+} as const;
+
+/**
+ * Bring the builder's PR up to date with the base branch (another merge left it conflicting,
+ * or it is back after a cleanup). Not a revise round.
+ */
+export function rebasePrompt(item: FactoryItem, branch: string, why: string, ask = 1): string {
   return [
-    `**Rebase**: your pull request${item.pr ? ` #${item.pr.number}` : ""} has merge conflicts with \`${branch}\` (another change merged first), so GitHub runs no CI on it and it can't merge.${ask > 1 ? ` It still has conflicts (request ${ask}).` : ""}`,
-    `Fetch, rebase your branch onto the latest \`origin/${branch}\` and resolve the conflicts, keeping both sides' intent. Run the tests, then push with \`create_pull_request\` (it updates the same PR), and call \`finish\`.`,
+    `**Rebase**: your pull request${item.pr ? ` #${item.pr.number}` : ""} ${why}${ask > 1 ? ` It still has conflicts (request ${ask}).` : ""}`,
+    `Fetch, rebase your branch onto the latest \`origin/${branch}\` and resolve any conflicts, keeping both sides' intent. Run the tests, then push with \`create_pull_request\` (it updates the same PR), and call \`finish\`.`,
     "Change nothing else. This doesn't count as a revise round; the merge checks run again on the new head.",
   ].join("\n");
 }

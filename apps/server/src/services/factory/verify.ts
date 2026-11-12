@@ -19,7 +19,13 @@ import { autoMerge, prDecidedOutside, readyForYou } from "./merge";
 import { escalate, failItem, runAudit } from "./outcomes";
 import { isUiFile, mayMerge, pickReviewer } from "./policy";
 import { fixPrompt, REVIEWER_NUDGE, reReviewPrompt, tooLargePrompt } from "./prompts";
-import { advanceConflicting, baseBranchOf, trackHead } from "./rebase";
+import {
+  advanceConflicting,
+  baseBranchOf,
+  restoreForAudit,
+  trackHead,
+  worktreeSettled,
+} from "./rebase";
 import { mayAutoMerge } from "./trust";
 
 const ENDED = new Set(["idle", "interrupted", "completed", "failed", "stopped"]);
@@ -74,11 +80,16 @@ export async function advanceVerifying(
 
   const vision = visionOf(project);
   const now = ctx.now();
+  const conflicting = pr.mergeable === "conflicting";
   const builder = item.builderSessionId ? ctx.repo.find(item.builderSessionId)?.session : undefined;
   const worktree = builder?.worktreePath ?? null;
   const auditConfigured = Boolean(loop.tuning.auditCommand && worktree);
   const headKey = `${item.id}:${pr.headSha ?? ""}`;
-  if (auditConfigured && worktree && loop.tuning.auditCommand && !auditCache.has(headKey)) {
+  // The audit runs in the builder's settled worktree: not once cleanup removed it, not while
+  // the builder is mid-turn, and not on a head a rebase is about to replace. Until then it is
+  // pending (still required before a merge), never skipped.
+  const auditable = builder !== undefined && worktreeSettled(builder) && !conflicting;
+  if (auditable && worktree && loop.tuning.auditCommand && !auditCache.has(headKey)) {
     auditCache.set(headKey, await runAudit(ctx, loop.tuning.auditCommand, worktree));
   }
   const evidence = await gatherEvidence(ctx, project, item, pr, headKey);
@@ -108,7 +119,6 @@ export async function advanceVerifying(
     nudges: trackHead(i.nudges, pr, now.toISOString()).nudges,
   }));
 
-  const conflicting = pr.mergeable === "conflicting";
   if (outcome === "escalate") return escalate(ctx, loop, current, checks);
   if (outcome === "fail") {
     return handleFailure(ctx, project, loop, current, conflicting ? baseBranchOf(project) : null);
@@ -117,6 +127,10 @@ export async function advanceVerifying(
     // Merge conflicts (another merge came first): the builder rebases, then CI runs again.
     // A review in progress still counts; a new one waits for the rebased head.
     if (conflicting) return advanceConflicting(ctx, project, loop, current);
+    // The audit is due but cleanup removed the builder's worktree: bring it back first.
+    if (auditConfigured && builder?.worktreeRemovedAt && !auditCache.has(headKey)) {
+      return restoreForAudit(ctx, project, loop, current, builder, pr.headSha);
+    }
     const reviewed = checks.find((c) => c.name === "review")?.state !== "skipped";
     if (!reviewed) return loop;
     current = await ensureReviewer(ctx, current, vision.text);

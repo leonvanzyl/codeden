@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import type { FactoryItem, ReviewVerdictInit } from "@codeden/contracts";
 import { ReviewVerdict } from "@codeden/contracts";
 import { afterEach, describe, expect, it } from "vitest";
@@ -35,6 +36,16 @@ const enable = () =>
     mode: "software_factory",
     limits: { ...env.project.factoryLimits, autoMerge: true },
   } as Parameters<FactoryEnv["factory"]["setMode"]>[1]);
+
+/** An audit command, required before a merge (run in the builder's worktree). */
+const requireAudit = () =>
+  env.factory.setMode(env.project.id, {
+    mode: "software_factory",
+    tuning: { auditCommand: "node --version" },
+  });
+
+/** How items failed for missing CI before the factory rebased conflicting PRs. */
+const LEGACY_NO_CI = "ci: No CI reported on the head commit; CI is required for automatic merges";
 
 const tick = () => env.factory.tick(env.project.id);
 const item = (id: string) => env.factory.data.item(id) as FactoryItem;
@@ -214,12 +225,77 @@ describe("factory PRs without CI (merge conflicts, a new head)", () => {
     env.factory.data.updateItem(id, (i) => ({
       ...i,
       stage: "failed",
-      reason: "ci: No CI reported on the head commit; CI is required for automatic merges",
+      reason: LEGACY_NO_CI,
       finishedAt: new Date().toISOString(),
     }));
     await tick();
     expect(item(id).stage).not.toBe("failed");
     expect(item(id).reason).toBeNull();
     expect(lastMessageTo(builder)).toMatch(/rebase/i);
+  });
+
+  it("recovers an item whose builder was archived: the rebase request restores it before the audit runs", async () => {
+    env = createFactoryEnv();
+    enable();
+    const { id, pr, builder } = await verifying();
+    // It failed for missing CI with its revise rounds used up, and cleanup archived its builder
+    // (removing the worktree). The audit is required, and none has run on this head yet (as
+    // after a restart).
+    const at = new Date().toISOString();
+    env.factory.data.updateItem(id, (i) => ({
+      ...i,
+      stage: "failed",
+      attempts: 2,
+      reason: LEGACY_NO_CI,
+      finishedAt: at,
+      sessionsArchivedAt: at,
+    }));
+    env.factory.archiver.push([builder]);
+    await env.factory.archiver.idle();
+    const worktree = env.repo.get(builder).worktreePath as string;
+    expect(existsSync(worktree)).toBe(false);
+    requireAudit();
+    conflicting(pr);
+
+    await tick();
+    expect(item(id)).toMatchObject({ stage: "verifying", reason: null });
+    expect(env.messages.filter((m) => m.sessionId === builder)).toHaveLength(1);
+    expect(lastMessageTo(builder)).toMatch(/\*\*Rebase\*\*.*failed earlier because no CI reported/);
+    // The request brought the builder and its worktree back; nothing ran in a missing directory.
+    expect(env.repo.get(builder)).toMatchObject({ archivedAt: null, worktreeRemovedAt: null });
+    expect(existsSync(worktree)).toBe(true);
+    expect(env.execs).toEqual([]);
+    expect(item(id).checks.find((c) => c.name === "security")?.state).toBe("pending");
+
+    // The builder rebases and pushes: the audit runs in its restored worktree, then the merge.
+    Object.assign(pr, { headSha: "rebased3", mergeable: "mergeable", checks: "success" });
+    await env.setStatus(builder, "idle");
+    await tick();
+    expect(env.execs).toEqual([{ command: "node", args: ["--version"], cwd: worktree }]);
+    review(id);
+    await tick();
+    expect(item(id).checks.find((c) => c.name === "security")?.detail).toMatch(/Audit clean/);
+    expect(item(id).stage).toBe("watching");
+  });
+
+  it("brings a cleaned-up builder worktree back for the audit instead of running it where it was", async () => {
+    env = createFactoryEnv();
+    enable();
+    const { id, builder } = await verifying("success");
+    env.factory.archiver.push([builder]);
+    await env.factory.archiver.idle();
+    const worktree = env.repo.get(builder).worktreePath as string;
+    requireAudit();
+
+    await tick();
+    expect(env.execs).toEqual([]);
+    expect(item(id).stage).toBe("verifying");
+    expect(lastMessageTo(builder)).toMatch(/worktree had been cleaned up/);
+    expect(existsSync(worktree)).toBe(true);
+    // Once the builder's turn is over, the audit runs in the restored worktree.
+    await env.setStatus(builder, "idle");
+    await tick();
+    expect(env.execs).toEqual([{ command: "node", args: ["--version"], cwd: worktree }]);
+    expect(item(id).stage).toBe("verifying");
   });
 });
