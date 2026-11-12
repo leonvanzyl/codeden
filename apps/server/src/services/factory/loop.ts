@@ -15,6 +15,7 @@ import { advanceBuilding, advanceWatching } from "./progress";
 import { recoverNoCiFailures } from "./rebase";
 import { advanceScout } from "./scout";
 import { mayAutoMerge } from "./trust";
+import { recoverTurnRaceFailures } from "./turn-race";
 import { advanceVerifying } from "./verify";
 
 export { FACTORY_LABEL } from "./intake";
@@ -65,6 +66,8 @@ export async function runTick(
 
   // Items that failed only because their conflicting PR got no CI go back to verification.
   await recoverNoCiFailures(ctx, project);
+  // Items whose builder was marked failed by a message racing its turn go back to building.
+  await recoverTurnRaceFailures(ctx, project);
   // Items already in flight move on even while paused (merges stay blocked, reverts excepted).
   // Watch merges first, then builds, then verification, so a PR found while building is
   // verified in the same step and a fresh merge is watched from the next one.

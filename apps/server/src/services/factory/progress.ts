@@ -3,6 +3,7 @@ import { errorMessage } from "../errors";
 import { type FactoryContext, factoryNotice, pauseLoop, raiseInbox } from "./context";
 import { failItem } from "./outcomes";
 import { ANALYZE_NUDGE, BUILDER_NUDGE, REPRODUCE_NUDGE } from "./prompts";
+import { awaitTurnRaceResume } from "./turn-race";
 
 const BUSY = new Set(["created", "queued", "starting", "running", "waiting"]);
 
@@ -36,6 +37,8 @@ export async function advanceBuilding(
     return loop;
   }
   if (s.status === "failed" || s.status === "stopped") {
+    // Failed only because a message raced its turn: told to carry on instead.
+    if (await awaitTurnRaceResume(ctx, item, s)) return loop;
     return failItem(ctx, loop, item, `The builder session ${s.status} without a pull request`);
   }
   const investigating = !item.investigation && (item.type === "bug" || item.type === "feature");

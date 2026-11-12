@@ -298,6 +298,10 @@ export const REPRODUCE_NUDGE =
 export const ANALYZE_NUDGE =
   "You ended your turn without your analysis. Call `factory_submit_analysis` now: `implement` with a spec and acceptance criteria, or `already_done`, `needs_info` or `out_of_scope` with the reason.";
 
+/** To a builder whose session CodeDen marked failed by mistake (a message raced its turn). */
+export const BUILDER_RESUME =
+  "CodeDen marked your session failed by mistake: a message reached it while your turn was still running. Nothing you did failed. Carry on from where you left off (check `git status` and your last steps if you need to) and finish the task as your brief and the factory's latest message ask: report your step if it is still open, then commit, push and make sure your pull request is open.";
+
 export const REVIEWER_NUDGE =
   "You ended your turn without a verdict. Call `factory_submit_review` now with `approve`, `request_changes` or `reject`.";
 
