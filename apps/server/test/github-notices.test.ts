@@ -1,5 +1,6 @@
 import type { Notice } from "@codeden/contracts";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { FACTORY_STARTER } from "../src/services/factory/starter";
 import { prReviewInboxId } from "../src/services/github/review-inbox";
 import { InboxService } from "../src/services/inbox-service";
 import { renderNotices } from "../src/services/orchestration/digest";
@@ -191,6 +192,7 @@ describe("pr_review inbox items", () => {
     expect(inbox.find(id)).toMatchObject({
       kind: "pr_review",
       status: "open",
+      notify: "needs_you",
       sessionId: owner.id,
       pr: { number: 1, state: "open" },
     });
@@ -198,6 +200,23 @@ describe("pr_review inbox items", () => {
     await env.service.mergePr(`${P}:1`, { method: "squash" });
     await waitTick();
     expect(inbox.find(id)).toMatchObject({ status: "resolved" });
+  });
+
+  it("marks a factory session's PR as factory activity: the factory reviews and merges it", async () => {
+    const builder = env.addSession({ branch: "codeden/factory", startedBy: FACTORY_STARTER });
+    env.service.start({ sync: false });
+    env.gh.addPr("codeden/factory", {}, { draft: false });
+    env.gh.touch(1, (i) => {
+      if (i.pr) i.pr.checks = [{ name: "ci", status: "COMPLETED", conclusion: "SUCCESS" }];
+    });
+    await env.service.syncNow(P);
+    await waitTick();
+    const inbox = new InboxService(env.db.db, env.store, () => async () => {});
+    expect(inbox.find(prReviewInboxId(P, 1))).toMatchObject({
+      kind: "pr_review",
+      notify: "factory",
+      sessionId: builder.id,
+    });
   });
 });
 

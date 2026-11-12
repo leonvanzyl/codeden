@@ -185,6 +185,7 @@ export const inboxItems = sqliteTable(
     kind: text("kind").notNull(),
     status: text("status").notNull(),
     priority: text("priority").notNull().default("normal"),
+    notify: text("notify").notNull().default("needs_you"),
     title: text("title").notNull(),
     body: text("body"),
     projectId: text("project_id"),

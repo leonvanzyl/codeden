@@ -366,7 +366,28 @@ describe("factory pipelines with the Fake provider (§10.1)", () => {
       scout,
     );
     const decision = open().find((i) => i.id === recorded.inboxItemId);
-    expect(decision).toMatchObject({ kind: "message", priority: "low", status: "open" });
+    // Informational: it goes to the inbox and the digest, without a toast by default.
+    expect(decision).toMatchObject({
+      kind: "message",
+      priority: "low",
+      notify: "factory",
+      status: "open",
+    });
+    const flagged = await call(
+      "agent",
+      "factory_record_decision",
+      {
+        question: "Deploy the new stack to production?",
+        decision: "Left for the user",
+        reasoning: "Deploys are outside the code",
+        needsHuman: true,
+      },
+      scout,
+    );
+    expect(open().find((i) => i.id === flagged.inboxItemId)).toMatchObject({
+      priority: "high",
+      notify: "needs_you",
+    });
 
     // A session the user started still asks as usual.
     const mine = await h.startFakeSession();

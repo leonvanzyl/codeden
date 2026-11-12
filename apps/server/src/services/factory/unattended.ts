@@ -117,6 +117,8 @@ export function recordDecision(
   raiseInbox(ctx, {
     id,
     kind: "message",
+    // Only a flagged decision needs the user; the rest are for the inbox and the digest.
+    notify: req.needsHuman ? "needs_you" : "factory",
     priority: req.needsHuman ? "high" : "low",
     projectId: by.projectId,
     sessionId: by.sessionId,

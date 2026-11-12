@@ -79,12 +79,16 @@ export function visionOf(project: Project): {
   }
 }
 
-/** Raise (or refresh) a factory inbox item. */
+/**
+ * Raise (or refresh) a factory inbox item. `notify` says whether it needs the user (`needs_you`,
+ * `failure`) or is the factory's own activity (`factory`), which toasts only when they ask for it.
+ */
 export function raiseInbox(
   ctx: FactoryContext,
   item: {
     id: string;
     kind: InboxItem["kind"];
+    notify: InboxItem["notify"];
     projectId: string;
     title: string;
     body: string | null;
@@ -103,6 +107,7 @@ export function raiseInbox(
     kind: item.kind,
     status: "open",
     priority: item.priority ?? "normal",
+    notify: item.notify,
     title: item.title,
     body: item.body,
     projectId: item.projectId,
@@ -170,6 +175,7 @@ export function pauseLoop(
     raiseInbox(ctx, {
       id: `inbox:factory-paused:${loop.projectId}`,
       kind: "run_failed",
+      notify: "failure",
       priority: "high",
       projectId: loop.projectId,
       title: "Factory loop paused",

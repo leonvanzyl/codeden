@@ -281,6 +281,7 @@ export class WorktreeCleanup {
       kind: "cleanup_failed",
       status: "open",
       priority: "normal",
+      notify: "failure",
       title: `Couldn't remove the worktree: ${session.title ?? session.purpose}`,
       body,
       projectId: session.projectId,

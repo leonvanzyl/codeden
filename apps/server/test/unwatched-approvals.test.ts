@@ -18,6 +18,7 @@ function approval(id: string, sessionId: string, over: Partial<InboxItem> = {}):
     kind: "approval",
     status: "open",
     priority: "high",
+    notify: "needs_you",
     title: "Run `git push --force`",
     body: null,
     projectId: "p1",

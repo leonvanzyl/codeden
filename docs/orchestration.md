@@ -133,6 +133,17 @@ The inbox collects everything waiting on you:
 
 Each item links to its session, issue and PR, and can be answered in place. The sidebar shows the count, and the **Waiting on you** box lists the top items. Toasts are on by default; browser notifications are opt-in in **Settings → Notifications**.
 
+Not everything that lands in the inbox needs you, so CodeDen tags each item and only some kinds raise a toast or a notification. **Settings → Notifications → Notify me about** has four switches:
+
+| Category | What it covers | Default |
+|---|---|---|
+| Needs you | PRs only a person can merge (auto-merge off, an untrusted author, a protected area), factory decisions flagged `needsHuman`, start conflicts, budget alerts | On |
+| Failures | Failed runs of sessions you or a PM started, a paused factory loop, a regression after a merge, a worktree that couldn't be removed | On |
+| Factory activity | What the factory handles itself: its decisions, the PRs it reviews and merges, its own sessions' failures, stopped items, the daily digest | Off |
+| Automations | Automation results and triage decisions | On |
+
+Switched-off categories still land in the inbox (and the factory's in the daily digest). Several updates within a few seconds become one toast ("4 updates from the factory"), and at most three toasts are on screen at once. A toast says what happened in one line, and **Open** goes to the thing itself: a failed run opens its session, anything else opens the inbox scrolled to that item. Browser and system notifications follow the same rules.
+
 Approvals and questions block an agent until you answer, so they also play a short chime (turn it off with **Sound when an agent needs you**), keep a toast on screen until you open or resolve them, put an amber dot on the tab icon, and make a background tab's title alternate with "⏳ Waiting on you".
 
 ![The inbox](images/inbox.png)

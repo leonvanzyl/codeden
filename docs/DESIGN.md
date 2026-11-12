@@ -444,6 +444,15 @@ The inbox is one view, also available as an MCP tool. It collects:
 
 Each item links to its session, issue and PR, and can be answered in place. The sidebar shows a count, and items also raise toasts and opt-in browser notifications.
 
+Not every item needs the user, so the server tags each one with a category when it raises it (`InboxItem.notify`), and Settings → Notifications chooses which categories toast and notify. Every item lands in the inbox either way.
+
+- **Needs you** (on): approvals and questions, PRs only a person merges (the factory's "ready for you" and escalations, PRs of sessions the factory doesn't run), factory decisions flagged `needsHuman`, start conflicts, budget alerts.
+- **Failures** (on): failed runs of sessions the factory doesn't run, a paused factory loop, a regression, a worktree that couldn't be removed.
+- **Factory activity** (off): what the factory handles itself: its decisions, the PRs it reviews and merges, its own sessions' failures, stopped items, the daily digest.
+- **Automations** (on): automation results and triage decisions.
+
+A failed session raises its `run_failed` item, and that item is its only toast. Updates arriving within a few seconds of each other share one toast ("4 updates from the factory · Open inbox"), and at most three toasts show at once. A toast says what happened in one line (the item's title and the first sentence of its body that adds to it). **Open** goes to the thing itself: a failed run's session, otherwise the item in the inbox, scrolled into view. Browser and system notifications follow the same rules, one per group.
+
 Approvals and questions block an agent, so they get stronger cues. When one arrives live, a short chime plays (synthesized in the browser, debounced so a burst plays once, on by default and switchable in Settings) and a sticky toast with **Open** stays until the item is opened or resolved. While any is open, the favicon carries an amber dot, and a background tab's title alternates with "Waiting on you". The first such toast also offers, once, to turn on browser notifications.
 
 ### 11.2 Autonomy levels (Permissions)

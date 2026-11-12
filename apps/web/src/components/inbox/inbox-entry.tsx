@@ -9,6 +9,7 @@ import { ago } from "@/lib/format";
 import { platform } from "@/lib/platform";
 import { useProject, useTranscript } from "@/lib/queries";
 import type { TranscriptState } from "@/lib/transcript/reducer";
+import { cn } from "@/lib/utils";
 import { FactoryInboxCard, factoryInboxKind } from "./factory-inbox";
 import { InboxActions, PrReviewStatus } from "./inbox-actions";
 import { TriageCard } from "./triage-card";
@@ -47,13 +48,29 @@ function MirroredRequest({ item }: { item: InboxItem }) {
   );
 }
 
-/** One inbox item: context line, title, body, links, and the in-place answer (§11.1). */
-export function InboxEntry({ item }: { item: InboxItem }) {
+/** DOM id of an inbox entry, for scrolling it into view. */
+export function inboxEntryId(itemId: string): string {
+  return `inbox-item-${itemId}`;
+}
+
+/**
+ * One inbox item: context line, title, body, links, and the in-place answer (§11.1). `focused`
+ * highlights the item a toast's Open went to.
+ */
+export function InboxEntry({ item, focused = false }: { item: InboxItem; focused?: boolean }) {
   const project = useProject(item.projectId);
   const resolved = item.status !== "open";
   const mirrors = item.kind === "approval" || item.kind === "question";
   return (
-    <article className={resolved ? "opacity-60" : "animate-rise"} data-kind={item.kind}>
+    <article
+      id={inboxEntryId(item.id)}
+      className={cn(
+        resolved ? "opacity-60" : "animate-rise",
+        focused && "rounded-xl ring-2 ring-primary/50 ring-offset-4 ring-offset-background",
+      )}
+      data-kind={item.kind}
+      data-focused={focused || undefined}
+    >
       <div className="mb-1.5 flex items-center gap-2 text-2xs text-muted-foreground">
         {project && <ProjectTile project={project} />}
         <span>{project?.name ?? "Global"}</span>

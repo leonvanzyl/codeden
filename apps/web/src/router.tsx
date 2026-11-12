@@ -35,7 +35,8 @@ function Root() {
   return (
     <>
       <Outlet />
-      <Toaster position={nativeShown ? "bottom-left" : "bottom-right"} />
+      {/* At most three toasts on screen; bursts of updates are grouped into one before that. */}
+      <Toaster position={nativeShown ? "bottom-left" : "bottom-right"} visibleToasts={3} />
     </>
   );
 }
@@ -174,6 +175,18 @@ const agentsRoute = createRoute({
   },
 });
 
+const inboxRoute = createRoute({
+  getParentRoute: () => shell,
+  path: "/inbox",
+  // `?item=` scrolls that item into view (a toast's Open).
+  validateSearch: (s: Record<string, unknown>): { item?: string } =>
+    typeof s.item === "string" && s.item ? { item: s.item } : {},
+  component: function Inbox() {
+    const { item } = inboxRoute.useSearch();
+    return <InboxPage focusItemId={item} />;
+  },
+});
+
 const reportsRoute = createRoute({
   getParentRoute: () => shell,
   path: "/reports",
@@ -188,7 +201,7 @@ const reportsRoute = createRoute({
 const routeTree = rootRoute.addChildren([
   shell.addChildren([
     createRoute({ getParentRoute: () => shell, path: "/", component: HomePage }),
-    createRoute({ getParentRoute: () => shell, path: "/inbox", component: InboxPage }),
+    inboxRoute,
     reportsRoute,
     sessionRoute,
     projectRoute,

@@ -1,32 +1,33 @@
-import type { Snapshot } from "@codeden/contracts";
+import type { InboxItem, Snapshot } from "@codeden/contracts";
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo } from "react";
 import { toast } from "sonner";
 import { useClient } from "@/lib/api";
 import { attentionTarget, isBlockingKind } from "@/lib/attention/blocking";
+import {
+  createUpdateGrouper,
+  describeUpdates,
+  notifiesFor,
+  UPDATE_TOAST_MS,
+} from "@/lib/attention/updates";
 import { platform } from "@/lib/platform";
 import { snapshotKey, useSnapshot } from "@/lib/queries";
 import { onLiveEvent } from "@/lib/realtime";
 import { startReadAloud } from "@/lib/voice/read-aloud";
 import { useAttention } from "./use-attention";
 
-const inboxVerb: Record<string, string> = {
+const blockingVerb: Partial<Record<InboxItem["kind"], string>> = {
   approval: "Approval needed",
   question: "Question from an agent",
-  pr_review: "PR ready for review",
-  run_failed: "Run failed",
-  triage: "Triage decision",
-  automation_result: "Automation result",
-  message: "Message",
-  conflict: "Already running",
-  cleanup_failed: "Worktree not removed",
 };
 
 /**
- * Side effects of live events: toasts and browser notifications for new inbox items, the
+ * Side effects of live events: update toasts and desktop notifications for new inbox items
+ * (`lib/attention/updates.ts`: only the categories switched on, a burst grouped into one), the
  * unread badge, the attention cues for items that block an agent (`useAttention`), and
- * read-aloud of the final message when a turn completes (§11.1, §11.3).
+ * read-aloud of the final message when a turn completes (§11.1, §11.3). A session that fails
+ * raises a `run_failed` item, so the failure toasts once, through that item.
  */
 export function LiveEffects() {
   const client = useClient();
@@ -34,7 +35,7 @@ export function LiveEffects() {
   const navigate = useNavigate();
   const { data } = useSnapshot();
   const openCount = data?.inbox.filter((i) => i.status === "open").length ?? 0;
-  const lastStatus = useRef(new Map<string, string>());
+  const grouper = useMemo(() => createUpdateGrouper(), []);
 
   useEffect(() => platform.setBadge(openCount), [openCount]);
   // After the badge, so a flashing title is redrawn on top of it.
@@ -42,47 +43,42 @@ export function LiveEffects() {
 
   useEffect(() => {
     return onLiveEvent((env) => {
+      if (env.type !== "inbox.created") return;
       const snap = queryClient.getQueryData<Snapshot>(snapshotKey);
       if (!snap) return;
-      if (env.type === "inbox.created") {
-        const item = env.payload.item;
-        const blocking = isBlockingKind(item);
-        // Blocking items get a sticky toast from useAttention instead.
-        if (snap.settings.notifications.toasts && !blocking) {
-          toast(inboxVerb[item.kind] ?? "Inbox", {
-            description: item.title,
-            action: { label: "Open", onClick: () => void navigate({ to: "/inbox" }) },
-          });
-        }
-        if (snap.settings.notifications.browser && !platform.isFocused()) {
-          platform.notify(inboxVerb[item.kind] ?? "CodeDen", {
+      const item = env.payload.item;
+      const settings = snap.settings.notifications;
+      const background = settings.browser && !platform.isFocused();
+      if (isBlockingKind(item)) {
+        // The sticky toast comes from useAttention; this is its desktop notification.
+        if (background) {
+          platform.notify(blockingVerb[item.kind] ?? "CodeDen", {
             body: item.title,
             tag: item.id,
-            onClick: () => void navigate(blocking ? attentionTarget(item) : { to: "/inbox" }),
+            onClick: () => void navigate(attentionTarget(item)),
           });
         }
+        return;
       }
-      if (env.type === "session.updated") {
-        const s = env.payload.session;
-        const prev = lastStatus.current.get(s.id);
-        lastStatus.current.set(s.id, s.status);
-        if (
-          prev &&
-          prev !== "failed" &&
-          s.status === "failed" &&
-          snap.settings.notifications.toasts
-        ) {
-          toast.error(`${s.title ?? s.purpose} failed`, {
-            action: {
-              label: "Open",
-              onClick: () =>
-                void navigate({ to: "/sessions/$sessionId", params: { sessionId: s.id } }),
-            },
-          });
-        }
+      if (!notifiesFor(item, settings)) return;
+      const batch = grouper.add(item);
+      const view = describeUpdates(batch.items);
+      const open = () => void navigate(view.target);
+      if (settings.toasts) {
+        const show = view.tone === "error" ? toast.error : toast;
+        show(view.title, {
+          id: batch.id,
+          description: view.description,
+          duration: UPDATE_TOAST_MS,
+          action: { label: view.action, onClick: open },
+        });
+      }
+      // Same tag for the whole batch, so a burst replaces one notification.
+      if (background) {
+        platform.notify(view.title, { body: view.description, tag: batch.id, onClick: open });
       }
     });
-  }, [queryClient, navigate]);
+  }, [queryClient, navigate, grouper]);
 
   // Read the final message aloud when any session's turn completes (§11.3).
   useEffect(() => startReadAloud(client, queryClient), [client, queryClient]);

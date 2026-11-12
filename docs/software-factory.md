@@ -94,6 +94,7 @@ In a dark factory, the project's PM and the factory's own sessions (the scout, i
 - **The vision wins over the current code.** Work that brings the code in line with the vision comes first.
 - **Decisions are recorded.** Each judgement call goes through `factory_record_decision` to your inbox as a low-priority **Factory decided** message and into the daily digest.
 - **Flagged decisions:** a protected area, a missing or self-contradicting vision, or anything irreversible outside the code is flagged as **Factory needs you**, at high priority, without stopping the rest.
+- **Quiet by default.** The factory's own activity (its decisions, the PRs it reviews and merges, its sessions' failures, the digest) lands in the inbox without a toast. Flagged decisions, PRs a person has to merge, a paused loop and a regression still notify you. Turn **Factory activity** on under **Settings → Notifications** to see everything (see [the inbox](orchestration.md#the-inbox)).
 
 Sessions you start yourself still ask you as usual, and so does the PM when you talk to it. In the software factory, questions reach you, since exceptions are yours to handle.
 

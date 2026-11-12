@@ -59,6 +59,7 @@ const inbox: InboxItem = {
   kind: "question",
   status: "open",
   priority: "normal",
+  notify: "needs_you",
   title: "Bump React to 20?",
   body: null,
   projectId: "p1",

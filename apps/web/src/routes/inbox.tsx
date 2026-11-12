@@ -1,8 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { CheckCheck, Inbox } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { EmptyState, SectionLabel } from "@/components/common/bits";
-import { InboxEntry } from "@/components/inbox/inbox-entry";
+import { InboxEntry, inboxEntryId } from "@/components/inbox/inbox-entry";
 import { ConflictCard } from "@/components/project/conflict-card";
 import { useClient } from "@/lib/api";
 import { groupInbox, type InboxFilter, inboxCounts } from "@/lib/inbox";
@@ -17,11 +17,27 @@ const FILTERS: { id: InboxFilter; label: string }[] = [
   { id: "problems", label: "Problems" },
 ];
 
-/** Inbox (§11.1): everything waiting on you, answerable in place. */
-export function InboxPage() {
+/**
+ * Inbox (§11.1): everything waiting on you, answerable in place. `focusItemId` (a toast's Open)
+ * scrolls that item into view and highlights it.
+ */
+export function InboxPage({ focusItemId }: { focusItemId?: string }) {
   const client = useClient();
   const items = useSnapshotData((s) => s.inbox, []);
   const [filter, setFilter] = useState<InboxFilter>("all");
+  const focusLoaded = focusItemId !== undefined && items.some((i) => i.id === focusItemId);
+
+  useEffect(() => {
+    if (!focusItemId || !focusLoaded) return;
+    setFilter("all");
+    // After the filter change has rendered the item.
+    const frame = requestAnimationFrame(() =>
+      document
+        .getElementById(inboxEntryId(focusItemId))
+        ?.scrollIntoView({ block: "center", behavior: "smooth" }),
+    );
+    return () => cancelAnimationFrame(frame);
+  }, [focusItemId, focusLoaded]);
   const conflicts = useQuery({ queryKey: ["conflicts"], queryFn: () => client.listConflicts() });
   const conflictList = conflicts.data ?? [];
   const groups = groupInbox(items, filter);
@@ -74,7 +90,7 @@ export function InboxPage() {
                   </SectionLabel>
                   <div className="space-y-5">
                     {g.items.map((item) => (
-                      <InboxEntry key={item.id} item={item} />
+                      <InboxEntry key={item.id} item={item} focused={item.id === focusItemId} />
                     ))}
                   </div>
                 </section>
@@ -87,7 +103,7 @@ export function InboxPage() {
               <SectionLabel className="mb-3">Recently resolved</SectionLabel>
               <div className="space-y-3">
                 {resolved.map((item) => (
-                  <InboxEntry key={item.id} item={item} />
+                  <InboxEntry key={item.id} item={item} focused={item.id === focusItemId} />
                 ))}
               </div>
             </section>

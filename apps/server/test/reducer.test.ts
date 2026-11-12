@@ -1,6 +1,7 @@
 import type { AgentEvent, Item } from "@codeden/contracts";
 import { beforeEach, describe, expect, it } from "vitest";
-import { applyDelta, latestFollowups } from "../src/events/reducer/items";
+import { applyDelta, latestFollowups, runFailedInbox } from "../src/events/reducer/items";
+import { FACTORY_STARTER } from "../src/services/factory/starter";
 import { sampleSession } from "./helpers";
 import { MemoryProjection } from "./support/memory-projection";
 
@@ -99,10 +100,18 @@ describe("threads and turns", () => {
     const failed = [...p.inbox.values()].find((i) => i.kind === "run_failed");
     expect(failed).toMatchObject({
       status: "open",
+      notify: "failure",
       body: "boom",
       projectId: "p1",
       sessionId: "s1",
     });
+  });
+
+  it("marks a factory session's failed run as factory activity, the factory handles it", () => {
+    const ts = "2026-11-12T10:00:00.000Z";
+    const factory = { ...sampleSession, startedBy: FACTORY_STARTER };
+    expect(runFailedInbox(factory, "i1", "boom", null, ts).notify).toBe("factory");
+    expect(runFailedInbox(sampleSession, "i2", "boom", null, ts).notify).toBe("failure");
   });
 
   it("distinguishes user interrupts from runner restarts", () => {
