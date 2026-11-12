@@ -36,10 +36,7 @@ export class FakeSession implements ProviderSession {
     private readonly fake: FakeProviderOptions,
   ) {
     this.autonomy = opts.autonomy;
-    // A fork gets a conversation of its own at once, like the real providers.
-    this.token =
-      opts.resumeToken ??
-      (opts.forkFrom ? `fake-fork-${opts.sessionId}` : `fake-${opts.sessionId}`);
+    this.token = opts.resumeToken ?? `fake-${opts.sessionId}`;
     this.rootThreadId = `${opts.sessionId}:thread-root`;
     this.events.push({ type: "thread.started", thread: { id: this.rootThreadId } });
     this.events.push({ type: "session.updated", resumeToken: this.token, model: "fake-1" });
@@ -417,12 +414,7 @@ export class FakeSession implements ProviderSession {
       type: "item.completed",
       threadId,
       turnId,
-      item: {
-        ...base,
-        status: "completed",
-        summary: "No issues found.",
-        stats: { totalTokens: 48_213, toolUses: 23, durationMs: 72_000 },
-      },
+      item: { ...base, status: "completed", summary: "No issues found." },
     });
   }
 

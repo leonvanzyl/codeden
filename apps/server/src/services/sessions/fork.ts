@@ -7,6 +7,8 @@ import type {
   WorkspaceRequest,
 } from "@codeden/contracts";
 import { badRequest, conflict, type ServiceError } from "../errors";
+import type { ProjectService } from "../projects/project-service";
+import { type RunnerPort, toServiceError } from "../runner-port";
 import type { LaunchFork } from "./launcher";
 import type { SessionRepo, StoredStartMeta } from "./repo";
 
@@ -14,13 +16,25 @@ const BUSY = new Set(["running", "waiting"]);
 const NOT_STARTED = new Set(["created", "queued", "starting"]);
 const TITLE_MAX = 200;
 const FORK_SUFFIX = " (fork)";
+/** Writing a checkpoint stages the whole worktree; a big one can take a while. */
+const SETTLE_TIMEOUT_MS = 120_000;
+/** A provider may start a process to fork (Codex's app-server). */
+const FORK_TIMEOUT_MS = 60_000;
+
+/**
+ * How a fork's workspace is made (§9), kept with its start metadata until it exists: every
+ * start of the session prepares it first, and none runs anywhere else.
+ */
+export interface ForkStart {
+  workspace: WorkspaceRequest;
+  fork: LaunchFork;
+}
 
 /** A new session that forks another one, ready to be created and launched. */
 export interface ForkPlan {
   session: Session;
   meta: StoredStartMeta;
-  workspace: WorkspaceRequest;
-  fork: LaunchFork;
+  start: ForkStart;
 }
 
 /**
@@ -62,23 +76,73 @@ export function forkTitle(source: Session): string {
 }
 
 /**
- * Plan a fork of `source` (§9): a new agent session in the same project with the same
- * provider, model, effort, permissions, work and issue, started by the user. Its worktree
- * branches from the source's branch and starts from the source's latest checkpoint, and the
- * provider forks the conversation (`SessionOptions.forkFrom`, see `SessionLauncher`). There is
- * no §8.4 conflict check: the fork is a deliberate, visible duplicate (`forkedFrom`). The
- * source is only read.
+ * Fork `sourceId` (§9). The code and the conversation are taken at the same moment:
+ * 1. the source's latest checkpoint, once the runner has written the one for a turn that has
+ *    just ended (`checkpoint.list` `settled`);
+ * 2. a copy of its conversation, made now by the provider (`provider.fork`).
+ * The source is only read. A turn that started meanwhile would make the two disagree, so that
+ * fails the fork (the unused copy is left behind, never resumed). Throws `ServiceError`s.
  */
-export function planFork(
-  deps: { repo: SessionRepo; project: Project; provider: ProviderInfo | undefined },
+export async function planFork(
+  deps: { repo: SessionRepo; projects: ProjectService; runner: RunnerPort },
+  sourceId: string,
+  req: ForkSessionRequest,
+): Promise<ForkPlan> {
+  const { repo, runner } = deps;
+  const source = repo.get(sourceId);
+  const provider = runner.providers().find((p) => p.id === source.provider);
+  const project = forkProject(deps.projects, source, provider);
+  const { checkpoints } = await runner
+    .request(
+      { name: "checkpoint.list", cwd: project.path, sessionId: source.id, settled: true },
+      SETTLE_TIMEOUT_MS,
+    )
+    .catch(rethrow);
+  const checkpoint = checkpoints.at(-1)?.index ?? null;
+  const { resumeToken } = await runner
+    .request(
+      {
+        name: "provider.fork",
+        providerId: source.provider,
+        resumeToken: source.resumeToken as string,
+        cwd: project.path,
+      },
+      FORK_TIMEOUT_MS,
+    )
+    .catch(rethrow);
+  const late = forkBlocker(repo.get(sourceId), provider);
+  if (late) throw late;
+  return forkPlan(source, project, { checkpoint, resumeToken }, req);
+}
+
+/** The source's project, after checking the source can be forked at all. */
+function forkProject(
+  projects: ProjectService,
   source: Session,
+  provider: ProviderInfo | undefined,
+): Project {
+  const blocker = forkBlocker(source, provider);
+  if (blocker) throw blocker;
+  if (!source.projectId) throw badRequest("Only agent sessions can be forked", "fork_unsupported");
+  const project = projects.get(source.projectId);
+  if (project.archivedAt) throw badRequest("The project is archived", "project_archived");
+  return project;
+}
+
+/**
+ * The fork itself: a new agent session in the same project with the same provider, model,
+ * effort, permissions, work and issue, started by the user, with its own copy of the
+ * conversation (`resumeToken`). Its worktree branches from the source's branch and starts from
+ * `checkpoint`; its pull request targets the source's base branch. There is no §8.4 conflict
+ * check: the fork is a deliberate, visible duplicate (`forkedFrom`).
+ */
+export function forkPlan(
+  source: Session,
+  project: Project,
+  origin: { checkpoint: number | null; resumeToken: string },
   req: ForkSessionRequest,
 ): ForkPlan {
-  const blocker = forkBlocker(source, deps.provider);
-  if (blocker) throw blocker;
-  const { project } = deps;
-  if (project.archivedAt) throw badRequest("The project is archived", "project_archived");
-  const checkpoint = deps.repo.latestCheckpointIndex(source.id);
+  const { checkpoint } = origin;
   const now = new Date().toISOString();
   const session: Session = {
     id: randomUUID(),
@@ -102,7 +166,7 @@ export function planFork(
     baseBranch: null,
     issue: source.issue,
     pr: null,
-    resumeToken: null,
+    resumeToken: origin.resumeToken,
     runnerId: null,
     automationRunId: null,
     rootThreadId: null,
@@ -111,9 +175,7 @@ export function planFork(
     updatedAt: now,
     endedAt: null,
   };
-  return {
-    session,
-    meta: { workspaceMode: "worktree", workspaceFallback: null, forced: null, queuedBehind: [] },
+  const start: ForkStart = {
     workspace: { mode: "worktree", baseRef: source.branch ?? undefined, fetch: false },
     fork: {
       baseBranch: source.baseBranch ?? project.defaultBranch ?? null,
@@ -122,4 +184,19 @@ export function planFork(
         : { restoreCheckpoint: { sessionId: source.id, index: checkpoint } }),
     },
   };
+  return {
+    session,
+    start,
+    meta: {
+      workspaceMode: "worktree",
+      workspaceFallback: null,
+      forced: null,
+      queuedBehind: [],
+      forkStart: start,
+    },
+  };
+}
+
+function rethrow(error: unknown): never {
+  throw toServiceError(error);
 }

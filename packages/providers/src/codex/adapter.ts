@@ -12,6 +12,7 @@ import { quickLocate } from "../util/locate";
 import { DEFAULT_MODEL_ID } from "../util/model";
 import type { UtilityModel } from "../utility";
 import { detectCodex } from "./detect";
+import { forkCodexThread } from "./fork";
 import { listCodexModels, visibleCodexModels } from "./models";
 import { CodexUtilityModel } from "./one-shot";
 import { CodexSession } from "./session";
@@ -21,7 +22,7 @@ export const CODEX_PROVIDER_ID = "codex";
 /**
  * Honest flags: subagents (collab agents) are experimental in app-server and not surfaced as
  * child threads yet; rollback exists in the protocol but is not wired up. Fork is
- * `thread/fork` (see `CodexSession`).
+ * `thread/fork` (`forkConversation`).
  */
 const capabilities: ProviderCapabilities = {
   resume: true,
@@ -141,6 +142,13 @@ export class CodexAdapter implements ProviderAdapter {
       throw error;
     }
     return session;
+  }
+
+  /** Copy a thread with `thread/fork` (see `forkCodexThread`); returns the new thread's id. */
+  async forkConversation(resumeToken: string, opts: { cwd: string }): Promise<string> {
+    const executable = this.executable();
+    if (!executable) throw new Error("Codex is not installed (no `codex` on PATH)");
+    return forkCodexThread(executable, resumeToken, opts);
   }
 
   utilityModel(): UtilityModel {

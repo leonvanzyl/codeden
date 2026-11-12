@@ -51,7 +51,8 @@ The **git bar** at the top shows the branch, ahead/behind and the uncommitted co
 Want to try a second approach without losing the first? Open the session's **⋯** menu and choose **Fork session**, or use **Fork this session** in the command palette (**Ctrl/Cmd+K**). CodeDen starts a new session in the same project:
 
 - **Same conversation.** The agent continues from where the original left off, through the provider's own fork. It remembers everything said so far.
-- **Same code.** The new session gets its own worktree on a new branch, created from the original's branch. The original's files at the end of its last turn are copied in, including changes it hadn't committed yet, before setup runs.
+- **Same code.** The new session gets its own worktree on a new branch, created from the original's branch. The original's files at the end of its last turn are copied in, including changes it hadn't committed yet, before setup runs. The conversation and the code are taken at the same moment, even right after a turn ends.
+- **Always in its own worktree.** If the worktree can't be made, the fork shows as failed. Your next message to it tries again, and the agent never runs in the project folder itself.
 - **Same agent.** It keeps the provider, model, effort, permissions and linked issue. Its pull request targets the same base branch.
 - **Original unchanged.** Nothing about the original session changes. Both can carry on side by side.
 

@@ -171,18 +171,15 @@ export class SessionService {
   }
 
   /**
-   * Fork an agent session (§9): a new session that continues its conversation in a new
-   * worktree started from its latest checkpoint (`fork.ts`). Starts in the background.
+   * Fork an agent session (§9): a new session with a copy of its conversation, in a new
+   * worktree started from its latest checkpoint (`fork.ts`). The worktree is made in the
+   * background.
    */
-  fork(id: string, req: ForkSessionRequest): ForkSessionResponse {
-    const source = this.deps.repo.get(id);
-    if (!source.projectId)
-      throw badRequest("Only agent sessions can be forked", "fork_unsupported");
-    const project = this.deps.projects.get(source.projectId);
-    const provider = this.provider(source.provider);
-    const plan = planFork({ repo: this.deps.repo, project, provider }, source, req);
-    this.deps.repo.create(plan.session, plan.meta);
-    this.launchInBackground(plan.session.id, undefined, plan.workspace, plan.fork);
+  async fork(id: string, req: ForkSessionRequest): Promise<ForkSessionResponse> {
+    const { repo, projects, runner } = this.deps;
+    const plan = await planFork({ repo, projects, runner }, id, req);
+    repo.create(plan.session, plan.meta);
+    this.launchInBackground(plan.session.id, undefined, plan.start.workspace, plan.start.fork);
     return { sessionId: plan.session.id };
   }
 

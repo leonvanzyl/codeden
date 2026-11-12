@@ -187,9 +187,18 @@ export class SessionHost {
     await Promise.all([...this.sessions.values()].map((h) => h.checkpointChain));
   }
 
-  /** Wait until every pending checkpoint of a session has been written (tests, drain). */
+  /**
+   * Wait until every pending checkpoint of a session has been written, including any queued
+   * while waiting (tests, drain, `checkpoint.list` with `settled`). A session this runner
+   * doesn't host has none pending.
+   */
   async settled(sessionId: string): Promise<void> {
-    await this.sessions.get(sessionId)?.checkpointChain;
+    for (;;) {
+      const chain = this.sessions.get(sessionId)?.checkpointChain;
+      if (!chain) return;
+      await chain;
+      if (this.sessions.get(sessionId)?.checkpointChain === chain) return;
+    }
   }
 
   private get(sessionId: string): Hosted {
@@ -226,8 +235,10 @@ export class SessionHost {
     try {
       for await (const raw of hosted.session.events) {
         const event = this.rewrite(hosted, raw);
-        this.emit({ kind: "agent", sessionId, event });
+        // Track first: a turn's end queues its checkpoint before the server hears the turn
+        // ended, so anything it asks after that (`settled`) waits for that checkpoint.
         this.track(sessionId, hosted, event);
+        this.emit({ kind: "agent", sessionId, event });
       }
       await hosted.checkpointChain;
       this.emit({

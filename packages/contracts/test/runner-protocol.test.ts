@@ -215,6 +215,8 @@ describe("runner protocol", () => {
       { name: "git.commit", cwd: "/repo", message: "feat: x", paths: ["a.ts"] },
       { name: "git.push", cwd: "/repo", setUpstream: true },
       { name: "checkpoint.list", cwd: "/repo", sessionId: "s1" },
+      { name: "checkpoint.list", cwd: "/repo", sessionId: "s1", settled: true },
+      { name: "provider.fork", providerId: "claude", resumeToken: "claude-1", cwd: "/repo" },
       { name: "checkpoint.diff", cwd: "/repo", sessionId: "s1", from: 0, to: 2 },
       { name: "checkpoint.restoreFiles", cwd: "/repo", sessionId: "s1", index: 1 },
       { name: "pty.attach", ptyId: "p1" },
@@ -238,6 +240,14 @@ describe("runner protocol", () => {
       diff: "diff --git a/x b/x",
       files: [{ path: "x", status: "modified", additions: 1, deletions: 2, binary: false }],
     });
+    roundTrip(RunnerCommandResults["provider.fork"], { resumeToken: "claude-2" });
+    expect(RunnerCommandResults["provider.fork"].safeParse({ resumeToken: "" }).success).toBe(
+      false,
+    );
+    expect(
+      RunnerCommand.safeParse({ name: "provider.fork", providerId: "claude", cwd: "/repo" })
+        .success,
+    ).toBe(false);
     roundTrip(RunnerCommandResults["workspace.remove"], { removed: true, discardedChanges: true });
     roundTrip(RunnerCommandResults["workspace.remove"], { removed: true });
     roundTrip(RunnerCommandResults["workspace.prepare"], {

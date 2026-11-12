@@ -1,21 +1,9 @@
 import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { SessionOptions } from "@codeden/contracts";
 import { afterEach, describe, expect, it } from "vitest";
 import { CodexAdapter } from "../src/codex/adapter";
-import { CodexSession } from "../src/codex/session";
-
-const base: SessionOptions = {
-  sessionId: "s2",
-  role: "agent",
-  cwd: tmpdir(),
-  autonomy: "auto",
-  mcpServers: [],
-  additionalDirectories: [],
-  planMode: false,
-  systemPrompt: "You are the forked session s2.",
-};
+import { forkCodexThread } from "../src/codex/fork";
 
 const fakeCodex = {
   kind: "node-script" as const,
@@ -38,63 +26,36 @@ function logFile(): string {
   return log;
 }
 
-const sessions: CodexSession[] = [];
-afterEach(async () => {
-  await Promise.all(sessions.splice(0).map((s) => s.close()));
+afterEach(() => {
   delete process.env.FAKE_CODEX_LOG;
 });
 
 describe("Codex fork", () => {
-  it("reports the fork capability", () => {
-    expect(new CodexAdapter().capabilities().fork).toBe(true);
+  it("reports the fork capability and can fork", () => {
+    const adapter = new CodexAdapter();
+    expect(adapter.capabilities().fork).toBe(true);
+    expect(typeof adapter.forkConversation).toBe("function");
   });
 
-  it("forks the source thread with this session's cwd, policy and instructions", async () => {
+  it("copies the thread with thread/fork and returns the new thread's id", async () => {
     const log = logFile();
-    const session = new CodexSession(
-      { ...base, forkFrom: "thread-source" },
-      {
-        executable: fakeCodex,
-      },
+    const cwd = tmpdir();
+    await expect(forkCodexThread(fakeCodex, "thread-source", { cwd })).resolves.toBe(
+      "thread-fork-1",
     );
-    sessions.push(session);
-    await session.start();
-    expect(session.resumeToken()).toBe("thread-fork-1");
     const methods = requests(log).map((r) => r.method);
-    expect(methods).toContain("thread/fork");
-    expect(methods).not.toContain("thread/resume");
-    expect(methods).not.toContain("thread/start");
-    const fork = requests(log).find((r) => r.method === "thread/fork");
-    expect(fork?.params).toMatchObject({
+    expect(methods).toEqual(["initialize", "thread/fork"]);
+    expect(requests(log).find((r) => r.method === "thread/fork")?.params).toEqual({
       threadId: "thread-source",
+      cwd,
       excludeTurns: true,
-      cwd: tmpdir(),
-      approvalPolicy: "on-request",
-      sandbox: "workspace-write",
-      developerInstructions: "You are the forked session s2.",
     });
   });
 
-  it("resumes its own thread once forked, never the source", async () => {
-    const log = logFile();
-    const session = new CodexSession(
-      { ...base, forkFrom: "thread-source", resumeToken: "thread-fork-1" },
-      { executable: fakeCodex },
+  it("says which thread could not be copied", async () => {
+    logFile();
+    await expect(forkCodexThread(fakeCodex, "missing", { cwd: tmpdir() })).rejects.toThrow(
+      /Could not fork Codex thread missing: thread not found/,
     );
-    sessions.push(session);
-    await session.start();
-    const methods = requests(log).map((r) => r.method);
-    expect(methods).not.toContain("thread/fork");
-    expect(requests(log).find((r) => r.method === "thread/resume")?.params).toMatchObject({
-      threadId: "thread-fork-1",
-    });
-  });
-
-  it("fails the start instead of starting a thread without the history", async () => {
-    const log = logFile();
-    const session = new CodexSession({ ...base, forkFrom: "missing" }, { executable: fakeCodex });
-    sessions.push(session);
-    await expect(session.start()).rejects.toThrow(/Could not fork Codex thread missing/);
-    expect(requests(log).map((r) => r.method)).not.toContain("thread/start");
   });
 });

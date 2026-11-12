@@ -79,4 +79,12 @@ export class FakeProvider implements ProviderAdapter {
   async openSession(opts: SessionOptions): Promise<ProviderSession> {
     return new FakeSession(opts, this.options);
   }
+
+  /** A fork gets a conversation of its own, named after the one it copies. */
+  async forkConversation(resumeToken: string): Promise<string> {
+    this.forks += 1;
+    return `${resumeToken}:fork-${this.forks}`;
+  }
+
+  private forks = 0;
 }

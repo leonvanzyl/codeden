@@ -18,7 +18,12 @@ import { sessionCounts, sessionsInView } from "@/lib/session-filter";
 import { renderWithClient } from "./utils";
 
 const toast = vi.hoisted(() =>
-  Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn(), warning: vi.fn() }),
+  Object.assign(vi.fn(), {
+    success: vi.fn(),
+    error: vi.fn(),
+    warning: vi.fn(),
+    loading: vi.fn(() => "loading-1"),
+  }),
 );
 vi.mock("sonner", () => ({ toast }));
 
@@ -183,8 +188,13 @@ describe("useSessionActions", () => {
     const { actions } = await actionsFor(session("s-search"), client);
     actions.fork();
     await waitFor(() => expect(fork).toHaveBeenCalledWith("s-search"));
+    expect(toast.loading).toHaveBeenCalledWith("Forking the session…");
+    // The "Forking…" toast turns into the result.
     await waitFor(() =>
-      expect(toast.success).toHaveBeenCalledWith("Forked into a new session", expect.anything()),
+      expect(toast.success).toHaveBeenCalledWith(
+        "Forked into a new session",
+        expect.objectContaining({ id: "loading-1" }),
+      ),
     );
   });
 

@@ -39,6 +39,12 @@ export interface ProviderAdapter {
    */
   onModelsChanged?(listener: () => void): () => void;
   openSession(opts: SessionOptions): Promise<ProviderSession>;
+  /**
+   * Copy the conversation behind `resumeToken` into a new one and return the copy's resume
+   * token; the original is never written to. Present exactly when `capabilities().fork`.
+   * `cwd` is an existing folder of the project (the copy is resumed from its own worktree).
+   */
+  forkConversation?(resumeToken: string, opts: { cwd: string }): Promise<string>;
   /** One-shot, tool-less model calls for side jobs (§7.4), when the provider supports them. */
   utilityModel?(): UtilityModel;
 }

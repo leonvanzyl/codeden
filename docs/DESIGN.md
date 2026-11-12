@@ -158,6 +158,7 @@ interface ProviderAdapter {
   detect(): Promise<ProviderStatus>;          // installed? version? logged in? (§14)
   capabilities(): ProviderCapabilities;
   openSession(opts: SessionOptions): Promise<ProviderSession>;
+  forkConversation?(resumeToken: string, opts: { cwd: string }): Promise<string>; // with `fork`
 }
 
 interface ProviderSession {
@@ -173,19 +174,19 @@ interface ProviderSession {
 
 **`ProviderCapabilities` flags:** `resume`, `steer`, `interrupt`, `approvals`, `userQuestions`, `subagents`, `rollback`, `fork`, `images`, `planMode`, `reasoningEffort`, `mcp`, `skills`.
 
-**Forking.** A provider with `fork` accepts `SessionOptions.forkFrom`, the resume token of another session's conversation. It copies that conversation into a new one when the session opens, so `resumeToken()` returns the copy's id at once and every later start is a plain resume. The original conversation is never written to. `forkFrom` is ignored once the session has a resume token of its own.
+**Forking.** An adapter with `fork` implements `forkConversation(resumeToken, { cwd })`. It copies that conversation into a new one at once and returns the copy's resume token, which a session then resumes like any other. The original conversation is never written to. The runner exposes it as `provider.fork`.
 
 ### 7.2 Providers
 
 - **Claude Code.** Uses the Claude Agent SDK `query()` with streaming input:
   - **Binary:** `pathToClaudeCodeExecutable` points at the user's installed `claude`, which inherits their login and settings.
   - **Approvals:** `canUseTool` maps to approvals, and `resume` handles sessions.
-  - **Fork:** the SDK's `forkSession()` copies the transcript into a new session file before the session starts, and the session resumes the copy.
+  - **Fork:** the SDK's `forkSession()` copies the transcript into a new session file (fresh message ids). No CLI starts and no turn runs.
   - **Subagents:** messages tagged with `parent_tool_use_id` become child threads.
   - **CodeDen tools:** CodeDen's MCP proxy is passed in through `mcpServers`.
   - **Versions:** the SDK version is pinned to one we've tested against.
 - **Codex.** Starts `codex app-server` and speaks JSON-RPC:
-  - **Methods:** threads, turns, items, approvals and steering. A fork is `thread/fork` with the new session's cwd, policy and instructions; a failed fork fails the start rather than starting an empty thread.
+  - **Methods:** threads, turns, items, approvals and steering. A fork is `thread/fork` through a short-lived app-server, closed before the copy is resumed. The session that resumes it sets its own cwd, policy and instructions.
   - **Types:** protocol types are generated from the installed Codex version.
   - **Permissions:** sandbox and approval policies map onto CodeDen's autonomy levels (§11.2).
   - **CodeDen tools:** the MCP server is injected through config overrides.
@@ -328,7 +329,9 @@ The orchestrator must always know what's happening across all projects, and each
 - **Forking a session.** **Fork** (`POST /api/sessions/:id/fork`, the thread header's ⋯ menu, the command palette) copies an agent session into a new one in the same project, so a second approach can run side by side.
   - **What is copied:** the provider, model, effort, permissions, work key and issue. The fork records `forkedFrom` (the source and the checkpoint it started at).
   - **Code:** the fork's worktree is a new branch created from the source's branch, so it carries the source's real commits and no checkpoint commits. The runner then writes the source's latest checkpoint into it as uncommitted changes, before setup runs (`workspace.prepare` `restoreCheckpoint`). Its pull request targets the source's base branch.
-  - **Conversation:** the provider's native fork (`SessionOptions.forkFrom`, §7.1).
+  - **Conversation:** the provider's native fork (`provider.fork`, §7.1). The copy is the fork's resume token from the start, so every start of the fork is a plain resume.
+  - **Same moment for both:** the server asks the runner for the source's checkpoints `settled`, which waits for the checkpoint of a turn that has just ended (the runner queues it before it reports the turn's end). Only then does it copy the conversation. A turn that starts in the source meanwhile fails the fork (409 `turn_running`).
+  - **No other place to run:** the fork's workspace plan is kept with its start metadata until the worktree exists. If preparing it fails (a restore that fails removes the new worktree again), any later start of the fork, after a message or a restart, prepares it first. A fork never falls back to the repo root.
   - **When:** only when the provider reports `fork`, no turn is running, and the session has a conversation and a git branch. The source is only read. Forking is an explicit, visible duplicate, so it skips the §8.4 conflict check.
   - **Not yet:** forking at an earlier turn, forking a running turn, and rolling a conversation back.
 - **GitHub API.** Octokit on the server, authenticated with the token from `gh auth token` (read at runtime, not stored). Agents use `gh` inside their worktrees.

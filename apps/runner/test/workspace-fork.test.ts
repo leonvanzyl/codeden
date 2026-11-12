@@ -4,7 +4,7 @@ import type { RunnerEvent } from "@codeden/contracts";
 import { afterEach, describe, expect, it } from "vitest";
 import { createCheckpoint } from "../src/git/checkpoints";
 import { ProcessSupervisor } from "../src/process/supervisor";
-import { prepareWorkspace } from "../src/workspace/worktree";
+import { prepareWorkspace, slugFromPath } from "../src/workspace/worktree";
 import { makeRepo, removeDir, sh, tempDir, write } from "./helpers";
 
 const dirs: string[] = [];
@@ -102,16 +102,28 @@ describe("workspace.prepare for a fork", { timeout: 30_000 }, () => {
     expect(readFileSync(join(fork.cwd, "a.txt"), "utf8")).toBe("the fork's own work\n");
   });
 
-  it("fails when the checkpoint does not exist", async () => {
+  it("removes the new worktree when the restore fails, so a retry starts clean and restores", async () => {
     const { repo, ctx, source } = await sourceSession();
-    await expect(
+    const attempt = (index: number) =>
       prepareWorkspace(
-        prepare("fork-missing", repo, {
+        prepare("fork-retry", repo, {
+          branch: "codeden/try-again",
           baseRef: source.branch,
-          restoreCheckpoint: { sessionId: "src-session", index: 9 },
+          restoreCheckpoint: { sessionId: "src-session", index },
         }),
         ctx,
-      ),
-    ).rejects.toMatchObject({ code: "unknown_checkpoint" });
+      );
+    await expect(attempt(9)).rejects.toMatchObject({ code: "unknown_checkpoint" });
+    // Nothing is left behind: no folder, no worktree record, no branch.
+    const path = join(ctx.home, "wt", slugFromPath(repo), "forkretr");
+    expect(existsSync(path)).toBe(false);
+    expect(sh(repo, "worktree", "list")).not.toContain("forkretr");
+    expect(sh(repo, "branch", "--list", "codeden/try-again")).toBe("");
+
+    // The next attempt creates the worktree again and does restore the source's files.
+    const fork = await attempt(1);
+    expect(fork).toMatchObject({ created: true, branch: "codeden/try-again" });
+    expect(readFileSync(join(fork.cwd, "a.txt"), "utf8")).toBe("changed in the last turn\n");
+    expect(existsSync(join(fork.cwd, "gone.txt"))).toBe(false);
   });
 });

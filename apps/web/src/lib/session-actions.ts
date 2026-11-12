@@ -108,15 +108,18 @@ export function useSessionActions(session: Session) {
     mutationFn: (title: string) => client.updateSession(session.id, { title }),
     onError,
   });
+  // Copying the conversation can take a moment (a provider may start a process for it).
   const fork = useMutation({
     mutationFn: () => client.forkSession(session.id),
-    onSuccess: ({ sessionId }) => {
+    onMutate: () => ({ toastId: toast.loading("Forking the session…") }),
+    onSuccess: ({ sessionId }, _vars, context) => {
       toast.success("Forked into a new session", {
+        id: context?.toastId,
         description: "It has the conversation and the code so far. The original is unchanged.",
       });
       void navigate({ to: "/sessions/$sessionId", params: { sessionId } });
     },
-    onError,
+    onError: (error, _vars, context) => toast.error(message(error), { id: context?.toastId }),
   });
   const provider = useSnapshotData(
     (s) => s.runner.providers.find((p) => p.id === session.provider),

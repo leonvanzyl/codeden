@@ -56,8 +56,11 @@ export function sessionRoutes(s: AppServices) {
       })
       .post("/:id/stop", async (c) => c.json(await s.sessions.stop(c.req.param("id"))))
       // A new session continuing this one's conversation and code (§9); 409 when it can't.
-      .post("/:id/fork", jsonBody(ForkSessionRequest), (c) => {
-        const body: ForkSessionResponse = s.sessions.fork(c.req.param("id"), c.req.valid("json"));
+      .post("/:id/fork", jsonBody(ForkSessionRequest), async (c) => {
+        const body: ForkSessionResponse = await s.sessions.fork(
+          c.req.param("id"),
+          c.req.valid("json"),
+        );
         return c.json(body);
       })
       .post("/:id/archive", jsonBody(ArchiveSessionRequest), async (c) =>
