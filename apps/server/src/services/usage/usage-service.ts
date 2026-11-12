@@ -281,6 +281,8 @@ export class UsageService {
         kind: "message",
         status: "open",
         priority: s.priority,
+        // A budget alert: the user decides whether to keep spending.
+        notify: "needs_you",
         title: s.title,
         body: s.body,
         projectId: s.projectId,

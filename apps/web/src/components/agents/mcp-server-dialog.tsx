@@ -6,6 +6,7 @@ import type {
   McpServerTarget,
 } from "@codeden/contracts";
 import { useMutation } from "@tanstack/react-query";
+import { Loader2, PlugZap } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Segmented } from "@/components/settings/settings-ui";
@@ -24,6 +25,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { useClient } from "@/lib/api";
 import { emptyMcpForm, formToSpec, type McpForm, mcpFormValid, specToForm } from "./mcp-form";
+import { McpTestResultView, useMcpTest } from "./mcp-test-result";
 import { PatchDialog } from "./patch-dialog";
 
 const SCOPES: Record<AgentConfigProvider, { value: McpConfigScope; label: string }[]> = {
@@ -100,7 +102,17 @@ export function McpServerDialog({
     previous: editing?.provider === provider ? editing.spec : undefined,
   });
   const needsProject = scope !== "user" && !projectId;
-  const valid = /^[A-Za-z0-9_.-]+$/.test(name) && mcpFormValid(form) && !needsProject;
+  const nameValid = /^[A-Za-z0-9_.-]+$/.test(name);
+  const valid = nameValid && mcpFormValid(form) && !needsProject;
+  // The test needs no name: it runs the values in the form, saved or not.
+  const testable = mcpFormValid(form) && !needsProject;
+
+  // A result describes the values it tested: it goes when they change or the dialog reopens.
+  const test = useMcpTest();
+  const resetTest = test.reset;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset whenever the tested values change
+  useEffect(() => resetTest(), [open, provider, scope, form, resetTest]);
+  const runTest = () => void test.run({ ...target, name: nameValid ? name : "unsaved", spec });
 
   const preview = async () => {
     setDiff(undefined);
@@ -133,7 +145,8 @@ export function McpServerDialog({
           <DialogHeader>
             <DialogTitle>{locked ? `Edit ${editing.name}` : "Add MCP server"}</DialogTitle>
             <DialogDescription>
-              Written to the provider's own config, with a diff preview and a backup first.
+              Written to the provider's own config, with a diff preview and a backup first. Test the
+              connection before you save.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
@@ -260,8 +273,23 @@ export function McpServerDialog({
                 </Label>
               </div>
             )}
+            {test.state && <McpTestResultView state={test.state} onDismiss={test.reset} />}
           </div>
           <DialogFooter>
+            <Button
+              variant="outline"
+              className="sm:mr-auto"
+              disabled={!testable || test.state?.status === "running"}
+              title="Start or reach the server with these values and list its tools"
+              onClick={runTest}
+            >
+              {test.state?.status === "running" ? (
+                <Loader2 className="animate-spin" />
+              ) : (
+                <PlugZap />
+              )}
+              Test
+            </Button>
             <Button variant="ghost" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>

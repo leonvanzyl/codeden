@@ -1,4 +1,5 @@
 import type { DiffFile, DiffScope, RestoreFilesRequest } from "@codeden/contracts";
+import type { SelectedLineRange } from "@pierre/diffs";
 import { PatchDiff } from "@pierre/diffs/react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -10,7 +11,7 @@ import {
   Rows2,
   WrapText,
 } from "lucide-react";
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { toast } from "sonner";
 import { EmptyState } from "@/components/common/bits";
 import { Button } from "@/components/ui/button";
@@ -24,10 +25,18 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ApiRequestError, useClient } from "@/lib/api";
+import { captureRange, diffScopeKey } from "@/lib/diff-review";
 import { ageShort } from "@/lib/format";
 import { useSession } from "@/lib/queries";
 import { cn } from "@/lib/utils";
+import { sessionComments, useDiffReviewStore } from "@/stores/diff-review";
 import { useResolvedTheme } from "@/stores/theme";
+import {
+  LineComments,
+  ReviewBar,
+  useCommentButtonLabels,
+  useReviewAnnotations,
+} from "./diff-review";
 import { GitBar } from "./git-bar";
 
 function scopeLabel(scope: DiffScope, turns: { id: string; label: string }[]): string {
@@ -77,6 +86,7 @@ export function DiffPanel({ sessionId }: { sessionId: string }) {
   const del = files.reduce((n, f) => n + f.deletions, 0);
   const noCheckpoints = error instanceof ApiRequestError && error.code === "no_checkpoints";
   const canRestore = restoreTarget(scope) !== null && files.length > 0;
+  const scopeKey = diffScopeKey(scope);
 
   return (
     <div className="flex h-full flex-col" data-testid="diff-panel">
@@ -170,6 +180,7 @@ export function DiffPanel({ sessionId }: { sessionId: string }) {
           </Button>
         </div>
       </div>
+      {session && <ReviewBar session={session} scopeKey={scopeKey} />}
       <div className="min-h-0 flex-1 overflow-y-auto scroll-thin">
         {isLoading ? (
           <div className="space-y-2 p-3">
@@ -191,6 +202,8 @@ export function DiffPanel({ sessionId }: { sessionId: string }) {
             {files.map((f) => (
               <FilePatch
                 key={f.path}
+                sessionId={sessionId}
+                scopeKey={scopeKey}
                 file={f}
                 options={{ theme, split, wrap }}
                 onRestore={canRestore ? () => restore.mutate([f.path]) : undefined}
@@ -204,18 +217,43 @@ export function DiffPanel({ sessionId }: { sessionId: string }) {
 }
 
 function FilePatch({
+  sessionId,
+  scopeKey,
   file,
   options,
   onRestore,
 }: {
+  sessionId: string;
+  scopeKey: string;
   file: DiffFile;
   options: { theme: "dark" | "light"; split: boolean; wrap: boolean };
   onRestore?: () => void;
 }) {
+  const annotations = useReviewAnnotations(sessionId, file.path, scopeKey);
+  const card = useCommentButtonLabels();
+  // Lines picked with the line numbers; otherwise the open comment's lines stay highlighted.
+  const [picked, setPicked] = useState<SelectedLineRange | null>(null);
+  // The range object is kept while its comment is typed, so typing doesn't re-render the diff.
+  const editingRange = useDiffReviewStore(
+    (s) =>
+      sessionComments(s, sessionId).findLast(
+        (c) => c.path === file.path && c.scopeKey === scopeKey && c.draft !== undefined,
+      )?.range,
+  );
+  const onComment = useCallback(
+    (selected: SelectedLineRange) => {
+      const { range, quote } = captureRange(file.patch, selected);
+      useDiffReviewStore.getState().start(sessionId, { path: file.path, scopeKey, range, quote });
+      // The view reports the selection again right after this call; let it go.
+      queueMicrotask(() => setPicked(null));
+    },
+    [sessionId, scopeKey, file.path, file.patch],
+  );
   return (
     <div
       className="group relative overflow-hidden rounded-lg border border-border"
       data-file={file.path}
+      ref={card}
     >
       {onRestore && (
         <Button
@@ -241,7 +279,23 @@ function FilePatch({
             diffStyle: options.split ? "split" : "unified",
             overflow: options.wrap ? "wrap" : "scroll",
             stickyHeader: true,
+            // A "+" by the hovered line (or the picked lines) starts a comment; drag it for a range.
+            enableGutterUtility: true,
+            enableLineSelection: true,
+            onGutterUtilityClick: onComment,
+            onLineSelected: setPicked,
           }}
+          selectedLines={picked ?? editingRange ?? null}
+          lineAnnotations={annotations}
+          renderAnnotation={(a) => (
+            <LineComments
+              sessionId={sessionId}
+              path={file.path}
+              scopeKey={scopeKey}
+              side={a.side}
+              line={a.lineNumber}
+            />
+          )}
         />
       )}
     </div>

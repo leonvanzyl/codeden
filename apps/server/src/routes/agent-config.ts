@@ -7,6 +7,7 @@ import {
   HookChangeRequest,
   McpServerDiffRequest,
   McpServerTarget,
+  McpServerTestRequest,
   McpServerUpsertRequest,
 } from "@codeden/contracts";
 import { Hono } from "hono";
@@ -45,6 +46,9 @@ export function agentConfigRoutes(s: AppServices) {
     .delete("/mcp", queryOf(McpServerTarget), (c) => c.json(ac.mcpDelete(c.req.valid("query"))))
     .post("/mcp/diff", jsonBody(McpServerDiffRequest), (c) =>
       c.json(ac.mcpDiff(c.req.valid("json"))),
+    )
+    .post("/mcp/test", jsonBody(McpServerTestRequest), async (c) =>
+      c.json(await ac.mcpTest(c.req.valid("json"))),
     )
     .get("/hooks", queryOf(AgentConfigListQuery.pick({ projectId: true })), (c) =>
       c.json(ac.hooks.list(c.req.valid("query").projectId)),

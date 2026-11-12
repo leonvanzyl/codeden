@@ -116,7 +116,7 @@ Open **Settings** (**Ctrl/Cmd+,**):
 | Voice | Dictation engine, push-to-talk, read-aloud |
 | Image generation | Engine, default size and quality, daily cap, API keys, a test button |
 | Utility model | The small model for follow-ups, read-aloud summaries and session titles |
-| Notifications | Toasts, the chime when an agent needs you (with a test button), browser notifications |
+| Notifications | Toasts, which inbox categories notify you (needs you, failures, factory activity, automations), the chime when an agent needs you (with a test button), browser notifications |
 | Keyboard shortcuts | The full list (also **Shift+?**) |
 
 ## Stopping CodeDen

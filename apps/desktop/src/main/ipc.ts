@@ -16,6 +16,7 @@ import {
 } from "electron";
 import { z } from "zod";
 import { CHANNELS } from "../shared/channels";
+import { createNotifier } from "./notifications";
 import { externalUrl, isServerUrl } from "./security";
 
 export interface BridgeHost {
@@ -73,21 +74,24 @@ export function registerBridge(host: BridgeHost): void {
     return result.canceled ? null : (result.filePaths[0] ?? null);
   });
 
+  // A notification with the tag of one still on screen replaces it (a grouped burst stays one).
+  const notifier = createNotifier(
+    (opts) =>
+      new Notification({ ...opts, icon: process.platform === "darwin" ? undefined : host.icon }),
+    (tag) => {
+      host.showWindow();
+      if (tag) host.window()?.webContents.send(CHANNELS.notificationClick, tag);
+    },
+  );
   ipcMain.on(CHANNELS.notify, (event, raw) => {
     if (!trusted(event) || !Notification.isSupported()) return;
     const parsed = DesktopNotification.safeParse(raw);
     if (!parsed.success) return;
-    const n = new Notification({
+    notifier.show({
       title: parsed.data.title,
       body: parsed.data.body ?? "",
-      icon: process.platform === "darwin" ? undefined : host.icon,
+      tag: parsed.data.tag || undefined,
     });
-    const tag = parsed.data.tag;
-    n.on("click", () => {
-      host.showWindow();
-      if (tag) host.window()?.webContents.send(CHANNELS.notificationClick, tag);
-    });
-    n.show();
   });
 
   ipcMain.on(CHANNELS.openExternal, (event, raw) => {

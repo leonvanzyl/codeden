@@ -7,6 +7,7 @@ import type {
   JsonValue,
   Session,
 } from "@codeden/contracts";
+import { isFactorySession } from "../../services/factory/starter";
 
 export type RequestItem = ItemOf<"approval_request"> | ItemOf<"user_question">;
 
@@ -65,6 +66,7 @@ export function inboxForRequest(
     kind: isApproval ? "approval" : "question",
     status: "open",
     priority: isApproval ? "high" : "normal",
+    notify: "needs_you",
     title: isApproval ? item.title : (item.questions[0]?.question ?? "Question"),
     body: isApproval ? requestBody(item) : questionBody(item),
     projectId: session.projectId,
@@ -123,7 +125,11 @@ export function closeInbox(
   return { ...inbox, status, resolution, resolvedAt: ts, updatedAt: ts };
 }
 
-/** Inbox item for a failed run (§11.1 "failed or stuck runs"). */
+/**
+ * Inbox item for a failed run (§11.1 "failed or stuck runs"). A factory session's failure is the
+ * factory's to handle (it fails or retries the item and pauses the loop when too many fail), so
+ * it notifies as factory activity; any other session's failure needs the user.
+ */
 export function runFailedInbox(
   session: Session,
   id: string,
@@ -136,6 +142,7 @@ export function runFailedInbox(
     kind: "run_failed",
     status: "open",
     priority: "normal",
+    notify: isFactorySession(session) ? "factory" : "failure",
     title: `Run failed: ${session.title ?? session.purpose}`,
     body: message,
     projectId: session.projectId,

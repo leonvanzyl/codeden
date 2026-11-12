@@ -202,6 +202,19 @@ export async function executeCommand(core: RunnerCore, command: RunnerCommand): 
     case "ports.list":
       return { ports: await listPorts(command.probe) };
 
+    case "mcp.test": {
+      // Loaded on first use: the MCP client adds about 300 ms to every runner start otherwise.
+      const { testMcpServer } = await import("./mcp/server-test");
+      return testMcpServer({
+        spec: command.spec,
+        cwd: command.cwd,
+        expandEnv: command.expandEnv,
+        timeoutMs: command.timeoutMs,
+        clientVersion: core.version,
+        supervisor: core.supervisor,
+      });
+    }
+
     default: {
       // Only `browser.*` commands reach here (checked by the type below).
       const browserCommand: Extract<RunnerCommand, { name: `browser.${string}` }> = command;

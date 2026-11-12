@@ -38,7 +38,11 @@
   },
   "overrides": [
     {
-      "includes": ["apps/desktop/electron-builder.config.mjs"],
+      "includes": [
+        "apps/desktop/electron-builder.config.mjs",
+        "apps/runner/test/mcp-server-test.test.ts",
+        "apps/server/test/agent-config-mcp-test.test.ts"
+      ],
       "linter": {
         "rules": { "suspicious": { "noTemplateCurlyInString": "off" } }
       }

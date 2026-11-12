@@ -199,6 +199,7 @@ async function regression(
   raiseInbox(ctx, {
     id: `inbox:factory-regression:${item.id}`,
     kind: "run_failed",
+    notify: "failure",
     priority: "high",
     projectId: project.id,
     issue: item.issue,

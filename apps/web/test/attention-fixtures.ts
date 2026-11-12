@@ -20,6 +20,7 @@ export function inboxItem(
     kind,
     status: "open",
     priority: "normal",
+    notify: "needs_you",
     title: `Item ${id}`,
     body: null,
     projectId: "p1",

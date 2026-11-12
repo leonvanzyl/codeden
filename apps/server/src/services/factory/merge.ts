@@ -59,6 +59,8 @@ export async function readyForYou(
   raiseInbox(ctx, {
     id: readyInboxId(item.id),
     kind: "pr_review",
+    // The factory won't merge this one: a person has to.
+    notify: "needs_you",
     priority: "normal",
     projectId: project.id,
     sessionId: item.builderSessionId,

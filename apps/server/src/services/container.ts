@@ -433,6 +433,7 @@ export function createServices(opts: ServicesOptions): AppServices {
       backupDir: join(opts.paths.backups, "agent-config"),
       disabledHooksFile: opts.paths.disabledHooks,
       mcpProxyUrl: () => opts.runner.mcpProxyUrl(),
+      runner: opts.runner,
     }),
     github,
     orchestration,

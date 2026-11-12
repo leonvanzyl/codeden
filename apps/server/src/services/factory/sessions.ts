@@ -2,7 +2,6 @@ import {
   type DiscoveryArea,
   type FactoryItem,
   type Session,
-  type StartedBy,
   StartSessionRequest,
   type StartSessionRequestInit,
   type StartSessionResponse,
@@ -13,9 +12,9 @@ import type { RunnerPort } from "../runner-port";
 import type { SessionRepo } from "../sessions/repo";
 import type { SessionService } from "../sessions/session-service";
 import { builderPrompt, revertPrompt, reviewerPrompt } from "./prompts";
+import { FACTORY_STARTER, isFactorySession } from "./starter";
 
-/** Who starts factory sessions; `id: "factory"` marks them for limits and the kill switch. */
-export const FACTORY_STARTER: StartedBy = { kind: "pm", id: "factory" };
+export { FACTORY_STARTER, isFactorySession };
 
 /**
  * A brief or follow-up from the factory loop, recorded as the factory's so the transcript shows
@@ -29,10 +28,6 @@ function brief(text: string): UserInput {
 const SLOT_STATUSES = new Set(["created", "queued", "starting", "running", "waiting"]);
 /** Statuses of sessions the kill switch stops. */
 const LIVE_STATUSES = new Set([...SLOT_STATUSES, "idle", "interrupted"]);
-
-export function isFactorySession(s: Session): boolean {
-  return s.startedBy.kind === FACTORY_STARTER.kind && s.startedBy.id === FACTORY_STARTER.id;
-}
 
 /** Work key of the dark factory's scout (one long-lived session per project). */
 export const SCOUT_WORK_KEY = "factory:scout";

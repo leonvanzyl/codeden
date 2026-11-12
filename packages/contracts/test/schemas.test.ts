@@ -229,7 +229,14 @@ describe("entities", () => {
       itemId: null,
       requestId: null,
     });
+    roundTrip(InboxItem, { ...sampleInboxItem, kind: "message", notify: "factory" });
     roundTrip(Automation, sampleAutomation);
+  });
+
+  it("reads inbox items stored without a notify category as needs_you", () => {
+    const { notify: _, ...stored } = sampleInboxItem;
+    expect(InboxItem.parse(stored).notify).toBe("needs_you");
+    expect(InboxItem.safeParse({ ...sampleInboxItem, notify: "noise" }).success).toBe(false);
   });
 
   it("orders projects pinned first, then by sortOrder, then by name", () => {

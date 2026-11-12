@@ -47,6 +47,17 @@ At the end of every turn the runner snapshots the worktree into a hidden ref, `r
 
 The **git bar** at the top shows the branch, ahead/behind and the uncommitted count, with **Commit** and **Push**.
 
+### Comment on lines
+
+Review the agent's changes line by line and send your notes back in one go:
+
+1. **Hover a line** in the Diff panel and click the **+** by its line number. To comment on several lines, drag the **+** over them, or pick them by their line numbers first (Shift+click extends the range) and then click **+**.
+2. **Write the comment** in the box that opens under the lines, then click **Comment** (or press **Ctrl/Cmd+Enter**). **Esc** cancels. Saved comments stay under their lines with **Edit** and **Delete**.
+3. **Collect as many as you like**, across files. The bar under the toolbar counts them. They stay while you switch to another panel tab or session, and only go when you send or discard them. A comment shows in the diff view you wrote it in (all changes, uncommitted or one turn); the count covers every view.
+4. **Send to agent** turns them into one message: for each comment, the file, the side and lines ("new lines 37–39" in the changed file, "old line 12" in the file before the change), the quoted diff lines and your text. It's sent right away, or queued behind the running turn like any message (you can still edit it in the queue). While it's on its way, the comments in it read **Sending…** and can't be changed, even if you leave the panel; comments you start meanwhile stay for your next review. **Discard** throws the drafts away.
+
+Drafts are kept in the app's memory, like the composer's draft, so reloading the page clears them.
+
 ## Fork a session
 
 Want to try a second approach without losing the first? Open the session's **⋯** menu and choose **Fork session**, or use **Fork this session** in the command palette (**Ctrl/Cmd+K**). CodeDen starts a new session in the same project:

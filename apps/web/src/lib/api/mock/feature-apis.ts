@@ -115,6 +115,42 @@ function mockAgentConfig(world: MockWorld): AgentConfigApi {
       const show = (v: unknown) => (v ? JSON.stringify({ [req.name]: v }, null, 2) : "");
       return delay(naiveDiff("mcp", show(before?.spec), show(req.spec)));
     },
+    testMcp: (req) => {
+      const spec =
+        req.spec ?? servers.find((s) => s.name === req.name && s.provider === req.provider)?.spec;
+      // A command or URL containing "fail" shows the failed result.
+      const target = spec?.type === "stdio" ? spec.command : (spec?.url ?? "");
+      if (!spec || target.includes("fail")) {
+        return delay(
+          {
+            ok: false as const,
+            durationMs: 1840,
+            stage: "connect" as const,
+            error: "MCP error -32000: Connection closed. The server stopped before it answered",
+            timedOut: false,
+            stderrTail: "npm error 404 Not Found - GET https://registry.npmjs.org/@acme%2fmcp",
+          },
+          900,
+        );
+      }
+      return delay(
+        {
+          ok: true as const,
+          durationMs: 842,
+          server: { name: req.name, version: "1.4.0" },
+          protocolVersion: "2025-06-18",
+          toolCount: 4,
+          morePages: false,
+          tools: [
+            { name: "browser_navigate", description: "Navigate to a URL" },
+            { name: "browser_click", description: "Click an element" },
+            { name: "browser_snapshot", description: "Accessibility snapshot of the page" },
+            { name: "browser_take_screenshot" },
+          ],
+        },
+        900,
+      );
+    },
     ...hooksApi,
     loaded: async (sessionId) => {
       const files = configFiles.filter((f) => f.exists);

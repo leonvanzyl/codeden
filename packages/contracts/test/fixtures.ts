@@ -235,6 +235,7 @@ export const sampleInboxItem: InboxItem = {
   kind: "approval",
   status: "open",
   priority: "high",
+  notify: "needs_you",
   title: "Force push?",
   body: null,
   projectId: "p1",

@@ -34,8 +34,14 @@ export interface FactoryApi {
   killSwitch(scope: { projectId: string } | "global", on: boolean): Promise<KillSwitchResponse>;
   /** Clear a pause and the failure count. */
   resume(projectId: string): Promise<FactoryLoop>;
-  /** Run one loop step now; returns the fresh status. */
+  /** Run one loop step now ("Check now"); returns the fresh status. */
   tick(projectId: string): Promise<FactoryStatus>;
+  /**
+   * Dark factory: start a scout round now, skipping the interval and the backlog threshold;
+   * returns the fresh status. 409 `scout_unavailable` says why it can't (as
+   * `status.scout.runNowBlockedBy` does).
+   */
+  runScout(projectId: string): Promise<FactoryStatus>;
   /** Today's digest, now (also raised in the inbox). */
   digest(projectId: string): Promise<FactoryDigest>;
   /** Let an issue from an untrusted author in (it is never merged automatically). */
@@ -68,6 +74,7 @@ export function httpFactoryApi(http: Fetcher): FactoryApi {
       ),
     resume: (id) => post(`${p(id)}/factory/resume`, {}, (v) => FactoryLoop.parse(v)),
     tick: (id) => post(`${p(id)}/factory/tick`, {}, (v) => FactoryStatus.parse(v)),
+    runScout: (id) => post(`${p(id)}/factory/scout`, {}, (v) => FactoryStatus.parse(v)),
     digest: (id) => post(`${p(id)}/factory/digest`, {}, (v) => FactoryDigest.parse(v)),
     admit: (id, req) => post(`${p(id)}/factory/admit`, req, item),
     setType: (id, req) => post(`${p(id)}/factory/set-type`, req, item),

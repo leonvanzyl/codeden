@@ -132,6 +132,7 @@ export class TriageService {
       kind: "triage",
       status: "open",
       priority: "normal",
+      notify: "automation",
       title: `Should I take this on? #${issue.number} ${issue.title ?? ""}`.trim(),
       body: trust.trusted
         ? report.summary

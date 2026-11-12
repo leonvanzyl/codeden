@@ -221,12 +221,35 @@ describe("runner protocol", () => {
       { name: "checkpoint.restoreFiles", cwd: "/repo", sessionId: "s1", index: 1 },
       { name: "pty.attach", ptyId: "p1" },
       { name: "ports.list", probe: [5173] },
+      {
+        name: "mcp.test",
+        spec: { type: "stdio", command: "npx", args: ["-y", "x"], env: { A: "1" } },
+        cwd: "/repo",
+        expandEnv: true,
+        timeoutMs: 30_000,
+      },
+      {
+        name: "mcp.test",
+        spec: { type: "http", url: "https://example.com/mcp", headers: { A: "b" } },
+        expandEnv: false,
+      },
     ];
     for (const command of commands) roundTrip(RunnerCommand, command);
     expect(
       RunnerCommand.safeParse({ name: "checkpoint.diff", cwd: "/r", sessionId: "s", from: -1 })
         .success,
     ).toBe(false);
+    const mcpTest = { name: "mcp.test", spec: { type: "http", url: "http://x" }, expandEnv: true };
+    expect(RunnerCommand.safeParse({ ...mcpTest, timeoutMs: 120_001 }).success).toBe(false);
+    roundTrip(RunnerCommandResults["mcp.test"], {
+      ok: true,
+      durationMs: 5,
+      server: { name: "s", version: "1" },
+      protocolVersion: null,
+      toolCount: 0,
+      morePages: false,
+      tools: [],
+    });
     expect(
       RunnerCommand.safeParse({
         name: "workspace.prepare",

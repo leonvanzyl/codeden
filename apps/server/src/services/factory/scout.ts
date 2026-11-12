@@ -1,8 +1,15 @@
 import { randomUUID } from "node:crypto";
-import type { FactoryLoop, Project, ScoutState, ScoutStatus, Session } from "@codeden/contracts";
-import { errorMessage } from "../errors";
-import { type FactoryContext, visionOf } from "./context";
-import { freeSlots } from "./policy";
+import {
+  type FactoryLoop,
+  type Project,
+  SCOUT_UNAVAILABLE,
+  type ScoutState,
+  type ScoutStatus,
+  type Session,
+} from "@codeden/contracts";
+import { conflict, errorMessage } from "../errors";
+import { budgetSpend, type FactoryContext, visionOf } from "./context";
+import { budgetExceeded, freeSlots, localDay } from "./policy";
 import { LENS_NUDGE, SCOUT_PLAN_NUDGE, scoutFilePrompt, scoutPlanPrompt } from "./prompts-scout";
 import { isBusy } from "./sessions";
 import { ACTIVE_STAGES, WAITING_STAGES } from "./store";
@@ -21,6 +28,9 @@ import { ACTIVE_STAGES, WAITING_STAGES } from "./store";
  *
  * The scout and its lenses hold agent slots like builders, and builders come first: a round
  * only starts with a free slot, and lenses only get the slots that are free.
+ *
+ * `minBacklog` 0 turns scheduled rounds off. "Run scout now" (`runScoutNow`) starts a round on
+ * demand, skipping the interval and the backlog threshold but nothing else.
  */
 
 /** A round that runs longer than this is closed (a stuck scout or lens). */
@@ -38,7 +48,7 @@ export function knownTitles(ctx: FactoryContext, projectId: string): string[] {
   return [...open, ...done].map((i) => i.title).slice(0, 60);
 }
 
-/** Whether a new round is due. */
+/** Whether a new round is due (never with `minBacklog` 0: scheduled rounds are off). */
 export function scoutDue(loop: FactoryLoop, waiting: number, now: number): boolean {
   if (loop.scout.round) return false;
   if (waiting >= loop.tuning.minBacklog) return false;
@@ -63,6 +73,71 @@ export async function advanceScout(
     ctx.log?.(`factory: scout round: ${errorMessage(error)}`);
     return loop;
   }
+}
+
+/** What decides whether "Run scout now" may start a round, besides the project and loop. */
+export interface ScoutNowFacts {
+  globalKillSwitch: boolean;
+  /** Factory sessions in a turn (they hold agent slots). */
+  activeSessions: number;
+  /** Why today's budget is spent (`budgetExceeded`), or null. */
+  overBudget: string | null;
+}
+
+/**
+ * Why "Run scout now" can't start a round right now, in plain words, or null when it can. A
+ * manual round skips the interval and the backlog threshold, never the kill switch, a pause, the
+ * budget, a running round or the agent limit.
+ */
+export function scoutNowBlocker(
+  project: Pick<Project, "autonomyMode" | "archivedAt" | "killSwitch" | "factoryLimits">,
+  loop: Pick<FactoryLoop, "state" | "pausedReason" | "scout">,
+  facts: ScoutNowFacts,
+): string | null {
+  if (project.autonomyMode !== "dark_factory") return "Only a dark factory has a scout.";
+  if (project.archivedAt) return "The project is archived.";
+  if (facts.globalKillSwitch) return "The global kill switch is on.";
+  if (project.killSwitch) return "The kill switch is on.";
+  if (loop.state === "paused")
+    return `The loop is paused${loop.pausedReason ? `: ${loop.pausedReason}` : ""}.`;
+  if (facts.overBudget)
+    return `${facts.overBudget.charAt(0).toUpperCase()}${facts.overBudget.slice(1)}.`;
+  if (loop.scout.round) return "A scout round is already running.";
+  if (freeSlots(facts.activeSessions, project.factoryLimits) === 0) {
+    const max = project.factoryLimits.maxConcurrentSessions;
+    return `No free agent: all ${max} ${max === 1 ? "is" : "are"} working (Agents at once).`;
+  }
+  return null;
+}
+
+/** The facts `scoutNowBlocker` needs, read now. */
+export function scoutNowFacts(
+  ctx: FactoryContext,
+  project: Project,
+  spend = budgetSpend(ctx, project.id, localDay(ctx.now()), project.factoryLimits),
+): ScoutNowFacts {
+  return {
+    globalKillSwitch: ctx.settings.get().factory.killSwitch,
+    activeSessions: ctx.sessions.activeCount(project.id),
+    overBudget: budgetExceeded(spend, project.factoryLimits),
+  };
+}
+
+/**
+ * "Run scout now": start a round right away, skipping the interval and the backlog threshold.
+ * Throws `scout_unavailable` (409) with the reason when no round can start.
+ */
+export async function runScoutNow(
+  ctx: FactoryContext,
+  project: Project,
+  loop: FactoryLoop,
+): Promise<FactoryLoop> {
+  const blocked = scoutNowBlocker(project, loop, scoutNowFacts(ctx, project));
+  if (blocked) throw conflict(blocked, SCOUT_UNAVAILABLE);
+  const scout = await startRound(ctx, project, loop, ctx.now());
+  if (!scout.round) throw conflict("The scout's session couldn't start.", SCOUT_UNAVAILABLE);
+  // As the next tick derives it: a round with nothing further along is "discovering".
+  return { ...loop, scout, state: loop.state === "idle" ? "discovering" : loop.state };
 }
 
 async function startRound(
@@ -174,8 +249,13 @@ export function defaultBranch(project: Project): string {
     : (project.defaultBranch ?? "main");
 }
 
-/** The scout as the dashboard shows it. */
-export function scoutStatus(ctx: FactoryContext, loop: FactoryLoop): ScoutStatus {
+/** The scout as the dashboard shows it (`spend`: today's, against the budget). */
+export function scoutStatus(
+  ctx: FactoryContext,
+  project: Project,
+  loop: FactoryLoop,
+  spend: { usd: number; tokens: number },
+): ScoutStatus {
   const { scout, tuning } = loop;
   const round = scout.round;
   const active = (id: string) => {
@@ -195,11 +275,12 @@ export function scoutStatus(ctx: FactoryContext, loop: FactoryLoop): ScoutStatus
     filed: round?.filed ?? 0,
     lastRoundAt: scout.lastRoundAt,
     nextRoundAt:
-      round || !scout.lastRoundAt
+      round || !scout.lastRoundAt || tuning.minBacklog === 0
         ? null
         : new Date(
             Date.parse(scout.lastRoundAt) + tuning.discoveryIntervalMin * 60_000,
           ).toISOString(),
     rounds: scout.rounds,
+    runNowBlockedBy: scoutNowBlocker(project, loop, scoutNowFacts(ctx, project, spend)),
   };
 }

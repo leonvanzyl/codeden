@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { McpServerSpec } from "../agent-config";
+import { MCP_TEST_MAX_TIMEOUT_MS, McpServerTestResult } from "../agent-config-mcp-test";
 import { AutonomyLevel, Id, ProviderId, ReasoningEffort } from "../common";
 import { UserInput } from "../input";
 import { ProjectConfigFile } from "../project-config";
@@ -256,6 +258,20 @@ export const RunnerCommand = z.discriminatedUnion("name", [
     name: z.literal("ports.list"),
     probe: z.array(z.int().min(1).max(65535)).optional(),
   }),
+  /**
+   * Connection test of an MCP server (§12.4): start it (stdio) or reach its URL (http/sse),
+   * run `initialize` and `tools/list`, then stop it. A failing server is an `ok: false` result.
+   */
+  z.object({
+    name: z.literal("mcp.test"),
+    spec: McpServerSpec,
+    /** Working directory of a stdio server without its own `cwd`; the runner's home when omitted. */
+    cwd: z.string().min(1).optional(),
+    /** Expand `${VAR}` and `${VAR:-default}` from the runner's environment, as Claude Code does. */
+    expandEnv: z.boolean(),
+    /** Default `MCP_TEST_DEFAULT_TIMEOUT_MS`. */
+    timeoutMs: z.int().positive().max(MCP_TEST_MAX_TIMEOUT_MS).optional(),
+  }),
 ]);
 export type RunnerCommand = z.infer<typeof RunnerCommand>;
 export type RunnerCommandName = RunnerCommand["name"];
@@ -387,6 +403,7 @@ export const RunnerCommandResults = {
       }),
     ),
   }),
+  "mcp.test": McpServerTestResult,
 } satisfies Record<RunnerCommandName, z.ZodType>;
 
 /** Result type of a command: `RunnerCommandResult<"session.start">`. */
