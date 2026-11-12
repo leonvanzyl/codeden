@@ -35,6 +35,18 @@ export interface LauncherDeps {
   connectTimeoutMs?: number;
 }
 
+/**
+ * A fork's start (§9): its worktree branches from the source's branch (`WorkspaceRequest.baseRef`),
+ * then gets the source's latest checkpoint as uncommitted changes; its pull request still
+ * targets the source's base branch.
+ */
+export interface LaunchFork {
+  /** The branch the fork's pull request targets (the source's base branch). */
+  baseBranch: string | null;
+  /** The source's latest checkpoint; omitted when it has none yet. */
+  restoreCheckpoint?: { sessionId: string; index: number };
+}
+
 interface PreparedWorkspace {
   cwd: string;
   worktreePath: string | null;
@@ -59,14 +71,14 @@ export class SessionLauncher {
 
   async launch(
     sessionId: string,
-    opts: { input?: UserInput; workspace: WorkspaceRequest },
+    opts: { input?: UserInput; workspace: WorkspaceRequest; fork?: LaunchFork },
   ): Promise<void> {
     const { repo, runner } = this.deps;
     try {
       const session = repo.get(sessionId);
       await this.requireRunner();
       const project = session.projectId ? this.deps.projects.get(session.projectId) : null;
-      const ws = await this.prepareWorkspace(session, project, opts.workspace);
+      const ws = await this.prepareWorkspace(session, project, opts.workspace, opts.fork);
       repo.update(sessionId, (s) => ({
         ...s,
         cwd: ws.cwd,
@@ -209,6 +221,7 @@ export class SessionLauncher {
       effort: session.effort ?? undefined,
       autonomy: session.autonomy,
       resumeToken: session.resumeToken ?? undefined,
+      forkFrom: this.forkFrom(session),
       systemPrompt: codedenSystemPrompt(session, this.projectOf(session)),
       // The orchestrator and PMs never write project code (§11.2). Agent sessions at the
       // `read_only` level carry it in `autonomy`, so it can change live.
@@ -216,6 +229,15 @@ export class SessionLauncher {
       mcpServers,
       ...(ownBranch(session) ? { ownBranch: ownBranch(session) } : {}),
     });
+  }
+
+  /**
+   * The conversation a fork still has to copy: its source's, until the fork has a resume token
+   * of its own (a start that failed before the provider forked tries again).
+   */
+  private forkFrom(session: Session): string | undefined {
+    if (!session.forkedFrom || session.resumeToken) return undefined;
+    return this.deps.repo.find(session.forkedFrom.sessionId)?.session.resumeToken ?? undefined;
   }
 
   /** The session's project for its system prompt; null without one (or once it is gone). */
@@ -237,6 +259,7 @@ export class SessionLauncher {
     session: Session,
     project: Project | null,
     req: WorkspaceRequest,
+    fork?: LaunchFork,
   ): Promise<PreparedWorkspace> {
     if (!project) {
       mkdirSync(this.deps.orchestratorDir, { recursive: true });
@@ -274,6 +297,7 @@ export class SessionLauncher {
           baseRef,
           setupCommands: req.setupCommands ?? [],
           ...(fetch ? { fetch: true } : {}),
+          ...(fork?.restoreCheckpoint ? { restoreCheckpoint: fork.restoreCheckpoint } : {}),
         },
         PREPARE_TIMEOUT_MS,
       );
@@ -281,7 +305,7 @@ export class SessionLauncher {
         cwd: result.cwd,
         worktreePath: req.mode === "worktree" ? result.cwd : null,
         branch: result.branch,
-        baseBranch: baseRef ?? null,
+        baseBranch: fork ? fork.baseBranch : (baseRef ?? null),
         fallback: null,
         setupNote: setupFailureNote(result.setup),
       };

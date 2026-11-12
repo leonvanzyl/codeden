@@ -19,6 +19,7 @@ import { startAppServer } from "./process";
 import type { ServerNotification } from "./protocol";
 import type {
   Model,
+  ThreadForkResponse,
   ThreadResumeResponse,
   ThreadStartResponse,
   TurnStartParams,
@@ -250,38 +251,10 @@ export class CodexSession implements ProviderSession {
       ...(explicitModel(this.opts.model) ? { model: explicitModel(this.opts.model) } : {}),
       ...(this.opts.systemPrompt ? { developerInstructions: this.opts.systemPrompt } : {}),
     };
-    let res: ThreadStartResponse | ThreadResumeResponse | undefined;
     const resumeId = this.mapper.codexThreadId;
-    if (resumeId) {
-      // A thread has a single writer: while a previous app-server is still shutting down,
-      // resume fails with "already has an active writer". Retry briefly, then give up loudly.
-      for (let attempt = 0; !res; attempt += 1) {
-        try {
-          res = await rpc.request<ThreadResumeResponse>("thread/resume", {
-            threadId: resumeId,
-            excludeTurns: true,
-            ...common,
-          });
-        } catch (error) {
-          const message = (error as Error).message;
-          if (/active writer/i.test(message)) {
-            if (attempt < 5) {
-              await new Promise((r) => setTimeout(r, 500 * (attempt + 1)));
-              continue;
-            }
-            await rpc.close();
-            throw new ProviderSessionError(
-              "resume_conflict",
-              `Codex thread ${resumeId} is still open in another process`,
-            );
-          }
-          this.noticeOutsideTurn(
-            `Could not resume Codex thread ${resumeId}; started a new one. ${message}`,
-          );
-          break;
-        }
-      }
-    }
+    let res: ThreadStartResponse | ThreadResumeResponse | ThreadForkResponse | undefined;
+    if (resumeId) res = await this.resumeThread(rpc, resumeId, common);
+    else if (this.opts.forkFrom) res = await this.forkThread(rpc, this.opts.forkFrom, common);
     res ??= await rpc.request<ThreadStartResponse>("thread/start", common);
     this.mapper.codexThreadId = res.thread.id;
     this.threadModel = res.model || undefined;
@@ -293,6 +266,68 @@ export class CodexSession implements ProviderSession {
       );
     }
     return rpc;
+  }
+
+  /**
+   * Resume the session's own thread; undefined (with a notice) when it can't be resumed, so a
+   * new one starts. A thread has a single writer: while a previous app-server is still shutting
+   * down, resume fails with "already has an active writer". Retry briefly, then give up loudly.
+   */
+  private async resumeThread(
+    rpc: CodexRpc,
+    threadId: string,
+    common: Record<string, unknown>,
+  ): Promise<ThreadResumeResponse | undefined> {
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        return await rpc.request<ThreadResumeResponse>("thread/resume", {
+          threadId,
+          excludeTurns: true,
+          ...common,
+        });
+      } catch (error) {
+        const message = (error as Error).message;
+        if (!/active writer/i.test(message)) {
+          this.noticeOutsideTurn(
+            `Could not resume Codex thread ${threadId}; started a new one. ${message}`,
+          );
+          return undefined;
+        }
+        if (attempt >= 5) {
+          await rpc.close();
+          throw new ProviderSessionError(
+            "resume_conflict",
+            `Codex thread ${threadId} is still open in another process`,
+          );
+        }
+        await new Promise((r) => setTimeout(r, 500 * (attempt + 1)));
+      }
+    }
+  }
+
+  /**
+   * Fork `threadId` (`SessionOptions.forkFrom`): a new thread with a copy of its history and
+   * this session's cwd, policy and instructions; the original thread is untouched. A failed
+   * fork fails the start rather than quietly starting a thread without the history.
+   */
+  private async forkThread(
+    rpc: CodexRpc,
+    threadId: string,
+    common: Record<string, unknown>,
+  ): Promise<ThreadForkResponse> {
+    try {
+      return await rpc.request<ThreadForkResponse>("thread/fork", {
+        threadId,
+        excludeTurns: true,
+        ...common,
+      });
+    } catch (error) {
+      await rpc.close();
+      throw new ProviderSessionError(
+        "fork_failed",
+        `Could not fork Codex thread ${threadId}: ${(error as Error).message}`,
+      );
+    }
   }
 
   /**

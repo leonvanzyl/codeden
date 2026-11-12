@@ -39,6 +39,17 @@ export const SessionStatus = z.enum([
 ]);
 export type SessionStatus = z.infer<typeof SessionStatus>;
 
+/**
+ * Where a forked session came from: the source session and the checkpoint its worktree
+ * started from (null when the source had none yet). The fork continues the source's
+ * conversation through the provider's native fork; the source is left as it was.
+ */
+export const ForkOrigin = z.object({
+  sessionId: Id,
+  checkpoint: z.int().nonnegative().nullable(),
+});
+export type ForkOrigin = z.infer<typeof ForkOrigin>;
+
 /** An agent session of any role (§8.1). */
 export const Session = z.object({
   id: Id,
@@ -79,6 +90,8 @@ export const Session = z.object({
    * checkpoints stay; the worktree is recreated from the branch on the next message.
    */
   worktreeRemovedAt: Timestamp.nullable().optional(),
+  /** Set when the session was forked from another one (its conversation and code). */
+  forkedFrom: ForkOrigin.nullable().optional(),
   createdAt: Timestamp,
   updatedAt: Timestamp,
   endedAt: Timestamp.nullable(),

@@ -6,6 +6,7 @@ All notable changes to CodeDen are documented here. The format follows [Keep a C
 
 ### Added
 
+- **Fork a session.** Try a second approach without losing the first. **Fork session** in a session's ⋯ menu (or **Fork this session** in the command palette) starts a new session in the same project. The agent continues the same conversation through Claude's or Codex's own fork. It works in a new worktree and branch that start from the original's code as it was at the end of its last turn, uncommitted changes included. The fork keeps the provider, model, effort, permissions and linked issue. Its header links back to the original, which is left unchanged. Fork is available once a session has had a turn and while no turn is running.
 - **See what each subagent used.** When a subagent finishes, its card in the transcript shows the tokens it used, how many tool calls it made and how long it ran, e.g. `48.2k tokens · 23 tool calls · 1m 12s` (hover the figures for the exact numbers). A turn that cost a lot now shows which subagent spent it. Claude reports these figures for both foreground and background subagents; providers that don't report them show no figures.
 
 ### Changed

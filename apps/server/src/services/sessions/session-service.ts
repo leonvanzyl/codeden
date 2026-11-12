@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import type {
   AutonomyLevel,
+  ForkSessionRequest,
+  ForkSessionResponse,
   JsonValue,
   ProviderInfo,
   QueueSender,
@@ -22,8 +24,9 @@ import { projectDefaultProvider } from "../projects/project-config";
 import type { ProjectService } from "../projects/project-service";
 import { type RunnerPort, runnerErrorCode, toServiceError } from "../runner-port";
 import { derivePurpose, deriveWorkKey, findConflicts } from "./conflicts";
+import { planFork } from "./fork";
 import type { InputDecorator } from "./input-decorator";
-import type { SessionLauncher } from "./launcher";
+import type { LaunchFork, SessionLauncher } from "./launcher";
 import type { Outbox } from "./outbox";
 import { isTransientRunnerError, OutboxHolds } from "./outbox-holds";
 import { readOnlyUnsupported } from "./permissions";
@@ -165,6 +168,22 @@ export class SessionService {
     }
     this.launchInBackground(session.id, req.input, req.workspace);
     return { status: "started", sessionId: session.id };
+  }
+
+  /**
+   * Fork an agent session (§9): a new session that continues its conversation in a new
+   * worktree started from its latest checkpoint (`fork.ts`). Starts in the background.
+   */
+  fork(id: string, req: ForkSessionRequest): ForkSessionResponse {
+    const source = this.deps.repo.get(id);
+    if (!source.projectId)
+      throw badRequest("Only agent sessions can be forked", "fork_unsupported");
+    const project = this.deps.projects.get(source.projectId);
+    const provider = this.provider(source.provider);
+    const plan = planFork({ repo: this.deps.repo, project, provider }, source, req);
+    this.deps.repo.create(plan.session, plan.meta);
+    this.launchInBackground(plan.session.id, undefined, plan.workspace, plan.fork);
+    return { sessionId: plan.session.id };
   }
 
   /** Start a queued session whose blockers finished (called by the queue). */
@@ -389,11 +408,12 @@ export class SessionService {
     id: string,
     input: UserInput | undefined,
     workspace: StartSessionRequest["workspace"],
+    fork?: LaunchFork,
   ) {
     const session = this.deps.repo.get(id);
     const prepared = input ? this.forRunner(session, input) : undefined;
     const promise = this.deps.launcher
-      .launch(id, { input: prepared, workspace })
+      .launch(id, { input: prepared, workspace, ...(fork ? { fork } : {}) })
       .finally(() => this.launching.delete(id));
     this.launching.set(id, promise);
   }

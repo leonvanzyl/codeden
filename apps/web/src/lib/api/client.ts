@@ -8,6 +8,8 @@ import type {
   DiffResult,
   DiffScope,
   DisconnectGithubResponse,
+  ForkSessionRequest,
+  ForkSessionResponse,
   FsListResponse,
   GitCommitRequest,
   GitCommitResponse,
@@ -106,6 +108,11 @@ export interface CodeDenClient {
   respond(sessionId: string, requestId: string, response: RuntimeResponse): Promise<void>;
   startSession(input: StartSessionRequestInit): Promise<StartSessionResponse>;
   stopSession(sessionId: string): Promise<void>;
+  /**
+   * A new session that continues this one's conversation (the provider's fork) in a new
+   * worktree started from its latest checkpoint (§9). The source is left as it is.
+   */
+  forkSession(sessionId: string, req?: ForkSessionRequest): Promise<ForkSessionResponse>;
   /** Hide a session and remove its worktree (§9); `force` drops uncommitted changes. */
   archiveSession(sessionId: string, opts?: { force?: boolean }): Promise<ArchiveSessionResponse>;
   unarchiveSession(sessionId: string): Promise<Session>;

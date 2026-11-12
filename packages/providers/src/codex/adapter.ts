@@ -20,7 +20,8 @@ export const CODEX_PROVIDER_ID = "codex";
 
 /**
  * Honest flags: subagents (collab agents) are experimental in app-server and not surfaced as
- * child threads yet; rollback/fork exist in the protocol but are not wired up.
+ * child threads yet; rollback exists in the protocol but is not wired up. Fork is
+ * `thread/fork` (see `CodexSession`).
  */
 const capabilities: ProviderCapabilities = {
   resume: true,
@@ -30,7 +31,7 @@ const capabilities: ProviderCapabilities = {
   userQuestions: true,
   subagents: false,
   rollback: false,
-  fork: false,
+  fork: true,
   images: true,
   planMode: false,
   reasoningEffort: true,

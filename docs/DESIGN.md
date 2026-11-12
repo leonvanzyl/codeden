@@ -173,16 +173,19 @@ interface ProviderSession {
 
 **`ProviderCapabilities` flags:** `resume`, `steer`, `interrupt`, `approvals`, `userQuestions`, `subagents`, `rollback`, `fork`, `images`, `planMode`, `reasoningEffort`, `mcp`, `skills`.
 
+**Forking.** A provider with `fork` accepts `SessionOptions.forkFrom`, the resume token of another session's conversation. It copies that conversation into a new one when the session opens, so `resumeToken()` returns the copy's id at once and every later start is a plain resume. The original conversation is never written to. `forkFrom` is ignored once the session has a resume token of its own.
+
 ### 7.2 Providers
 
 - **Claude Code.** Uses the Claude Agent SDK `query()` with streaming input:
   - **Binary:** `pathToClaudeCodeExecutable` points at the user's installed `claude`, which inherits their login and settings.
   - **Approvals:** `canUseTool` maps to approvals, and `resume` handles sessions.
+  - **Fork:** the SDK's `forkSession()` copies the transcript into a new session file before the session starts, and the session resumes the copy.
   - **Subagents:** messages tagged with `parent_tool_use_id` become child threads.
   - **CodeDen tools:** CodeDen's MCP proxy is passed in through `mcpServers`.
   - **Versions:** the SDK version is pinned to one we've tested against.
 - **Codex.** Starts `codex app-server` and speaks JSON-RPC:
-  - **Methods:** threads, turns, items, approvals and steering.
+  - **Methods:** threads, turns, items, approvals and steering. A fork is `thread/fork` with the new session's cwd, policy and instructions; a failed fork fails the start rather than starting an empty thread.
   - **Types:** protocol types are generated from the installed Codex version.
   - **Permissions:** sandbox and approval policies map onto CodeDen's autonomy levels (§11.2).
   - **CodeDen tools:** the MCP server is injected through config overrides.
@@ -322,6 +325,12 @@ The orchestrator must always know what's happening across all projects, and each
   - **Visible failures.** A removal that still fails raises one `cleanup_failed` inbox item per session (updated when the reason changes, left alone once dismissed), which CodeDen resolves when a later attempt removes the worktree. The desktop server always writes its log lines to `<home>/logs/desktop-server.log`.
 - **Setup scripts.** `.codeden/project.json` can define commands such as `pnpm install`, which run when a worktree is created, plus a dev-server command and the default provider. Setup stops at the first failing command and the session starts anyway; the agent's first input is prefixed with "Setup command `X` failed (exit N):" and the end of the command's output, so it knows why the worktree may be incomplete.
 - **Turn checkpoints.** At the end of each turn the runner snapshots the worktree into a hidden ref (`refs/codeden/checkpoints/<session>/<n>`). It uses a temporary index (`write-tree` → `commit-tree` → `update-ref`), so the user's branch and index are never touched. This gives exact per-turn diffs and file-level undo; full rollback is offered only when the provider can also roll back its conversation.
+- **Forking a session.** **Fork** (`POST /api/sessions/:id/fork`, the thread header's ⋯ menu, the command palette) copies an agent session into a new one in the same project, so a second approach can run side by side.
+  - **What is copied:** the provider, model, effort, permissions, work key and issue. The fork records `forkedFrom` (the source and the checkpoint it started at).
+  - **Code:** the fork's worktree is a new branch created from the source's branch, so it carries the source's real commits and no checkpoint commits. The runner then writes the source's latest checkpoint into it as uncommitted changes, before setup runs (`workspace.prepare` `restoreCheckpoint`). Its pull request targets the source's base branch.
+  - **Conversation:** the provider's native fork (`SessionOptions.forkFrom`, §7.1).
+  - **When:** only when the provider reports `fork`, no turn is running, and the session has a conversation and a git branch. The source is only read. Forking is an explicit, visible duplicate, so it skips the §8.4 conflict check.
+  - **Not yet:** forking at an earlier turn, forking a running turn, and rolling a conversation back.
 - **GitHub API.** Octokit on the server, authenticated with the token from `gh auth token` (read at runtime, not stored). Agents use `gh` inside their worktrees.
 - **Sync.** Issues, PRs, checks and reviews are polled with conditional requests (ETags) and batched GraphQL. A local app can't receive webhooks; webhook support arrives with remote runners.
 - **Traceability.** Every session records its issue, branch, PR and commits. PR bodies link the issue (`Fixes #N`) and the CodeDen session.
@@ -590,6 +599,7 @@ Detailed, trustworthy reports on spend and usage across every provider, project 
   - **follow-up chips** after a turn completes (§7.5)
 - **Right panel** (tabs): diff, files, browser, terminal, issue/PR, session details. A bottom terminal drawer is optional.
 - **Global:** command palette, keyboard shortcuts, settings, light and dark themes.
+- **Session actions.** The thread header's ⋯ menu offers **Fork session** (§9) when the provider reports `fork`. It is disabled with the reason while a turn runs, and the command palette offers **Fork this session** for the session on screen. A fork shows where it came from: a "Fork of …" chip in its header, a **Forked from** row in Session details, and a note in its empty transcript.
 - **Phones and tablets.** The same layout adapts rather than a separate app (narrow desktop windows with a mouse keep the desktop layout): on phones (< 768 px) and portrait touch tablets (< 1024 px) the sidebar is a slide-out drawer opened from a menu button in every header; touch tablets in landscape (1024–1279 px) keep the icon rail, which expands into the drawer. In both, the right panel opens as an overlay sheet (full screen on phones) instead of squeezing the transcript, and phones use its Terminal tab instead of the bottom drawer. Touch screens get tap targets of at least 40 px and 16 px form fields, and hover-only affordances (row menus, copy buttons) are always shown when the device can't hover. A web app manifest and icons make **Add to Home Screen** open CodeDen full screen; there is no service worker (§15.1).
 - **Platform bridge.** Notifications, opening links, folder picking, global shortcuts, clipboard images and badge counts go through one `PlatformBridge` interface in the UI. It has a web implementation and a desktop one (§17), chosen by detecting the desktop app's `window.codedenDesktop` bridge; features are read from `capabilities`, never "am I in Electron?". Browsers can't return real folder paths, so projects are added through a **server-side folder picker**, which also suits remote use; the desktop app (`capabilities.folderPicker`) uses the system folder picker, with the server-side one as a fallback.
 

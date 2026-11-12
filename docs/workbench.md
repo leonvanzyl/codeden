@@ -9,7 +9,7 @@ Everything an agent touches sits next to its chat. Open the right panel with **C
 | Browser | Alt+3 | The session's browser, shared with the agent |
 | Terminal | Alt+4 | Terminals in the worktree |
 | Issue / PR | Alt+5 | The linked issue and pull request (see [GitHub](github.md)) |
-| Details | Alt+6 | Status, purpose, work key, who started it, provider, autonomy, branch, worktree, scope, what's loaded, read-aloud mute |
+| Details | Alt+6 | Status, purpose, work key, who started it, what it was forked from, provider, autonomy, branch, worktree, scope, what's loaded, read-aloud mute |
 
 ## The transcript
 
@@ -45,6 +45,17 @@ At the end of every turn the runner snapshots the worktree into a hidden ref, `r
 - **Restore:** put files (one, or all of them) back to the session's starting point or to the state before a turn.
 
 The **git bar** at the top shows the branch, ahead/behind and the uncommitted count, with **Commit** and **Push**.
+
+## Fork a session
+
+Want to try a second approach without losing the first? Open the session's **⋯** menu and choose **Fork session**, or use **Fork this session** in the command palette (**Ctrl/Cmd+K**). CodeDen starts a new session in the same project:
+
+- **Same conversation.** The agent continues from where the original left off, through the provider's own fork. It remembers everything said so far.
+- **Same code.** The new session gets its own worktree on a new branch, created from the original's branch. The original's files at the end of its last turn are copied in, including changes it hadn't committed yet, before setup runs.
+- **Same agent.** It keeps the provider, model, effort, permissions and linked issue. Its pull request targets the same base branch.
+- **Original unchanged.** Nothing about the original session changes. Both can carry on side by side.
+
+The fork's header shows **Fork of …** with a link back, and **Details** shows where it was forked from. Fork is offered when the provider supports it (Claude and Codex do). It's available once the session has had a turn and while no turn is running; while a turn runs, the menu says why it's disabled.
 
 ## Files
 

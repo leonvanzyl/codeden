@@ -17,7 +17,7 @@ import {
 import { and, asc, type Column, desc, eq, gt, inArray, lt, or, type SQL, sql } from "drizzle-orm";
 import type { Db } from "../../db/client";
 import { rowToItemRecord, rowToSession } from "../../db/rows";
-import { automationRuns, items, sessions, turns } from "../../db/schema";
+import { automationRuns, checkpoints, items, sessions, turns } from "../../db/schema";
 import type { EventStore } from "../../events/store";
 import { notFound } from "../errors";
 import { ACTIVE_RUN_STATUSES, ACTIVE_SESSION_STATUSES } from "./conflicts";
@@ -308,6 +308,18 @@ export class SessionRepo {
       hasMoreBefore: newestFirst ? more : first !== undefined && exists(lt(items.position, first)),
       hasMoreAfter: newestFirst ? last !== undefined && exists(gt(items.position, last)) : more,
     };
+  }
+
+  /** Index of the session's latest turn checkpoint (§9), or null when it has none. */
+  latestCheckpointIndex(sessionId: string): number | null {
+    const row = this.db
+      .select({ index: checkpoints.index })
+      .from(checkpoints)
+      .where(eq(checkpoints.sessionId, sessionId))
+      .orderBy(desc(checkpoints.index))
+      .limit(1)
+      .get();
+    return row?.index ?? null;
   }
 
   /** Follow-ups of the latest root-thread turn that produced some (§7.5). */

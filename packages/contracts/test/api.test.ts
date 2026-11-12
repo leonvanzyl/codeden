@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   CreateProjectRequest,
   defaultSettings,
+  ForkSessionRequest,
+  ForkSessionResponse,
   ListSessionsQuery,
   RefreshModelsResponse,
   ReorderProjectsRequest,
@@ -69,6 +71,17 @@ describe("api schemas", () => {
       roundTrip(StartSessionResponse, value);
     }
     expect(() => StartSessionResponse.parse({ status: "conflict", existing: [] })).toThrow();
+  });
+
+  it("round-trips fork requests and responses", () => {
+    expect(roundTrip(ForkSessionRequest, {})).toEqual({});
+    expect(roundTrip(ForkSessionRequest, { title: "  Try OAuth instead " }).title).toBe(
+      "Try OAuth instead",
+    );
+    expect(ForkSessionRequest.safeParse({ title: "" }).success).toBe(false);
+    expect(ForkSessionRequest.safeParse({ title: "x".repeat(201) }).success).toBe(false);
+    roundTrip(ForkSessionResponse, { sessionId: "s2" });
+    expect(ForkSessionResponse.safeParse({}).success).toBe(false);
   });
 
   it("parses project sources", () => {

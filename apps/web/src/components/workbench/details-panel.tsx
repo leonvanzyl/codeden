@@ -1,10 +1,12 @@
-import type { Session } from "@codeden/contracts";
+import type { ForkOrigin, Session } from "@codeden/contracts";
+import { Link } from "@tanstack/react-router";
 import { Brain } from "lucide-react";
 import type { ReactNode } from "react";
 import { ProviderMark } from "@/components/common/bits";
 import { AutonomyBadge } from "@/components/thread/autonomy";
 import { Switch } from "@/components/ui/switch";
 import { ago, compact, statusLabel, usd } from "@/lib/format";
+import { useSession } from "@/lib/queries";
 import { useTranscriptsStore } from "@/stores/transcripts";
 import { useVoiceStore } from "@/stores/voice";
 import { LoadedConfig } from "./loaded-config";
@@ -24,6 +26,29 @@ const startedByLabel = {
   pm: "Project manager",
   automation: "Automation",
 };
+
+/** The session a fork came from, and the checkpoint its worktree started at (§9). */
+function ForkedFromRow({ origin }: { origin: ForkOrigin }) {
+  const source = useSession(origin.sessionId);
+  return (
+    <Row label="Forked from">
+      <Link
+        to="/sessions/$sessionId"
+        params={{ sessionId: origin.sessionId }}
+        className="underline-offset-2 hover:underline"
+      >
+        {source ? (source.title ?? source.purpose) : origin.sessionId}
+      </Link>
+      <span className="block text-2xs text-muted-foreground">
+        {origin.checkpoint === null
+          ? "Code: its branch"
+          : origin.checkpoint === 0
+            ? "Code: its files when it started"
+            : `Code: its files after turn ${origin.checkpoint}`}
+      </span>
+    </Row>
+  );
+}
 
 /** Session metadata, usage and what's loaded into its context (§8.4, §12.4). */
 export function DetailsPanel({ session }: { session: Session }) {
@@ -51,6 +76,7 @@ export function DetailsPanel({ session }: { session: Session }) {
         <Row label="Started by">
           {startedByLabel[session.startedBy.kind]} · {ago(session.createdAt)}
         </Row>
+        {session.forkedFrom && <ForkedFromRow origin={session.forkedFrom} />}
         <Row label="Provider">
           <span className="inline-flex items-center gap-1.5">
             <ProviderMark provider={session.provider} /> {session.provider} ·{" "}

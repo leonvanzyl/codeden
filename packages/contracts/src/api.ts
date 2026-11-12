@@ -178,6 +178,20 @@ export const StartSessionResponse = z.discriminatedUnion("status", [
 ]);
 export type StartSessionResponse = z.infer<typeof StartSessionResponse>;
 
+/**
+ * `POST /api/sessions/:id/fork`: a new agent session that continues this one's conversation
+ * (the provider's native fork) in a new worktree started from its latest checkpoint.
+ */
+export const ForkSessionRequest = z.object({
+  /** Defaults to the source's title followed by "(fork)". */
+  title: z.string().trim().min(1).max(200).optional(),
+});
+export type ForkSessionRequest = z.infer<typeof ForkSessionRequest>;
+
+/** `POST /api/sessions/:id/fork` response: the new session (it starts in the background). */
+export const ForkSessionResponse = z.object({ sessionId: Id });
+export type ForkSessionResponse = z.infer<typeof ForkSessionResponse>;
+
 /** Recorded with a session about how it was started (forced starts keep their reason). */
 export const SessionStartMeta = z.object({
   workspaceMode: WorkspaceRequest.shape.mode,

@@ -27,7 +27,8 @@ const capabilities: ProviderCapabilities = {
   userQuestions: true,
   subagents: true,
   rollback: false,
-  fork: false,
+  // The SDK copies a conversation into a new session (`forkSession`), see `openSession`.
+  fork: true,
   images: true,
   planMode: true,
   reasoningEffort: true,
@@ -54,6 +55,19 @@ const FALLBACK_MODELS: ModelInfo[] = [
   { id: "haiku", label: "Haiku", efforts: [] },
 ];
 
+/** Copy a Claude conversation into a new session file; returns the new session id. */
+async function forkConversation(
+  sdk: Pick<ClaudeSdkModule, "forkSession">,
+  sessionId: string,
+): Promise<string> {
+  try {
+    return (await sdk.forkSession(sessionId)).sessionId;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new Error(`Could not fork the Claude conversation ${sessionId}: ${reason}`);
+  }
+}
+
 export interface ClaudeAdapterOptions {
   /** Override executable resolution (tests, custom installs). */
   executable?: ResolvedCommand;
@@ -63,7 +77,7 @@ export interface ClaudeAdapterOptions {
    * Load the SDK (tests stub it). By default sessions use `loadClaudeSdk()`, and discovery
    * uses it only when the SDK is ready without an install (`claudeSdkReady()`).
    */
-  loadSdk?: () => Promise<Pick<ClaudeSdkModule, "query">>;
+  loadSdk?: () => Promise<Pick<ClaudeSdkModule, "query" | "forkSession">>;
 }
 
 /** Claude Code through the Claude Agent SDK and the user's installed `claude` (§7.2). */
@@ -124,11 +138,21 @@ export class ClaudeAdapter implements ProviderAdapter {
     return this.refreshing;
   }
 
+  /**
+   * Open a session. With `forkFrom` (and no resume token yet), the SDK first copies that
+   * conversation into a new session file (`forkSession`); the session then resumes the copy,
+   * so its resume token is known at once and the original conversation is never written to.
+   */
   async openSession(opts: SessionOptions): Promise<ProviderSession> {
     const executable = this.executable();
     if (!executable) throw new Error("Claude Code is not installed (no `claude` on PATH)");
-    const { query } = await (this.options.loadSdk ?? loadClaudeSdk)();
-    return new ClaudeSession(opts, {
+    const sdk = await (this.options.loadSdk ?? loadClaudeSdk)();
+    const { query } = sdk;
+    const sessionOpts =
+      opts.forkFrom && !opts.resumeToken
+        ? { ...opts, resumeToken: await forkConversation(sdk, opts.forkFrom) }
+        : opts;
+    return new ClaudeSession(sessionOpts, {
       executable,
       query,
       // Every session start reports the list of the `claude` it runs: the cheapest refresh.

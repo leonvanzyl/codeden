@@ -90,6 +90,12 @@ export const RunnerCommand = z.discriminatedUnion("name", [
     fetch: z.boolean().optional(),
     /** Run `.codeden/project.json` `setup` commands before `setupCommands`. Default true. */
     runProjectSetup: z.boolean().optional(),
+    /**
+     * A forked session's starting point: once a new worktree is created, its files are made to
+     * match this checkpoint of another session (as uncommitted changes on top of the branch)
+     * before setup commands run. Ignored when the worktree already existed.
+     */
+    restoreCheckpoint: z.object({ sessionId: Id, index: CheckpointIndex }).optional(),
   }),
   /**
    * Remove a session worktree (and optionally its branch). Idempotent: a missing path, or a

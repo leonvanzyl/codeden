@@ -29,7 +29,7 @@ const capabilities: ProviderCapabilities = {
   userQuestions: false,
   subagents: true,
   rollback: false,
-  fork: false,
+  fork: true,
   images: false,
   planMode: false,
   reasoningEffort: false,

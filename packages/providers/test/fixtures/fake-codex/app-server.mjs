@@ -92,6 +92,12 @@ createInterface({ input: process.stdin }).on("line", (line) => {
     case "thread/start":
     case "thread/resume":
       return send({ id: msg.id, result: { thread: { id: "thread-1" }, model: "gpt-configured" } });
+    // A thread id of "missing" has nothing to fork, like a thread deleted from disk.
+    case "thread/fork":
+      if (msg.params?.threadId === "missing") {
+        return send({ id: msg.id, error: { code: -32600, message: "thread not found" } });
+      }
+      return send({ id: msg.id, result: { thread: { id: "thread-fork-1" }, model: "gpt-configured" } });
     case "model/list":
       return modelList(msg);
     case "turn/start": {

@@ -175,6 +175,35 @@ export function createMockClient(opts: MockClientOptions = {}): CodeDenClient {
       running.get(sessionId)?.cancel();
       world.updateSession(sessionId, { status: "stopped", endedAt: new Date().toISOString() });
     },
+    async forkSession(sessionId, req) {
+      const source = world.snapshot.sessions.find((s) => s.id === sessionId);
+      if (!source) throw new Error("Session not found");
+      if (running.has(sessionId)) throw new Error("Wait for the running turn to finish");
+      const id = uid("s");
+      const project = world.snapshot.projects.find((p) => p.id === source.projectId);
+      const session = makeSession({
+        ...source,
+        id,
+        title: req?.title ?? `${source.title ?? source.purpose} (fork)`,
+        status: "idle",
+        startedBy: { kind: "user" },
+        parentSessionId: null,
+        pr: null,
+        progress: null,
+        result: null,
+        archivedAt: null,
+        worktreeRemovedAt: null,
+        branch: `codeden/${id.slice(2, 10)}`,
+        worktreePath: `~/.codeden/wt/${project?.slug ?? "project"}/${id.slice(2, 10)}`,
+        forkedFrom: { sessionId, checkpoint: null },
+        rootThreadId: `t-${id.slice(2)}`,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        endedAt: null,
+      });
+      world.emitDomain({ type: "session.created", sessionId: null, payload: { session } });
+      return delay({ sessionId: id }, 200);
+    },
     queue: queue.api({
       running: (sessionId) => running.has(sessionId),
       steer: (sessionId, input) => client.sendMessage(sessionId, input, "steer"),

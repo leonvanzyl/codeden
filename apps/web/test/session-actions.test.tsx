@@ -8,6 +8,8 @@ import { createMockClient } from "@/lib/api/mock";
 import { sessions as fixtureSessions } from "@/lib/api/mock/fixtures/sessions";
 import {
   canStop,
+  forkBlocked,
+  forkSupported,
   type SessionActions,
   sessionLink,
   useSessionActions,
@@ -150,6 +152,42 @@ describe("useSessionActions", () => {
     await waitFor(() => expect(update).toHaveBeenCalledWith("s-search", { title: "Search v2" }));
   });
 
+  it("offers Fork only where the provider can fork, and only once nothing is running", () => {
+    const idle: Session = {
+      ...session("s-search"),
+      role: "agent",
+      status: "idle",
+      resumeToken: "claude-1",
+      branch: "codeden/search",
+    };
+    const caps = (fork: boolean) =>
+      ({ id: "claude", displayName: "Claude Code", models: [], capabilities: { fork } }) as never;
+    expect(forkSupported(idle, caps(true))).toBe(true);
+    expect(forkSupported(idle, caps(false))).toBe(false);
+    expect(forkSupported(idle, undefined)).toBe(false);
+    expect(forkSupported({ ...idle, role: "pm" }, caps(true))).toBe(false);
+
+    expect(forkBlocked(idle)).toBeNull();
+    expect(forkBlocked({ ...idle, status: "stopped" })).toBeNull();
+    expect(forkBlocked({ ...idle, status: "running" })).toMatch(/running turn/);
+    expect(forkBlocked({ ...idle, status: "waiting" })).toMatch(/running turn/);
+    expect(forkBlocked({ ...idle, status: "starting" })).toMatch(/hasn't started/);
+    expect(forkBlocked({ ...idle, resumeToken: null })).toMatch(/No conversation/);
+    expect(forkBlocked({ ...idle, branch: null })).toMatch(/git branch/);
+  });
+
+  it("forks through the client and opens the new session", async () => {
+    toast.success.mockClear();
+    const client = createMockClient();
+    const fork = vi.spyOn(client, "forkSession");
+    const { actions } = await actionsFor(session("s-search"), client);
+    actions.fork();
+    await waitFor(() => expect(fork).toHaveBeenCalledWith("s-search"));
+    await waitFor(() =>
+      expect(toast.success).toHaveBeenCalledWith("Forked into a new session", expect.anything()),
+    );
+  });
+
   it("stops only sessions that are working or waiting", () => {
     expect(canStop({ status: "running" })).toBe(true);
     expect(canStop({ status: "waiting" })).toBe(true);
@@ -171,6 +209,9 @@ describe("session row menu", () => {
     archived: false,
     archive: vi.fn(),
     unarchive: vi.fn(),
+    canFork: false,
+    forkBlocked: null,
+    fork: vi.fn(),
     ...patch,
   });
 

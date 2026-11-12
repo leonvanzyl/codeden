@@ -202,6 +202,14 @@ describe("runner protocol", () => {
         projectSlug: "demo",
         fetch: true,
       },
+      {
+        name: "workspace.prepare",
+        sessionId: "s2",
+        repoPath: "/repo",
+        strategy: "worktree",
+        baseRef: "codeden/login-ab12",
+        restoreCheckpoint: { sessionId: "s1", index: 3 },
+      },
       { name: "workspace.remove", repoPath: "/repo", path: "/wt/demo/s1", deleteBranch: "b" },
       { name: "git.branches", cwd: "/repo" },
       { name: "git.commit", cwd: "/repo", message: "feat: x", paths: ["a.ts"] },
@@ -216,6 +224,15 @@ describe("runner protocol", () => {
     expect(
       RunnerCommand.safeParse({ name: "checkpoint.diff", cwd: "/r", sessionId: "s", from: -1 })
         .success,
+    ).toBe(false);
+    expect(
+      RunnerCommand.safeParse({
+        name: "workspace.prepare",
+        sessionId: "s2",
+        repoPath: "/repo",
+        strategy: "worktree",
+        restoreCheckpoint: { sessionId: "s1", index: -1 },
+      }).success,
     ).toBe(false);
     roundTrip(RunnerCommandResults["checkpoint.diff"], {
       diff: "diff --git a/x b/x",

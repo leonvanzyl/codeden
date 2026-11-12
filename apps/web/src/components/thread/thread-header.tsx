@@ -8,6 +8,7 @@ import {
   Copy,
   FolderTree,
   GitBranch,
+  GitFork,
   MoreHorizontal,
   PanelRight,
   Square,
@@ -31,7 +32,7 @@ import { SessionCostChip } from "@/components/usage/session-cost";
 import { useClient } from "@/lib/api";
 import { statusLabel } from "@/lib/format";
 import { platform } from "@/lib/platform";
-import { useProject } from "@/lib/queries";
+import { useProject, useSession } from "@/lib/queries";
 import { useSessionActions } from "@/lib/session-actions";
 import { cn } from "@/lib/utils";
 import { useViewport } from "@/lib/viewport";
@@ -60,6 +61,26 @@ function Chip({
       {icon}
       <span className="truncate font-mono">{children}</span>
     </span>
+  );
+}
+
+/** Where a forked session came from, linking to the source session. */
+function ForkedFromChip({ sourceId, className }: { sourceId: string; className?: string }) {
+  const source = useSession(sourceId);
+  const title = source ? (source.title ?? source.purpose) : "another session";
+  return (
+    <Link
+      to="/sessions/$sessionId"
+      params={{ sessionId: sourceId }}
+      title={`Forked from ${title}`}
+      className={cn(
+        "inline-flex h-6 max-w-44 items-center gap-1.5 rounded-md border border-border/80 px-2 text-2xs text-muted-foreground hover:border-primary/40 hover:text-foreground [&_svg]:size-3",
+        className,
+      )}
+    >
+      <GitFork />
+      <span className="truncate">Fork of {title}</span>
+    </Link>
   );
 }
 
@@ -144,6 +165,12 @@ export function ThreadHeader({ session, running }: { session: Session; running: 
             {session.worktreePath.split(/[\\/]/).at(-1)}
           </Chip>
         )}
+        {session.forkedFrom && (
+          <ForkedFromChip
+            sourceId={session.forkedFrom.sessionId}
+            className="hidden @[48rem]:inline-flex"
+          />
+        )}
         <SessionCostChip sessionId={session.id} className="hidden @[40rem]:inline-flex" />
         {/* Agents show their model and permissions under the message box; the PM and the
             orchestrator have no permission picker there, so their read-only badge stays. */}
@@ -224,6 +251,21 @@ export function ThreadHeader({ session, running }: { session: Session; running: 
             <DropdownMenuItem onSelect={() => layout.openRightTab("details")}>
               <Bot /> Session details
             </DropdownMenuItem>
+            {actions.canFork && (
+              <DropdownMenuItem
+                disabled={actions.forkBlocked !== null}
+                title={actions.forkBlocked ?? undefined}
+                onSelect={actions.fork}
+              >
+                <GitFork />
+                <span className="flex min-w-0 flex-col">
+                  Fork session
+                  <span className="text-2xs text-muted-foreground">
+                    {actions.forkBlocked ?? "Try another approach in a new worktree"}
+                  </span>
+                </span>
+              </DropdownMenuItem>
+            )}
             {session.role === "agent" && (
               <>
                 <DropdownMenuSeparator />

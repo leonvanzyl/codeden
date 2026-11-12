@@ -4,7 +4,7 @@ import { mkdir } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import type { RunnerCommandOf, RunnerCommandResult, RunnerEvent } from "@codeden/contracts";
 import { CommandError } from "../errors";
-import { topLevel } from "../git/checkpoints";
+import { restoreFiles, topLevel } from "../git/checkpoints";
 import { git, gitOk, isWorkTree } from "../git/exec";
 import { currentBranch, defaultBranch } from "../git/ops";
 import type { ProcessSupervisor } from "../process/supervisor";
@@ -146,8 +146,9 @@ async function createWorktree(
 
 /**
  * `workspace.prepare` (§9): resolve the session's working directory (repo root, an existing
- * worktree, or a new worktree under `<home>/wt/<slug>/<short>` on a new branch), then run
- * `.codeden/project.json` setup (new worktrees only) and the explicit setup commands.
+ * worktree, or a new worktree under `<home>/wt/<slug>/<short>` on a new branch), restore a
+ * forked session's starting checkpoint into a new one, then run `.codeden/project.json` setup
+ * (new worktrees only) and the explicit setup commands.
  */
 export async function prepareWorkspace(
   cmd: RunnerCommandOf<"workspace.prepare">,
@@ -176,6 +177,12 @@ export async function prepareWorkspace(
     case "worktree":
       target = await createWorktree(cmd, ctx);
       break;
+  }
+  // A fork starts where its source left off: that checkpoint's files, uncommitted, on top of
+  // the branch. Only on creation, so a retried start never overwrites the fork's own work.
+  if (target.created && cmd.restoreCheckpoint) {
+    const from = cmd.restoreCheckpoint;
+    await restoreFiles(target.cwd, from.sessionId, from.index);
   }
 
   const { config, error } = await readProjectConfig(target.cwd);
