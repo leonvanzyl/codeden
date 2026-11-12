@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { ErrorInfo, Id } from "./common";
 import { Item, ItemDelta } from "./items";
+import { ProviderCommand } from "./slash-commands";
 
 /**
  * Token/cost/rate-limit usage. Providers fill in what they report; everything is optional.
@@ -55,6 +56,11 @@ export const SessionUpdatedEvent = z.object({
   title: z.string().optional(),
   /** The agent entered or left plan mode on its own, e.g. it left once its plan was approved. */
   planMode: z.boolean().optional(),
+  /**
+   * The full list of `/` commands the provider reports for this session (built-in, plugin,
+   * custom). Replaces any earlier list; absent when unchanged or not reported.
+   */
+  commands: z.array(ProviderCommand).optional(),
 });
 
 /** A thread came into existence. Emitted for the root thread and every subagent thread. */

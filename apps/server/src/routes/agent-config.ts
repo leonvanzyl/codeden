@@ -9,6 +9,7 @@ import {
   McpServerTarget,
   McpServerTestRequest,
   McpServerUpsertRequest,
+  type SlashCommandList,
 } from "@codeden/contracts";
 import { Hono } from "hono";
 import type { AppServices } from "../services/container";
@@ -61,9 +62,14 @@ export function agentConfigRoutes(s: AppServices) {
     );
 }
 
-/** `GET /api/sessions/:id/agent-config/loaded`. */
+/**
+ * `GET /api/sessions/:id/agent-config/loaded` and `GET /api/sessions/:id/commands` (the
+ * composer's `/` menu: the session's commands and skills).
+ */
 export function sessionAgentConfigRoutes(s: AppServices) {
-  return new Hono().get("/:id/agent-config/loaded", (c) =>
-    c.json(s.agentConfig.loaded(c.req.param("id"))),
-  );
+  return new Hono()
+    .get("/:id/agent-config/loaded", (c) => c.json(s.agentConfig.loaded(c.req.param("id"))))
+    .get("/:id/commands", (c) =>
+      c.json<SlashCommandList>(s.agentConfig.slashCommands(c.req.param("id"))),
+    );
 }

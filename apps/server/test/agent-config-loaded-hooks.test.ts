@@ -150,6 +150,7 @@ describe("hooks that apply to a session's working folder", () => {
       disabledHooksFile: join(dir, "data", "disabled-hooks.json"),
       mcpProxyUrl: () => null,
       runner: { request: () => Promise.reject(new Error("no runner")) },
+      reportedCommands: () => null,
     });
     const claude = LoadedAgentConfig.parse(service.loaded("s1"));
     expect(claude.hooks?.hooks.map((h) => h.handler.command)).toEqual(["notify"]);

@@ -34,6 +34,7 @@ import type {
   Settings,
   SettingsPatch,
   SetupStatus,
+  SlashCommand,
   Snapshot,
   SpeechSummaryResponse,
   StartSessionRequestInit,
@@ -58,7 +59,7 @@ import type {
 } from "./feature-apis";
 import type { AuthApi, NetworkApi } from "./network-api";
 import type { QueueApi } from "./queue-api";
-import type { MentionCandidate, OpenTerminalOptions, SlashCommand, TerminalChannel } from "./types";
+import type { MentionCandidate, OpenTerminalOptions, TerminalChannel } from "./types";
 import type { UpdatesApi } from "./updates-api";
 
 /** How a message is delivered while a turn is running. */
@@ -184,6 +185,7 @@ export interface CodeDenClient {
   listFiles(sessionId: string): Promise<SessionFileList>;
   readFile(sessionId: string, path: string): Promise<SessionFileContent>;
   searchMentions(sessionId: string, query: string): Promise<MentionCandidate[]>;
+  /** The session's `/` commands and skills for the composer, sorted by name. */
   listSlashCommands(sessionId: string): Promise<SlashCommand[]>;
   openTerminal(opts: OpenTerminalOptions): TerminalChannel;
   /** The session browser: live viewer socket, tabs, navigation, dev servers (§12.2). */

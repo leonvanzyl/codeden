@@ -2,6 +2,7 @@ import type {
   AgentEvent,
   AutonomyLevel,
   Item,
+  ProviderCommand,
   RuntimeResponse,
   SessionOptions,
   TodoStatus,
@@ -14,6 +15,11 @@ import { fakeMcpInput, fakeMcpResult } from "./mcp-result";
 import { type FakeTurn, proposePlan } from "./plan";
 
 class Interrupted extends Error {}
+
+/** The `/` commands the Fake provider reports for its sessions (it echoes every message). */
+export const FAKE_COMMANDS: ProviderCommand[] = [
+  { name: "echo", description: "Reply with the message (Fake provider)", builtin: true },
+];
 
 type Todo = { text: string; status: TodoStatus };
 
@@ -41,7 +47,12 @@ export class FakeSession implements ProviderSession {
     this.token = opts.resumeToken ?? `fake-${opts.sessionId}`;
     this.rootThreadId = `${opts.sessionId}:thread-root`;
     this.events.push({ type: "thread.started", thread: { id: this.rootThreadId } });
-    this.events.push({ type: "session.updated", resumeToken: this.token, model: "fake-1" });
+    this.events.push({
+      type: "session.updated",
+      resumeToken: this.token,
+      model: "fake-1",
+      commands: FAKE_COMMANDS,
+    });
   }
 
   resumeToken(): string | undefined {

@@ -38,6 +38,7 @@ function stubSdk(opts: { refuseBypass?: boolean } = {}) {
       },
       interrupt: async () => undefined,
       supportedModels: async () => [],
+      supportedCommands: async () => [],
       close: () => finish(),
     };
     return q as unknown as Query;

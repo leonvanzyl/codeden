@@ -560,6 +560,7 @@ First-class screens for each provider's own files:
 - **MCP servers:** `.mcp.json`, Claude user config and `~/.codex/config.toml`. Add, edit, test the connection, and enable per provider.
 - **Hooks:** the `hooks` key of Claude's `~/.claude/settings.json`, `.claude/settings.json` and `.claude/settings.local.json`, listed by file with event, matcher, type, command and timeout. Add, edit, disable and delete; only the `hooks` value is rewritten. Claude has no per-hook switch, so disabling moves the hook to a shelf in CodeDen's data folder and enabling writes it back. The tab shows for providers whose native config has hooks (`agentConfigFeatures` in contracts).
 - **What's loaded:** for any session, a view of which memory files, skills, MCP servers and hooks are in its context. Hooks are those of the settings files that apply to the session's working folder, with the file whose `disableAllHooks` turns them off.
+- **`/` commands:** the composer's `/` menu (§13) lists, per session, the skills What's loaded finds and the provider's custom command files (Claude's `.claude/commands/` and `~/.claude/commands/`). Once the provider reports what it runs for the session (`session.updated { commands }`; Claude Code reports its built-in, plugin and custom commands and skills), that list decides which names are offered. Picking one inserts `/<name> `.
 
 Edits are written to the native files in place (Principle 2), with a diff preview and a backup before overwriting.
 

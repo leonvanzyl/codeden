@@ -3,7 +3,6 @@
  * nodes, live channels).
  * Server shapes come from contracts.
  */
-import type { ProviderId } from "@codeden/contracts";
 
 // ------------------------------------------------------------------ workbench (§12)
 
@@ -20,14 +19,6 @@ export interface FileNode {
 export interface MentionCandidate {
   path: string;
   kind: "file" | "dir";
-}
-
-export interface SlashCommand {
-  name: string;
-  description: string;
-  kind: "command" | "skill";
-  /** Provider that owns a skill, if any. */
-  provider?: ProviderId;
 }
 
 // ------------------------------------------------------------------ live workbench channels

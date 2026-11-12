@@ -310,6 +310,11 @@ export class ClaudeSession implements ProviderSession {
     this.prompts = prompts;
     this.abort = abort;
     void this.pump(q);
+    // The composer's `/` menu lists what Claude Code would run (built-in commands included).
+    q.supportedCommands().then(
+      (commands) => this.mapper.reportCommands(commands),
+      () => {},
+    );
     if (this.config.onModels) {
       q.supportedModels().then(this.config.onModels, () => {});
     }

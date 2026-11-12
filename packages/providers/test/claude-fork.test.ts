@@ -21,6 +21,7 @@ function stubSdk(fork: (id: string) => Promise<{ sessionId: string }>) {
         next: () => new Promise<IteratorResult<unknown>>(() => {}),
       }),
       supportedModels: async () => [],
+      supportedCommands: async () => [],
       close: () => {},
     };
     return q as unknown as Query;

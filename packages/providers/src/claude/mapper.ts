@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { AgentEvent, ErrorInfo, Item, Usage } from "@codeden/contracts";
 import { str } from "../util/text";
+import { toProviderCommands } from "./commands";
 import { rejectedResetsAt, resultError, type TurnErrorSignals } from "./errors";
 import { apiRetryNotice, compactedNotice, compactFailedNotice, compactingNotice } from "./notices";
 import { StreamAssembler } from "./stream";
@@ -56,6 +57,8 @@ export class ClaudeEventMapper {
   private retryNoticeId: string | undefined;
   /** What the current turn said about a failure, for classifying it (`errors.ts`). */
   private signals: TurnErrorSignals = {};
+  /** The `/` command list last reported, so an unchanged list isn't sent again. */
+  private commandsKey: string | undefined;
 
   constructor(opts: MapperOptions) {
     this.rootThreadId = `${opts.sessionId}:thread-root`;
@@ -85,6 +88,18 @@ export class ClaudeEventMapper {
 
   get resumeToken(): string | undefined {
     return this.claudeSessionId;
+  }
+
+  /**
+   * Report the session's `/` commands (from `supportedCommands()` or a `commands_changed`
+   * push) as `session.updated { commands }`, when they differ from the last list reported.
+   */
+  reportCommands(commands: unknown): void {
+    const list = toProviderCommands(commands);
+    const key = JSON.stringify(list);
+    if (key === this.commandsKey) return;
+    this.commandsKey = key;
+    this.emit({ type: "session.updated", commands: list });
   }
 
   /** Emit `thread.started` for the root thread (once, at session open). */
@@ -279,6 +294,8 @@ export class ClaudeEventMapper {
           model: this.model,
         });
       }
+    } else if (msg.subtype === "commands_changed") {
+      this.reportCommands(msg.commands);
     } else if (msg.subtype === "task_started") {
       this.subagents.onTaskStarted(msg);
     } else if (msg.subtype === "task_notification") {

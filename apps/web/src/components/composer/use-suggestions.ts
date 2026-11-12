@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { useClient } from "@/lib/api";
 import type { Suggestion } from "./suggestion-menu";
-import { detectTrigger, type Trigger } from "./trigger";
+import { detectTrigger, rankCommands, type Trigger } from "./trigger";
 
 /** Suggestions for the active `@` or `/` trigger at the caret. */
 export function useSuggestions(sessionId: string, text: string, caret: number) {
@@ -34,16 +34,13 @@ export function useSuggestions(sessionId: string, text: string, caret: number) {
         insert: `@${m.path}`,
       }));
     }
-    const q = trigger.query.toLowerCase();
-    return (commands.data ?? [])
-      .filter((c) => c.name.toLowerCase().includes(q))
-      .map((c) => ({
-        id: c.name,
-        label: `/${c.name}`,
-        description: c.description,
-        icon: c.kind === "skill" ? ("skill" as const) : ("command" as const),
-        insert: `/${c.name}`,
-      }));
+    return rankCommands(commands.data ?? [], trigger.query).map((c) => ({
+      id: c.name,
+      label: `/${c.name}`,
+      description: c.description,
+      icon: c.kind === "skill" ? ("skill" as const) : ("command" as const),
+      insert: `/${c.name}`,
+    }));
   }, [trigger, mentions.data, commands.data]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: reset selection when the query changes.

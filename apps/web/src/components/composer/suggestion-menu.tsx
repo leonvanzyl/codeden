@@ -68,16 +68,20 @@ export function SuggestionMenu({
                   s.icon === "skill" ? "text-primary" : "text-muted-foreground",
                 )}
               />
+              {/* The name keeps its width (up to most of the row); a long description is cut. */}
               <span
                 className={cn(
-                  "truncate",
+                  "max-w-[70%] shrink-0 truncate",
                   (s.icon === "file" || s.icon === "dir") && "font-mono text-[12px]",
                 )}
               >
                 {s.label}
               </span>
               {s.description && (
-                <span className="ml-auto truncate pl-3 text-2xs text-muted-foreground">
+                <span
+                  title={s.description}
+                  className="ml-auto min-w-0 truncate pl-3 text-2xs text-muted-foreground"
+                >
                   {s.description}
                 </span>
               )}

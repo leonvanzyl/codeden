@@ -159,6 +159,9 @@ Commands on a session without an open browser fail with `409 browser_not_open`.
 | `POST /api/agent-config/hooks/diff` | `HookChangeRequest` -> `AgentConfigDiff` (unchanged for shelf-only removals) |
 | `POST /api/agent-config/hooks` | `HookChangeRequest` (`add`, `update`, `remove`, `disable`, `enable`; `listProjectId` picks the list to return) -> `HookWriteResponse` (with the refreshed `hooks` list) |
 | `GET /api/sessions/:id/agent-config/loaded` | -> `LoadedAgentConfig` |
+| `GET /api/sessions/:id/commands` | -> `SlashCommandList` (the composer's `/` menu) |
+
+- **`/` commands** (`slash-commands.ts`, shapes in `slash-commands.ts` of contracts). One list per session, sorted by name, first entry of a name winning: the skills What's loaded finds for it, then its provider's custom command files (Claude: `.claude/commands/**/*.md` from the working directory up to the repo root, then `~/.claude/commands`; named by file with subfolders in front, `frontend/fix-issue.md` is `frontend:fix-issue`; `description` and `argument-hint` front matter or the first line). Providers report what they run on `session.updated { commands }` (Claude Code: the Agent SDK's `supportedCommands()` at query start and its `commands_changed` pushes, built-in and plugin commands included); the route reads the newest such event from the log. Once a provider has reported, its list decides which names are offered, and the files only mark skills and fill in descriptions; before that (or for providers that report nothing) the files are the list.
 
 ## Cloud voice (§11.3)
 

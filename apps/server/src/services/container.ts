@@ -10,6 +10,7 @@ import { allTools } from "../mcp/tools";
 import type { HomePaths } from "../paths";
 import type { SettingsStore } from "../settings-store";
 import { AgentConfigService } from "./agent-config/agent-config-service";
+import { reportedCommands } from "./agent-config/slash-commands";
 import { ArtifactService } from "./artifacts";
 import { AutomationService, type AutomationServiceDeps } from "./automations/automation-service";
 import { BrowserService } from "./browser/browser-service";
@@ -434,6 +435,7 @@ export function createServices(opts: ServicesOptions): AppServices {
       disabledHooksFile: opts.paths.disabledHooks,
       mcpProxyUrl: () => opts.runner.mcpProxyUrl(),
       runner: opts.runner,
+      reportedCommands: (sessionId) => reportedCommands(opts.db, sessionId),
     }),
     github,
     orchestration,

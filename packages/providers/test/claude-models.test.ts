@@ -78,6 +78,7 @@ function stubSdk(initial: Behaviour = "list") {
         if (state.behaviour === "newer") return NEWER_MODELS;
         return state.behaviour === "empty" ? [] : SDK_MODELS;
       },
+      supportedCommands: async () => [],
       close: () => {
         state.closed++;
         finish();

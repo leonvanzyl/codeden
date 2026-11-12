@@ -53,6 +53,7 @@ describe("MCP connection test requests", () => {
           return passed as never;
         },
       },
+      reportedCommands: () => null,
     });
   });
   afterEach(() => rmSync(dir, { recursive: true, force: true }));

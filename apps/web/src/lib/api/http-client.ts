@@ -22,6 +22,7 @@ import {
   SessionSnapshot,
   Settings,
   SetupStatus,
+  SlashCommandList,
   Snapshot,
   SpeechSummaryResponse,
   StartSessionResponse,
@@ -39,7 +40,6 @@ import {
   httpVoiceApi,
 } from "./http-features";
 import { httpGithubApi, httpOrchestrationApi, httpSessionConflictApi } from "./http-orchestration";
-import { configApi } from "./http-unwired";
 import { httpAuthApi, httpNetworkApi } from "./network-api";
 import { httpQueueApi } from "./queue-api";
 import { RealtimeSocket } from "./realtime-socket";
@@ -170,6 +170,8 @@ export function createHttpClient(origin: string, opts: HttpClientOptions = {}): 
       fileCache.set(id, { at: cached?.list === list ? cached.at : Date.now(), list });
       return rankMentions(list, query);
     },
+    listSlashCommands: (id) =>
+      get(`/sessions/${enc(id)}/commands`, (v) => SlashCommandList.parse(v)),
     openTerminal: (o) => openTerminalSocket(wsBase, o),
     artifactUrl: (id) => `${origin}/api/artifacts/${enc(id)}`,
     speechSummary: (text) =>
@@ -181,7 +183,6 @@ export function createHttpClient(origin: string, opts: HttpClientOptions = {}): 
     voice: httpVoiceApi(http),
     orchestration: httpOrchestrationApi(http),
     github: httpGithubApi(http),
-    ...configApi(http),
   };
 }
 

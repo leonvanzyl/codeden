@@ -16,12 +16,15 @@ import {
   type McpServerTestResult,
   type McpServerUpsertRequest,
   type McpServerWriteResponse,
+  type ProviderCommand,
+  type SlashCommand,
 } from "@codeden/contracts";
 import { badRequest, ServiceError } from "../errors";
 import type { ProjectService } from "../projects/project-service";
 import { type RunnerPort, toServiceError } from "../runner-port";
 import type { SessionRepo } from "../sessions/repo";
 import {
+  type LoadedFiles,
   listClaudeProject,
   listClaudeUser,
   listCodexProject,
@@ -35,6 +38,12 @@ import { HookShelf } from "./hook-shelf";
 import { AgentConfigHooks } from "./hooks-service";
 import { applyChange, claudeProjectKey, diffChange, readServers, sourceFor } from "./mcp";
 import { claudeAutoMemoryDir, findGitRoot, mainRepoRoot, readJson } from "./paths";
+import {
+  loadedClaudeCommands,
+  mergeSlashCommands,
+  reportedCommand,
+  skillCommand,
+} from "./slash-commands";
 
 export interface AgentConfigServiceDeps {
   /** User home (`~`); tests point it at a temp folder. */
@@ -49,6 +58,8 @@ export interface AgentConfigServiceDeps {
   mcpProxyUrl: () => string | null;
   /** The runner, which runs MCP connection tests next to the code (§4.2). */
   runner: Pick<RunnerPort, "request">;
+  /** The newest `/` command list a session's provider reported, or null (event log). */
+  reportedCommands: (sessionId: string) => ProviderCommand[] | null;
 }
 
 /** Extra time the server waits for the runner beyond the test's own timeout. */
@@ -152,17 +163,9 @@ export class AgentConfigService {
   // ------------------------------------------------------------------- what's loaded
 
   loaded(sessionId: string): LoadedAgentConfig {
-    const session = this.deps.repo.get(sessionId);
-    const project = session.projectId ? this.project(session.projectId) : null;
+    const { session, project, gitRoot, files } = this.discover(sessionId);
     const cwd = session.cwd;
-    const gitRoot = findGitRoot(cwd);
     const home = this.deps.home;
-    const files =
-      session.provider === "codex"
-        ? loadedCodex(home, cwd, gitRoot, project)
-        : session.provider === "claude"
-          ? loadedClaude(home, cwd, gitRoot, project)
-          : { memory: [], skills: [], subagents: [] };
     const mcpServers: McpServerEntry[] = [];
     const proxy = this.deps.mcpProxyUrl();
     if (proxy) {
@@ -189,7 +192,42 @@ export class AgentConfigService {
     return { sessionId, provider: session.provider, cwd, ...files, mcpServers, hooks };
   }
 
+  /**
+   * The composer's `/` menu for a session (§13): the skills that apply to its working folder
+   * (as What's loaded finds them) and its provider's custom command files; once the provider
+   * has reported the commands it runs for the session (built-in ones included), that list.
+   * Role sessions get what applies to their own folder: the orchestrator, outside any
+   * project, only user-level entries.
+   */
+  slashCommands(sessionId: string): SlashCommand[] {
+    const { session, gitRoot, files } = this.discover(sessionId);
+    const custom =
+      session.provider === "claude"
+        ? loadedClaudeCommands(this.deps.home, session.cwd, gitRoot)
+        : [];
+    const reported = this.deps.reportedCommands(sessionId);
+    return mergeSlashCommands(
+      [...files.skills.map(skillCommand), ...custom],
+      reported?.map((c) => reportedCommand(c, session.provider)) ?? null,
+    );
+  }
+
   // ------------------------------------------------------------------- helpers
+
+  /** A session's working folder, project and the native files its provider loads there. */
+  private discover(sessionId: string) {
+    const session = this.deps.repo.get(sessionId);
+    const project = session.projectId ? this.project(session.projectId) : null;
+    const gitRoot = findGitRoot(session.cwd);
+    const home = this.deps.home;
+    const files: LoadedFiles =
+      session.provider === "codex"
+        ? loadedCodex(home, session.cwd, gitRoot, project)
+        : session.provider === "claude"
+          ? loadedClaude(home, session.cwd, gitRoot, project)
+          : { memory: [], skills: [], subagents: [] };
+    return { session, project, gitRoot, files };
+  }
 
   /** A project with its Claude auto-memory folder (keyed by the main repo root). */
   project(projectId: string): ProjectRef {
