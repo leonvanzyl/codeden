@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { MessageSender, Session } from "@codeden/contracts";
+import type { MessageSender, Session, UserInput } from "@codeden/contracts";
 import type { NoticeStore } from "./notices";
 import { type WakeResult, WakeScheduler, type WakeSchedulerOptions } from "./wake-scheduler";
 
@@ -47,8 +47,8 @@ const pmKey = (projectId: string | null) => `pm:${projectId ?? ""}`;
 export class LoopGuard {
   /** The orchestrator's messages to each PM (`pm:<projectId>`) from turns it started itself. */
   readonly relays: WakeScheduler;
-  /** Who sent the input that started each role session's latest turn. */
-  private readonly turnFrom = new Map<string, MessageSender>();
+  /** Role sessions whose latest turn carries the user's request (see `turnStarted`). */
+  private readonly userTurns = new Set<string>();
 
   constructor(private readonly deps: LoopGuardDeps) {
     this.relays = new WakeScheduler((key) => this.deliverHeld(key.slice("pm:".length)), {
@@ -62,18 +62,32 @@ export class LoopGuard {
     });
   }
 
-  /** A role session's turn starts with input from `from`; the user's input clears its counts. */
-  turnStarted(session: Session, from: MessageSender): void {
+  /**
+   * A role session's turn starts with `input` from `from`. It carries the user's request when
+   * the user wrote it, or when the orchestrator passed it on from a turn the user started
+   * (`relayedForUser`). The user's own input clears the session's counts.
+   */
+  turnStarted(
+    session: Session,
+    from: MessageSender,
+    input?: Pick<UserInput, "relayedForUser">,
+  ): void {
     if (session.role === "agent") return;
-    this.turnFrom.set(session.id, from);
+    const relayed = from === "orchestrator" && input?.relayedForUser === true;
+    if (from === "user" || relayed) this.userTurns.add(session.id);
+    else this.userTurns.delete(session.id);
     if (from !== "user") return;
     this.clear(session.role === "pm" ? pmKey(session.projectId) : "orchestrator");
   }
 
-  /** Whether a message carries the user's own request (the UI, or a turn the user started). */
+  /**
+   * Whether a request carries the user's own words: it came through the UI, or from a role
+   * session's turn that the user's message started (directly, or relayed by the orchestrator).
+   * Turns started by automations, notices, wake-ups and other agents never do.
+   */
   humanLed(origin: MessageOrigin): boolean {
     if (origin.caller === "ui") return true;
-    return origin.sessionId !== null && this.turnFrom.get(origin.sessionId) === "user";
+    return origin.sessionId !== null && this.userTurns.has(origin.sessionId);
   }
 
   /**

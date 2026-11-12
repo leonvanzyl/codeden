@@ -154,7 +154,7 @@ export class OrchestrationService {
   start(): void {
     this.unsubscribe = this.deps.store.subscribe((events) => this.onEvents(events));
     this.deps.sessions.setInputDecorator((session, input, from) => {
-      this.loops.turnStarted(session, from);
+      this.loops.turnStarted(session, from, input);
       // The status digest and undelivered notices, fresh at send time (§8.4, `NoticeDelivery`).
       return this.delivery.decorate(session, input);
     });
@@ -239,13 +239,14 @@ export class OrchestrationService {
     origin: MessageOrigin,
   ): Promise<RoleMessageResponse | HeldMessage> {
     await this.roles.ensure("pm", projectId);
+    const forUser = this.loops.humanLed(origin);
     if (!this.loops.mayDeliver(projectId, origin)) {
       return { status: "held", until: this.loops.hold(projectId, origin.sessionId, text) };
     }
     return this.sendToRole(
       "pm",
       projectId,
-      messageFrom("orchestrator", text),
+      relayed(messageFrom("orchestrator", text), forUser),
       "queue",
       "orchestrator",
     );
@@ -261,6 +262,7 @@ export class OrchestrationService {
     opts: { origin: MessageOrigin; timeoutMs?: number; signal?: AbortSignal },
   ): Promise<(AskOutcome & { pmSessionId: string }) | HeldMessage> {
     const pm = await this.roles.ensure("pm", projectId);
+    const forUser = this.loops.humanLed(opts.origin);
     const askId = randomUUID().slice(0, 8);
     const target = { pmSessionId: pm.id, projectId, fromSessionId: opts.origin.sessionId };
     const text = [
@@ -281,7 +283,10 @@ export class OrchestrationService {
     );
     await this.deps.sessions.send(
       pm.id,
-      { input: { text, attachments: [], from: "orchestrator" }, whenBusy: "queue" },
+      {
+        input: relayed({ text, attachments: [], from: "orchestrator" }, forUser),
+        whenBusy: "queue",
+      },
       "orchestrator",
     );
     return { ...(await answer), pmSessionId: pm.id };
@@ -403,6 +408,14 @@ export class OrchestrationService {
       return id;
     }
   }
+}
+
+/**
+ * An orchestrator message to a PM, marked when it passes on the user's own request (a turn the
+ * user started), so the PM's turn carries the user's authority (`LoopGuard.turnStarted`).
+ */
+function relayed(input: UserInput, forUser: boolean): UserInput {
+  return forUser ? { ...input, relayedForUser: true } : input;
 }
 
 /** Scheduler key of a notice target. */

@@ -31,7 +31,7 @@ import { issueSessionPrompt, triageRequestText } from "./triage-prompts";
 export type TriageGithub = Pick<FactoryGithub, "viewerLogin" | "issueAuthor">;
 
 /** Whether an issue's author may have work started for them without asking. */
-interface AuthorTrust {
+export interface AuthorTrust {
   trusted: boolean;
   author: string | null;
   /** GitHub answered the write-access question (false: it could not be checked). */
@@ -220,6 +220,15 @@ export class TriageService {
         conflict: decision,
       }),
     );
+  }
+
+  /**
+   * Whether the author of issue `number` is trusted, by the rule triage uses. The PM's
+   * `start_session` checks it in turns the user's own message didn't start (#137).
+   */
+  async issueAuthorTrust(project: Project, number: number): Promise<AuthorTrust> {
+    const { author } = this.syncedIssue(project, number);
+    return this.authorTrust(project, number, author);
   }
 
   /**

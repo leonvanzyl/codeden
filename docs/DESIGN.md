@@ -260,7 +260,7 @@ All three roles are the same kind of agent session, differing only in **role**, 
 1. **Work arrives.** You ask the orchestrator, a PM picks up a GitHub issue, or an automation fires.
 2. **The PM starts an agent session.** It names a provider, model, issue link and brief; CodeDen creates the worktree and branch, then starts the session on the runner.
 3. **The agent works.** It may ask questions (inbox), request approvals (inbox), share screenshots, and finally opens a PR with evidence linked to the issue.
-4. **Notices wake the PM.** Session events become **typed notices** (`session.finished`, `session.needs_input`, `pr.opened`, `pr.checks_failed`, …). They're batched and debounced, and wake the PM with an "updates since your last turn" summary. A loop guard limits wake-ups: it paces agent-to-agent ping-pong (orchestrator ↔ PM, PM ↔ its sessions) per conversation while no person steps in. Anything the user started goes straight through and clears the counts, and a paced message is queued and delivered automatically, never refused.
+4. **Notices wake the PM.** Session events become **typed notices** (`session.finished`, `session.needs_input`, `pr.opened`, `pr.checks_failed`, …). They're batched and debounced, and wake the PM with an "updates since your last turn" summary. A loop guard limits wake-ups: it paces agent-to-agent ping-pong (orchestrator ↔ PM, PM ↔ its sessions) per conversation while no person steps in. Anything the user started goes straight through and clears the counts, and a paced message is queued and delivered automatically, never refused. The guard also records which role-session turns carry the user's own request: the user wrote the message, or the orchestrator passed it on from a turn the user started (`UserInput.relayedForUser`). Only such a PM turn may start work on an issue whose author isn't trusted (§10.1): in any other turn `start_session` refuses that issue and `factory_admit_issue` is refused, and the PM raises it in the inbox instead.
 5. **The PM decides.** It follows up with the agent and makes routine calls itself with sensible defaults, stating what it assumed. It merges nothing on its own unless that project's policy allows it, and escalates to the orchestrator or the inbox only for decisions that are the user's: destructive or irreversible actions, spending money or credentials, outward-facing actions (releases, publishing, deploys, messages to people), protected areas, and conflicting priorities.
 6. **The orchestrator wakes only for what matters.** PM messages can be marked informational so routine updates don't wake it.
 
@@ -292,7 +292,7 @@ defineTool({
     - Issues: `list_issues`, `get_issue`, `triage_issue` (labels, comment, accept/decline), `create_issue`.
     - PRs and escalation: `get_pr_status`, `ask_user`, `message_orchestrator`.
     - Automations and notes: `list_automations`, `run_automation`, `read_project_notes`, `update_project_notes`.
-    - Factory projects (§10.1): `factory_status`, `factory_admit_issue` (only at the user's request), `factory_set_type`, `factory_allow_large_change`.
+    - Factory projects (§10.1): `factory_status`, `factory_admit_issue` (only at the user's request, enforced per turn as in §8.2 step 4), `factory_set_type`, `factory_allow_large_change`.
   - **Agent:**
     - People: `ask_user`, `message_pm`, `report_progress`.
     - Sharing and evidence: `share_to_chat` (file or screenshot), `attach_evidence` (to an issue or PR).

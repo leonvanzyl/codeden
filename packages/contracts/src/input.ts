@@ -59,6 +59,13 @@ export const UserInput = z.object({
    * own messages and on every message stored before senders were recorded.
    */
   from: MessageSender.optional(),
+  /**
+   * Set by CodeDen on a message the orchestrator passes on to a PM from a turn the user's own
+   * message started (§8.2): the PM's turn it starts carries the user's request, like a message
+   * the user wrote to the PM. Only such turns may start work on issues by authors who aren't
+   * trusted. Absent on every other message.
+   */
+  relayedForUser: z.boolean().optional(),
 });
 export type UserInput = z.infer<typeof UserInput>;
 /** Input shape accepted before defaults are applied (`attachments` optional). */

@@ -63,6 +63,23 @@ describe("loop guard (§8.2): only agent-to-agent loops are paced", () => {
     expect(guard.humanLed({ caller: "mcp", sessionId: null })).toBe(false);
   });
 
+  it("knows which PM turns carry the user's request, relayed ones included (#137)", () => {
+    const { guard } = setup();
+    const fromPm = { caller: "mcp" as const, sessionId: "pm1" };
+    for (const from of ["automation", "codeden", "factory", "orchestrator"] as const) {
+      guard.turnStarted(pm, from);
+      expect(guard.humanLed(fromPm)).toBe(false);
+    }
+    guard.turnStarted(pm, "user");
+    expect(guard.humanLed(fromPm)).toBe(true);
+    // The orchestrator passes on what the user asked it: the PM's turn is the user's too.
+    guard.turnStarted(pm, "orchestrator", { relayedForUser: true });
+    expect(guard.humanLed(fromPm)).toBe(true);
+    // The next turn decides afresh; only the orchestrator can relay for the user.
+    guard.turnStarted(pm, "codeden", { relayedForUser: true });
+    expect(guard.humanLed(fromPm)).toBe(false);
+  });
+
   it("holds an orchestrator <-> PM ping-pong back and delivers it once the window allows", async () => {
     const { guard, stored, delivered, turn } = setup();
     turn(orchestrator, "codeden"); // woken by a PM message: no person in this turn
