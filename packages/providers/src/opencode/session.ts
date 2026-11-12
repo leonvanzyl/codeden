@@ -23,6 +23,7 @@ import {
   SESSION_PERMISSIONS,
   toPromptBody,
 } from "./config";
+import { userMessageEvent } from "./items";
 import { OpenCodeEventMapper } from "./mapper";
 import { OpenCodePolicy } from "./policy";
 import type { OcEvent, OcModel, OcModelRef, OcSession } from "./protocol";
@@ -68,6 +69,8 @@ export class OpenCodeSession implements ProviderSession {
   /** Instructions that could not be set on the session go in front of the next prompt. */
   private inlineInstructions: string | undefined;
   private pendingNotice: string | undefined;
+  /** The prompt being sent: recorded as the user message of its turn once the turn starts. */
+  private pendingInput: { turnId: string; input: UserInput } | undefined;
 
   constructor(
     private readonly opts: SessionOptions,
@@ -83,6 +86,13 @@ export class OpenCodeSession implements ProviderSession {
         this.turnPending = false;
       }
       this.events.push(event);
+      // The turn opens (on OpenCode's execution event or once the prompt is queued, whichever
+      // comes first): its user message comes before anything the agent does.
+      const pending = this.pendingInput;
+      if (event.type === "turn.started" && pending?.turnId === event.turnId) {
+        this.pendingInput = undefined;
+        this.events.push(userMessageEvent(event.threadId, event.turnId, pending.input));
+      }
     };
     this.toolCtx = { cwd: opts.cwd, mcpServers: opts.mcpServers.map((s) => mcpName(s.name)) };
     this.mapper = new OpenCodeEventMapper({
@@ -133,6 +143,7 @@ export class OpenCodeSession implements ProviderSession {
       const server = await this.ensureServer();
       await this.applyModelChange(server);
       this.mapper.pendingTurnId = turnId;
+      this.pendingInput = { turnId, input };
       await server.client.post(
         `/api/session/${seg(this.sessionId())}/prompt`,
         toPromptBody(this.withInstructions(input)),
@@ -141,6 +152,7 @@ export class OpenCodeSession implements ProviderSession {
       this.flushNotice();
     } catch (error) {
       if (this.mapper.pendingTurnId === turnId) this.mapper.pendingTurnId = undefined;
+      if (this.pendingInput?.turnId === turnId) this.pendingInput = undefined;
       if (this.mapper.currentTurnId === turnId) {
         this.mapper.endTurn({ type: "failed", message: errorMessage(error), code: "send_failed" });
       }
@@ -152,13 +164,15 @@ export class OpenCodeSession implements ProviderSession {
   /** Delivered at the next step boundary of the running turn (`delivery: "steer"`). */
   async steer(input: UserInput): Promise<void> {
     const server = this.server;
-    if (!this.mapper.currentTurnId || !server || server.exited) {
+    const turnId = this.mapper.currentTurnId;
+    if (!turnId || !server || server.exited) {
       throw new ProviderSessionError("no_turn", "No turn is running");
     }
     await server.client.post(
       `/api/session/${seg(this.sessionId())}/prompt`,
       toPromptBody(input, "steer"),
     );
+    this.events.push(userMessageEvent(this.mapper.rootThreadId, turnId, input));
   }
 
   async interrupt(): Promise<void> {

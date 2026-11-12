@@ -143,7 +143,12 @@ describe("server <-> runner <-> OpenCode", () => {
     expect(snapshot.session.resumeToken).toBe(result?.resumeToken);
     const kinds = snapshot.items.map((i) => i.item.kind);
     expect(kinds).toEqual(
-      expect.arrayContaining(["approval_request", "tool_call", "assistant_message"]),
+      expect.arrayContaining([
+        "user_message",
+        "approval_request",
+        "tool_call",
+        "assistant_message",
+      ]),
     );
     const edit = snapshot.items.find((i) => i.item.kind === "tool_call");
     expect(edit?.item).toMatchObject({ toolKind: "file_edit", status: "completed" });

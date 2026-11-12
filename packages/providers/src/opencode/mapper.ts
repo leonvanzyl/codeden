@@ -276,6 +276,8 @@ export class OpenCodeEventMapper {
     const id = this.textKey(event.data, reasoning ? "reasoning" : "text");
     const open = this.open.get(id);
     if (!open || !event.data.delta) return;
+    // Kept on the open item, so a turn that ends early (an interrupt) keeps what streamed.
+    open.item = { ...open.item, text: streamedText(open.item) + event.data.delta } as Item;
     this.opts.emit({
       type: "item.delta",
       ...open.ctx,
@@ -293,7 +295,8 @@ export class OpenCodeEventMapper {
     const ctx = open?.ctx ?? this.ctxFor(event.data.sessionID);
     if (!ctx) return;
     this.open.delete(id);
-    const text = event.data.text ?? "";
+    // The final text, or what streamed when the end event carries none (a cut-off step).
+    const text = event.data.text || (open ? streamedText(open.item) : "");
     if (!reasoning && !text.trim() && !open) return;
     const item: Item = reasoning
       ? {
@@ -430,4 +433,9 @@ export class OpenCodeEventMapper {
       },
     });
   }
+}
+
+/** The text streamed so far into an open message or reasoning item. */
+function streamedText(item: Item): string {
+  return item.kind === "assistant_message" || item.kind === "reasoning" ? item.text : "";
 }

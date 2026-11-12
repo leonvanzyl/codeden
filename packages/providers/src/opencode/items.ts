@@ -1,7 +1,28 @@
+import { randomUUID } from "node:crypto";
 import path from "node:path";
-import type { FileChange, ItemStatus, ToolCallItem } from "@codeden/contracts";
+import type {
+  AgentEvent,
+  FileChange,
+  ItemStatus,
+  ToolCallItem,
+  UserInput,
+} from "@codeden/contracts";
 import { num, shorten, str, toJson, toolOutput } from "../util/text";
 import type { OcFileDiff, OcToolContent } from "./protocol";
+
+/**
+ * The transcript's record of input CodeDen sent (a prompt or a steer). OpenCode doesn't echo
+ * prompts as events, so the session records them itself, with the input as sent: its sender
+ * (a PM's or the factory's brief) and attachments included, CodeDen's instructions left out.
+ */
+export function userMessageEvent(threadId: string, turnId: string, input: UserInput): AgentEvent {
+  return {
+    type: "item.completed",
+    threadId,
+    turnId,
+    item: { id: `user-${randomUUID()}`, kind: "user_message", status: "completed", input },
+  };
+}
 
 /** What is known about one tool call while it runs and when it ends. */
 export interface ToolState {

@@ -407,6 +407,16 @@ describe("OpenCode session", () => {
     await session.interrupt();
     const end = await reader.until(isRootEnd);
     expect(end).toMatchObject({ type: "turn.interrupted", reason: "user" });
+    // The text that streamed before the interrupt is kept, not replaced with nothing.
+    const streamed = reader.all
+      .filter((e) => e.type === "item.delta")
+      .map((e) => (e.type === "item.delta" && e.delta.type === "text" ? e.delta.text : ""))
+      .join("");
+    expect(streamed.length).toBeGreaterThan(0);
+    expect(completed(reader.all, "assistant_message").at(-1)?.item).toMatchObject({
+      status: "cancelled",
+      text: streamed,
+    });
     expect((await reader.turn("hello")).at(-1)).toMatchObject({ type: "turn.completed" });
   });
 
@@ -428,6 +438,35 @@ describe("OpenCode session", () => {
           e.item.text === "steered: also say hi",
       ),
     ).toBe(true);
+    // Both the prompt and the steer are in the transcript, in the same turn.
+    const sent = completed(reader.all, "user_message");
+    expect(sent.map((e) => e.item.kind === "user_message" && e.item.input.text)).toEqual([
+      "slow",
+      "also say hi",
+    ]);
+    expect(new Set(sent.map((e) => e.turnId)).size).toBe(1);
+  });
+
+  it("records what was sent as the turn's user message, sender included", async () => {
+    const { session, reader } = await open({ systemPrompt: "You are a CodeDen agent." });
+    const events = await reader.turn("hello");
+    // Right after the turn starts, before anything the agent does; the role prompt stays out.
+    const start = events.findIndex((e) => e.type === "turn.started");
+    expect(events[start + 1]).toMatchObject({
+      type: "item.completed",
+      turnId: (events[start] as { turnId: string }).turnId,
+      item: { kind: "user_message", status: "completed", input: { text: "hello" } },
+    });
+    expect(completed(events, "user_message")).toHaveLength(1);
+    // A PM's brief keeps its sender, so the transcript shows it as a brief card.
+    const at = reader.all.length;
+    await session.send({ text: "hello", attachments: [], from: "pm" });
+    await reader.until(isRootEnd);
+    expect(completed(reader.all.slice(at), "user_message")[0]?.item).toMatchObject({
+      kind: "user_message",
+      input: { text: "hello", from: "pm" },
+    });
+    expect(validateEventStream(reader.all)).toEqual([]);
   });
 
   it("reports provider errors as a failed turn", async () => {
