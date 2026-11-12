@@ -84,9 +84,12 @@ export function openCodeModelList(
   });
 }
 
-/** A model's base price (no context tier): input + output USD per million tokens. */
+/**
+ * A model's base price: input + output USD per million tokens of its entry without a context
+ * tier. A model priced only above some context size counts as unpriced.
+ */
 function basePrice(m: OcModel): number | undefined {
-  const cost = m.cost?.find((c) => !c.tier) ?? m.cost?.[0];
+  const cost = m.cost?.find((c) => !c.tier);
   const input = cost?.input;
   const output = cost?.output;
   if (typeof input !== "number" || typeof output !== "number") return undefined;
@@ -99,25 +102,29 @@ function basePrice(m: OcModel): number | undefined {
  * provider of OpenCode's default model, by listed input + output price per million tokens
  * (base price). Staying on that provider keeps side jobs on the account and data policy the
  * user already chose (Sonnet's provider gives Haiku, never another provider's free tier).
- * Disabled, deprecated and unpriced models are skipped, and the default wins ties. Undefined
- * when nothing is known (no default, no prices): OpenCode then uses its own default.
+ * A free model is only picked when the default is free too: a provider that sells models
+ * may offer free ones on different data terms. Disabled, deprecated and unpriced models are
+ * skipped (the default too), and the default wins ties. Undefined when nothing qualifies (no
+ * default, no prices): OpenCode then uses its own default.
  */
 export function cheapUtilityModel(
   models: readonly OcModel[],
   defaultModel: OcModel | null | undefined,
 ): OcModelRef | undefined {
   if (!defaultModel?.providerID || !defaultModel.id) return undefined;
-  const sameProvider = models.filter(
+  const candidates = [defaultModel, ...models].filter(
     (m) =>
       m.providerID === defaultModel.providerID &&
       !!m.id &&
       m.enabled !== false &&
       m.status !== "deprecated",
   );
+  const paidDefault = (basePrice(defaultModel) ?? 0) > 0;
   let best: { model: OcModel; price: number } | undefined;
-  for (const model of [defaultModel, ...sameProvider]) {
+  for (const model of candidates) {
     const price = basePrice(model);
-    if (price !== undefined && (!best || price < best.price)) best = { model, price };
+    if (price === undefined || (paidDefault && price === 0)) continue;
+    if (!best || price < best.price) best = { model, price };
   }
   return best ? { providerID: best.model.providerID, id: best.model.id } : undefined;
 }

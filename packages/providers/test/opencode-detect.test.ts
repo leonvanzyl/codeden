@@ -178,6 +178,27 @@ describe("OpenCode model discovery", () => {
       providerID: "openai",
       id: "cheaper-elsewhere",
     });
+    // A provider that sells models and gives some away: free ones only for a free default.
+    const zenPaid = { id: "zen-pro", providerID: "opencode", cost: [cost(3, 15)] };
+    const zenMini = { id: "zen-mini", providerID: "opencode", cost: [cost(0.5, 2)] };
+    const zenFree = { id: "zen-free", providerID: "opencode", cost: [cost(0, 0)] };
+    const zen = [zenPaid, zenMini, zenFree];
+    expect(cheapUtilityModel(zen, zenPaid)).toEqual({ providerID: "opencode", id: "zen-mini" });
+    expect(cheapUtilityModel(zen, zenFree)).toEqual({ providerID: "opencode", id: "zen-free" });
+    // Priced only above a context size: unpriced, never ranked by that tier.
+    const tierOnly = { id: "tier-only", providerID: "anthropic", cost: [cost(0.01, 0.01, 1)] };
+    expect(cheapUtilityModel([opus, tierOnly], opus)).toEqual({
+      providerID: "anthropic",
+      id: "opus",
+    });
+    // A disabled or deprecated default is skipped like any other model.
+    const oldDefault = { ...haiku, id: "old-default", status: "deprecated" };
+    expect(cheapUtilityModel([opus, oldDefault], oldDefault)).toEqual({
+      providerID: "anthropic",
+      id: "opus",
+    });
+    const offDefault = { ...haiku, id: "off-default", enabled: false };
+    expect(cheapUtilityModel([offDefault], offDefault)).toBeUndefined();
     // Nothing known: OpenCode's own default.
     expect(cheapUtilityModel(models, null)).toBeUndefined();
     expect(
