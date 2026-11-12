@@ -1,6 +1,7 @@
 import type { Attachment, FileChange, Item, ItemStatus, ToolCallItem } from "@codeden/contracts";
 import { shorten, toJson, toolOutput, unixToIso } from "../util/text";
 import { type AgentNames, collabToolCall } from "./collab";
+import { saveImageResult } from "./image-result";
 import type { ImageGenerationItem } from "./protocol/ImageGenerationItem";
 import type { UserInput as CodexUserInput, FileUpdateChange, ThreadItem } from "./protocol/v2";
 
@@ -249,11 +250,17 @@ export function mapThreadItem(item: ThreadItem, names: AgentNames = noNames): It
 
 /**
  * Codex's built-in image generation. `result` holds the whole image base64-encoded (megabytes),
- * so it never goes into the item: the image is the file Codex saved (`savedPath`), which the
- * server stores as an artifact and shows inline.
+ * so it never goes into the item: the image is the file Codex saved (`savedPath`), or a copy
+ * CodeDen writes when Codex saved none, which the server stores as an artifact and shows inline.
  */
 function imageGenerationItem(item: ImageGenerationItem): ToolCallItem {
-  const failure = imageGenerationFailure(item);
+  let failure = imageGenerationFailure(item);
+  let file = item.savedPath;
+  if (!failure && !file && item.status === "completed" && item.result) {
+    const saved = saveImageResult(item.id, item.result);
+    if ("path" in saved) file = saved.path;
+    else failure = saved.error;
+  }
   const prompt = item.revisedPrompt?.trim();
   return {
     id: item.id,
@@ -264,12 +271,12 @@ function imageGenerationItem(item: ImageGenerationItem): ToolCallItem {
     title: "Generate image",
     input: toJson({
       revisedPrompt: item.revisedPrompt,
-      savedPath: item.savedPath,
+      savedPath: file,
       transparentBackground: item.transparentBackground,
     }),
     ...(failure ? { error: { message: failure } } : {}),
-    ...(!failure && item.savedPath
-      ? { generatedImages: [{ path: item.savedPath, ...(prompt ? { caption: prompt } : {}) }] }
+    ...(!failure && file
+      ? { generatedImages: [{ path: file, ...(prompt ? { caption: prompt } : {}) }] }
       : {}),
   };
 }
