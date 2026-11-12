@@ -155,9 +155,26 @@ export class OrchestrationService {
   start(): void {
     this.unsubscribe = this.deps.store.subscribe((events) => this.onEvents(events));
     this.deps.sessions.setInputDecorator((session, input, from) => {
-      this.loops.turnStarted(session, from, input);
-      // The status digest and undelivered notices, fresh at send time (§8.4, `NoticeDelivery`).
-      return this.delivery.decorate(session, input);
+      // Who the turn is from counts once the runner takes it (the loop guard, #137).
+      const turn = this.loops.beginTurn(session, from, input);
+      try {
+        // The status digest and undelivered notices, fresh at send time (§8.4, `NoticeDelivery`).
+        const decorated = this.delivery.decorate(session, input);
+        return {
+          input: decorated.input,
+          delivered: () => {
+            decorated.delivered?.();
+            turn.accepted();
+          },
+          failed: () => {
+            decorated.failed?.();
+            turn.failed();
+          },
+        };
+      } catch (error) {
+        turn.failed();
+        throw error;
+      }
     });
     this.delivery.rearm();
     this.reminders.start();

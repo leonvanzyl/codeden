@@ -43,6 +43,14 @@ export function turnOriginsIn(repo: Pick<SessionRepo, "find" | "setStartMeta">):
   };
 }
 
+/** What the delivery of a role session's turn reports back (`LoopGuard.beginTurn`). */
+export interface TurnDelivery {
+  /** The runner took the turn. */
+  accepted: () => void;
+  /** It didn't: no turn started. */
+  failed: () => void;
+}
+
 export interface LoopGuardDeps {
   /** The notice-wake scheduler: a PM and its sessions, PM messages to the orchestrator. */
   wakes: WakeScheduler;
@@ -91,41 +99,52 @@ export class LoopGuard {
   }
 
   /**
-   * A role session's turn starts with `input` from `from`. It carries the user's request when
-   * the user wrote it, or when the orchestrator passed it on from a turn the user started
-   * (`relayedForUser`). The origin is saved before the turn starts (a failed save stops the
-   * send), so it survives a server restart. The user's own input clears the session's counts.
+   * A delivery of `input` from `from` to a role session begins. The turn it starts carries the
+   * user's request when the user wrote it, or when the orchestrator passed it on from a turn the
+   * user started (`relayedForUser`). Authority follows the delivery the runner accepted:
+   *
+   * - while it is in flight the session has none (saved too, before anything is sent);
+   * - `accepted` records the turn's origin (saved, so it survives a server restart) and, for
+   *   the user's own input, clears the session's counts;
+   * - `failed` puts back the origin of the turn the last accepted delivery started, so a
+   *   rejected message never lends its origin to the turn that is running.
+   *
+   * The session service delivers one message per session at a time, so nothing else changes
+   * the origin between the two.
    */
-  turnStarted(
+  beginTurn(
     session: Session,
     from: MessageSender,
     input?: Pick<UserInput, "relayedForUser">,
-  ): void {
-    if (session.role === "agent") return;
-    const relayed = from === "orchestrator" && input?.relayedForUser === true;
-    const fromUser = from === "user" || relayed;
-    this.deps.turnOrigins?.save(session.id, fromUser);
-    this.userTurns.set(session.id, fromUser);
-    if (from !== "user") return;
-    this.clear(session.role === "pm" ? pmKey(session.projectId) : "orchestrator");
+  ): TurnDelivery {
+    if (session.role === "agent") return { accepted: () => {}, failed: () => {} };
+    const previous = this.originOf(session.id);
+    const fromUser = from === "user" || (from === "orchestrator" && input?.relayedForUser === true);
+    this.record(session.id, false);
+    return {
+      accepted: () => {
+        this.record(session.id, fromUser);
+        if (from !== "user") return;
+        this.clear(session.role === "pm" ? pmKey(session.projectId) : "orchestrator");
+      },
+      failed: () => this.record(session.id, previous),
+    };
+  }
+
+  /** A role session's turn started with input from `from` (`beginTurn`, then accepted). */
+  turnStarted(session: Session, from: MessageSender, input?: Pick<UserInput, "relayedForUser">) {
+    this.beginTurn(session, from, input).accepted();
   }
 
   /**
    * Whether a request carries the user's own words: it came through the UI, or from a role
    * session's turn that the user's message started (directly, or relayed by the orchestrator).
    * Turns started by automations, notices, wake-ups and other agents never do, and neither
-   * does a turn whose origin was never recorded.
+   * does a turn whose origin was never recorded or whose input is still being delivered.
    */
   humanLed(origin: MessageOrigin): boolean {
     if (origin.caller === "ui") return true;
-    if (origin.sessionId === null) return false;
-    let fromUser = this.userTurns.get(origin.sessionId);
-    if (fromUser === undefined) {
-      // A turn started before this server did (the runner kept it going): its saved origin.
-      fromUser = this.deps.turnOrigins?.load(origin.sessionId) === true;
-      this.userTurns.set(origin.sessionId, fromUser);
-    }
-    return fromUser;
+    return origin.sessionId !== null && this.originOf(origin.sessionId);
   }
 
   /**
@@ -174,6 +193,23 @@ export class LoopGuard {
       .undelivered("pm", projectId)
       .some((n) => n.type === "orchestrator.message");
     return held ? this.deps.wakePm(projectId) : "empty";
+  }
+
+  /** A role session's turn origin; a turn started before this server did has its saved one. */
+  private originOf(sessionId: string): boolean {
+    let fromUser = this.userTurns.get(sessionId);
+    if (fromUser === undefined) {
+      fromUser = this.deps.turnOrigins?.load(sessionId) === true;
+      this.userTurns.set(sessionId, fromUser);
+    }
+    return fromUser;
+  }
+
+  /** Save, then remember, a role session's turn origin (a failed save throws, unchanged). */
+  private record(sessionId: string, fromUser: boolean): void {
+    if (this.userTurns.get(sessionId) === fromUser) return;
+    this.deps.turnOrigins?.save(sessionId, fromUser);
+    this.userTurns.set(sessionId, fromUser);
   }
 
   private clear(key: string): void {

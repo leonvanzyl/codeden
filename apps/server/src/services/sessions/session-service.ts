@@ -71,6 +71,8 @@ export class SessionService {
   readonly launching = new Map<string, Promise<void>>();
   /** Rewrites a turn's input at send time (the orchestration status digest, §8.4). */
   private inputDecorator: InputDecorator | undefined;
+  /** Sessions with a delivery in flight: one at a time, so others queue behind it (`sendNow`). */
+  private readonly delivering = new Set<string>();
   private readonly holds: OutboxHolds;
 
   constructor(private readonly deps: SessionServiceDeps) {
@@ -222,9 +224,11 @@ export class SessionService {
   ): Promise<SendMessageResponse> {
     const session = this.deps.repo.get(id);
     if (NOT_STARTED.has(session.status)) return this.enqueue(id, req.input, from);
-    if (BUSY.has(session.status)) {
+    const running = BUSY.has(session.status);
+    // A delivery in flight is a turn about to start: like a running one, nothing overtakes it.
+    if (running || this.delivering.has(id)) {
       if (req.whenBusy === "reject") throw conflict("A turn is running", "turn_running");
-      if (req.whenBusy === "steer") {
+      if (req.whenBusy === "steer" && running) {
         await this.steer(id, req.input);
         return { status: "steered" };
       }
@@ -322,7 +326,7 @@ export class SessionService {
    * pauses (`OutboxHolds`); only an error that is not a runner restart fails the session.
    */
   async flushOutbox(id: string): Promise<void> {
-    if (this.holds.isHeld(id)) return;
+    if (this.holds.isHeld(id) || this.delivering.has(id)) return;
     const next = this.deps.outbox.peek(id);
     if (!next) return;
     const session = this.deps.repo.get(id);
@@ -364,15 +368,31 @@ export class SessionService {
 
   // ---------------------------------------------------------------- internals
 
+  /**
+   * Deliver one turn's input. The session is reserved before anything awaits, so two sends to
+   * an idle session can't both start a delivery: the runner would reject the second after the
+   * decorator acted on it. Messages sent meanwhile queue, and are sent next if this one fails.
+   */
   private async sendNow(session: Session, raw: UserInput, from: QueueSender): Promise<void> {
-    const decorated = this.inputDecorator?.(session, raw, from) ?? { input: raw };
+    if (this.delivering.has(session.id)) throw conflict("A turn is running", "turn_running");
+    this.delivering.add(session.id);
+    let sent = false;
     try {
-      await this.deliver(session, this.forRunner(session, decorated.input));
-    } catch (error) {
-      decorated.failed?.();
-      throw error;
+      const decorated = this.inputDecorator?.(session, raw, from) ?? { input: raw };
+      try {
+        await this.deliver(session, this.forRunner(session, decorated.input));
+      } catch (error) {
+        decorated.failed?.();
+        throw error;
+      }
+      sent = true;
+      decorated.delivered?.();
+    } finally {
+      this.delivering.delete(session.id);
+      if (!sent && this.deps.outbox.count(session.id) > 0) {
+        setImmediate(() => void this.flushOutbox(session.id).catch(() => undefined));
+      }
     }
-    decorated.delivered?.();
   }
 
   /** Hand a turn's input to the runner, resuming the session when it no longer hosts it. */

@@ -80,6 +80,47 @@ describe("loop guard (§8.2): only agent-to-agent loops are paced", () => {
     expect(guard.humanLed(fromPm)).toBe(false);
   });
 
+  it("gives a turn the origin of the delivery the runner accepted, never a rejected one (#137)", () => {
+    const saved = new Map<string, boolean>();
+    const guard = new LoopGuard({
+      wakes: new WakeScheduler(async () => "sent", opts),
+      notices: { create: () => undefined, undelivered: () => [] },
+      wakePm: async () => "empty",
+      turnOrigins: {
+        load: (id) => saved.get(id),
+        save: (id, fromUser) => saved.set(id, fromUser),
+      },
+      options: opts,
+    });
+    const fromPm = { caller: "mcp" as const, sessionId: "pm1" };
+
+    // An automation's turn is running; the user's message to it is rejected by the runner.
+    guard.turnStarted(pm, "automation");
+    const rejected = guard.beginTurn(pm, "user");
+    expect(guard.humanLed(fromPm)).toBe(false);
+    rejected.failed();
+    expect(guard.humanLed(fromPm)).toBe(false);
+    // Nothing saved says it's the user's (an origin never saved counts as not the user's).
+    expect(saved.get("pm1")).not.toBe(true);
+
+    // The user's turn is accepted. A later automatic message has no authority while in flight;
+    // once the runner turns it down, the user's running turn has its origin back.
+    const user = guard.beginTurn(pm, "user");
+    expect(guard.humanLed(fromPm)).toBe(false);
+    user.accepted();
+    expect(guard.humanLed(fromPm)).toBe(true);
+    const wake = guard.beginTurn(pm, "codeden");
+    expect(guard.humanLed(fromPm)).toBe(false);
+    expect(saved.get("pm1")).toBe(false);
+    wake.failed();
+    expect(guard.humanLed(fromPm)).toBe(true);
+    expect(saved.get("pm1")).toBe(true);
+    // Accepted, the automatic turn is automatic.
+    guard.beginTurn(pm, "codeden").accepted();
+    expect(guard.humanLed(fromPm)).toBe(false);
+    expect(saved.get("pm1")).toBe(false);
+  });
+
   it("keeps a turn's origin across a server restart, and refuses unknown ones (#137)", () => {
     // What the session rows keep: the guard of a restarted server starts with empty memory.
     const saved = new Map<string, boolean>();

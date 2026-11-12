@@ -351,4 +351,63 @@ describe("PM tools and untrusted issues in turns the user didn't start (#137)", 
     expect(refused.isError).toBe(true);
     expect(issueSessions(49)).toHaveLength(0);
   });
+
+  it("never lets a user message that didn't start the turn authorize an automation's turn", {
+    timeout: 60_000,
+  }, async () => {
+    h.server.services.store.append([
+      {
+        type: "issue.updated",
+        sessionId: null,
+        payload: { issue: issue(50, "heidi"), changes: ["imported"] },
+      },
+    ]);
+    const opened = github.openIssue({ projectId: GH, title: "Add a banner", author: "ivan" });
+    const status = FactoryStatus.parse((await h.api("POST", `/projects/${GH}/factory/tick`)).body);
+    const ignored = status.ignored.find((w) => w.issue?.number === opened.number);
+    expect(ignored).toMatchObject({ trust: "untrusted", author: "ivan" });
+    expect((await h.detail(pmId)).session.status).toBe("idle");
+
+    // An automation and the user write to the idle PM at the same moment. The automation's
+    // message starts the turn (which then waits on an approval); the user's must not lend it
+    // their authority: it waits in the queue for the next turn.
+    const s = h.server.services.sessions;
+    const automated = "[approval] Automated triage of #50.";
+    const [auto, user] = await Promise.all([
+      s.send(
+        pmId,
+        { input: { text: automated, attachments: [] }, whenBusy: "queue" },
+        "automation",
+      ),
+      s.send(
+        pmId,
+        {
+          input: { text: "Hello, tell me the project status.", attachments: [] },
+          whenBusy: "queue",
+        },
+        "user",
+      ),
+    ]);
+    expect(auto).toEqual({ status: "sent" });
+    expect(user).toEqual({ status: "queued" });
+    await waitUntil(async () =>
+      (await h.detail(pmId)).session.status === "waiting" ? true : undefined,
+    );
+    const texts = await userTexts(pmId);
+    expect(texts.some((t) => t.includes(automated))).toBe(true);
+    expect(texts.some((t) => t.includes("tell me the project status"))).toBe(false);
+
+    // The running turn is the automation's, in memory and as saved.
+    expect(userLedAfterRestart()).toBe(false);
+    const start = await call("start_session", {
+      prompt: "Fix issue #50.",
+      purpose: "Resolve #50",
+      issueNumber: 50,
+    });
+    expect(start.isError).toBe(true);
+    expect(issueSessions(50)).toHaveLength(0);
+    const admit = await call("factory_admit_issue", { itemId: ignored?.id });
+    expect(admit.isError).toBe(true);
+    expect(item(ignored?.id as string)).toMatchObject({ stage: "ignored", trust: "untrusted" });
+  });
 });
