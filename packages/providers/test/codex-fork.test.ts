@@ -96,6 +96,47 @@ describe("Codex fork", () => {
     });
   });
 
+  it("refuses a turn thread/fork no longer finds when the list can't be read", async () => {
+    const log = logFile();
+    const adapter = new CodexAdapter({ executable: fakeCodex });
+    // Like Codex 0.160: the short-lived app-server hasn't loaded the thread, so it can't list it.
+    await expect(
+      adapter.forkConversation("unloaded", { cwd: tmpdir(), upTo: "turn-gone" }),
+    ).rejects.toMatchObject({
+      code: FORK_POINT_MISSING,
+      message: expect.stringMatching(/turn not found: turn-gone/),
+    });
+    expect(requests(log).map((r) => r.method)).toEqual([
+      "initialize",
+      "thread/turns/list",
+      "thread/fork",
+    ]);
+  });
+
+  it("refuses a deleted thread when forking at a turn", async () => {
+    logFile();
+    const adapter = new CodexAdapter({ executable: fakeCodex });
+    await expect(
+      adapter.forkConversation("missing", { cwd: tmpdir(), upTo: "turn-2" }),
+    ).rejects.toMatchObject({
+      code: FORK_POINT_MISSING,
+      message: expect.stringMatching(/no rollout found for thread id missing/),
+    });
+  });
+
+  it("keeps any other refusal a plain failure", async () => {
+    logFile();
+    const adapter = new CodexAdapter({ executable: fakeCodex });
+    const failure = await adapter
+      .forkConversation("unloaded", { cwd: tmpdir(), upTo: "turn-running" })
+      .catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as { code?: string }).code).toBeUndefined();
+    expect((failure as Error).message).toMatch(
+      /Could not fork Codex thread unloaded: lastTurnId 'turn-running' identifies an in-progress turn/,
+    );
+  });
+
   it("forks forkFrom as a session opens, then resumes the copy (never the original)", async () => {
     const log = logFile();
     const adapter = new CodexAdapter({ executable: fakeCodex });
@@ -120,10 +161,14 @@ describe("Codex fork", () => {
     }
   });
 
-  it("says which thread could not be copied", async () => {
+  it("says which thread could not be copied, and a whole copy stays a plain failure", async () => {
     logFile();
-    await expect(forkCodexThread(fakeCodex, "missing", { cwd: tmpdir() })).rejects.toThrow(
-      /Could not fork Codex thread missing: thread not found/,
+    const failure = await forkCodexThread(fakeCodex, "missing", { cwd: tmpdir() }).catch(
+      (error: unknown) => error,
     );
+    expect((failure as Error).message).toMatch(
+      /Could not fork Codex thread missing: no rollout found for thread id missing/,
+    );
+    expect((failure as { code?: string }).code).toBeUndefined();
   });
 });

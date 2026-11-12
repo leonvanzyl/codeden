@@ -2,20 +2,31 @@ import { FORK_POINT_MISSING, ProviderSessionError } from "../adapter";
 import type { ResolvedCommand } from "../util/exec";
 import { startAppServer } from "./process";
 import type { ThreadForkParams, ThreadForkResponse, ThreadTurnsListResponse } from "./protocol/v2";
-import type { CodexRpc } from "./rpc";
+import { type CodexRpc, CodexRpcError } from "./rpc";
 
 /** Turns listed per `thread/turns/list` page, and the most pages read to find a turn. */
 const TURNS_PAGE = 100;
 const MAX_PAGES = 50;
 
 /**
+ * How the app-server answers for a thread or turn it doesn't have. Codex 0.160 says
+ * `no rollout found for thread id <id>` for a deleted thread and `turn not found: <id>` for a
+ * missing `lastTurnId`. Other refusals (a turn still in progress, a malformed id) don't match.
+ */
+const MISSING = /\bno rollout found\b|\b(thread|turn|rollout) not found\b/i;
+
+/**
  * Copy a Codex thread with `thread/fork` through a short-lived `codex app-server` and return
  * the new thread's id. The original thread is untouched; the session that resumes the copy
  * sets its own cwd, policy and instructions (`thread/resume` overrides). The process is closed
- * before returning, so it no longer holds the new thread when that session resumes it. With
- * `upTo` (a turn id), the copy ends with that turn (`lastTurnId`), once the thread's turns
- * (`thread/turns/list`) show it still holds that turn: one it doesn't throws
- * `FORK_POINT_MISSING` before anything is copied.
+ * before returning, so it no longer holds the new thread when that session resumes it.
+ *
+ * With `upTo` (a turn id), the copy ends with that turn (`lastTurnId`). A thread that no
+ * longer holds the turn, or no longer exists, throws `FORK_POINT_MISSING`: when the turn list
+ * (`thread/turns/list`) shows it before anything is copied, or else when `thread/fork` answers
+ * so. A short-lived app-server usually can't list a thread it hasn't loaded (Codex 0.160 says
+ * `thread not loaded`), so `thread/fork`'s answer is what decides then. Any other failure, and
+ * every failure of a whole copy, stays a plain error.
  */
 export async function forkCodexThread(
   exe: ResolvedCommand,
@@ -49,7 +60,14 @@ export async function forkCodexThread(
     return res.thread.id;
   } catch (error) {
     if (error instanceof ProviderSessionError) throw error;
-    throw new Error(`Could not fork Codex thread ${threadId}: ${(error as Error).message}`);
+    const message = (error as Error).message;
+    if (opts.upTo && error instanceof CodexRpcError && MISSING.test(message)) {
+      throw new ProviderSessionError(
+        FORK_POINT_MISSING,
+        `The thread no longer holds that turn (${message}), so it can't be forked there`,
+      );
+    }
+    throw new Error(`Could not fork Codex thread ${threadId}: ${message}`);
   } finally {
     await rpc.close();
   }
@@ -57,7 +75,8 @@ export async function forkCodexThread(
 
 /**
  * Whether the thread still holds `turnId`, from its turn list. Undefined when the list can't be
- * read (an app-server without the method, say): `thread/fork` then decides on its own.
+ * read (a thread this app-server hasn't loaded, or an app-server without the method):
+ * `thread/fork` then decides.
  */
 async function holdsTurn(
   rpc: CodexRpc,
