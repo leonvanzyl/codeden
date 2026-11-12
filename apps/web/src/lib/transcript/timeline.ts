@@ -121,6 +121,22 @@ export function buildTimeline(state: TranscriptState, threadId: string): Timelin
   return rows;
 }
 
+/** Index of the row showing `itemId` (a work group shows several items), or -1. */
+export function rowIndexOfItem(rows: TimelineRow[], itemId: string): number {
+  return rows.findIndex((row) => {
+    switch (row.type) {
+      case "user":
+      case "assistant":
+      case "card":
+        return row.item.id === itemId;
+      case "work":
+        return row.entries.some((e) => e.id === itemId);
+      default:
+        return false;
+    }
+  });
+}
+
 /** Follow-up suggestions of the latest completed turn, if it's the last turn (§7.5). */
 export function latestFollowups(
   state: TranscriptState,

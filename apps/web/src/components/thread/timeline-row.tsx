@@ -68,15 +68,23 @@ function TurnFooter({
   );
 }
 
-/** Render one timeline row. */
-export function TimelineRowView({ row, sessionId }: { row: Row; sessionId: string }) {
+/** Render one timeline row; `focusItemId` is the search hit it was opened for, if any. */
+export function TimelineRowView({
+  row,
+  sessionId,
+  focusItemId,
+}: {
+  row: Row;
+  sessionId: string;
+  focusItemId?: string;
+}) {
   switch (row.type) {
     case "user":
       return <UserMessage item={row.item} />;
     case "assistant":
       return <AssistantMessage item={row.item} streaming={row.streaming} />;
     case "work":
-      return <WorkGroup entries={row.entries} live={row.live} />;
+      return <WorkGroup entries={row.entries} live={row.live} focusItemId={focusItemId} />;
     case "working":
       return <Working startedAt={row.turn.startedAt} />;
     case "turn-end":

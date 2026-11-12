@@ -3,7 +3,7 @@ import { ArrowDown } from "lucide-react";
 import { type ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import type { TranscriptState } from "@/lib/transcript/reducer";
-import { buildTimeline, type TimelineRow } from "@/lib/transcript/timeline";
+import { buildTimeline, rowIndexOfItem, type TimelineRow } from "@/lib/transcript/timeline";
 import { cn } from "@/lib/utils";
 import { TimelineRowView } from "./timeline-row";
 
@@ -16,14 +16,19 @@ const gapAfter = (row: TimelineRow, next: TimelineRow | undefined): number => {
   return 14;
 };
 
+/** How long a row opened from search stays highlighted. */
+const FOCUS_HIGHLIGHT_MS = 2400;
+
 /**
  * Virtualised transcript (§13). Sticks to the bottom while the user is there; scrolling up
- * releases it and shows a "jump to latest" button.
+ * releases it and shows a "jump to latest" button. With `focusItemId` (a search hit) it opens
+ * at that item instead: centred, its work group expanded, briefly highlighted.
  */
 export function Transcript({
   transcript,
   threadId,
   sessionId,
+  focusItemId,
   footer,
   className,
   contentClassName,
@@ -31,6 +36,7 @@ export function Transcript({
   transcript: TranscriptState;
   threadId: string;
   sessionId: string;
+  focusItemId?: string;
   footer?: ReactNode;
   className?: string;
   contentClassName?: string;
@@ -39,6 +45,9 @@ export function Transcript({
   const scrollRef = useRef<HTMLDivElement>(null);
   const [atBottom, setAtBottom] = useState(true);
   const stick = useRef(true);
+  // The row opened from search while it is highlighted, and the item it was opened for.
+  const [focus, setFocus] = useState<{ index: number; key: string } | null>(null);
+  const focusedItem = useRef<string | null>(null);
 
   const virtualizer = useVirtualizer({
     count: rows.length,
@@ -54,14 +63,42 @@ export function Transcript({
     el.scrollTo({ top: el.scrollHeight, behavior: smooth ? "smooth" : "auto" });
   };
 
-  // Jump to the end on first render of a thread.
+  // Jump to the end on first render of a thread, unless it opens at a search hit.
   // biome-ignore lint/correctness/useExhaustiveDependencies: run once per thread.
   useLayoutEffect(() => {
+    if (focusItemId && rowIndexOfItem(rows, focusItemId) !== -1) return;
     stick.current = true;
     requestAnimationFrame(() => scrollToEnd());
     const t = setTimeout(() => scrollToEnd(), 120);
     return () => clearTimeout(t);
   }, [threadId]);
+
+  // Open at the search hit once its row exists: stop following the end, then centre it.
+  useLayoutEffect(() => {
+    if (!focusItemId || focusedItem.current === focusItemId) return;
+    const index = rowIndexOfItem(rows, focusItemId);
+    const row = rows[index];
+    if (!row) return;
+    focusedItem.current = focusItemId;
+    stick.current = false;
+    setAtBottom(false);
+    setFocus({ index, key: row.key });
+  }, [focusItemId, rows]);
+
+  useEffect(() => {
+    if (!focus) return;
+    virtualizer.scrollToIndex(focus.index, { align: "center" });
+    // Rows measure (and the work group opens) after the first scroll: centre again.
+    const again = setTimeout(
+      () => virtualizer.scrollToIndex(focus.index, { align: "center" }),
+      150,
+    );
+    const done = setTimeout(() => setFocus(null), FOCUS_HIGHLIGHT_MS);
+    return () => {
+      clearTimeout(again);
+      clearTimeout(done);
+    };
+  }, [focus, virtualizer]);
 
   // Follow new content while pinned.
   const total = virtualizer.getTotalSize();
@@ -94,6 +131,7 @@ export function Transcript({
             {virtualizer.getVirtualItems().map((v) => {
               const row = rows[v.index];
               if (!row) return null;
+              const focused = focus?.key === row.key;
               return (
                 <div
                   key={v.key}
@@ -105,7 +143,19 @@ export function Transcript({
                     paddingBottom: gapAfter(row, rows[v.index + 1]),
                   }}
                 >
-                  <TimelineRowView row={row} sessionId={sessionId} />
+                  <div
+                    data-focused={focused || undefined}
+                    className={cn(
+                      "rounded-xl transition-[background-color,box-shadow] duration-700",
+                      focused && "bg-primary/[0.06] ring-1 ring-primary/30",
+                    )}
+                  >
+                    <TimelineRowView
+                      row={row}
+                      sessionId={sessionId}
+                      focusItemId={focused ? focusItemId : undefined}
+                    />
+                  </div>
                 </div>
               );
             })}

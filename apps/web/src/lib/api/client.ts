@@ -39,6 +39,7 @@ import type {
   StartSessionRequestInit,
   StartSessionResponse,
   TranscriptMessage,
+  TranscriptSearchResponse,
   UiServerMessage,
   UpdateProjectRequest,
   UpdateSessionRequest,
@@ -68,6 +69,14 @@ export type SendMode = "send" | "queue" | "steer";
 export type TranscriptWatchMessage =
   | TranscriptMessage
   | { type: "transcript_resync"; sessionId: string; seq: number };
+
+/** A transcript search (`GET /api/search/transcripts`). */
+export interface TranscriptSearchRequest {
+  q: string;
+  projectId?: string;
+  /** Most hits (1–100, default 20). */
+  limit?: number;
+}
 
 /** Resolve an inbox item; approvals and questions carry the agent `response`. */
 export interface InboxResolution {
@@ -121,6 +130,8 @@ export interface CodeDenClient {
   updateSession(sessionId: string, patch: UpdateSessionRequest): Promise<Session>;
   /** Messages waiting behind a running turn: list, edit, delete, send now. */
   readonly queue: QueueApi;
+  /** Full-text search over every transcript, archived sessions included (§13). */
+  searchTranscripts(req: TranscriptSearchRequest): Promise<TranscriptSearchResponse>;
 
   // Conflicts (§8.4): persisted start requests that matched running work.
   listConflicts(query?: { projectId?: string }): Promise<ConflictRecord[]>;

@@ -14,9 +14,10 @@ import {
   Settings,
   SlidersHorizontal,
   SquareTerminal,
+  TextSearch,
   Workflow,
 } from "lucide-react";
-import type { ReactNode } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { Hotkey } from "@/components/common/bits";
 import { StatusDot } from "@/components/common/status-dot";
 import {
@@ -35,6 +36,7 @@ import { formatCombo, type ShortcutId, shortcut } from "@/lib/shortcuts";
 import { useLayoutStore } from "@/stores/layout";
 import { useThemeStore } from "@/stores/theme";
 import { useUiStore } from "@/stores/ui";
+import { PaletteTranscripts, paletteFilter } from "./palette-transcripts";
 import { ProjectTile } from "./sidebar/project-group";
 
 const SETTINGS = [
@@ -109,10 +111,15 @@ function ForkCurrentSession({ session, close }: { session: Session; close: () =>
   );
 }
 
-/** Ctrl K: jump to any session or project, or run an action. */
+/** Ctrl K: jump to any session or project, find what was said in a transcript, or run an action. */
 export function CommandPalette() {
   const open = useUiStore((s) => s.paletteOpen);
   const setOpen = useUiStore((s) => s.setPaletteOpen);
+  const [search, setSearch] = useState("");
+  // Each opening starts from an empty search.
+  useEffect(() => {
+    if (!open) setSearch("");
+  }, [open]);
   const { data } = useSnapshot();
   const navigate = useNavigate();
   const layout = useLayoutStore();
@@ -136,8 +143,12 @@ export function CommandPalette() {
       title="Command palette"
       className="sm:max-w-xl"
     >
-      <Command>
-        <CommandInput placeholder="Search sessions, projects and actions…" />
+      <Command filter={paletteFilter}>
+        <CommandInput
+          placeholder="Search sessions, transcripts, projects and actions…"
+          value={search}
+          onValueChange={setSearch}
+        />
         <CommandList className="max-h-[min(440px,60dvh)]">
           <CommandEmpty>No results.</CommandEmpty>
           <CommandGroup heading="Go to">
@@ -152,6 +163,13 @@ export function CommandPalette() {
               label="Inbox"
               keys="inbox"
               onSelect={run(() => navigate({ to: "/inbox" }))}
+            />
+            <Row
+              icon={<TextSearch />}
+              label="Search transcripts"
+              hint="What was asked, answered or run"
+              value="search transcripts find messages commands"
+              onSelect={run(() => navigate({ to: "/search" }))}
             />
             {data?.projects.map((p) => (
               <Row
@@ -182,6 +200,12 @@ export function CommandPalette() {
                 />
               ))}
           </CommandGroup>
+          <PaletteTranscripts
+            search={search}
+            sessions={data?.sessions ?? []}
+            projects={data?.projects ?? []}
+            close={() => setOpen(false)}
+          />
           <CommandSeparator />
           <CommandGroup heading="Actions">
             {current && <ForkCurrentSession session={current} close={() => setOpen(false)} />}

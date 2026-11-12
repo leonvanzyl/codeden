@@ -12,6 +12,7 @@ import {
   buildTimeline,
   finalAssistantText,
   latestFollowups,
+  rowIndexOfItem,
   summarizeWork,
   type WorkEntry,
 } from "@/lib/transcript/timeline";
@@ -149,6 +150,18 @@ describe("buildTimeline", () => {
     const end = rows.find((r) => r.type === "turn-end");
     expect(end?.type === "turn-end" && end.filesChanged).toBe(2);
     expect(rows.at(-1)?.type).toBe("working");
+  });
+
+  it("finds the row showing an item, inside work groups too", () => {
+    const work = rows.find((r) => r.type === "work" && r.entries.length > 1);
+    const step = work?.type === "work" ? work.entries.at(-1) : undefined;
+    expect(step).toBeDefined();
+    expect(rowIndexOfItem(rows, step?.id ?? "")).toBe(rows.indexOf(work as (typeof rows)[number]));
+    const card = rows.findIndex((r) => r.type === "card");
+    const cardRow = rows[card];
+    expect(rowIndexOfItem(rows, cardRow?.type === "card" ? cardRow.item.id : "")).toBe(card);
+    expect(rowIndexOfItem(rows, rows[0]?.type === "user" ? rows[0].item.id : "")).toBe(0);
+    expect(rowIndexOfItem(rows, "no-such-item")).toBe(-1);
   });
 
   it("keeps a turn whole when an earlier turn's follow-ups arrive during it", () => {

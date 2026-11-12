@@ -25,6 +25,7 @@ import {
   Snapshot,
   SpeechSummaryResponse,
   StartSessionResponse,
+  TranscriptSearchResponse,
   UpdateStatus,
 } from "@codeden/contracts";
 import { httpAutomationsApi } from "./automations-api";
@@ -101,6 +102,12 @@ export function createHttpClient(origin: string, opts: HttpClientOptions = {}): 
     forkSession: (id, req) =>
       post(`/sessions/${enc(id)}/fork`, req ?? {}, (v) => ForkSessionResponse.parse(v)),
     queue: httpQueueApi(http),
+    searchTranscripts: ({ q, projectId, limit }) => {
+      const params = new URLSearchParams({ q });
+      if (projectId) params.set("projectId", projectId);
+      if (limit) params.set("limit", String(limit));
+      return get(`/search/transcripts?${params}`, (v) => TranscriptSearchResponse.parse(v));
+    },
 
     ...httpSessionConflictApi(http),
     resolveInbox: (id, resolution) =>

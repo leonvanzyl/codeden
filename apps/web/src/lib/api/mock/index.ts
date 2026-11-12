@@ -10,6 +10,7 @@ import { mockOrchestration } from "./orchestration";
 import { mockProjectApi } from "./projects";
 import { MockQueue } from "./queue";
 import { respond } from "./responses";
+import { mockSearch } from "./search";
 import { workbenchApi } from "./workbench-api";
 import { MockWorld } from "./world";
 
@@ -71,6 +72,7 @@ export function createMockClient(opts: MockClientOptions = {}): CodeDenClient {
     kind: "mock",
     getSnapshot: () => delay(world.snapshot, 150),
     getSessionSnapshot: (id) => delay(world.sessionSnapshot(id), 120),
+    searchTranscripts: (req) => delay(mockSearch(world, req), 150),
     subscribe: (fromSeq, onMessage) => world.subscribe(fromSeq, onMessage),
     // Agent events arrive on the global stream in the mock, so watches have nothing to add.
     watchSession: () => () => {},

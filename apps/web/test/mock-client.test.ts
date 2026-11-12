@@ -1,4 +1,4 @@
-import type { UiServerMessage } from "@codeden/contracts";
+import { TranscriptSearchResponse, type UiServerMessage } from "@codeden/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createMockClient } from "@/lib/api/mock";
 import { transcriptFromSnapshot } from "@/lib/transcript/reducer";
@@ -72,5 +72,19 @@ describe("mock client", () => {
     const settings = await p;
     expect(settings.voice.readAloud.enabled).toBe(false);
     expect(settings.voice.dictation.engine).toBe("browser");
+  });
+
+  it("searches transcripts like the server: every term, highlighted, case-insensitively", async () => {
+    const client = createMockClient();
+    const p = client.searchTranscripts({ q: "WEBHOOKS retried" });
+    const short = client.searchTranscripts({ q: "pr" });
+    await vi.advanceTimersByTimeAsync(500);
+    const result = TranscriptSearchResponse.parse(await p);
+    const hit = result.hits.find((h) => h.sessionId === "s-webhooks");
+    expect(hit).toMatchObject({ kind: "user_message", anchorItemId: hit?.itemId });
+    expect(hit?.snippet.filter((s) => s.match).map((s) => s.text.toLowerCase())).toEqual(
+      expect.arrayContaining(["webhooks", "retried"]),
+    );
+    expect((await short).hits).toEqual([]);
   });
 });
