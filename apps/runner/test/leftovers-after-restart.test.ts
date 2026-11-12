@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import type { ProcessRow } from "../src/process/inside";
+import { type ProcessRow, withDescendants } from "../src/process/inside";
 import { endProcessesInside } from "../src/process/worktree-processes";
 import { removeWithLeftovers } from "../src/workspace/leftover-processes";
 import { emptyTrash } from "../src/workspace/trash";
@@ -151,8 +151,28 @@ describe("removing a worktree after the runner restarted (#99)", () => {
   });
 
   it("never ends the user's editor or terminal there, nor CodeDen", async () => {
-    const killed = await endInside(SCOUT_WT, table);
-    for (const pid of [...USERS_OWN, process.pid, DESKTOP_APP]) expect(killed).not.toContain(pid);
+    // What the tree kills of the chosen processes end (`taskkill /T` follows parent pids).
+    const ended = withDescendants(await endInside(SCOUT_WT, table), table);
+    for (const pid of [...USERS_OWN, process.pid, DESKTOP_APP]) expect(ended).not.toContain(pid);
+  });
+
+  it("never ends a person's editor by ending the shell it runs under (P1 review)", async () => {
+    // A shell whose parent is gone, working in the worktree, with an editor opened from it.
+    const shell = row(100, 999, {
+      exe: p("C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"),
+      cwd: SCOUT_WT,
+      startedAt: 100,
+    });
+    const nvim = row(101, 100, {
+      exe: p("C:\\Program Files\\Neovim\\bin\\nvim.exe"),
+      cwd: SCOUT_WT,
+      startedAt: 101,
+    });
+    const rows = [...codeden, shell, nvim];
+    const ended = withDescendants(await endInside(SCOUT_WT, rows), rows);
+    expect([...ended]).toEqual([]);
+    // Without the editor under it, the same shell is a leftover like any other.
+    expect(await endInside(SCOUT_WT, [...codeden, shell])).toEqual([100]);
   });
 
   it("ends a process running an executable from inside the worktree, started before it", async () => {

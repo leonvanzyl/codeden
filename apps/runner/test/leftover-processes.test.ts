@@ -9,6 +9,7 @@ import {
   pathIsInside,
   processesToEnd,
   startedByAgents,
+  withDescendants,
 } from "../src/process/inside";
 import { ProcessSupervisor } from "../src/process/supervisor";
 import {
@@ -190,6 +191,30 @@ describe("choosing which processes to end before deleting a worktree", () => {
       allowed,
     });
     expect(ended.sort((a, b) => a - b)).toEqual([31, 40, 41, 42]);
+  });
+
+  it("never chooses a process whose tree a person's app or terminal runs in", () => {
+    // Orphaned shells in the worktree: one with an editor opened from it, one with a dev
+    // server, and one with a spared CodeDen terminal under it.
+    const tree: ProcessRow[] = [
+      row(RUNNER, 99, { startedAt: 50 }),
+      row(100, 999, { commandLine: "powershell.exe", cwd: WT, startedAt: 100 }),
+      row(101, 100, { exe: "C:\\Program Files\\Neovim\\bin\\nvim.exe", cwd: WT, startedAt: 101 }),
+      row(200, 998, { commandLine: "bash.exe", cwd: WT, startedAt: 200 }),
+      row(201, 200, { commandLine: script, startedAt: 201 }),
+      row(300, 997, { commandLine: "bash.exe", cwd: WT, startedAt: 300 }),
+      row(301, 300, { commandLine: "pwsh.exe", cwd: WT, startedAt: 301 }),
+    ];
+    const ended = processesToEnd({
+      dir: WT,
+      rows: tree,
+      windows: true,
+      protect: [RUNNER],
+      allowed: new Set(tree.map((r) => r.pid)),
+      spare: new Set([301]),
+    });
+    // What the tree kills end (`taskkill /T` follows parent pids the same way).
+    expect([...withDescendants(ended, tree)].sort((a, b) => a - b)).toEqual([200, 201]);
   });
 });
 

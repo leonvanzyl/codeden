@@ -192,14 +192,24 @@ export interface SelectOptions {
   spare?: ReadonlySet<number>;
 }
 
-/** The processes inside `dir` that may be ended, by pid. */
+/**
+ * The processes inside `dir` that may be ended, by pid. Each is ended with its whole tree
+ * (`killTree`), so a process is never chosen when anything that must survive runs under it: it
+ * is an ancestor of CodeDen (`protect`), of an app a person works in (an editor opened from a
+ * shell in the folder), or of a spared terminal. Ancestry is followed by parent pid, as tree
+ * kills do.
+ */
 export function processesToEnd(opts: SelectOptions): number[] {
+  const kept = [
+    ...opts.protect,
+    ...opts.rows.filter((r) => isUserApp(r, opts.dir, opts.windows)).map((r) => r.pid),
+    ...(opts.spare ?? []),
+  ];
   const safe = new Set<number>();
-  for (const pid of opts.protect) for (const p of withAncestors(pid, opts.rows)) safe.add(p);
+  for (const pid of kept) for (const p of withAncestors(pid, opts.rows)) safe.add(p);
   return opts.rows
     .filter((r) => r.pid > 0 && !safe.has(r.pid))
-    .filter((r) => opts.allowed.has(r.pid) && !opts.spare?.has(r.pid))
-    .filter((r) => !isUserApp(r, opts.dir, opts.windows))
+    .filter((r) => opts.allowed.has(r.pid))
     .filter((r) => runsInside(opts.dir, r, opts.windows))
     .map((r) => r.pid);
 }
