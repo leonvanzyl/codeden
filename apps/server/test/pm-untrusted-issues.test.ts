@@ -11,6 +11,8 @@ import {
 } from "@codeden/contracts";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { VISION_TEMPLATE } from "../src/services/factory/vision";
+import { LoopGuard, turnOriginsIn } from "../src/services/orchestration/loop-guard";
+import { WakeScheduler } from "../src/services/orchestration/wake-scheduler";
 import { FakeFactoryGithub } from "./support/fake-factory-github";
 import { type Harness, startHarness, waitUntil } from "./support/harness";
 
@@ -62,6 +64,23 @@ describe("PM tools and untrusted issues in turns the user didn't start (#137)", 
       .list({ projectId: GH, role: "agent" })
       .filter((s) => s.workKey === `issue:${number}`);
   const item = (id: string) => h.server.services.factory.data.item(id) as FactoryItem;
+  /**
+   * Whether the PM's turn is the user's as a restarted server sees it: a fresh guard (empty
+   * memory) reading the origins saved with the session rows, while the runner keeps the turn.
+   */
+  const userLedAfterRestart = () => {
+    const guard = new LoopGuard({
+      wakes: new WakeScheduler(async () => "empty"),
+      notices: h.server.services.orchestration.notices,
+      wakePm: async () => "empty",
+      turnOrigins: turnOriginsIn(h.server.services.sessionRepo),
+    });
+    try {
+      return guard.humanLed({ caller: "mcp", sessionId: pmId });
+    } finally {
+      guard.dispose();
+    }
+  };
 
   function issue(number: number, author: string): GithubIssue {
     return {
@@ -141,6 +160,7 @@ describe("PM tools and untrusted issues in turns the user didn't start (#137)", 
     });
     pmId = run.sessionId as string;
     await pmTurnDone("#46");
+    expect(userLedAfterRestart()).toBe(false);
 
     // The issue's text talks the PM into starting work on it at once.
     const res = await call("start_session", {
@@ -246,6 +266,8 @@ describe("PM tools and untrusted issues in turns the user didn't start (#137)", 
     const text = `Let #${opened.number} in, and start a session on #47.`;
     await h.api("POST", `/orchestration/projects/${GH}/pm/messages`, { input: { text } });
     await pmTurnDone(text);
+    // Saved with the session, so a turn the runner keeps through a server restart stays yours.
+    expect(userLedAfterRestart()).toBe(true);
 
     const admitted = await call("factory_admit_issue", { itemId: ignored?.id });
     expect(admitted.isError).toBe(false);
@@ -298,6 +320,7 @@ describe("PM tools and untrusted issues in turns the user didn't start (#137)", 
       (await asOrchestrator("message_pm", { projectId: GH, text: relay }, orchestratorId)).isError,
     ).toBe(false);
     await pmTurnDone(relay);
+    expect(userLedAfterRestart()).toBe(true);
     const relayed = await call("start_session", {
       prompt: "Fix issue #48.",
       purpose: "Resolve #48",
@@ -319,6 +342,7 @@ describe("PM tools and untrusted issues in turns the user didn't start (#137)", 
         .isError,
     ).toBe(false);
     await pmTurnDone(onItsOwn);
+    expect(userLedAfterRestart()).toBe(false);
     const refused = await call("start_session", {
       prompt: "Fix issue #49.",
       purpose: "Resolve #49",

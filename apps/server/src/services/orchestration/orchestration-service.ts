@@ -31,7 +31,7 @@ import {
   sharedWork,
 } from "./digest";
 import { deriveGithubNotices, GITHUB_NOTICE_EVENTS } from "./github-notices";
-import { type HeldMessage, LoopGuard, type MessageOrigin } from "./loop-guard";
+import { type HeldMessage, LoopGuard, type MessageOrigin, turnOriginsIn } from "./loop-guard";
 import { ProjectNotes } from "./notes";
 import { deriveNotices, type NoticeDraft, NoticeStore } from "./notices";
 import {
@@ -132,6 +132,7 @@ export class OrchestrationService {
       wakes: this.wakes,
       notices: this.notices,
       wakePm: (projectId) => this.fire(wakeKey("pm", projectId)),
+      turnOrigins: turnOriginsIn(deps.repo),
       options: deps.options?.wake,
       log: deps.log,
     });

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { MessageSender, Session, UserInput } from "@codeden/contracts";
+import type { SessionRepo } from "../sessions/repo";
 import type { NoticeStore } from "./notices";
 import { type WakeResult, WakeScheduler, type WakeSchedulerOptions } from "./wake-scheduler";
 
@@ -17,12 +18,39 @@ export interface HeldMessage {
   until: number;
 }
 
+/**
+ * Where the guard keeps whether each role session's latest turn carries the user's request,
+ * so a turn that outlives a server restart (the runner keeps it going) keeps its origin.
+ */
+export interface TurnOrigins {
+  /** The recorded origin; `undefined` when none was ever recorded. */
+  load(sessionId: string): boolean | undefined;
+  save(sessionId: string, fromUser: boolean): void;
+}
+
+/**
+ * Turn origins kept with each role session's start metadata (`turnFromUser`). A session
+ * without start metadata records nothing; an origin never recorded counts as not the user's.
+ */
+export function turnOriginsIn(repo: Pick<SessionRepo, "find" | "setStartMeta">): TurnOrigins {
+  return {
+    load: (sessionId) => repo.find(sessionId)?.startMeta?.turnFromUser,
+    save: (sessionId, fromUser) => {
+      const stored = repo.find(sessionId)?.startMeta;
+      if (!stored) return;
+      repo.setStartMeta(sessionId, (meta) => ({ ...(meta ?? stored), turnFromUser: fromUser }));
+    },
+  };
+}
+
 export interface LoopGuardDeps {
   /** The notice-wake scheduler: a PM and its sessions, PM messages to the orchestrator. */
   wakes: WakeScheduler;
   notices: Pick<NoticeStore, "create" | "undelivered">;
   /** Wake the PM of a project, delivering its undelivered notices. */
   wakePm: (projectId: string) => Promise<WakeResult>;
+  /** Persisted turn origins. Without them the guard remembers origins until it is disposed. */
+  turnOrigins?: TurnOrigins;
   options?: WakeSchedulerOptions;
   log?: (message: string) => void;
 }
@@ -47,8 +75,8 @@ const pmKey = (projectId: string | null) => `pm:${projectId ?? ""}`;
 export class LoopGuard {
   /** The orchestrator's messages to each PM (`pm:<projectId>`) from turns it started itself. */
   readonly relays: WakeScheduler;
-  /** Role sessions whose latest turn carries the user's request (see `turnStarted`). */
-  private readonly userTurns = new Set<string>();
+  /** Whether each role session's latest turn carries the user's request (see `turnStarted`). */
+  private readonly userTurns = new Map<string, boolean>();
 
   constructor(private readonly deps: LoopGuardDeps) {
     this.relays = new WakeScheduler((key) => this.deliverHeld(key.slice("pm:".length)), {
@@ -65,7 +93,8 @@ export class LoopGuard {
   /**
    * A role session's turn starts with `input` from `from`. It carries the user's request when
    * the user wrote it, or when the orchestrator passed it on from a turn the user started
-   * (`relayedForUser`). The user's own input clears the session's counts.
+   * (`relayedForUser`). The origin is saved before the turn starts (a failed save stops the
+   * send), so it survives a server restart. The user's own input clears the session's counts.
    */
   turnStarted(
     session: Session,
@@ -74,8 +103,9 @@ export class LoopGuard {
   ): void {
     if (session.role === "agent") return;
     const relayed = from === "orchestrator" && input?.relayedForUser === true;
-    if (from === "user" || relayed) this.userTurns.add(session.id);
-    else this.userTurns.delete(session.id);
+    const fromUser = from === "user" || relayed;
+    this.deps.turnOrigins?.save(session.id, fromUser);
+    this.userTurns.set(session.id, fromUser);
     if (from !== "user") return;
     this.clear(session.role === "pm" ? pmKey(session.projectId) : "orchestrator");
   }
@@ -83,11 +113,19 @@ export class LoopGuard {
   /**
    * Whether a request carries the user's own words: it came through the UI, or from a role
    * session's turn that the user's message started (directly, or relayed by the orchestrator).
-   * Turns started by automations, notices, wake-ups and other agents never do.
+   * Turns started by automations, notices, wake-ups and other agents never do, and neither
+   * does a turn whose origin was never recorded.
    */
   humanLed(origin: MessageOrigin): boolean {
     if (origin.caller === "ui") return true;
-    return origin.sessionId !== null && this.userTurns.has(origin.sessionId);
+    if (origin.sessionId === null) return false;
+    let fromUser = this.userTurns.get(origin.sessionId);
+    if (fromUser === undefined) {
+      // A turn started before this server did (the runner kept it going): its saved origin.
+      fromUser = this.deps.turnOrigins?.load(origin.sessionId) === true;
+      this.userTurns.set(origin.sessionId, fromUser);
+    }
+    return fromUser;
   }
 
   /**

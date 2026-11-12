@@ -31,12 +31,19 @@ export interface PendingStart {
 }
 
 /**
- * Start metadata as stored: the public `SessionStartMeta` plus a pending start, and the PR
- * feedback already sent per PR number (`PrFeedbackService`).
+ * Start metadata as stored: the public `SessionStartMeta` plus a pending start, the PR
+ * feedback already sent per PR number (`PrFeedbackService`) and, for the orchestrator and PMs,
+ * whether their latest turn carries the user's request (`LoopGuard`).
  */
 export type StoredStartMeta = SessionStartMeta & {
   pending?: PendingStart | null;
   prFeedback?: Record<string, { rounds: number; keys: string[] }>;
+  /**
+   * Whether the latest turn CodeDen started in this role session carries the user's request,
+   * written when its input is sent, so a turn that outlives a server restart keeps it. Absent:
+   * never recorded, treated as not the user's.
+   */
+  turnFromUser?: boolean;
   /** A fork's workspace plan (§9): prepared before any start until the worktree exists. */
   forkStart?: ForkStart | null;
 };

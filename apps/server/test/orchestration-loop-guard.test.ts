@@ -80,6 +80,44 @@ describe("loop guard (§8.2): only agent-to-agent loops are paced", () => {
     expect(guard.humanLed(fromPm)).toBe(false);
   });
 
+  it("keeps a turn's origin across a server restart, and refuses unknown ones (#137)", () => {
+    // What the session rows keep: the guard of a restarted server starts with empty memory.
+    const saved = new Map<string, boolean>();
+    const turnOrigins = {
+      load: (id: string) => saved.get(id),
+      save: (id: string, fromUser: boolean) => saved.set(id, fromUser),
+    };
+    const restarted = () =>
+      new LoopGuard({
+        wakes: new WakeScheduler(async () => "sent", opts),
+        notices: { create: () => undefined, undelivered: () => [] },
+        wakePm: async () => "empty",
+        turnOrigins,
+        options: opts,
+      });
+    const fromPm = { caller: "mcp" as const, sessionId: "pm1" };
+    const fromOrchestrator = { caller: "mcp" as const, sessionId: "orch" };
+
+    // Never recorded (a turn from before the origin was saved): not the user's.
+    expect(restarted().humanLed(fromPm)).toBe(false);
+    const before = restarted();
+    before.turnStarted(pm, "user");
+    before.turnStarted(orchestrator, "user");
+    // The runner keeps both turns going while the server restarts.
+    const after = restarted();
+    expect(after.humanLed(fromPm)).toBe(true);
+    expect(after.humanLed(fromOrchestrator)).toBe(true);
+
+    // Automated turns stay automated after a restart too.
+    after.turnStarted(pm, "automation");
+    after.turnStarted(orchestrator, "codeden");
+    const again = restarted();
+    expect(again.humanLed(fromPm)).toBe(false);
+    expect(again.humanLed(fromOrchestrator)).toBe(false);
+    again.turnStarted(pm, "orchestrator", { relayedForUser: true });
+    expect(restarted().humanLed(fromPm)).toBe(true);
+  });
+
   it("holds an orchestrator <-> PM ping-pong back and delivers it once the window allows", async () => {
     const { guard, stored, delivered, turn } = setup();
     turn(orchestrator, "codeden"); // woken by a PM message: no person in this turn
