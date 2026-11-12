@@ -10,6 +10,13 @@ import { rateLimits } from "./usage";
 export type { TurnOutcome } from "./thread-mapper";
 export { CodexTurnUsage, rateLimits, tokenUsage } from "./usage";
 
+export interface CodexEventMapperOptions {
+  /** Clock for sub-agent durations (tests). */
+  now?: () => number;
+  /** Interrupt a sub-agent turn that started after Stop cancelled its agent. */
+  stopTurn?: (codexThreadId: string, turnId: string) => void;
+}
+
 /**
  * Translates `codex app-server` notifications into normalized `AgentEvent`s. The session's own
  * Codex thread maps to the root thread; threads of agents it spawns map to child threads
@@ -33,11 +40,17 @@ export class CodexEventMapper {
   constructor(
     sessionId: string,
     private readonly emit: (event: AgentEvent) => void,
-    now: () => number = Date.now,
+    options: CodexEventMapperOptions = {},
   ) {
     this.rootThreadId = `${sessionId}:thread-root`;
     const limits = () => this.limits;
-    this.subagents = new CodexSubagents({ sessionId, emit, limits, now });
+    this.subagents = new CodexSubagents({
+      sessionId,
+      emit,
+      limits,
+      now: options.now ?? Date.now,
+      ...(options.stopTurn ? { stopTurn: options.stopTurn } : {}),
+    });
     this.root = new CodexThreadMapper({
       threadId: this.rootThreadId,
       root: true,
@@ -45,6 +58,8 @@ export class CodexEventMapper {
       links: this.subagents,
       limits,
       userMessage: (item, clientId) => this.withSender(item, clientId),
+      // A new turn of the session is new work: agents a Stop cancelled may run again.
+      onTurnStarted: () => this.subagents.releaseStops(),
     });
   }
 
@@ -111,9 +126,17 @@ export class CodexEventMapper {
     return { threadId: this.rootThreadId, turnId };
   }
 
-  /** Running sub-agent turns, to stop them with the session's turn. */
+  /** Running sub-agent turns. */
   runningSubagentTurns(): { codexThreadId: string; turnId: string }[] {
     return this.subagents.runningTurns();
+  }
+
+  /**
+   * Stop for sub-agents: cancels the cards of agents with no turn running yet (their next turn
+   * is stopped through `stopTurn`) and returns the running turns to interrupt.
+   */
+  stopSubagents(): { codexThreadId: string; turnId: string }[] {
+    return this.subagents.stop();
   }
 
   /** Close a sub-agent's turn, if `turnId` is still the one it runs. */

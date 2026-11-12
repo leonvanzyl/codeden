@@ -83,7 +83,10 @@ export class CodexSession implements ProviderSession {
       }
       this.events.push(event);
     };
-    this.mapper = new CodexEventMapper(opts.sessionId, emit);
+    this.mapper = new CodexEventMapper(opts.sessionId, emit, {
+      // An agent Stop cancelled before it ran started a turn after all: stop that too.
+      stopTurn: (codexThreadId, turnId) => void this.stopSubagentTurn(codexThreadId, turnId),
+    });
     this.mapper.codexThreadId = opts.resumeToken;
     this.broker = new ApprovalBroker(emit);
     this.autonomy = opts.autonomy;
@@ -156,39 +159,49 @@ export class CodexSession implements ProviderSession {
   }
 
   /**
-   * Stop the running turn and every running sub-agent turn: Stop means the whole session, so
-   * the agents it spawned stop too, also once the session's own turn has ended. Each turn that
+   * Stop the running turn and every sub-agent: Stop means the whole session, so the agents it
+   * spawned stop too, also once the session's own turn has ended. Running sub-agent turns are
+   * interrupted; agents with no turn yet (a pending spawn) are cancelled, and a turn one of
+   * them starts before the session's next turn is interrupted when it starts. Each turn that
    * app-server doesn't end in time (or never answers `turn/interrupt` for) is closed as
-   * interrupted anyway; the deadline only closes that same turn, never later work.
+   * interrupted anyway; a deadline only closes that same turn, never later work.
    */
   async interrupt(): Promise<void> {
     const rpc = this.rpc;
+    if (!rpc) return;
     const turnId = this.mapper.currentTurnId;
-    const children = this.mapper.runningSubagentTurns();
-    if (!rpc || (!turnId && children.length === 0)) return;
+    const children = this.mapper.stopSubagents();
+    if (!turnId && children.length === 0) return;
     this.broker.cancelAll();
-    const timeoutMs = this.config.interruptTimeoutMs ?? 10_000;
-    const interrupted = { type: "interrupted" } as const;
-    const stops = children.map((child) =>
-      interruptWithDeadline(
-        () =>
-          rpc.request("turn/interrupt", { threadId: child.codexThreadId, turnId: child.turnId }),
-        timeoutMs,
-        () => this.mapper.endSubagentTurn(child.codexThreadId, child.turnId, interrupted),
-      ),
-    );
+    const stops = children.map((c) => this.stopSubagentTurn(c.codexThreadId, c.turnId));
     if (turnId) {
       stops.push(
         interruptWithDeadline(
           () => rpc.request("turn/interrupt", { threadId: this.threadId(), turnId }),
-          timeoutMs,
+          this.interruptTimeoutMs(),
           () => {
-            if (this.mapper.currentTurnId === turnId) this.mapper.endTurn(interrupted, turnId);
+            if (this.mapper.currentTurnId === turnId)
+              this.mapper.endTurn({ type: "interrupted" }, turnId);
           },
         ),
       );
     }
     await Promise.all(stops);
+  }
+
+  /** Interrupt one sub-agent turn, closing it at the deadline if it is still that turn. */
+  private stopSubagentTurn(codexThreadId: string, turnId: string): Promise<void> {
+    const rpc = this.rpc;
+    if (!rpc) return Promise.resolve();
+    return interruptWithDeadline(
+      () => rpc.request("turn/interrupt", { threadId: codexThreadId, turnId }),
+      this.interruptTimeoutMs(),
+      () => this.mapper.endSubagentTurn(codexThreadId, turnId, { type: "interrupted" }),
+    );
+  }
+
+  private interruptTimeoutMs(): number {
+    return this.config.interruptTimeoutMs ?? 10_000;
   }
 
   async respond(requestId: string, response: RuntimeResponse): Promise<void> {

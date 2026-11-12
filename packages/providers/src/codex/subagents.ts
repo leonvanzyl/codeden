@@ -41,6 +41,11 @@ interface Run {
   note?: string;
   /** True while the card shows the agent as working. */
   open: boolean;
+  /**
+   * Stop came before the agent ran a turn (its spawn was pending, or it had not started): the
+   * next turn it starts is stopped too, unless the session's own next turn began first.
+   */
+  stopping?: boolean;
 }
 
 export interface CodexSubagentsOptions {
@@ -48,6 +53,8 @@ export interface CodexSubagentsOptions {
   emit: (event: AgentEvent) => void;
   limits: () => RateLimitSnapshot | undefined;
   now: () => number;
+  /** Interrupt a sub-agent turn that started after Stop cancelled its agent. */
+  stopTurn?: (codexThreadId: string, turnId: string) => void;
 }
 
 /**
@@ -63,6 +70,8 @@ export class CodexSubagents implements ThreadLinks {
   /** By the spawned agent's Codex thread id. */
   private readonly byThread = new Map<string, Run>();
   private readonly held = new Map<string, ServerNotification[]>();
+  /** True while CodeDen itself closes turns (close, exit, a stop's deadline), not Codex. */
+  private forcing = false;
 
   constructor(private readonly o: CodexSubagentsOptions) {}
 
@@ -138,17 +147,48 @@ export class CodexSubagents implements ThreadLinks {
     return out;
   }
 
+  /**
+   * Stop: returns the running sub-agent turns to interrupt, and cancels the cards of agents not
+   * running a turn yet (a pending spawn, or an agent that has not started). A turn such an agent
+   * starts before the session's next turn is stopped as well (`stopTurn`).
+   */
+  stop(): { codexThreadId: string; turnId: string }[] {
+    const running = this.runningTurns();
+    for (const run of this.runs.values()) {
+      if (!run.open || run.thread?.turnId) continue;
+      run.stopping = true;
+      this.settle(run, "cancelled");
+    }
+    return running;
+  }
+
+  /** The session's next turn began: what stopped agents do from now on is new work. */
+  releaseStops(): void {
+    for (const run of this.runs.values()) run.stopping = false;
+  }
+
   /** End one sub-agent turn if it is still the one running (a stop that got no answer). */
   endTurn(codexThreadId: string, turnId: string, outcome: TurnOutcome): void {
     const thread = this.byThread.get(codexThreadId)?.thread;
-    if (thread?.turnId === turnId) thread.endTurn(outcome, turnId);
+    if (thread?.turnId === turnId) this.force(() => thread.endTurn(outcome, turnId));
   }
 
   /** End every running sub-agent turn and close every open card (close, process exit). */
   endAll(outcome: TurnOutcome): void {
-    for (const run of this.runs.values()) run.thread?.endTurn(outcome);
+    this.force(() => {
+      for (const run of this.runs.values()) run.thread?.endTurn(outcome);
+    });
     for (const run of this.runs.values()) {
       this.settle(run, statusOf(outcome), outcome.type === "failed" ? outcome.message : undefined);
+    }
+  }
+
+  private force(close: () => void): void {
+    this.forcing = true;
+    try {
+      close();
+    } finally {
+      this.forcing = false;
     }
   }
 
@@ -206,21 +246,8 @@ export class CodexSubagents implements ThreadLinks {
       emit: this.o.emit,
       links: this,
       limits: this.o.limits,
-      onTurnStarted: () => this.turnStarted(run),
-      onTurnEnded: (_turnId, outcome) => {
-        if (run.open) {
-          this.settle(
-            run,
-            statusOf(outcome),
-            outcome.type === "failed" ? outcome.message : undefined,
-          );
-        } else {
-          // Closed by Codex's report while the turn ran: its end brings the final figures (a
-          // stop or exit that closes it later doesn't stretch the agent's duration).
-          if (outcome.type === "completed") run.endedAt = this.o.now();
-          this.refresh(run);
-        }
-      },
+      onTurnStarted: (turnId) => this.turnStarted(run, turnId),
+      onTurnEnded: (_turnId, outcome) => this.turnEnded(run, outcome),
       onItemStarted: (item) => {
         if (item.kind === "tool_call") run.toolCalls.add(item.id);
       },
@@ -241,16 +268,41 @@ export class CodexSubagents implements ThreadLinks {
   }
 
   /** A turn started in the agent's thread: the card shows it working again. */
-  private turnStarted(run: Run): void {
+  private turnStarted(run: Run, turnId: string): void {
     run.turns += 1;
     run.lastMessage = undefined;
     run.reported = undefined;
     run.note = undefined;
+    if (run.stopping) {
+      // Stop cancelled this agent before it ran: stop the turn too; its end settles the card.
+      run.stopping = false;
+      if (run.codexThreadId) this.o.stopTurn?.(run.codexThreadId, turnId);
+      return;
+    }
     if (run.open) return;
     run.open = true;
     const { summary: _summary, stats: _stats, ...rest } = run.item;
     run.item = { ...rest, status: "in_progress" };
     this.o.emit({ type: "item.updated", ...run.parent, item: run.item });
+  }
+
+  /**
+   * A turn of the agent ended. An open card closes with its outcome. A card that closed early
+   * (Codex reported the agent done, or Stop cancelled it) takes the turn's actual outcome, with
+   * a failure's message, and its final figures. When CodeDen closes the turn itself (close,
+   * exit, a stop's deadline) a closed card keeps what it shows.
+   */
+  private turnEnded(run: Run, outcome: TurnOutcome): void {
+    const note = outcome.type === "failed" ? outcome.message : undefined;
+    if (run.open) {
+      this.settle(run, statusOf(outcome), note);
+    } else if (this.forcing) {
+      this.refresh(run);
+    } else {
+      run.note = note;
+      run.endedAt = this.o.now();
+      this.refresh(run, statusOf(outcome));
+    }
   }
 
   /**
@@ -279,9 +331,10 @@ export class CodexSubagents implements ThreadLinks {
   }
 
   /** Send a closed card again when a late report or its turn's end changed what it shows. */
-  private refresh(run: Run): void {
-    const next = this.card(run, run.item.status);
+  private refresh(run: Run, status: ItemStatus = run.item.status): void {
+    const next = this.card(run, status);
     if (
+      next.status === run.item.status &&
       next.summary === run.item.summary &&
       JSON.stringify(next.stats) === JSON.stringify(run.item.stats)
     )

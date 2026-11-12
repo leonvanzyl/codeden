@@ -15,11 +15,12 @@ const CHILD_THREAD = "s1:thread-call-spawn";
 function setup() {
   let clock = 1_000;
   const events: AgentEvent[] = [];
-  const mapper = new CodexEventMapper(
-    "s1",
-    (e) => events.push(AgentEvent.parse(e)),
-    () => clock,
-  );
+  /** Sub-agent turns the mapper asked the session to stop. */
+  const stopped: [codexThreadId: string, turnId: string][] = [];
+  const mapper = new CodexEventMapper("s1", (e) => events.push(AgentEvent.parse(e)), {
+    now: () => clock,
+    stopTurn: (codexThreadId, turnId) => stopped.push([codexThreadId, turnId]),
+  });
   mapper.codexThreadId = ROOT;
   const feed = (threadId: string, method: string, params: object) =>
     mapper.handle({ method, params: { threadId, ...params } } as unknown as ServerNotification);
@@ -30,7 +31,7 @@ function setup() {
     events.flatMap((e) =>
       "item" in e && e.item.kind === kind && (!type || e.type === type) ? [e] : [],
     );
-  return { mapper, events, feed, tick, items };
+  return { mapper, events, feed, tick, items, stopped };
 }
 
 const turn = (id: string, status: string, error: object | null = null) => ({
@@ -476,6 +477,61 @@ describe("Codex sub-agents", () => {
     feed(ROOT, "model/rerouted", { turnId: RT, fromModel: "a", toModel: "b", reason: "x" });
     expect(events.at(-1)).toEqual({ type: "session.updated", model: "b" });
     expect(mapper.currentTurnId).toBe(RT);
+  });
+
+  it("takes a turn's actual outcome after Codex reported the agent done", () => {
+    const failed = spawnedV2();
+    failed.feed(CHILD, "turn/started", { turn: turn(CT, "inProgress") });
+    failed.feed(ROOT, "item/completed", { turnId: RT, item: activity("completed", "act-5") });
+    expect(subagentCards(failed.events).at(-1)).toMatchObject({ status: "completed" });
+    failed.feed(CHILD, "turn/completed", {
+      turn: turn(CT, "failed", { message: "Boom", codexErrorInfo: null, additionalDetails: null }),
+    });
+    expect(subagentCards(failed.events).at(-1)).toMatchObject({
+      status: "failed",
+      summary: "Boom",
+    });
+
+    // Closing the turn itself (session close, exit) doesn't overrule what Codex reported.
+    const closed = spawnedV2();
+    closed.feed(CHILD, "turn/started", { turn: turn(CT, "inProgress") });
+    closed.feed(ROOT, "item/completed", { turnId: RT, item: activity("completed", "act-6") });
+    closed.mapper.endAll({ type: "interrupted" });
+    expect(subagentCards(closed.events).at(-1)).toMatchObject({ status: "completed" });
+  });
+
+  it("cancels agents with no turn yet on Stop, and stops the turn they start late", () => {
+    const { mapper, events, feed, items, stopped } = setup();
+    feed(ROOT, "turn/started", { turn: turn(RT, "inProgress") });
+    // A v1 spawn still pending, and a v2 agent that has not started a turn.
+    feed(ROOT, "item/started", { turnId: RT, item: spawn("inProgress", []) });
+    feed(ROOT, "item/completed", {
+      turnId: RT,
+      item: { ...activity("started", "call-v2"), agentThreadId: "codex-v2" },
+    });
+
+    expect(mapper.stopSubagents()).toEqual([]);
+    expect(subagentCards(events).map((c) => [c.id, c.status])).toEqual([
+      ["call-spawn", "cancelled"],
+      ["call-v2", "cancelled"],
+    ]);
+    mapper.endTurn({ type: "interrupted" });
+
+    // The pending spawn completes and its agent starts after Stop: that turn is stopped too.
+    feed(ROOT, "item/completed", { turnId: RT, item: spawn("completed", [CHILD]) });
+    feed(CHILD, "turn/started", { turn: turn(CT, "inProgress") });
+    expect(stopped).toEqual([[CHILD, CT]]);
+    expect(items("subagent", "item.updated")).toEqual([]);
+    feed(CHILD, "turn/completed", { turn: turn(CT, "interrupted") });
+    expect(subagentCards(events).at(-1)).toMatchObject({ id: "call-spawn", status: "cancelled" });
+
+    // The session's next turn is new work: the other agent may run again.
+    mapper.beginTurn("turn-root-2");
+    feed("codex-v2", "turn/started", { turn: turn("turn-v2", "inProgress") });
+    expect(stopped).toEqual([[CHILD, CT]]);
+    expect(items("subagent", "item.updated").at(-1)).toMatchObject({
+      item: { id: "call-v2", status: "in_progress" },
+    });
   });
 
   it("routes a sub-agent's approvals to its child thread", async () => {

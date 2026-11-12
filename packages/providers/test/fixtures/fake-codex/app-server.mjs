@@ -11,7 +11,8 @@
 // FAKE_CODEX_TURN=hang starts turns that never complete and never answers `turn/interrupt`.
 // FAKE_CODEX_TURN=open sends the scripted requests but keeps the turn open until
 // `turn/interrupt`, which ends it as interrupted; interrupts for other threads (sub-agents) are
-// answered but their turns never end.
+// answered but their turns never end. Scripted entries with `afterInterrupt: true` are held
+// back and sent as notifications once the root turn has been interrupted.
 import { appendFileSync, readFileSync } from "node:fs";
 import { createInterface } from "node:readline";
 
@@ -104,6 +105,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
       // Like the real server: the turn completes after the response has been handled.
       setTimeout(async () => {
         for (const [i, r] of scripted.entries()) {
+          if (r.afterInterrupt) continue;
           // `notify: true` entries are notifications (such as `item/started`), sent as they are.
           if (r.notify) {
             send({ method: r.method, params: { threadId: "thread-1", turnId: turn.id, ...r.params } });
@@ -128,6 +130,9 @@ createInterface({ input: process.stdin }).on("line", (line) => {
       if (turnMode === "open" && msg.params?.threadId === "thread-1") {
         const turn = { id: msg.params.turnId, status: "interrupted", items: [], error: null };
         send({ method: "turn/completed", params: { threadId: "thread-1", turn } });
+        for (const r of scripted.filter((entry) => entry.afterInterrupt)) {
+          send({ method: r.method, params: { threadId: "thread-1", turnId: turn.id, ...r.params } });
+        }
       }
       return;
     default:
