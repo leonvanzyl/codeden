@@ -176,17 +176,19 @@ You are drafting the weekly **release notes** for {{project.name}} ({{date}}).
 ## 1. Collect
 - List the pull requests merged since last Friday:
   `gh pr list --state merged --search "merged:>=<the date 7 days ago, YYYY-MM-DD>" --json number,title,author,labels,url`
-- Skip PRs labelled `skip-changelog` and pure dependency bumps.
+- Skip PRs labelled `skip-changelog`, pure dependency bumps, and PRs that already added a
+  note in `changes/` (`gh pr view <number> --json files`).
 - Call `report_progress` with the number of PRs found.
 
 ## 2. Write
-- Group the changes under **Added**, **Changed**, **Fixed** and **Security**, one line each,
-  written for users, not developers. Link every line to its PR.
-- Prepend the draft to `CHANGELOG.md` under an `## Unreleased` heading. Don't touch older entries.
+- For each remaining user-facing PR, add one note file `changes/<PR number>-<short-slug>.md`:
+  front matter `section: added`, `changed`, `fixed` or `security` between `---` lines, then one
+  `- ` bullet written for users, not developers, that links the PR. No headings.
+- Don't edit `CHANGELOG.md`: the release gathers `changes/` into the new version's section.
 
 ## 3. Deliver
 - Open a pull request with `create_pull_request` titled `docs: release notes draft ({{date}})`.
-- If nothing was merged this week, don't open a PR.
+- If no PR needs a note, don't open a PR.
 
 Call `finish` with the PR link, or say that there was nothing to release.
 ```

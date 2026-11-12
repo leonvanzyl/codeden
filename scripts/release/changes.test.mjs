@@ -37,6 +37,27 @@ describe("parseFragment", () => {
     expect(() => parseFragment("bad.md", text)).toThrow(error);
     expect(() => parseFragment("bad.md", text)).toThrow(/^changes\/bad\.md: .*changes\/README\.md/);
   });
+
+  it.each([
+    ["heading indented one space", "- A.\n\n ## Bad heading"],
+    ["heading indented two spaces", "- A.\n\n  ## Bad heading"],
+    ["heading indented three spaces", "- A.\n\n   ## Bad heading"],
+    ["heading indented with a tab", "- A.\n\t# Bad heading"],
+    ["heading indented inside a bullet", "- A.\n\n    ### Bad heading"],
+    ["bare # line", "- A.\n  #"],
+    ["setext === underline", "- A.\nBad heading\n==="],
+    ["--- rule or underline", "- A.\n\n---\n\n- B."],
+    ["*** rule", "- A.\n\n***"],
+  ])("rejects a heading or rule: %s", (_, body) => {
+    expect(() => parseFragment("bad.md", fragment("fixed", body))).toThrow(
+      /^changes\/bad\.md: must not contain headings or rules \(found "[^"]+"\)/,
+    );
+  });
+
+  it("allows # inside a line and nested bullets", () => {
+    const body = "- **Fixed.** Issue #73 and C# support.\n  - A nested detail.\n  #74 too.";
+    expect(parseFragment("ok.md", fragment("fixed", body)).body).toBe(body);
+  });
 });
 
 describe("assembleSection", () => {

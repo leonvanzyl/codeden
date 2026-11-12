@@ -61,13 +61,25 @@ export function releaseChangelog(text, version, date, notes) {
   return `${before}## [Unreleased]\n\n${UNRELEASED_POINTER}\n\n${section}${rest ? `\n${rest}` : ""}`;
 }
 
+/** Today as YYYY-MM-DD (UTC), the date a release is stamped with by default. */
+export function today() {
+  return new Date().toISOString().slice(0, 10);
+}
+
 /**
  * Applies a bump to the repository at `root`: the three versions, and the changes/ fragments
  * assembled into CHANGELOG.md and deleted. Everything is computed before anything is written.
- * With `dryRun` nothing is written. Returns the new version, the notes and the fragment paths.
+ * With `options.dryRun` nothing is written. `date` (YYYY-MM-DD) is checked first, so a call that
+ * passes something else in its place fails before it can change a file. Returns the new
+ * version, its date, the notes and the fragment paths.
  */
-export function bumpRepository(root, bump, options = {}) {
-  const { date = new Date().toISOString().slice(0, 10), dryRun = false } = options;
+export function bumpRepository(root, bump, date = today(), options = {}) {
+  if (typeof date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    throw new Error(
+      `bumpRepository: date must be YYYY-MM-DD (got ${JSON.stringify(date)}); options go fourth`,
+    );
+  }
+  const { dryRun = false } = options;
   const cliPath = join(root, "apps/cli/package.json");
   const desktopPath = join(root, "apps/desktop/package.json");
   const sourcePath = join(root, "packages/contracts/src/version.ts");
@@ -109,7 +121,7 @@ function main(args) {
   const dryRun = args.includes("--dry-run");
   const [bump, root = process.cwd()] = args.filter((arg) => !arg.startsWith("--"));
   const repo = resolve(root);
-  const result = bumpRepository(repo, bump, { dryRun });
+  const result = bumpRepository(repo, bump, today(), { dryRun });
   if (!dryRun) {
     stageRemovals(repo, result.fragments);
     process.stdout.write(`${result.version}\n`);

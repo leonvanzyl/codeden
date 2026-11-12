@@ -23,7 +23,12 @@ export const UNRELEASED_POINTER =
   "The notes for the next release are in [`changes/`](changes/README.md), one file per change. The release moves them into a version section here.";
 
 const UNRELEASED_HEADING = "## [Unreleased]";
-const HEADING_LINE = /^#{1,6}(\s|$)/;
+/**
+ * Lines that would add structure to the release section: ATX headings at any indentation
+ * (inside a bullet an indented `## x` still renders as a heading), and setext underlines or
+ * horizontal rules (`===`, `---`, `***`, `___`).
+ */
+const STRUCTURE_LINE = /^\s*(#{1,6}(\s|$)|(=+|-{2,}|\*{3,}|_{3,})\s*$)/;
 
 /** File name order with numbers compared as numbers (`9-a.md` before `73-b.md`), locale-fixed. */
 const byName = new Intl.Collator("en", { numeric: true }).compare;
@@ -36,7 +41,7 @@ export function parseFragment(name, text) {
   const fail = (why) => {
     throw new Error(`changes/${name}: ${why} (see changes/README.md)`);
   };
-  const normalized = text.replace(/^﻿/, "").replace(/\r\n?/g, "\n");
+  const normalized = text.replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n");
   const match = /^---\n([\s\S]*?)\n?---(?:\n|$)([\s\S]*)$/.exec(normalized);
   if (!match) fail("must start with front matter: a `---` line, `section: <name>`, a `---` line");
   const fields = {};
@@ -53,8 +58,11 @@ export function parseFragment(name, text) {
   const body = match[2].trim();
   if (body === "") fail("has no note after the front matter");
   if (!body.startsWith("- ")) fail('the note must be Markdown bullets, each starting with "- "');
-  if (body.split("\n").some((line) => HEADING_LINE.test(line))) {
-    fail("must not contain headings; the release adds the section headings");
+  const structure = body.split("\n").find((line) => STRUCTURE_LINE.test(line));
+  if (structure !== undefined) {
+    fail(
+      `must not contain headings or rules (found "${structure.trim()}"); the release adds the section headings`,
+    );
   }
   return { name, section, body };
 }

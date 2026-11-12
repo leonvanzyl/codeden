@@ -15,11 +15,11 @@ section: fixed
 ```
 
 - `section` is one of `added`, `changed`, `deprecated`, `removed`, `fixed` or `security`.
-- The note is one or more `- ` bullet lines. No headings: the release adds them. A change that fits two sections gets two files.
+- The note is one or more `- ` bullet lines (nested bullets are fine). No headings or rules (`#` lines at any indentation, `===`, `---`): the release adds the headings. A change that fits two sections gets two files.
 - Docs-only and internal changes (refactors, tests, CI) don't need a note.
 - Never edit `CHANGELOG.md` for an unreleased change. To reword a note that's already merged, edit its file here.
 
-`pnpm test` checks every file here (front matter with a known section, a bullet note) and that nothing was written under `## [Unreleased]` in `CHANGELOG.md`.
+`pnpm test` checks every file here (front matter with a known section, a bullet note without headings) and that nothing was written under `## [Unreleased]` in `CHANGELOG.md`.
 
 ## At release
 

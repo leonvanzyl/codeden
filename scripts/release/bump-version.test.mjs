@@ -1,6 +1,8 @@
+import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   bumpRepository,
@@ -94,9 +96,28 @@ describe("bumpRepository", () => {
   };
   const assembled = "### Added\n\n- **New.** A.\n- **More.** C.\n\n### Fixed\n\n- **Fixed.** B.";
 
+  /** The fixture as a git repository with every file staged (no commit, so no identity needed). */
+  function makeGitRepo(fragments) {
+    makeRepo("0.4.0", "0.4.0", fragments);
+    execFileSync("git", ["init", "--quiet"], { cwd: root });
+    execFileSync("git", ["-c", "core.autocrlf=false", "add", "--all"], { cwd: root });
+  }
+  const gitIndex = () =>
+    execFileSync("git", ["ls-files", "--stage"], { cwd: root, encoding: "utf8" });
+  const snapshot = () =>
+    [
+      "apps/cli/package.json",
+      "apps/desktop/package.json",
+      "packages/contracts/src/version.ts",
+      "CHANGELOG.md",
+    ].map(read);
+  const bumpScript = fileURLToPath(new URL("./bump-version.mjs", import.meta.url));
+  const runCli = (...args) =>
+    execFileSync(process.execPath, [bumpScript, ...args], { encoding: "utf8" });
+
   it("writes the new version everywhere and turns the fragments into its section", () => {
     makeRepo("0.4.0", "0.4.0", sample);
-    expect(bumpRepository(root, "minor", { date: "2026-11-09" })).toEqual({
+    expect(bumpRepository(root, "minor", "2026-11-09")).toEqual({
       version: "0.5.0",
       date: "2026-11-09",
       notes: assembled,
@@ -113,19 +134,49 @@ describe("bumpRepository", () => {
 
   it("is a maintenance release without fragments", () => {
     makeRepo("0.4.0", "0.4.0");
-    bumpRepository(root, "patch", { date: "2026-11-09" });
+    bumpRepository(root, "patch", "2026-11-09");
     expect(read("CHANGELOG.md")).toContain("## [0.4.1] - 2026-11-09\n\nMaintenance release.\n");
   });
 
-  it("changes nothing on a dry run", () => {
-    makeRepo("0.4.0", "0.4.0", sample);
-    const result = bumpRepository(root, "patch", { date: "2026-11-09", dryRun: true });
-    expect(result.version).toBe("0.4.1");
-    expect(result.notes).toBe(assembled);
-    expect(JSON.parse(read("apps/cli/package.json")).version).toBe("0.4.0");
-    expect(read("packages/contracts/src/version.ts")).toContain('"0.4.0"');
-    expect(read("CHANGELOG.md")).toBe(changelog);
+  it("changes no file and no git index entry on a dry run, and keeps the given date", () => {
+    makeGitRepo(sample);
+    const [files, index] = [snapshot(), gitIndex()];
+    const result = bumpRepository(root, "patch", "2000-01-02", { dryRun: true });
+    expect(result).toEqual({
+      version: "0.4.1",
+      date: "2000-01-02",
+      notes: assembled,
+      fragments: ["changes/75-new.md", "changes/77-more.md", "changes/80-fix.md"],
+    });
+    expect(snapshot()).toEqual(files);
+    expect(gitIndex()).toBe(index);
     expect(readdirSync(join(root, "changes"))).toHaveLength(4);
+  });
+
+  it("refuses options in the date's place before writing anything", () => {
+    makeRepo("0.4.0", "0.4.0", sample);
+    const files = snapshot();
+    expect(() => bumpRepository(root, "patch", { dryRun: true })).toThrow(
+      /date must be YYYY-MM-DD \(got \{"dryRun":true\}\); options go fourth/,
+    );
+    expect(() => bumpRepository(root, "patch", "9 Nov 2026")).toThrow(/date must be YYYY-MM-DD/);
+    expect(snapshot()).toEqual(files);
+    expect(readdirSync(join(root, "changes"))).toHaveLength(4);
+  });
+
+  it("from the command line: --dry-run changes nothing; a release prints only the version and stages the removals", () => {
+    makeGitRepo(sample);
+    const [files, index] = [snapshot(), gitIndex()];
+    const preview = runCli("patch", root, "--dry-run");
+    expect(preview).toContain("Next version: 0.4.1 (patch)");
+    expect(preview).toContain(`\n\n${assembled}\n`);
+    expect(snapshot()).toEqual(files);
+    expect(gitIndex()).toBe(index);
+
+    expect(runCli("patch", root)).toBe("0.4.1\n");
+    expect(readdirSync(join(root, "changes"))).toEqual(["README.md"]);
+    const staged = execFileSync("git", ["ls-files", "changes"], { cwd: root, encoding: "utf8" });
+    expect(staged.trim().split("\n")).toEqual(["changes/README.md"]);
   });
 
   it("writes nothing when a fragment is malformed", () => {
