@@ -1,4 +1,9 @@
-import type { FactoryLimits, ProtectedAreas } from "@codeden/contracts";
+import type {
+  FactoryItem,
+  FactoryItemSource,
+  FactoryLimits,
+  ProtectedAreas,
+} from "@codeden/contracts";
 import { matchingGlobs } from "./globs";
 import { DEPLOY_GLOBS, mentionsTopic } from "./vision";
 
@@ -34,6 +39,31 @@ export function budgetExceeded(
 /** True when limits carry a daily budget (required for the software and dark factory). */
 export function hasBudget(limits: FactoryLimits): boolean {
   return limits.dailyBudget.usd !== undefined || limits.dailyBudget.tokens !== undefined;
+}
+
+/** Who asked for the work decides its place in the queue first (lower goes first). */
+const QUEUE_TIER: Record<FactoryItemSource, number> = {
+  failed_check: 0,
+  revert: 0,
+  issue: 1,
+  discovery: 2,
+};
+
+/**
+ * The order free agents take queued work in (§10.1 Assign): repairs of the default branch
+ * first, then the issues people filed, then the work the scout found; within each, by priority
+ * (the scout's, a failed check's), then age. People's issues carry no priority, so ranking by
+ * priority alone would put every scout finding ahead of every issue a person filed.
+ */
+export function queueOrder(
+  a: Pick<FactoryItem, "source" | "score" | "createdAt">,
+  b: Pick<FactoryItem, "source" | "score" | "createdAt">,
+): number {
+  return (
+    QUEUE_TIER[a.source] - QUEUE_TIER[b.source] ||
+    (b.score ?? 0.5) - (a.score ?? 0.5) ||
+    a.createdAt.localeCompare(b.createdAt)
+  );
 }
 
 /** Free session slots under `maxConcurrentSessions`. */

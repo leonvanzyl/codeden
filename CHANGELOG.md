@@ -17,6 +17,7 @@ All notable changes to CodeDen are documented here. The format follows [Keep a C
 
 ### Fixed
 
+- **Your issues no longer wait behind the scout's.** In a dark factory, every issue the scout filed went ahead of every issue you filed, so your bugs could sit in the queue for an hour while agents worked only on the scout's features, and it looked as if everything went down the feature pipeline. Free agents now take a fix for a failing check on the default branch first, then the issues you and trusted authors filed (oldest first), then the scout's (by the priority it gave them). Work already queued is reordered on the next step; nothing to migrate.
 - **Copy buttons work on phones and tablets over the local network.** Copying code, commands, messages, links and passwords now works on plain `http://` addresses, where browsers don't offer the usual clipboard access. If a copy still fails, CodeDen tells you so you can select the text and copy it yourself.
 
 ## [0.6.0] - 2026-11-11
