@@ -26,6 +26,12 @@ export function diffScopeKey(scope: DiffScope): string {
   return scope.kind === "turn" ? `turn:${scope.turnId}` : scope.kind;
 }
 
+/** The diff view a `diffScopeKey` names. */
+export function scopeFromKey(key: string): DiffScope {
+  if (key.startsWith("turn:")) return { kind: "turn", turnId: key.slice("turn:".length) };
+  return key === "uncommitted" ? { kind: "uncommitted" } : { kind: "session" };
+}
+
 /** A diff side: `additions` counts lines in the changed file, `deletions` in the file before. */
 export type DiffSide = "additions" | "deletions";
 
@@ -105,6 +111,9 @@ export function parsePatchRows(patch: string): PatchRow[] {
   return rows;
 }
 
+/** A row as the unified view shows it and a comment quotes it: marker, then text. */
+const rowText = (row: PatchRow) => row.marker + row.text;
+
 function rowIndex(rows: PatchRow[], line: number, side: DiffSide): number {
   return rows.findIndex((r) => (side === "additions" ? r.newLine : r.oldLine) === line);
 }
@@ -153,8 +162,94 @@ export function captureRange(
       end: lineOf(bottomRow, bottomSide),
       endSide: bottomSide,
     },
-    quote: rows.slice(top, bottom + 1).map((r) => r.marker + r.text),
+    quote: rows.slice(top, bottom + 1).map(rowText),
   };
+}
+
+const sameRange = (a: ReviewRange, b: ReviewRange) =>
+  a.start === b.start && a.side === b.side && a.end === b.end && a.endSide === b.endSide;
+
+/**
+ * Where a comment's lines are in the diff as it is now. The diff changes under a comment (a
+ * new checkpoint, a commit, a restore), so its line numbers can't be trusted: its quoted rows
+ * are looked up instead, and where they appear more than once the match nearest the old
+ * position wins. Returns the range at that match (the same object when nothing moved), or
+ * null when the quoted rows are no longer in the diff and the comment is outdated. A comment
+ * that quotes nothing keeps its range while its last line is still a row.
+ */
+export function relocateRange(
+  rows: PatchRow[],
+  range: ReviewRange,
+  quote: string[],
+): ReviewRange | null {
+  if (quote.length === 0) return rowIndex(rows, range.end, range.endSide) >= 0 ? range : null;
+  let best = -1;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  for (let i = 0; i + quote.length <= rows.length; i++) {
+    if (!quote.every((q, k) => q === rowText(rows[i + k] as PatchRow))) continue;
+    const top = rows[i] as PatchRow;
+    const distance = Math.abs(lineOf(top, sideOf(top, range.side)) - range.start);
+    if (distance < bestDistance) {
+      best = i;
+      bestDistance = distance;
+    }
+  }
+  if (best < 0) return null;
+  const top = rows[best] as PatchRow;
+  const bottom = rows[best + quote.length - 1] as PatchRow;
+  const side = sideOf(top, range.side);
+  const endSide = sideOf(bottom, range.endSide);
+  const next = { start: lineOf(top, side), side, end: lineOf(bottom, endSide), endSide };
+  return sameRange(next, range) ? range : next;
+}
+
+/** A comment as anchoring needs it. */
+export interface AnchorInput {
+  id: string;
+  path: string;
+  range: ReviewRange;
+  quote: string[];
+}
+
+/** A diff line with comments under it, as a diff view annotation carrying their ids. */
+export interface CommentAnchor {
+  side: DiffSide;
+  lineNumber: number;
+  metadata: string[];
+}
+
+/** Where one view's comments go in its diff as it is now. */
+export interface ReviewAnchors {
+  /** Per file path: one anchor per line with comments, under the last line each covers. */
+  byPath: Record<string, CommentAnchor[]>;
+  /** Each placed comment's range in the diff as it is now, by comment id. */
+  ranges: Record<string, ReviewRange>;
+  /** Comments whose lines, or whole file, are no longer in the diff, in the order given. */
+  outdated: string[];
+}
+
+/** Place each comment in a view's files (see `relocateRange`), or list it as outdated. */
+export function anchorComments(
+  comments: AnchorInput[],
+  files: { path: string; patch: string; binary?: boolean }[],
+): ReviewAnchors {
+  const rowsByPath = new Map(files.map((f) => [f.path, f.binary ? [] : parsePatchRows(f.patch)]));
+  const anchors: ReviewAnchors = { byPath: {}, ranges: {}, outdated: [] };
+  for (const c of comments) {
+    const rows = rowsByPath.get(c.path);
+    const range = rows ? relocateRange(rows, c.range, c.quote) : null;
+    if (!range) {
+      anchors.outdated.push(c.id);
+      continue;
+    }
+    anchors.ranges[c.id] = range;
+    anchors.byPath[c.path] ??= [];
+    const list = anchors.byPath[c.path] as CommentAnchor[];
+    const spot = list.find((a) => a.side === range.endSide && a.lineNumber === range.end);
+    if (spot) spot.metadata.push(c.id);
+    else list.push({ side: range.endSide, lineNumber: range.end, metadata: [c.id] });
+  }
+  return anchors;
 }
 
 const sideWord = (side: DiffSide) => (side === "additions" ? "new" : "old");

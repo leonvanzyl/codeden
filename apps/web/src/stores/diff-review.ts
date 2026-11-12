@@ -5,10 +5,15 @@ import { formatReviewMessage, type ReviewRange } from "@/lib/diff-review";
 export interface ReviewComment {
   id: string;
   path: string;
-  /** The diff view it was written in (`diffScopeKey`); it shows inline only there. */
+  /** The diff view it was written in (`diffScopeKey`); it shows only there. */
   scopeKey: string;
+  /** The covered lines, as numbered where the comment was last placed; it's sent with these. */
   range: ReviewRange;
-  /** The covered diff rows, captured when the comment was started. */
+  /**
+   * The covered diff rows, captured when the comment was started. When the diff changes, the
+   * comment moves to where these rows are now (`move`), or is listed as outdated and keeps
+   * its last range (`anchorComments`).
+   */
   quote: string[];
   /** The saved text; empty until the comment is first saved. */
   body: string;
@@ -41,6 +46,8 @@ interface DiffReviewState {
   cancel: (sessionId: string, id: string) => void;
   edit: (sessionId: string, id: string) => void;
   remove: (sessionId: string, ids: string[]) => void;
+  /** Give comments the ranges their quoted lines have in the diff now, by comment id. */
+  move: (sessionId: string, ranges: Record<string, ReviewRange>) => void;
   /** Discard every comment that isn't on its way to the agent. */
   clear: (sessionId: string) => void;
   /**
@@ -72,9 +79,14 @@ export function savedComments(comments: ReviewComment[]): ReviewComment[] {
   return comments.filter((c) => c.body.trim() !== "");
 }
 
+/** Whether a comment's editor is open with text that differs from what is saved. */
+export function isUnsavedEdit(c: ReviewComment): boolean {
+  return c.draft !== undefined && c.draft.trim() !== c.body.trim();
+}
+
 /** An open editor whose text differs from what is saved: sending would leave it behind. */
 export function hasUnsavedEdit(comments: ReviewComment[]): boolean {
-  return comments.some((c) => c.draft !== undefined && c.draft.trim() !== c.body.trim());
+  return comments.some(isUnsavedEdit);
 }
 
 /** Whether a comment is part of the review in flight, and so can't be changed. */
@@ -138,6 +150,13 @@ export const useDiffReviewStore = create<DiffReviewState>()((set, get) => {
     remove: (sessionId, ids) => {
       const free = ids.filter((id) => !isSending(get(), sessionId, id));
       change(sessionId, (list) => list.filter((c) => !free.includes(c.id)));
+    },
+    move: (sessionId, ranges) => {
+      const moved = (c: ReviewComment) => ranges[c.id] !== undefined && ranges[c.id] !== c.range;
+      if (!sessionComments(get(), sessionId).some(moved)) return;
+      change(sessionId, (list) =>
+        list.map((c) => (moved(c) ? { ...c, range: ranges[c.id] as ReviewRange } : c)),
+      );
     },
     clear: (sessionId) =>
       change(sessionId, (list) => list.filter((c) => isSending(get(), sessionId, c.id))),
