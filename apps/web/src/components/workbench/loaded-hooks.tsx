@@ -15,12 +15,15 @@ export interface LoadedRow {
   dim?: boolean;
 }
 
-/** Hooks as rows: event and matcher, scope, and what each one runs; the file is the tooltip. */
+/**
+ * Hooks as rows: event and matcher, scope, and what each one runs; the file is the tooltip. A
+ * group with no matcher (or an empty one) matches everything, shown as `all`.
+ */
 export function hookRows(loaded: LoadedHooks): LoadedRow[] {
   const off = loaded.disabledBy !== null;
   return loaded.hooks.map((h, i) => ({
     key: `${h.file}:${h.event}:${h.groupIndex ?? i}:${h.handlerIndex ?? i}`,
-    label: h.matcher ? `${h.event} · ${h.matcher}` : h.event,
+    label: `${h.event} · ${h.matcher || "all"}`,
     detail: h.scope,
     sub:
       h.handler.type === "command"
@@ -32,18 +35,22 @@ export function hookRows(loaded: LoadedHooks): LoadedRow[] {
 }
 
 /**
- * What to know before reading the list: hooks are off for the session (`disabledBy`), a file
- * sets `disableAllHooks` but a higher-precedence file turns hooks back on, or a file can't be read.
+ * What to know before reading the list:
+ * - hooks are off for the session, and which file decided it (`disabledBy`);
+ * - every other file that sets `disableAllHooks: true`: while hooks are off it "also" sets it;
+ *   while they're on, a higher-precedence file set it to `false`, so its `true` is overridden;
+ * - files that can't be read.
  */
 export function hookNotices(loaded: LoadedHooks): ReactNode {
   const items: Array<{ key: string; tone: "warn" | "error"; text: ReactNode }> = [];
-  if (loaded.disabledBy) {
+  const winner = loaded.disabledBy;
+  if (winner) {
     items.push({
       key: "off",
       tone: "warn",
       text: (
         <>
-          Hooks are off for this session: <Path file={loaded.disabledBy} /> sets disableAllHooks.
+          Hooks are off for this session: <Path file={winner} /> sets disableAllHooks.
         </>
       ),
     });
@@ -51,11 +58,15 @@ export function hookNotices(loaded: LoadedHooks): ReactNode {
   for (const s of loaded.sources) {
     if (s.error) {
       items.push({ key: `error:${s.file}`, tone: "error", text: s.error });
-    } else if (s.disableAllHooks && !loaded.disabledBy) {
+    } else if (s.disableAllHooks && s.file !== winner) {
       items.push({
-        key: `overridden:${s.file}`,
+        key: `sets:${s.file}`,
         tone: "warn",
-        text: (
+        text: winner ? (
+          <>
+            <Path file={s.file} /> also sets disableAllHooks.
+          </>
+        ) : (
           <>
             <Path file={s.file} /> sets disableAllHooks, but a file with higher precedence sets it
             to false, so hooks run.

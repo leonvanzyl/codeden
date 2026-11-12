@@ -65,13 +65,13 @@ It's the quickest way to answer "why did the agent do that?" when an old rule is
 
 ### Hooks in What's loaded
 
-For providers whose native config has hooks (today Claude Code), a **Hooks** list shows every hook that applies to the session's folder. Each row has its event and matcher, what it runs and its scope. Hover a row to see its settings file. **Edit hooks** opens the Hooks tab for the session's project. The files that apply are:
+For providers whose native config has hooks (today Claude Code), a **Hooks** list shows every hook that applies to the session's folder. Each row has its event and matcher (`all` when the hook has no matcher, so it runs for everything), what it runs and its scope. Hover a row to see its settings file. **Edit hooks** opens the Hooks tab for the session's project. The files that apply are:
 
 - `~/.claude/settings.json`;
 - `.claude/settings.json` in the session's working folder itself. Claude Code doesn't look in parent folders for this file. A worktree session therefore reads the worktree's checked-out copy, not the main checkout's, so commit a hook (or copy it into the worktree) for worktree sessions to run it;
 - `.claude/settings.local.json` at the repository root, which for a worktree is the main checkout's root. On Windows, outside a git repository, or when the repository is your home folder, Claude Code reads it next to `.claude/settings.json` in the working folder instead. A local file an older Claude Code left in the working folder is still read, so it is listed too.
 
-`disableAllHooks` switches off the hooks of every file for the whole session, not just the file that sets it. The value from the file with the highest precedence wins (local over project over user). When it is on, the list says which file turned hooks off and dims the hooks. When a lower file sets it but a higher file sets it to `false`, the list says so. A file that can't be parsed, or that a link takes outside its folder, is shown with its error. Hooks you disabled on the Hooks tab don't run, so they aren't listed. Hooks from managed policy settings, plugins, and skill or subagent front matter aren't listed. Neither is CodeDen's own permission hook.
+`disableAllHooks` switches off the hooks of every file for the whole session, not just the file that sets it. The value from the file with the highest precedence wins (local over project over user). When it is on, the list says which file turned hooks off, dims the hooks, and flags any other file that also sets it. When a file sets it but a higher file sets it to `false`, so hooks still run, the list says that too. A file that can't be parsed, or that a link takes outside its folder, is shown with its error. Hooks you disabled on the Hooks tab don't run, so they aren't listed. Hooks from managed policy settings, plugins, and skill or subagent front matter aren't listed. Neither is CodeDen's own permission hook.
 
 ## CodeDen's own additions
 

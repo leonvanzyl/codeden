@@ -1,3 +1,4 @@
+import type { AgentConfigScope, LoadedHooks } from "@codeden/contracts";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { formToHandler } from "@/components/agents/hook-form";
@@ -144,25 +145,96 @@ describe("LoadedConfig", () => {
     expect(hooks.getByText("PreToolUse · Bash")).toBeTruthy();
     expect(hooks.getByText("~/.claude/hooks/block-rm-rf.sh")).toBeTruthy();
     expect(hooks.getByText("prompt: Did the agent run the tests?")).toBeTruthy();
+    // A group without a matcher matches everything.
+    expect(hooks.getByText("Notification · all")).toBeTruthy();
+    expect(hooks.getByText("Stop · all")).toBeTruthy();
     const edit = hooks.getByRole("link", { name: "Edit hooks" }) as HTMLAnchorElement;
     expect(edit.getAttribute("href")).toContain("tab=hooks");
     expect(edit.getAttribute("href")).toContain("project=p-storefront");
   });
 
-  it("says when disableAllHooks turns hooks off, and hides hooks for providers without them", async () => {
+  describe("disableAllHooks and matchers", () => {
+    const user = "C:\\Users\\you\\.claude\\settings.json";
+    const project = "C:\\Code\\storefront\\.claude\\settings.json";
+    const local = "C:\\Code\\storefront\\.claude\\settings.local.json";
+    const source = (scope: AgentConfigScope, file: string, disableAllHooks: boolean) => ({
+      provider: "claude" as const,
+      scope,
+      projectId: scope === "user" ? null : "p-storefront",
+      file,
+      exists: true,
+      disableAllHooks,
+    });
+    const hook = (file: string, event: string, matcher: string | null, command: string) => ({
+      ...source("local", file, false),
+      event,
+      matcher,
+      handler: { type: "command", command },
+      enabled: true,
+      groupIndex: 0,
+      handlerIndex: 0,
+    });
+    /** Render What's loaded with these hooks; returns the hooks list and its notices. */
+    async function renderHooks(hooks: LoadedHooks) {
+      const client = createMockClient();
+      const base = await client.agentConfig.loaded("s1");
+      vi.spyOn(client.agentConfig, "loaded").mockResolvedValue({ ...base, hooks });
+      renderWithClient(<LoadedConfig sessionId="s1" projectId={null} />, client, {
+        withRouter: true,
+      });
+      const list = within(await screen.findByTestId("loaded-hooks"));
+      const notices = list.queryAllByText(/disableAllHooks/).map((n) => n.textContent);
+      return { list, notices };
+    }
+
+    it("shows a missing or empty matcher as all", async () => {
+      const { list } = await renderHooks({
+        sources: [source("local", local, false)],
+        hooks: [
+          hook(local, "PreToolUse", "", "./guard.sh"),
+          hook(local, "PostToolUse", null, "./format.sh"),
+          hook(local, "PostToolUse", "Edit|Write", "./lint.sh"),
+        ],
+        disabledBy: null,
+      });
+      expect(list.getByText("PreToolUse · all")).toBeTruthy();
+      expect(list.getByText("PostToolUse · all")).toBeTruthy();
+      expect(list.getByText("PostToolUse · Edit|Write")).toBeTruthy();
+    });
+
+    it("names the file that turns hooks off and flags every other file that sets it", async () => {
+      const { notices } = await renderHooks({
+        sources: [
+          source("user", user, true),
+          source("project", project, false),
+          source("local", local, true),
+        ],
+        hooks: [hook(local, "PreToolUse", "Bash", "./guard.sh")],
+        disabledBy: local,
+      });
+      expect(notices).toEqual([
+        `Hooks are off for this session: ${local} sets disableAllHooks.`,
+        `${user} also sets disableAllHooks.`,
+      ]);
+    });
+
+    it("says when a higher-precedence false overrides a file's true", async () => {
+      const { list, notices } = await renderHooks({
+        sources: [source("user", user, true), source("project", project, false)],
+        hooks: [hook(project, "Stop", null, "notify")],
+        disabledBy: null,
+      });
+      expect(notices).toEqual([
+        `${user} sets disableAllHooks, but a file with higher precedence sets it to false, so hooks run.`,
+      ]);
+      expect(list.queryByText(/Hooks are off/)).toBeNull();
+    });
+  });
+
+  it("hides hooks for providers without them", async () => {
     const client = createMockClient();
     const base = await client.agentConfig.loaded("s1");
-    if (!base.hooks) throw new Error("The mock session has hooks");
-    const user = "C:\\Users\\you\\.claude\\settings.json";
     const loaded = vi.spyOn(client.agentConfig, "loaded");
-    loaded.mockResolvedValueOnce({ ...base, hooks: { ...base.hooks, disabledBy: user } });
-    const first = renderWithClient(<LoadedConfig sessionId="s1" projectId={null} />, client, {
-      withRouter: true,
-    });
-    expect(await screen.findByText(/Hooks are off for this session/)).toBeTruthy();
-    expect(screen.getAllByText(user).length).toBeGreaterThan(0);
-    first.unmount();
-
     loaded.mockResolvedValueOnce({ ...base, provider: "codex", hooks: null });
     renderWithClient(<LoadedConfig sessionId="s2" projectId={null} />, client, {
       withRouter: true,
