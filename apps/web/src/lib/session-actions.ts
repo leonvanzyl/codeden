@@ -1,13 +1,36 @@
-import type { ArchiveSessionResponse, Session } from "@codeden/contracts";
+import type { ArchiveSessionResponse, ProviderInfo, Session } from "@codeden/contracts";
 import { useMutation } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
 import { useClient } from "./api";
 import { copyWithFeedback } from "./copy";
+import { useSnapshotData } from "./queries";
 
 /** Sessions that can be stopped from a menu: ones with a turn running or a question open. */
 export const canStop = (session: Pick<Session, "status">) =>
   session.status === "running" || session.status === "waiting";
+
+const NOT_STARTED = new Set<Session["status"]>(["created", "queued", "starting"]);
+
+/**
+ * Whether the Fork action applies to a session at all: an agent session on a provider that
+ * reports `capabilities.fork` (Principle 5: never the provider's name).
+ */
+export const forkSupported = (session: Session, provider: ProviderInfo | undefined) =>
+  session.role === "agent" && provider?.capabilities.fork === true;
+
+/**
+ * Why a session that supports forking can't be forked right now, or null when it can (the
+ * server checks the same, §9).
+ */
+export function forkBlocked(session: Session): string | null {
+  if (session.status === "waiting") return "Answer what it's waiting on first";
+  if (canStop(session)) return "Wait for the running turn to finish";
+  if (NOT_STARTED.has(session.status)) return "The session hasn't started yet";
+  if (!session.resumeToken) return "No conversation to fork yet";
+  if (!session.branch) return "Only sessions on a git branch can be forked";
+  return null;
+}
 
 /**
  * Sessions that can be turned into an automation ("Make an automation…"): agent sessions in a
@@ -60,9 +83,9 @@ export function announceArchive(
 }
 
 /**
- * What you can do to a session from its row menu or the thread header's ⋯ menu: open, rename,
- * copy its link, make an automation from it, stop, archive (with Undo) and unarchive. Both
- * menus use this, so they show the same toasts.
+ * What you can do to a session from its row menu, the thread header's ⋯ menu or the command
+ * palette: open, rename, copy its link, make an automation from it, stop, fork, archive (with
+ * Undo) and unarchive. They all use this, so they show the same toasts.
  */
 export function useSessionActions(session: Session) {
   const client = useClient();
@@ -93,6 +116,24 @@ export function useSessionActions(session: Session) {
     mutationFn: (title: string) => client.updateSession(session.id, { title }),
     onError,
   });
+  // Copying the conversation can take a moment (a provider may start a process for it).
+  const fork = useMutation({
+    mutationFn: () => client.forkSession(session.id),
+    onMutate: () => ({ toastId: toast.loading("Forking the session…") }),
+    onSuccess: ({ sessionId }, _vars, context) => {
+      toast.success("Forked into a new session", {
+        id: context?.toastId,
+        description: "It has the conversation and the code so far. The original is unchanged.",
+      });
+      void navigate({ to: "/sessions/$sessionId", params: { sessionId } });
+    },
+    onError: (error, _vars, context) => toast.error(message(error), { id: context?.toastId }),
+  });
+  const provider = useSnapshotData(
+    (s) => s.runner.providers.find((p) => p.id === session.provider),
+    undefined,
+  );
+  const forkable = forkSupported(session, provider);
 
   return {
     open: () => void navigate({ to: "/sessions/$sessionId", params: { sessionId: session.id } }),
@@ -119,6 +160,11 @@ export function useSessionActions(session: Session) {
     archived: Boolean(session.archivedAt),
     archive: () => archive.mutate(false),
     unarchive: () => unarchive.mutate(),
+    /** The provider can fork this session's conversation: show the Fork action. */
+    canFork: forkable,
+    /** Why Fork is disabled right now (null when it can run). */
+    forkBlocked: forkable ? (fork.isPending ? "Forking…" : forkBlocked(session)) : null,
+    fork: () => fork.mutate(),
   };
 }
 

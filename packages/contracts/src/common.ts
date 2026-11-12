@@ -33,7 +33,7 @@ export const ReasoningEffort = z.enum(["minimal", "low", "medium", "high", "xhig
 export type ReasoningEffort = z.infer<typeof ReasoningEffort>;
 
 /**
- * Provider identifier such as `claude`, `codex` or `fake`. Deliberately an open string:
+ * Provider identifier such as `claude`, `codex`, `opencode` or `fake`. Deliberately an open string:
  * UI and orchestration must read capability flags, never branch on the id (Principle 5).
  */
 export const ProviderId = z.string().regex(/^[a-z][a-z0-9-]{0,39}$/);

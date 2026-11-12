@@ -3,6 +3,7 @@ import { Readable } from "node:stream";
 import {
   FileReadQuery,
   FileWriteRequest,
+  LoginToolId,
   type RefreshModelsResponse,
   SecretKey,
   type SecretsStatus,
@@ -23,7 +24,7 @@ export function setupRoutes(s: AppServices) {
       c.json(await s.setup.status({ refresh: c.req.valid("query").refresh !== undefined })),
     )
     .post("/login/:tool", (c) => {
-      const tool = z.enum(["claude", "codex", "gh"]).safeParse(c.req.param("tool"));
+      const tool = LoginToolId.safeParse(c.req.param("tool"));
       if (!tool.success) throw badRequest("Unknown tool", "unknown_tool");
       return c.json(s.setup.loginCommand(tool.data));
     })

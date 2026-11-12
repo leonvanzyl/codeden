@@ -145,6 +145,29 @@ describe("runner", () => {
     expect(() => readFileSync(runner.lockFile)).toThrow();
   });
 
+  it("loads OpenCode from a given executable (--opencode), even without the built-ins", async () => {
+    const fake = join(
+      import.meta.dirname,
+      "../../../packages/providers/test/fixtures/fake-opencode/opencode.mjs",
+    );
+    const runner = await startRunner({ home, openCodeExecutable: fake });
+    const lock = RunnerLock.parse(JSON.parse(readFileSync(runner.lockFile, "utf8")));
+    expect(lock.providers).toEqual(["opencode"]);
+    await runner.close();
+    // A path that isn't there is reported, not loaded.
+    const logs: string[] = [];
+    const missing = await startRunner({
+      home,
+      openCodeExecutable: join(home, "no-such-opencode.mjs"),
+      log: (m) => logs.push(m),
+    });
+    expect(RunnerLock.parse(JSON.parse(readFileSync(missing.lockFile, "utf8"))).providers).toEqual(
+      [],
+    );
+    expect(logs.some((m) => m.includes("no-such-opencode.mjs not found"))).toBe(true);
+    await missing.close();
+  });
+
   it("handshakes, runs a Fake session and replays unacked events after reconnect", async () => {
     const runner = await startRunner({ home, enableFakeProvider: true });
     const server = await TestServer.connect(runner);

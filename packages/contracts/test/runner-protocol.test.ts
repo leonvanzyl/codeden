@@ -202,11 +202,21 @@ describe("runner protocol", () => {
         projectSlug: "demo",
         fetch: true,
       },
+      {
+        name: "workspace.prepare",
+        sessionId: "s2",
+        repoPath: "/repo",
+        strategy: "worktree",
+        baseRef: "codeden/login-ab12",
+        restoreCheckpoint: { sessionId: "s1", index: 3 },
+      },
       { name: "workspace.remove", repoPath: "/repo", path: "/wt/demo/s1", deleteBranch: "b" },
       { name: "git.branches", cwd: "/repo" },
       { name: "git.commit", cwd: "/repo", message: "feat: x", paths: ["a.ts"] },
       { name: "git.push", cwd: "/repo", setUpstream: true },
       { name: "checkpoint.list", cwd: "/repo", sessionId: "s1" },
+      { name: "checkpoint.list", cwd: "/repo", sessionId: "s1", settled: true },
+      { name: "provider.fork", providerId: "claude", resumeToken: "claude-1", cwd: "/repo" },
       { name: "checkpoint.diff", cwd: "/repo", sessionId: "s1", from: 0, to: 2 },
       { name: "checkpoint.restoreFiles", cwd: "/repo", sessionId: "s1", index: 1 },
       { name: "pty.attach", ptyId: "p1" },
@@ -239,10 +249,27 @@ describe("runner protocol", () => {
       toolCount: 0,
       tools: [],
     });
+    expect(
+      RunnerCommand.safeParse({
+        name: "workspace.prepare",
+        sessionId: "s2",
+        repoPath: "/repo",
+        strategy: "worktree",
+        restoreCheckpoint: { sessionId: "s1", index: -1 },
+      }).success,
+    ).toBe(false);
     roundTrip(RunnerCommandResults["checkpoint.diff"], {
       diff: "diff --git a/x b/x",
       files: [{ path: "x", status: "modified", additions: 1, deletions: 2, binary: false }],
     });
+    roundTrip(RunnerCommandResults["provider.fork"], { resumeToken: "claude-2" });
+    expect(RunnerCommandResults["provider.fork"].safeParse({ resumeToken: "" }).success).toBe(
+      false,
+    );
+    expect(
+      RunnerCommand.safeParse({ name: "provider.fork", providerId: "claude", cwd: "/repo" })
+        .success,
+    ).toBe(false);
     roundTrip(RunnerCommandResults["workspace.remove"], { removed: true, discardedChanges: true });
     roundTrip(RunnerCommandResults["workspace.remove"], { removed: true });
     roundTrip(RunnerCommandResults["workspace.prepare"], {

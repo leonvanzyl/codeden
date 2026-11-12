@@ -99,6 +99,20 @@ export async function executeCommand(core: RunnerCore, command: RunnerCommand): 
       });
       return { text, model };
     }
+    case "provider.fork": {
+      const adapter = registry.get(command.providerId);
+      if (!adapter?.capabilities().fork || !adapter.forkConversation) {
+        throw new CommandError("unsupported", `Provider ${command.providerId} cannot fork`);
+      }
+      try {
+        const resumeToken = await adapter.forkConversation(command.resumeToken, {
+          cwd: command.cwd,
+        });
+        return { resumeToken };
+      } catch (error) {
+        throw new CommandError("fork_failed", (error as Error).message);
+      }
+    }
 
     case "workspace.prepare":
       if (core.isDraining()) throw new CommandError("draining", "Runner is draining");
@@ -179,6 +193,7 @@ export async function executeCommand(core: RunnerCore, command: RunnerCommand): 
       return gitOps.push(command);
 
     case "checkpoint.list":
+      if (command.settled) await host.settled(command.sessionId);
       return { checkpoints: await listCheckpoints(command.cwd, command.sessionId) };
     case "checkpoint.diff":
       return diffCheckpoints(command.cwd, command.sessionId, command.from, command.to);

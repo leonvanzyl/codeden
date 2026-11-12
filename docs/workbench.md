@@ -9,7 +9,7 @@ Everything an agent touches sits next to its chat. Open the right panel with **C
 | Browser | Alt+3 | The session's browser, shared with the agent |
 | Terminal | Alt+4 | Terminals in the worktree |
 | Issue / PR | Alt+5 | The linked issue and pull request (see [GitHub](github.md)) |
-| Details | Alt+6 | Status, purpose, work key, who started it, provider, autonomy, branch, worktree, scope, what's loaded, read-aloud mute |
+| Details | Alt+6 | Status, purpose, work key, who started it, what it was forked from, provider, autonomy, branch, worktree, scope, what's loaded, read-aloud mute |
 
 ## The transcript
 
@@ -46,6 +46,18 @@ At the end of every turn the runner snapshots the worktree into a hidden ref, `r
 - **Restore:** put files (one, or all of them) back to the session's starting point or to the state before a turn.
 
 The **git bar** at the top shows the branch, ahead/behind and the uncommitted count, with **Commit** and **Push**.
+
+## Fork a session
+
+Want to try a second approach without losing the first? Open the session's **⋯** menu and choose **Fork session**, or use **Fork this session** in the command palette (**Ctrl/Cmd+K**). CodeDen starts a new session in the same project:
+
+- **Same conversation.** The agent continues from where the original left off, through the provider's own fork. It remembers everything said so far.
+- **Same code.** The new session gets its own worktree on a new branch, created from the original's branch. The original's files at the end of its last turn are copied in, including changes it hadn't committed yet, before setup runs. The conversation and the code are taken at the same moment, even right after a turn ends.
+- **Always in its own worktree.** If the worktree can't be made, the fork shows as failed. Your next message to it tries again, and the agent never runs in the project folder itself.
+- **Same agent.** It keeps the provider, model, effort, permissions and linked issue. Its pull request targets the same base branch. If the original is still planning, the fork keeps planning too, and implements once you approve its own plan.
+- **Original unchanged.** Nothing about the original session changes. Both can carry on side by side.
+
+The fork's header shows **Fork of …** with a link back, and **Details** shows where it was forked from. Fork is offered when the provider supports it (Claude and Codex do). It's available once the session has had a turn and while no turn is running; while a turn runs, the menu says why it's disabled.
 
 ## Files
 
@@ -116,4 +128,4 @@ The runner launches one Chromium (your installed **Edge** or **Chrome**; Edge fi
 
 ## The utility model
 
-Small side jobs use one cheap model so they never need a separate API key: follow-up suggestions, read-aloud summaries, session titles and short summaries in notices. It runs as a one-shot, tool-less call through an installed provider (a small Claude model by default, or a small Codex model when only Codex is set up). Pick the model and switch each job off in **Settings → Utility model**; whether read-aloud uses a TL;DR is chosen in **Settings → Voice → What to read**. When a job fails, the reason is written to the server log.
+Small side jobs use one cheap model so they never need a separate API key: follow-up suggestions, read-aloud summaries, session titles and short summaries in notices. It runs as a one-shot, tool-less call through an installed provider (a small Claude model by default, or a small Codex model when only Codex is set up). When only OpenCode is set up, or you pick OpenCode without a model, CodeDen uses the cheapest model OpenCode lists from the same provider as its default model, by listed price (for example Haiku when the default is an Anthropic model), never another provider's model. If OpenCode lists no prices, its default model is used. Pick the model and switch each job off in **Settings → Utility model**; whether read-aloud uses a TL;DR is chosen in **Settings → Voice → What to read**. When a job fails, the reason is written to the server log.

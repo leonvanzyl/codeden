@@ -14,7 +14,7 @@
   "userQuestions": true,
   "subagents": true,
   "rollback": false,
-  "fork": false,
+  "fork": true,
   "images": true,
   "planMode": true,
   "reasoningEffort": true,

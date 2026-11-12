@@ -18,6 +18,8 @@ import { and, eq } from "drizzle-orm";
 import type { Db } from "../../db/client";
 import { githubIssues } from "../../db/schema";
 import { badRequest, conflict } from "../errors";
+import type { FactoryGithub } from "../factory/github-port";
+import { hasWriteAccess, isTrustedAuthor, trustedLogins } from "../factory/trust";
 import { rowToIssue } from "../github/rows";
 import type { InboxService } from "../inbox-service";
 import type { OrchestrationService } from "../orchestration/orchestration-service";
@@ -25,12 +27,25 @@ import type { ProjectService } from "../projects/project-service";
 import type { SessionService } from "../sessions/session-service";
 import { issueSessionPrompt, triageRequestText } from "./triage-prompts";
 
+/** What triage asks GitHub to decide whether an issue's author is trusted. */
+export type TriageGithub = Pick<FactoryGithub, "viewerLogin" | "issueAuthor">;
+
+/** Whether an issue's author may have work started for them without asking. */
+interface AuthorTrust {
+  trusted: boolean;
+  author: string | null;
+  /** GitHub answered the write-access question (false: it could not be checked). */
+  checked: boolean;
+}
+
 export interface TriageDeps {
   db: Db;
   inbox: InboxService;
   sessions: SessionService;
   projects: ProjectService;
   orchestration: () => OrchestrationService;
+  /** Who opened an issue and whether they have write access (shared with the factory). */
+  github: TriageGithub;
   /** The project's enabled triage automation, if any. */
   triageAutomation: (projectId: string) => Automation | undefined;
   /** A report arrived: complete the triage runs waiting on this issue. */
@@ -47,12 +62,24 @@ function policyOf(automation: Automation | undefined): TriagePolicy {
   return TriagePolicy.parse(raw ?? {});
 }
 
+/** What the inbox item says when the author is not trusted. */
+function untrustedNote({ author, checked }: AuthorTrust): string {
+  const who = author ? `@${author}` : "an unknown author";
+  return checked
+    ? `Opened by ${who}, who has no write access to the repository and is not a trusted author, so CodeDen won't start work on it without you.`
+    : `Opened by ${who}, who is not a trusted author. CodeDen couldn't check their write access on GitHub, so it won't start work on it without you.`;
+}
+
 /**
  * Issue triage (§10). A triage run hands the new issue to the project's PM with the policy;
  * the PM classifies it with its GitHub tools (`get_issue`, `list_issues`, `triage_issue`) and
- * calls `report_triage`. A `ready` issue then starts a session when the policy allows it and
- * the project is not in manual mode, otherwise it becomes an inbox decision that the user
- * accepts (a session starts) or declines.
+ * calls `report_triage`. A `ready` issue then starts a session when the policy allows it, the
+ * project is not in manual mode and its author is trusted; otherwise it becomes an inbox
+ * decision that the user accepts (a session starts) or declines.
+ *
+ * On a public repository anyone can open an issue, and an issue is a prompt for an agent. So
+ * only issues by trusted authors start work by themselves: the factory's trusted authors, the
+ * account CodeDen uses on GitHub, and people with write access to the repository.
  */
 export class TriageService {
   constructor(private readonly deps: TriageDeps) {}
@@ -87,8 +114,9 @@ export class TriageService {
     if (report.decision !== "ready") return { status: "recorded" };
     const automation = this.deps.triageAutomation(project.id);
     const policy = policyOf(automation);
-    const issue = this.issueRef(project, report.issueNumber);
-    if (automation && policy.autoStart && project.autonomyMode !== "manual") {
+    const { issue, author } = this.syncedIssue(project, report.issueNumber);
+    const trust = await this.authorTrust(project, report.issueNumber, author);
+    if (automation && policy.autoStart && project.autonomyMode !== "manual" && trust.trusted) {
       const start = await this.startForIssue(project, issue, report.summary, policy, {
         kind: "automation",
         id: automation.id,
@@ -105,7 +133,9 @@ export class TriageService {
       status: "open",
       priority: "normal",
       title: `Should I take this on? #${issue.number} ${issue.title ?? ""}`.trim(),
-      body: report.summary,
+      body: trust.trusted
+        ? report.summary
+        : [report.summary, untrustedNote(trust)].filter((s) => s !== "").join("\n\n"),
       projectId: project.id,
       sessionId: null,
       threadId: null,
@@ -191,8 +221,31 @@ export class TriageService {
     );
   }
 
-  /** The synced issue when known, else a link built from the repository. */
-  private issueRef(project: Project, number: number): GitHubIssueRef {
+  /**
+   * Whether the issue's author is trusted: a trusted author of the project, the account
+   * CodeDen uses on GitHub, or someone with write access to the repository. Unknown authors,
+   * and authors whose access GitHub can't confirm right now, are not.
+   */
+  private async authorTrust(
+    project: Project,
+    number: number,
+    synced: string | null,
+  ): Promise<AuthorTrust> {
+    const viewer = await this.deps.github.viewerLogin().catch(() => null);
+    const logins = trustedLogins(project.factoryLimits, viewer);
+    if (isTrustedAuthor(synced, logins)) return { trusted: true, author: synced, checked: true };
+    const live = await this.deps.github.issueAuthor(project.id, number).catch(() => null);
+    const author = live?.login ?? synced;
+    if (!live) return { trusted: false, author, checked: false };
+    const trusted = isTrustedAuthor(author, logins) || hasWriteAccess(live.association);
+    return { trusted, author, checked: true };
+  }
+
+  /** The synced issue and its author when known, else a link built from the repository. */
+  private syncedIssue(
+    project: Project,
+    number: number,
+  ): { issue: GitHubIssueRef; author: string | null } {
     const row = this.deps.db
       .select()
       .from(githubIssues)
@@ -200,12 +253,10 @@ export class TriageService {
       .get();
     if (row) {
       const issue = rowToIssue(row);
-      return { number, url: issue.url, title: issue.title };
+      return { issue: { number, url: issue.url, title: issue.title }, author: issue.author };
     }
     if (project.kind !== "github") throw badRequest("Triage needs a GitHub project", "not_github");
-    return {
-      number,
-      url: `https://github.com/${project.github.owner}/${project.github.repo}/issues/${number}`,
-    };
+    const url = `https://github.com/${project.github.owner}/${project.github.repo}/issues/${number}`;
+    return { issue: { number, url }, author: null };
   }
 }

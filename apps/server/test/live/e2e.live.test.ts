@@ -28,6 +28,7 @@ const PROMPT = [
 const MODELS: Record<string, string | undefined> = {
   claude: process.env.CODEDEN_LIVE_CLAUDE_MODEL ?? "haiku",
   codex: process.env.CODEDEN_LIVE_CODEX_MODEL,
+  opencode: process.env.CODEDEN_LIVE_OPENCODE_MODEL,
 };
 
 describe.skipIf(!LIVE)("live end-to-end", () => {
@@ -45,7 +46,7 @@ describe.skipIf(!LIVE)("live end-to-end", () => {
     await h?.close();
   });
 
-  for (const provider of ["claude", "codex"] as const) {
+  for (const provider of ["claude", "codex", "opencode"] as const) {
     it(`${provider}: worktree session creates hello.txt, uses MCP tools, diff shows it`, async () => {
       const res = await h.api("POST", "/sessions", {
         projectId: h.projectId,

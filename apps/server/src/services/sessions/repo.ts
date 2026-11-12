@@ -21,6 +21,7 @@ import { automationRuns, items, sessions, turns } from "../../db/schema";
 import type { EventStore } from "../../events/store";
 import { notFound } from "../errors";
 import { ACTIVE_RUN_STATUSES, ACTIVE_SESSION_STATUSES } from "./conflicts";
+import type { ForkStart } from "./fork";
 
 /** What a queued session needs to start later (kept with its start metadata). */
 export interface PendingStart {
@@ -35,6 +36,8 @@ export interface PendingStart {
 export type StoredStartMeta = SessionStartMeta & {
   pending?: PendingStart | null;
   prFeedback?: Record<string, { rounds: number; keys: string[] }>;
+  /** A fork's workspace plan (§9): prepared before any start until the worktree exists. */
+  forkStart?: ForkStart | null;
 };
 
 /**
@@ -308,6 +311,19 @@ export class SessionRepo {
       hasMoreBefore: newestFirst ? more : first !== undefined && exists(lt(items.position, first)),
       hasMoreAfter: newestFirst ? last !== undefined && exists(gt(items.position, last)) : more,
     };
+  }
+
+  /**
+   * How many turns the session has had, subagent turns included. It only grows (a turn's row is
+   * written when it starts and kept), so two equal counts mean no turn started in between.
+   */
+  turnCount(sessionId: string): number {
+    const row = this.db
+      .select({ n: sql<number>`count(*)` })
+      .from(turns)
+      .where(eq(turns.sessionId, sessionId))
+      .get();
+    return row?.n ?? 0;
   }
 
   /** Follow-ups of the latest root-thread turn that produced some (§7.5). */

@@ -25,7 +25,7 @@ import { TerminalView } from "@/components/workbench/terminal-view";
 import { useClient } from "@/lib/api";
 import { copyWithFeedback } from "@/lib/copy";
 import { platform } from "@/lib/platform";
-import { useSetupStatus } from "@/lib/queries";
+import { useSetupStatus, useSnapshotData } from "@/lib/queries";
 import { cn } from "@/lib/utils";
 import { ClaudeSupportRow } from "./claude-support";
 
@@ -35,12 +35,11 @@ type RowState = SetupCheck["state"] | "checking";
 const PENDING: { id: string; label: string }[] = [
   { id: "claude", label: "Claude Code" },
   { id: "codex", label: "Codex" },
+  { id: "opencode", label: "OpenCode" },
   { id: "gh", label: "GitHub CLI" },
   { id: "git", label: "git identity" },
   { id: "browser", label: "Browser for agents" },
 ];
-
-const PROVIDERS = new Set(["claude", "codex"]);
 
 const fixLabel: Record<NonNullable<SetupCheck["fix"]>["kind"], string> = {
   install: "Install",
@@ -120,6 +119,9 @@ export function SetupChecklist() {
   const [fixing, setFixing] = useState<SetupCheck | null>(null);
   const [rechecking, setRechecking] = useState(false);
   const { data } = useSetupStatus();
+  // Rows for the agent providers the runner loaded carry a "provider" tag (data, not ids).
+  const providers = useSnapshotData((s) => s.runner.providers, []);
+  const providerIds = new Set(providers.map((p) => p.id));
 
   const recheck = async (focus?: SetupCheck) => {
     setRechecking(true);
@@ -159,7 +161,7 @@ export function SetupChecklist() {
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2 text-[13.5px] font-medium">
                     {label}
-                    {PROVIDERS.has(id) ? (
+                    {providerIds.has(id) ? (
                       <span className="text-3xs font-normal text-muted-foreground">provider</span>
                     ) : null}
                   </div>

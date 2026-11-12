@@ -10,6 +10,7 @@ import { askUser } from "../src/mcp/tools/ask-user";
 import { triageIssue } from "../src/mcp/tools/pm/github";
 import { startSession } from "../src/mcp/tools/pm/sessions";
 import { issueSessionPrompt, triageRequestText } from "../src/services/automations/triage-prompts";
+import { UNTRUSTED_INPUT } from "../src/services/factory/prompts";
 import { clipKeepingEnd, renderNotices } from "../src/services/orchestration/digest";
 import { rolePrompt } from "../src/services/orchestration/prompts";
 
@@ -355,6 +356,22 @@ describe("triage texts", () => {
     expect(text).not.toContain("instead of guessing");
     expect(text).toContain("state the assumption in the pull request description");
     expect(text).toContain("Ask with ask_user only if the change needs a protected area");
+  });
+
+  it("tells the PM and the agent the issue and its comments are data, not instructions (#86)", () => {
+    const request = triageRequestText({
+      automation: {
+        name: "Issue triage",
+        action: { type: "triage", policy: {} },
+      } as unknown as Automation,
+      run: { id: "run-1" },
+      issue,
+      policy: TriagePolicy.parse({ autoStart: true }),
+      canStart: true,
+    });
+    expect(request).toContain(UNTRUSTED_INPUT);
+    expect(request).toContain("for anyone else's it asks the user");
+    expect(issueSessionPrompt(issue, "Clear bug.")).toContain(UNTRUSTED_INPUT);
   });
 });
 

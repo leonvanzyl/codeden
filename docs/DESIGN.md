@@ -4,7 +4,7 @@
 
 ## 1. What CodeDen is
 
-CodeDen is a local-first harness for coding agents (Claude Code and Codex at launch, more later). Lead with this: a beautiful, streamlined coding harness that can also run a software factory, and a dark factory that finds its own work. Every piece of work stays visible and traceable in GitHub.
+CodeDen is a local-first harness for coding agents (Claude Code, Codex and OpenCode, more later). Lead with this: a beautiful, streamlined coding harness that can also run a software factory, and a dark factory that finds its own work. Every piece of work stays visible and traceable in GitHub.
 
 - **Orchestrator.** One high-level agent you talk to. It creates projects and hands work to project managers.
 - **Project Managers (PMs).** One long-lived agent per project. It triages GitHub issues, starts agent sessions, follows their progress, and escalates to you when unsure.
@@ -42,7 +42,7 @@ Installed with `npx codeden`, or as the desktop app (§17). Open source under th
 | Database | SQLite through the built-in `node:sqlite` and Drizzle (`drizzle-orm/node-sqlite`), WAL mode |
 | Web UI | React 19 + Vite single-page app; Tailwind v4 + shadcn/ui; TanStack Router + TanStack Query; Zustand. **Not Next.js** |
 | API typing | Hono typed RPC client for HTTP; shared zod schemas for the WebSocket event model |
-| Agents | Claude Code through the **Claude Agent SDK**, using the user's installed `claude` binary. Codex through **`codex app-server`** (JSON-RPC, with types generated from the installed Codex). OpenCode (official SDK) and a generic **ACP** adapter come after v1 |
+| Agents | Claude Code through the **Claude Agent SDK**, using the user's installed `claude` binary. Codex through **`codex app-server`** (JSON-RPC, with types generated from the installed Codex). OpenCode through a private **`opencode serve`** per session (its v2 HTTP API and event stream). A generic **ACP** adapter comes after v1 |
 | Agent ↔ app | One internal **MCP server** (Streamable HTTP) with **role-scoped tokens** (orchestrator, PM, agent) |
 | Process model | **Server and runner are separate processes** from day one (§4) |
 | Terminal | node-pty in the runner, xterm.js in the UI |
@@ -125,7 +125,7 @@ codeden/
     cli/        the published `codeden` package (CLI entry, bundles server + runner + web)
   packages/
     contracts/  zod schemas: event model, runner protocol, WS messages, settings
-    providers/  provider adapters (claude, codex, later opencode, acp, fake, replay)
+    providers/  provider adapters (claude, codex, opencode, later acp, fake, replay)
   docs/
 ```
 
@@ -159,6 +159,7 @@ interface ProviderAdapter {
   detect(): Promise<ProviderStatus>;          // installed? version? logged in? (§14)
   capabilities(): ProviderCapabilities;
   openSession(opts: SessionOptions): Promise<ProviderSession>;
+  forkConversation?(resumeToken: string, opts: { cwd: string }): Promise<string>; // with `fork`
 }
 
 interface ProviderSession {
@@ -175,24 +176,34 @@ interface ProviderSession {
 
 **`ProviderCapabilities` flags:** `resume`, `steer`, `interrupt`, `approvals`, `userQuestions`, `subagents`, `rollback`, `fork`, `images`, `planMode`, `reasoningEffort`, `mcp`, `skills`.
 
+**Forking.** An adapter with `fork` implements `forkConversation(resumeToken, { cwd })`. It copies that conversation into a new one at once and returns the copy's resume token, which a session then resumes like any other. The original conversation is never written to. The runner exposes it as `provider.fork`. `SessionOptions.forkFrom` does the same as a session opens: the adapter copies that conversation and the session resumes the copy. A `resumeToken` wins over it, and a provider without `fork` refuses it.
+
 ### 7.2 Providers
 
 - **Claude Code.** Uses the Claude Agent SDK `query()` with streaming input:
   - **Binary:** `pathToClaudeCodeExecutable` points at the user's installed `claude`, which inherits their login and settings.
   - **Approvals:** `canUseTool` maps to approvals, and `resume` handles sessions.
+  - **Fork:** the SDK's `forkSession()` copies the transcript into a new session file (fresh message ids). No CLI starts and no turn runs.
   - **Subagents:** messages tagged with `parent_tool_use_id` become child threads.
   - **CodeDen tools:** CodeDen's MCP proxy is passed in through `mcpServers`.
   - **Versions:** the SDK version is pinned to one we've tested against.
 - **Codex.** Starts `codex app-server` and speaks JSON-RPC:
-  - **Methods:** threads, turns, items, approvals and steering.
+  - **Methods:** threads, turns, items, approvals and steering. A fork is `thread/fork` through a short-lived app-server, closed before the copy is resumed. The session that resumes it sets its own cwd, policy and instructions.
   - **Types:** protocol types are generated from the installed Codex version.
   - **Permissions:** sandbox and approval policies map onto CodeDen's autonomy levels (§11.2).
   - **Subagents:** an agent Codex spawns (a `collabAgentToolCall` spawn, or a `subAgentActivity` start) becomes a subagent card, and the spawned agent's thread, whose notifications arrive under its own thread id, becomes the card's child thread. The card follows the agent's turns, its approvals go to the child thread, and its calls to other agents (message, wait, close) show as tool calls named after their targets. Threads no spawn claims are not shown.
   - **CodeDen tools:** the MCP server is injected through config overrides.
+- **OpenCode.** Starts a private `opencode serve --stdio` for each session and speaks its v2 HTTP API, following its Server-Sent Events:
+  - **Process:** the server listens on a random `127.0.0.1` port with a per-process password and exits when its stdin closes, so it never outlives the runner. One server per session, because MCP servers are process-wide config and every session has its own role-scoped token.
+  - **The user's OpenCode:** it uses their config, credentials and sessions. CodeDen layers an inline config on top with its MCP server (headers, listed directly rather than behind OpenCode's code mode) and a small plugin that keeps the server's secrets out of the agent's shell commands.
+  - **Permissions:** OpenCode has no OS sandbox. Every edit, command, path outside the worktree and web fetch asks, and CodeDen's own classifier decides each ask by autonomy level (§11.2): approved on the spot, refused with a reason, or shown to the user. Autonomy changes apply from the next tool call. OpenCode's "always" saves a rule for the whole project, so CodeDen keeps `allow_session` decisions itself.
+  - **Sessions:** created in the worktree; CodeDen's role prompt is a session instruction. Steering, interrupt, questions (OpenCode forms) and subagents (child sessions) map onto the event model; OpenCode keeps sessions in its own database, so resume continues the same session after a restart.
+  - **Models:** `<provider>/<model>` ids from every provider OpenCode is connected to, with each model's variants as efforts, listed by a short-lived server that never calls a model.
+  - **Why not the SDK:** OpenCode's published SDK targets its v1 API; OpenCode 2 serves a different v2 API. CodeDen types the handful of v2 routes it uses (`src/opencode/protocol.ts`), which keeps the published package free of another dependency to pin.
 - **Fake and Replay** (development and tests only):
   - **Fake** is a scripted provider for demos and deterministic tests.
   - **Replay** plays back sessions recorded from the real CLIs, so the test suite never pays for agent turns.
-- **After v1:** OpenCode through its official SDK, and a generic ACP adapter that opens up the long tail of ACP-speaking agents.
+- **After v1:** a generic ACP adapter that opens up the long tail of ACP-speaking agents.
 
 ### 7.3 Normalized event model
 
@@ -219,7 +230,7 @@ A conversation is a **thread** made of **turns**, and each turn holds **items**.
 Small side jobs use one configurable **utility model**, so they never need a separate API key:
 
 - **The jobs:** follow-up prompt suggestions (§13), compressing a final message for read-aloud (§11.3), session titles, and short summaries in notices.
-- **How it runs:** a one-shot call through an installed provider with no tools. The default is a small Claude model through the Agent SDK, or a small Codex model when only Codex is set up.
+- **How it runs:** a one-shot call through an installed provider with no tools. The default is a small Claude model through the Agent SDK, or a small Codex model when only Codex is set up, or, when only OpenCode is, the cheapest model OpenCode lists from its default model's provider, by listed price (through its text generation endpoint; OpenCode's default model when no prices are known).
 - **Controls:** the model is chosen in Settings, and each job can be switched off. The read-aloud TL;DR is controlled by `voice.readAloud.content` (§11.3), not by a job toggle.
 - **Failures are visible:** a failed or empty one-shot, and having no provider that can run one, are written to the server log (stderr) whatever the debug setting, and the job falls back as described for it.
 
@@ -325,6 +336,14 @@ The orchestrator must always know what's happening across all projects, and each
   - **Visible failures.** A removal that still fails raises one `cleanup_failed` inbox item per session (updated when the reason changes, left alone once dismissed), which CodeDen resolves when a later attempt removes the worktree. The desktop server always writes its log lines to `<home>/logs/desktop-server.log`.
 - **Setup scripts.** `.codeden/project.json` can define commands such as `pnpm install`, which run when a worktree is created, plus a dev-server command and the default provider. Setup stops at the first failing command and the session starts anyway; the agent's first input is prefixed with "Setup command `X` failed (exit N):" and the end of the command's output, so it knows why the worktree may be incomplete.
 - **Turn checkpoints.** At the end of each turn the runner snapshots the worktree into a hidden ref (`refs/codeden/checkpoints/<session>/<n>`). It uses a temporary index (`write-tree` → `commit-tree` → `update-ref`), so the user's branch and index are never touched. This gives exact per-turn diffs and file-level undo; full rollback is offered only when the provider can also roll back its conversation.
+- **Forking a session.** **Fork** (`POST /api/sessions/:id/fork`, the thread header's ⋯ menu, the command palette) copies an agent session into a new one in the same project, so a second approach can run side by side.
+  - **What is copied:** the provider, model, effort, permissions, plan mode, work key and issue. A fork of a session that is still planning keeps planning and implements only once its own plan is approved; a session waiting for its plan to be approved can't be forked until it's answered. The fork records `forkedFrom` (the source and the checkpoint it started at).
+  - **Code:** the fork's worktree is a new branch created from the source's branch, so it carries the source's real commits and no checkpoint commits. The runner then writes the source's latest checkpoint into it as uncommitted changes, before setup runs (`workspace.prepare` `restoreCheckpoint`). Its pull request targets the source's base branch.
+  - **Conversation:** the provider's native fork (`provider.fork`, §7.1). The copy is the fork's resume token from the start, so every start of the fork is a plain resume.
+  - **Same moment for both:** the server asks the runner for the source's checkpoints `settled`, which waits for the checkpoint of a turn that has just ended (the runner queues it before it reports the turn's end). Only then does it copy the conversation. If the source moved on meanwhile, the fork fails and nothing is created: a turn still running gives 409 `turn_running`, and a turn that started (even one that already finished, judged by the source's turn count) gives 409 `source_changed`.
+  - **No other place to run:** the fork's workspace plan is kept with its start metadata until the worktree exists. If preparing it fails (a restore that fails removes the new worktree again), any later start of the fork, after a message or a restart, prepares it first. A fork never falls back to the repo root.
+  - **When:** only when the provider reports `fork`, no turn is running, and the session has a conversation and a git branch. The source is only read. Forking is an explicit, visible duplicate, so it skips the §8.4 conflict check.
+  - **Not yet:** forking at an earlier turn, forking a running turn, and rolling a conversation back.
 - **GitHub API.** Octokit on the server, authenticated with the token from `gh auth token` (read at runtime, not stored). Agents use `gh` inside their worktrees.
 - **Sync.** Issues, PRs, checks and reviews are polled with conditional requests (ETags) and batched GraphQL. A local app can't receive webhooks; webhook support arrives with remote runners.
 - **Traceability.** Every session records its issue, branch, PR and commits. PR bodies link the issue (`Fixes #N`) and the CodeDen session.
@@ -562,7 +581,7 @@ Any agent can generate images through the `generate_image` MCP tool, whatever it
 
 Detailed, trustworthy reports on spend and usage across every provider, project and kind of work.
 
-- **Ledger.** Every turn records a **usage delta**. It's computed from the provider's own figures: Claude reports cumulative session totals, so CodeDen stores the per-turn difference. Each delta holds:
+- **Ledger.** Every turn records a **usage delta**. It's computed from the provider's own figures: Claude reports cumulative session totals, so CodeDen stores the per-turn difference; OpenCode reports each model call with its tokens and cost, so a turn is their sum. Each delta holds:
   - input, output, cache-read and cache-write tokens
   - reasoning tokens where reported
   - cost in USD as reported by the provider
@@ -570,6 +589,7 @@ Detailed, trustworthy reports on spend and usage across every provider, project 
 - **Cost sources are labelled honestly.** Each figure is marked `reported` (the provider returned a USD cost) or `estimated` (tokens multiplied by a bundled, user-editable price table per model).
   - **API-key users** see actual spend.
   - **Subscription users** (a claude.ai or ChatGPT login) see an **"API-equivalent cost"**, clearly labelled as such, so they know what the same work would cost on API credits.
+  - **OpenCode** model ids such as `anthropic/<model>` and `openai/<model>` are priced from the Claude and Codex tables when OpenCode reports no cost.
 - **Rate limits.** CodeDen records each provider's limit status as it reports it: Claude's 5-hour and weekly windows, and Codex rate-limit snapshots from `app-server`. It shows how much of each window is used and when it resets, and can warn before a limit is reached.
 - **Reports screen:**
   - a time range (today, 7 or 30 days, custom) and a total
@@ -599,6 +619,7 @@ Detailed, trustworthy reports on spend and usage across every provider, project 
   - **follow-up chips** after a turn completes (§7.5)
 - **Right panel** (tabs): diff, files, browser, terminal, issue/PR, session details. A bottom terminal drawer is optional.
 - **Global:** command palette, keyboard shortcuts, settings, light and dark themes.
+- **Session actions.** The thread header's ⋯ menu offers **Fork session** (§9) when the provider reports `fork`. It is disabled with the reason while a turn runs, and the command palette offers **Fork this session** for the session on screen. A fork shows where it came from: a "Fork of …" chip in its header, a **Forked from** row in Session details, and a note in its empty transcript.
 - **Phones and tablets.** The same layout adapts rather than a separate app (narrow desktop windows with a mouse keep the desktop layout): on phones (< 768 px) and portrait touch tablets (< 1024 px) the sidebar is a slide-out drawer opened from a menu button in every header; touch tablets in landscape (1024–1279 px) keep the icon rail, which expands into the drawer. In both, the right panel opens as an overlay sheet (full screen on phones) instead of squeezing the transcript, and phones use its Terminal tab instead of the bottom drawer. Touch screens get tap targets of at least 40 px and 16 px form fields, and hover-only affordances (row menus, copy buttons) are always shown when the device can't hover. A web app manifest and icons make **Add to Home Screen** open CodeDen full screen; there is no service worker (§15.1).
 - **Platform bridge.** Notifications, opening links, folder picking, global shortcuts, clipboard images and badge counts go through one `PlatformBridge` interface in the UI. It has a web implementation and a desktop one (§17), chosen by detecting the desktop app's `window.codedenDesktop` bridge; features are read from `capabilities`, never "am I in Electron?". Browsers can't return real folder paths, so projects are added through a **server-side folder picker**, which also suits remote use; the desktop app (`capabilities.folderPicker`) uses the system folder picker, with the server-side one as a fallback.
 
@@ -612,12 +633,13 @@ The goal is to get from `npx codeden` to your first session in under a minute, w
    - **Claude Code:** `claude --version`, then `claude auth status`. This returns JSON with `loggedIn`, `authMethod` and `loginExpiresAt`. Logged in means ready; the Agent SDK uses the installed binary and its login.
    - **Claude Code support:** when `claude` is installed, a row for the Claude Agent SDK. It installs into `~/.codeden/deps/` when the user continues, with live progress; a failure shows npm's reason and a **Retry**. Sessions that start before it is installed install it themselves, and `codeden doctor --install` does it from a terminal.
    - **Codex:** `codex --version`, then `codex login status`. Logged in also enables **image generation through Codex** as the default engine (§12.5).
+   - **OpenCode:** `opencode --version` (2.2 or newer; OpenCode 1 is a different API), then `opencode auth list --standalone` for its connected providers, on a private server rather than the user's background service. OpenCode's own free models work without an account, so no provider is a warning, not a blocker.
    - **GitHub:** `gh auth status`. Logged in means ready, and the token is read at runtime with `gh auth token`, never stored.
    - **git identity:** `git config user.name` and `user.email`.
    - **Browser:** an installed Edge or Chrome.
 3. **Fix only what's missing.** Each failed check has one action:
    - The install command for the tool.
-   - Or a **Sign in** button that runs the tool's own login (`claude auth login`, `codex login`, `gh auth login`) in an embedded terminal, so the provider's normal browser login flow handles it. It runs the exact copy detection found, by its full path and quoted for the terminal's shell (`& 'C:\Users\x\.local\bin\claude.exe' auth login` in PowerShell), so a broken shim or an outdated PATH in the terminal can't get in the way.
+   - Or a **Sign in** button that runs the tool's own login (`claude auth login`, `codex login`, `opencode auth login`, `gh auth login`) in an embedded terminal, so the provider's normal browser login flow handles it. It runs the exact copy detection found, by its full path and quoted for the terminal's shell (`& 'C:\Users\x\.local\bin\claude.exe' auth login` in PowerShell), so a broken shim or an outdated PATH in the terminal can't get in the way.
    - A login state that can't be read is a warning with the underlying error (exit code, output) in the row's details.
    - API keys are only an advanced alternative, never the default ask.
 
@@ -735,7 +757,8 @@ Browser speech recognition doesn't work inside Electron, so dictation there uses
 | v1.0 | Public launch | Polish, docs, `npx codeden` release |
 | Desktop | Desktop app | The Electron app (§17): installers, tray, notifications, deep links, automatic updates |
 | Browser | Browser panel | Phase 1: the full-panel screencast on every surface. Phase 2: native browser views in the desktop app with a per-session CDP relay (§12.2, §17) |
-| Later | | OpenCode, ACP adapter, remote runners (Upstash Box, SSH/VPS, Docker), webhooks, GitLab and other forges, remote/mobile access |
+| OpenCode | Third provider | OpenCode through a private `opencode serve` per session (§7.2): setup, models, approvals, questions, subagents, steering, resume and usage |
+| Later | | ACP adapter, OpenCode's revert, fork and plan agent, remote runners (Upstash Box, SSH/VPS, Docker), webhooks, GitLab and other forges, remote/mobile access |
 
 ## 20. Spikes before M1 (de-risk first)
 

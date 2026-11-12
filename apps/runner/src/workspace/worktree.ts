@@ -4,13 +4,13 @@ import { mkdir } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import type { RunnerCommandOf, RunnerCommandResult, RunnerEvent } from "@codeden/contracts";
 import { CommandError } from "../errors";
-import { topLevel } from "../git/checkpoints";
+import { restoreFiles, topLevel } from "../git/checkpoints";
 import { git, gitOk, isWorkTree } from "../git/exec";
 import { currentBranch, defaultBranch } from "../git/ops";
 import type { ProcessSupervisor } from "../process/supervisor";
 import { endProcessesInside } from "../process/worktree-processes";
 import { readProjectConfig } from "./project-config";
-import { pruneWorktrees, worktreeState } from "./removal";
+import { pruneWorktrees, removeWorkspace, worktreeState } from "./removal";
 import { runSetup, type SetupStep } from "./setup";
 import { discardFolder, isManagedWorktreePath } from "./trash";
 
@@ -122,7 +122,7 @@ async function clearTarget(
 async function createWorktree(
   cmd: RunnerCommandOf<"workspace.prepare">,
   ctx: WorkspaceContext,
-): Promise<{ cwd: string; branch: string | null; created: boolean }> {
+): Promise<{ cwd: string; branch: string | null; created: boolean; newBranch?: boolean }> {
   const repo = await topLevel(cmd.repoPath).catch(() => {
     throw new CommandError("not_a_repo", `${cmd.repoPath} is not a git repository`);
   });
@@ -141,13 +141,41 @@ async function createWorktree(
   await git(repo, ["worktree", "add", "--no-track", "-b", branch, path, base], {
     timeoutMs: 10 * 60_000,
   });
-  return { cwd: path, branch, created: true };
+  return { cwd: path, branch, created: true, newBranch: true };
+}
+
+/**
+ * Give a new fork worktree its source's checkpoint (§9). If that fails, the worktree (and the
+ * branch, when it was just made) is removed again, so a later attempt starts clean and
+ * restores instead of reusing a worktree that never got the source's files.
+ */
+async function restoreForkStart(
+  cmd: RunnerCommandOf<"workspace.prepare">,
+  target: { cwd: string; branch: string | null; newBranch?: boolean },
+  ctx: WorkspaceContext,
+): Promise<void> {
+  const from = cmd.restoreCheckpoint;
+  if (!from) return;
+  try {
+    await restoreFiles(target.cwd, from.sessionId, from.index);
+  } catch (error) {
+    const undo = {
+      name: "workspace.remove" as const,
+      repoPath: cmd.repoPath,
+      path: target.cwd,
+      force: true,
+      ...(target.newBranch && target.branch ? { deleteBranch: target.branch } : {}),
+    };
+    await removeWorkspace(undo, ctx.home).catch(() => undefined);
+    throw error;
+  }
 }
 
 /**
  * `workspace.prepare` (§9): resolve the session's working directory (repo root, an existing
- * worktree, or a new worktree under `<home>/wt/<slug>/<short>` on a new branch), then run
- * `.codeden/project.json` setup (new worktrees only) and the explicit setup commands.
+ * worktree, or a new worktree under `<home>/wt/<slug>/<short>` on a new branch), restore a
+ * forked session's starting checkpoint into a new one, then run `.codeden/project.json` setup
+ * (new worktrees only) and the explicit setup commands.
  */
 export async function prepareWorkspace(
   cmd: RunnerCommandOf<"workspace.prepare">,
@@ -173,9 +201,14 @@ export async function prepareWorkspace(
       target = { cwd: resolve(cmd.path), branch: await currentBranch(cmd.path), created: false };
       break;
     }
-    case "worktree":
-      target = await createWorktree(cmd, ctx);
+    case "worktree": {
+      const { newBranch, ...made } = await createWorktree(cmd, ctx);
+      // A fork starts where its source left off: that checkpoint's files, uncommitted, on top
+      // of the branch. Only on creation, so a retried start never overwrites the fork's work.
+      if (made.created) await restoreForkStart(cmd, { ...made, newBranch }, ctx);
+      target = made;
       break;
+    }
   }
 
   const { config, error } = await readProjectConfig(target.cwd);

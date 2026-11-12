@@ -1,7 +1,9 @@
+import type { Session } from "@codeden/contracts";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import {
   Bot,
   FolderPlus,
+  GitFork,
   Inbox,
   Keyboard,
   MessageSquarePlus,
@@ -28,7 +30,7 @@ import {
   CommandSeparator,
 } from "@/components/ui/command";
 import { useSnapshot } from "@/lib/queries";
-import { canMakeAutomation } from "@/lib/session-actions";
+import { canMakeAutomation, useSessionActions } from "@/lib/session-actions";
 import { formatCombo, type ShortcutId, shortcut } from "@/lib/shortcuts";
 import { useLayoutStore } from "@/stores/layout";
 import { useThemeStore } from "@/stores/theme";
@@ -55,6 +57,7 @@ function Row({
   keys,
   onSelect,
   value,
+  disabled,
 }: {
   icon: ReactNode;
   label: string;
@@ -64,9 +67,10 @@ function Row({
   keys?: ShortcutId;
   onSelect: () => void;
   value?: string;
+  disabled?: boolean;
 }) {
   return (
-    <CommandItem onSelect={onSelect} value={value ?? label} className="gap-2.5">
+    <CommandItem onSelect={onSelect} value={value ?? label} disabled={disabled} className="gap-2.5">
       <span className="flex size-4 items-center justify-center text-muted-foreground [&_svg]:size-4">
         {icon}
       </span>
@@ -83,6 +87,28 @@ function Row({
   );
 }
 
+/**
+ * Fork the session on screen (§9), when its provider can fork. Disabled, with the reason,
+ * while a turn runs or before it has a conversation.
+ */
+function ForkCurrentSession({ session, close }: { session: Session; close: () => void }) {
+  const actions = useSessionActions(session);
+  if (!actions.canFork) return null;
+  return (
+    <Row
+      icon={<GitFork />}
+      label="Fork this session"
+      hint={actions.forkBlocked ?? session.title ?? session.purpose}
+      value="fork this session new worktree branch"
+      disabled={actions.forkBlocked !== null}
+      onSelect={() => {
+        actions.fork();
+        close();
+      }}
+    />
+  );
+}
+
 /** Ctrl K: jump to any session or project, or run an action. */
 export function CommandPalette() {
   const open = useUiStore((s) => s.paletteOpen);
@@ -91,8 +117,8 @@ export function CommandPalette() {
   const navigate = useNavigate();
   const layout = useLayoutStore();
   const toggleTheme = useThemeStore((s) => s.toggle);
-
-  // The session page that's open, if any: "Make an automation from this session…" acts on it.
+  // The session page that's open, if any: "Make an automation from this session…" and "Fork this
+  // session" act on it.
   const { sessionId } = useParams({ strict: false }) as { sessionId?: string };
   const current = sessionId ? data?.sessions.find((s) => s.id === sessionId) : undefined;
   const automationSource = current && canMakeAutomation(current) ? current : undefined;
@@ -158,6 +184,7 @@ export function CommandPalette() {
           </CommandGroup>
           <CommandSeparator />
           <CommandGroup heading="Actions">
+            {current && <ForkCurrentSession session={current} close={() => setOpen(false)} />}
             {automationSource?.projectId && (
               <Row
                 icon={<Workflow />}

@@ -1,6 +1,8 @@
 import {
   ArchiveSessionRequest,
   EditQueuedMessageRequest,
+  ForkSessionRequest,
+  type ForkSessionResponse,
   ListSessionsQuery,
   type QueuedMessageList,
   RespondRequest,
@@ -19,7 +21,7 @@ import { jsonBody, queryOf } from "./validate";
 
 /**
  * `/api/sessions`: start (with conflict handling), message, steer, interrupt, respond, stop,
- * archive (removes the worktree, §9), unarchive and the queued-message tray.
+ * fork, archive (removes the worktree, §9), unarchive and the queued-message tray.
  */
 export function sessionRoutes(s: AppServices) {
   return (
@@ -53,6 +55,14 @@ export function sessionRoutes(s: AppServices) {
         return c.json({ ok: true as const });
       })
       .post("/:id/stop", async (c) => c.json(await s.sessions.stop(c.req.param("id"))))
+      // A new session continuing this one's conversation and code (§9); 409 when it can't.
+      .post("/:id/fork", jsonBody(ForkSessionRequest), async (c) => {
+        const body: ForkSessionResponse = await s.sessions.fork(
+          c.req.param("id"),
+          c.req.valid("json"),
+        );
+        return c.json(body);
+      })
       .post("/:id/archive", jsonBody(ArchiveSessionRequest), async (c) =>
         c.json(await s.worktreeCleanup.archive(c.req.param("id"), c.req.valid("json"))),
       )

@@ -18,6 +18,7 @@ ok  Keychain             @napi-rs/keyring
 ok  Claude Code          2.1.318 - Signed in
 ok  Claude Code support  SDK 0.3.318 in C:\Users\you\.codeden\deps
 --  Codex                Codex is not installed
+ok  OpenCode             2.2.7 - Connected: Anthropic, OpenAI
 ok  GitHub CLI           2.83.0 - Signed in
 ok  git                  2.51.0 - Identity configured
 ok  Browser              Microsoft Edge
@@ -63,7 +64,7 @@ The browser doesn't have the install token cookie, for example after clearing co
 
 Install Node.js 24 or later from <https://nodejs.org>, or with your version manager (`nvm install 24`, `fnm install 24`, `volta install node@24`). Check with `node --version` in the same terminal you run `npx codeden` from.
 
-### Claude Code or Codex is installed but broken
+### Claude Code, Codex or OpenCode is installed but broken
 
 The setup row says, for example, **"Claude Code is installed but broken: `C:\Users\you\AppData\Roaming\npm\claude.cmd` points at a missing package. Reinstall it, or remove the leftover shim."** CodeDen found the tool's file, but it doesn't run. Usually it's an npm shim (`claude.cmd`, `claude.ps1`, or a link in npm's `bin` folder) whose package was removed or only half installed. Typing `claude` in a terminal fails the same way, often with *"The term '' is not recognized"* in PowerShell. Open **Details** on the row to see every broken copy and what it points at.
 
@@ -80,23 +81,31 @@ Where CodeDen looks, in order:
 2. The installers' own folders, even when they aren't on your PATH:
    - Claude Code: `~/.local/bin/claude` (`%USERPROFILE%\.local\bin\claude.exe` on Windows), then `~/.claude/local/claude`.
    - Codex: `~/.local/bin/codex`, then `~/.codex/packages/standalone/current` (or under `CODEX_HOME`).
+   - OpenCode: `~/.opencode/bin/opencode` (`%USERPROFILE%\.opencode\bin\opencode.exe` on Windows), where its install script puts it; `/opt/homebrew/bin/opencode` and `/usr/local/bin/opencode` on macOS.
    - GitHub CLI: `C:\Program Files\GitHub CLI\gh.exe` on Windows; `/opt/homebrew/bin/gh` and `/usr/local/bin/gh` on macOS.
 
 The first copy that answers `--version` is used for detection, for sessions and for **Sign in**, so a working native install wins over a broken shim earlier on PATH. When the native installer says its folder *"is not in your PATH"*, CodeDen still finds it; add the folder to your PATH if you also want `claude` to work in your own terminals.
 
-### Claude Code or Codex shows as not signed in
+### Claude Code, Codex or OpenCode shows as not signed in
 
 Use **Sign in** on the setup checklist, or run the CLI's own login in a terminal and re-check:
 
 ```sh
 claude auth login
 codex login
+opencode auth login
 gh auth login
 ```
 
 A Claude login close to expiry shows as a warning; signing in again clears it.
 
 **Sign in** runs the copy CodeDen found by its full path (in PowerShell, for example `& 'C:\Users\you\.local\bin\claude.exe' auth login`), so it works even when that copy isn't on your PATH. If the row says **"Could not read the Claude login state"**, CodeDen ran `claude auth status` but couldn't understand the answer. Open **Details** to see the exit code and output.
+
+OpenCode with no connected provider is a warning rather than an error: its own free models work without an account. `opencode auth login` connects a provider (Anthropic, OpenAI, and many more); API keys in your environment and providers in `opencode.json` count too. CodeDen checks with `opencode auth list --standalone`, which runs a private OpenCode server for a few seconds and never starts or touches OpenCode's background service.
+
+### OpenCode is installed but shows as unsupported
+
+CodeDen drives OpenCode 2 (its v2 server API, 2.2 or newer). OpenCode 1 (the `opencode-ai` npm package) is a different API. Install OpenCode 2 with `npm install -g @opencode/cli` (or `curl -fsSL https://opencode.ai/v2/install | bash`), and update an older 2.x with `opencode upgrade`.
 
 ### "Claude Code support could not be installed"
 
@@ -122,11 +131,12 @@ One-click updates install into `~/.codeden/app/<version>/` with npm, then CodeDe
 
 ### "older than the tested minimum"
 
-CodeDen pins the Claude Agent SDK and the Codex protocol to versions it has been tested against, and reports CLIs that are too old (Claude Code 2.1.250+, Codex 0.160.0+). Update them:
+CodeDen pins the Claude Agent SDK and the Codex protocol to versions it has been tested against, and reports CLIs that are too old (Claude Code 2.1.250+, Codex 0.160.0+, OpenCode 2.2.0+). Update them:
 
 ```sh
 claude update
 npm install -g @openai/codex@latest
+opencode upgrade
 ```
 
 ### "The runner exited during start-up" or "did not start within 300 s"

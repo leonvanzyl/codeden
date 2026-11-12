@@ -38,6 +38,12 @@ export function knownLocations(name: string, opts: KnownLocationOptions = {}): s
         p.join(standalone, "current", exe("codex")),
       ];
     }
+    case "opencode":
+      // The install script: `~/.opencode/bin`; Homebrew, for apps started from the Finder.
+      return [
+        p.join(home, ".opencode", "bin", exe("opencode")),
+        ...(platform === "darwin" ? ["/opt/homebrew/bin/opencode", "/usr/local/bin/opencode"] : []),
+      ];
     case "gh":
       if (win) {
         const programFiles = env.ProgramFiles || "C:\\Program Files";

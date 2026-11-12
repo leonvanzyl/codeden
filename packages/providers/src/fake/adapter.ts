@@ -4,7 +4,7 @@ import type {
   ProviderStatus,
   SessionOptions,
 } from "@codeden/contracts";
-import type { ProviderAdapter, ProviderSession } from "../adapter";
+import { type ProviderAdapter, type ProviderSession, withFork } from "../adapter";
 import { FakeSession } from "./session";
 
 /** Options for the scripted Fake provider. */
@@ -29,7 +29,7 @@ const capabilities: ProviderCapabilities = {
   userQuestions: false,
   subagents: true,
   rollback: false,
-  fork: false,
+  fork: true,
   images: false,
   planMode: true,
   reasoningEffort: false,
@@ -78,6 +78,14 @@ export class FakeProvider implements ProviderAdapter {
   }
 
   async openSession(opts: SessionOptions): Promise<ProviderSession> {
-    return new FakeSession(opts, this.options);
+    return new FakeSession(await withFork(this, opts), this.options);
   }
+
+  /** A fork gets a conversation of its own, named after the one it copies. */
+  async forkConversation(resumeToken: string): Promise<string> {
+    this.forks += 1;
+    return `${resumeToken}:fork-${this.forks}`;
+  }
+
+  private forks = 0;
 }

@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import type {
   AutonomyLevel,
+  ForkSessionRequest,
+  ForkSessionResponse,
   JsonValue,
   ProviderInfo,
   QueueSender,
@@ -22,8 +24,9 @@ import { projectDefaultProvider } from "../projects/project-config";
 import type { ProjectService } from "../projects/project-service";
 import { type RunnerPort, runnerErrorCode, toServiceError } from "../runner-port";
 import { derivePurpose, deriveWorkKey, findConflicts } from "./conflicts";
+import { planFork } from "./fork";
 import type { InputDecorator } from "./input-decorator";
-import type { SessionLauncher } from "./launcher";
+import type { LaunchFork, SessionLauncher } from "./launcher";
 import type { Outbox } from "./outbox";
 import { isTransientRunnerError, OutboxHolds } from "./outbox-holds";
 import { planModeUnsupported, readOnlyUnsupported } from "./permissions";
@@ -46,7 +49,7 @@ export interface SessionServiceDeps {
 }
 
 /** Preferred providers when the choice is `auto` (first ready one wins). */
-const AUTO_ORDER = ["claude", "codex"];
+const AUTO_ORDER = ["claude", "codex", "opencode"];
 
 const BUSY = new Set(["running", "waiting"]);
 const NOT_STARTED = new Set(["created", "queued", "starting"]);
@@ -177,6 +180,19 @@ export class SessionService {
     }
     this.launchInBackground(session.id, req.input, req.workspace);
     return { status: "started", sessionId: session.id };
+  }
+
+  /**
+   * Fork an agent session (§9): a new session with a copy of its conversation, in a new
+   * worktree started from its latest checkpoint (`fork.ts`). The worktree is made in the
+   * background.
+   */
+  async fork(id: string, req: ForkSessionRequest): Promise<ForkSessionResponse> {
+    const { repo, projects, runner } = this.deps;
+    const plan = await planFork({ repo, projects, runner }, id, req);
+    repo.create(plan.session, plan.meta);
+    this.launchInBackground(plan.session.id, undefined, plan.start.workspace, plan.start.fork);
+    return { sessionId: plan.session.id };
   }
 
   /** Start a queued session whose blockers finished (called by the queue). */
@@ -401,11 +417,12 @@ export class SessionService {
     id: string,
     input: UserInput | undefined,
     workspace: StartSessionRequest["workspace"],
+    fork?: LaunchFork,
   ) {
     const session = this.deps.repo.get(id);
     const prepared = input ? this.forRunner(session, input) : undefined;
     const promise = this.deps.launcher
-      .launch(id, { input: prepared, workspace })
+      .launch(id, { input: prepared, workspace, ...(fork ? { fork } : {}) })
       .finally(() => this.launching.delete(id));
     this.launching.set(id, promise);
   }

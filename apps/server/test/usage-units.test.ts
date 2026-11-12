@@ -70,6 +70,27 @@ describe("price table", () => {
     expect(findPrice("fake", "default")).toBeNull();
   });
 
+  it("prices OpenCode's vendor/model ids from the vendor's table", () => {
+    expect(findPrice("opencode", "anthropic/claude-opus-5-5")?.label).toBe("Opus 5.5");
+    expect(findPrice("opencode", "anthropic/claude-sonnet-4-5-20250929")?.label).toBe("Sonnet 4.5");
+    expect(findPrice("opencode", "openai/gpt-5.5")?.inputPerMTok).toBe(5);
+    expect(findPrice("opencode", "openrouter/anthropic/claude-opus-5-5")).toBeNull();
+    expect(findPrice("opencode", "zai/glm-5")).toBeNull();
+    expect(findPrice("opencode", "default")).toBeNull();
+    // A user's own price for the full OpenCode id wins.
+    const override = {
+      provider: "opencode",
+      model: "openai/gpt-5.5",
+      label: "Mine",
+      inputPerMTok: 1,
+      outputPerMTok: 2,
+      cacheReadPerMTok: 0,
+      cacheWritePerMTok: 0,
+      asOf: "2026-11-10",
+    };
+    expect(findPrice("opencode", "openai/gpt-5.5", [override])?.label).toBe("Mine");
+  });
+
   it("lets user overrides win over the bundled table", () => {
     const override: ModelPrice = {
       provider: "claude",

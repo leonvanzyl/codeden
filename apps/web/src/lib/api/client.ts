@@ -8,6 +8,8 @@ import type {
   DiffResult,
   DiffScope,
   DisconnectGithubResponse,
+  ForkSessionRequest,
+  ForkSessionResponse,
   FsListResponse,
   GitCommitRequest,
   GitCommitResponse,
@@ -16,6 +18,7 @@ import type {
   GitStatusResponse,
   InboxItem,
   LoginCommandResponse,
+  LoginToolId,
   Project,
   RefreshModelsResponse,
   RefreshProjectResponse,
@@ -106,6 +109,11 @@ export interface CodeDenClient {
   respond(sessionId: string, requestId: string, response: RuntimeResponse): Promise<void>;
   startSession(input: StartSessionRequestInit): Promise<StartSessionResponse>;
   stopSession(sessionId: string): Promise<void>;
+  /**
+   * A new session that continues this one's conversation (the provider's fork) in a new
+   * worktree started from its latest checkpoint (§9). The source is left as it is.
+   */
+  forkSession(sessionId: string, req?: ForkSessionRequest): Promise<ForkSessionResponse>;
   /** Hide a session and remove its worktree (§9); `force` drops uncommitted changes. */
   archiveSession(sessionId: string, opts?: { force?: boolean }): Promise<ArchiveSessionResponse>;
   unarchiveSession(sessionId: string): Promise<Session>;
@@ -157,7 +165,7 @@ export interface CodeDenClient {
   getUpdates(opts?: { refresh?: boolean }): Promise<UpdateStatus>;
   /** One-click self-update: install, restart, roll back, release notes (§16). */
   readonly updates: UpdatesApi;
-  loginCommand(tool: "claude" | "codex" | "gh"): Promise<LoginCommandResponse>;
+  loginCommand(tool: LoginToolId): Promise<LoginCommandResponse>;
   /** Ask a provider for its models again (a model was released, the CLI was updated). */
   refreshModels(providerId: string): Promise<RefreshModelsResponse>;
   /** Claude Code support: the Claude Agent SDK, installed on demand into `<home>/deps`. */

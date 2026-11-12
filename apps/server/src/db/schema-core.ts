@@ -3,6 +3,7 @@ import type {
   AutomationRun,
   ErrorInfo,
   FactoryLimits,
+  ForkOrigin,
   GitHubIssueRef,
   GitHubPrRef,
   GitHubRepo,
@@ -110,6 +111,8 @@ export const sessions = sqliteTable(
     endedAt: text("ended_at"),
     archivedAt: text("archived_at"),
     worktreeRemovedAt: text("worktree_removed_at"),
+    /** The session this one was forked from, and the checkpoint its worktree started at. */
+    forkedFrom: json<ForkOrigin>("forked_from"),
     /** Accumulated usage (server-side projection; not part of the `Session` entity). */
     usage: json<Usage>("usage"),
     /** How the session was started (workspace fallback, forced conflict reason, queue). */

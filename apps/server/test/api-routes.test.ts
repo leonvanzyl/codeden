@@ -158,6 +158,10 @@ describe("api routes", () => {
     expect((await call("POST", "/setup/login/codex")).json()).toMatchObject({
       command: "codex login",
     });
+    expect((await call("POST", "/setup/login/opencode")).json()).toMatchObject({
+      tool: "opencode",
+      command: "opencode auth login",
+    });
     expect((await call("POST", "/setup/login/rm")).status).toBe(400);
     const seen: string[] = [];
     const off = server.services.store.subscribe((events) =>

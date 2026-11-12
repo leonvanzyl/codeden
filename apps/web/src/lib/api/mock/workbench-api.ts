@@ -92,7 +92,9 @@ export function workbenchApi(world: MockWorld): WorkbenchApi {
           }
         : check,
     );
-    const ready = checks.some((c) => (c.id === "claude" || c.id === "codex") && c.state === "ok");
+    const ready = checks.some(
+      (c) => world.snapshot.runner.providers.some((p) => p.id === c.id) && c.state === "ok",
+    );
     return {
       checkedAt: new Date().toISOString(),
       setupCompleted: false,
@@ -136,9 +138,12 @@ export function workbenchApi(world: MockWorld): WorkbenchApi {
     auth: mockAuthApi(),
     loginCommand: (tool) => {
       if (tool === "codex") codexFixed = true;
-      const command = { claude: "claude auth login", codex: "codex login", gh: "gh auth login" }[
-        tool
-      ];
+      const command = {
+        claude: "claude auth login",
+        codex: "codex login",
+        opencode: "opencode auth login",
+        gh: "gh auth login",
+      }[tool];
       const [bin = tool, ...args] = command.split(" ");
       return delay({ tool, command: bin, args });
     },

@@ -6,7 +6,13 @@ import {
   parseClassification,
   typeFromLabels,
 } from "../src/services/factory/classify";
-import { isTrustedAuthor, mayAutoMerge, trustedLogins } from "../src/services/factory/trust";
+import {
+  hasWriteAccess,
+  isTrustedAuthor,
+  mayAutoMerge,
+  trustedLogins,
+} from "../src/services/factory/trust";
+import { authorAssociation } from "../src/services/github/graphql";
 
 describe("trusted authors (§10.1)", () => {
   const limits = FactoryLimits.parse({ trustedAuthors: ["Alice", "@bob"] });
@@ -19,6 +25,18 @@ describe("trusted authors (§10.1)", () => {
     expect(isTrustedAuthor("mallory", trusted)).toBe(false);
     expect(isTrustedAuthor(null, trusted)).toBe(false);
     expect(isTrustedAuthor("owner", trustedLogins(limits, null))).toBe(false);
+  });
+
+  it("counts owners, organization members and collaborators as having write access", () => {
+    for (const a of ["owner", "member", "collaborator"] as const) {
+      expect(hasWriteAccess(a)).toBe(true);
+    }
+    for (const a of ["contributor", "first_time_contributor", "none", null, undefined] as const) {
+      expect(hasWriteAccess(a)).toBe(false);
+    }
+    // GitHub sends upper-case values; unknown ones count as `none`.
+    expect(hasWriteAccess(authorAssociation("COLLABORATOR"))).toBe(true);
+    expect(hasWriteAccess(authorAssociation("SOMETHING_NEW"))).toBe(false);
   });
 
   it("rejects things that are not GitHub logins", () => {

@@ -72,6 +72,18 @@ export const RunnerCommand = z.discriminatedUnion("name", [
     model: z.string().optional(),
     timeoutMs: z.int().positive().max(300_000).optional(),
   }),
+  /**
+   * Copy a conversation into a new one (`capabilities.fork`): the result is the copy's resume
+   * token; the original is untouched. Fails with `unsupported` for a provider that can't fork.
+   */
+  z.object({
+    name: z.literal("provider.fork"),
+    providerId: ProviderId,
+    /** The resume token of the conversation to copy. */
+    resumeToken: z.string().min(1),
+    /** An existing folder of the project, for providers that run a process to fork. */
+    cwd: z.string().min(1),
+  }),
   /** Create or reuse the working directory for a session (worktree + setup commands). */
   z.object({
     name: z.literal("workspace.prepare"),
@@ -92,6 +104,12 @@ export const RunnerCommand = z.discriminatedUnion("name", [
     fetch: z.boolean().optional(),
     /** Run `.codeden/project.json` `setup` commands before `setupCommands`. Default true. */
     runProjectSetup: z.boolean().optional(),
+    /**
+     * A forked session's starting point: once a new worktree is created, its files are made to
+     * match this checkpoint of another session (as uncommitted changes on top of the branch)
+     * before setup commands run. Ignored when the worktree already existed.
+     */
+    restoreCheckpoint: z.object({ sessionId: Id, index: CheckpointIndex }).optional(),
   }),
   /**
    * Remove a session worktree (and optionally its branch). Idempotent: a missing path, or a
@@ -209,7 +227,16 @@ export const RunnerCommand = z.discriminatedUnion("name", [
     setUpstream: z.boolean().optional(),
     forceWithLease: z.boolean().optional(),
   }),
-  z.object({ name: z.literal("checkpoint.list"), cwd: z.string(), sessionId: Id }),
+  z.object({
+    name: z.literal("checkpoint.list"),
+    cwd: z.string(),
+    sessionId: Id,
+    /**
+     * First wait for checkpoints the runner is still writing for this session (the one for a
+     * turn that just ended), so the list ends with the state the conversation has reached.
+     */
+    settled: z.boolean().optional(),
+  }),
   /** Diff between two checkpoints; without `to`, against the current working tree. */
   z.object({
     name: z.literal("checkpoint.diff"),
@@ -278,6 +305,7 @@ export const RunnerCommandResults = {
     providers: z.array(ProviderInfo).optional(),
   }),
   "provider.oneShot": z.object({ text: z.string(), model: z.string() }),
+  "provider.fork": z.object({ resumeToken: z.string().min(1) }),
   "workspace.prepare": z.object({
     cwd: z.string(),
     branch: z.string().nullable(),

@@ -6,6 +6,7 @@ Provider adapters behind one normalized interface (`ProviderAdapter` / `Provider
 |---|---|---|
 | `claude` | Claude Agent SDK `query()` with streaming input, `pathToClaudeCodeExecutable` = the user's `claude` | SDK pinned to `0.3.318` (tested with Claude Code 2.1.318); loaded through `loadClaudeSdk()` |
 | `codex` | `codex app-server` JSON-RPC over stdio | Types generated from Codex 0.160.1 into `src/codex/protocol/` |
+| `opencode` | A private `opencode serve --stdio` per session, v2 HTTP API + SSE events | Tested with OpenCode 2.2.7 (minimum 2.2.0); route types in `src/opencode/protocol.ts` |
 | `fake` | Scripted, deterministic | Demos and tests |
 | `replay` | Plays back recorded fixtures | Contract tests; never spawns a CLI |
 
@@ -16,12 +17,13 @@ Provider adapters behind one normalized interface (`ProviderAdapter` / `Provider
 ```sh
 pnpm --filter @codeden/providers test            # unit + replay contract tests (no live turns)
 pnpm --filter @codeden/providers test:live       # live smoke tests against the installed CLIs (small cost)
+CODEDEN_LIVE=1 pnpm --filter @codeden/providers exec vitest run test/live/opencode.live.test.ts  # OpenCode only
 pnpm --filter @codeden/providers record:claude   # re-record test/fixtures/claude-*.json
 pnpm --filter @codeden/providers record:codex    # re-record test/fixtures/codex-*.json
 pnpm --filter @codeden/providers codex:protocol  # regenerate src/codex/protocol from the installed codex
 ```
 
-Fixtures replace the recording cwd with `<CWD>`, the session id with `<SESSION>` and the OS user name with `user`. `CODEDEN_RECORD_MODEL`, `CODEDEN_LIVE_CLAUDE_MODEL` and `CODEDEN_LIVE_CODEX_MODEL` override the models (Claude defaults to the `haiku` alias, Codex to the user's configured model).
+Fixtures replace the recording cwd with `<CWD>`, the session id with `<SESSION>` and the OS user name with `user`. `CODEDEN_RECORD_MODEL`, `CODEDEN_LIVE_CLAUDE_MODEL`, `CODEDEN_LIVE_CODEX_MODEL` and `CODEDEN_LIVE_OPENCODE_MODEL` override the models (Claude defaults to the `haiku` alias, Codex and OpenCode to the user's configured model).
 
 ## Loading the Claude Agent SDK (`src/claude/sdk/`)
 
@@ -34,11 +36,13 @@ The SDK is not redistributed in the published `codeden` package. `loadClaudeSdk(
 
 ## Autonomy mapping (§11.2)
 
-| Level | Claude | Codex |
-|---|---|---|
-| supervised | `default` + PreToolUse hook forces every edit/command to ask | `untrusted`, workspace-write sandbox |
-| auto | `acceptEdits` + hook asks only when the classifier flags a call | `on-request`, workspace-write, network off |
-| full | `bypassPermissions` + hook asks only for writes outside the worktree | `never`, workspace-write, network on |
+| Level | Claude | Codex | OpenCode |
+|---|---|---|---|
+| supervised | `default` + PreToolUse hook forces every edit/command to ask | `untrusted`, workspace-write sandbox | every edit and command goes to the user |
+| auto | `acceptEdits` + hook asks only when the classifier flags a call | `on-request`, workspace-write, network off | only calls the classifier flags go to the user |
+| full | `bypassPermissions` + hook asks only for writes outside the worktree | `never`, workspace-write, network on | only writes outside the worktree go to the user |
+
+OpenCode has no OS sandbox. Its sessions get permission rules that make every `edit`, `shell`, `external_directory` and `webfetch` call ask (`SESSION_PERMISSIONS`), and `OpenCodePolicy` decides each ask with the same classifier as Claude: approved on the spot, refused with a reason, or shown to the user. Because the rules never change, an autonomy change applies from the next tool call (`liveAutonomy`). Read-only roles and the `read_only` level refuse edits and run only read-only commands (`readOnlyCommandDenial`).
 
 ## Protocol gotchas
 
@@ -63,6 +67,22 @@ The SDK is not redistributed in the published `codeden` package. `loadClaudeSdk(
 - Unknown keys in the user's `~/.codex/config.toml` produce `configWarning` notifications on every start; they are ignored.
 - Collab subagents and plan mode are experimental in app-server and not surfaced, so `subagents` and `planMode` are `false` for Codex.
 - Models come from `model/list`, which needs no thread: `refreshModels()` runs a short-lived app-server for it (about 1 s on Windows, 20 s timeout) when the runner starts and on every `provider.detect`. The id CodeDen sends back is the `model` slug. `thread/start` accepts any model string, so a bad id only fails at `turn/start`. Current models list `max` (sent as is) and `ultra` (not offered). Older models top out at `xhigh`, so `max` is sent as `xhigh` for them.
+
+**OpenCode (v2 server)**
+- **One private server per session.** `opencode serve --stdio --hostname 127.0.0.1 --port 0` prints `{"url": ...}` on stdout, listens on a random port with Basic auth (`OPENCODE_PASSWORD`, a random password per process; user name `opencode`), and exits within ~50 ms when its stdin closes, so it never outlives the runner. Start-up takes 200-400 ms. One server per session because MCP servers are process-wide config (`OPENCODE_CONFIG_CONTENT`) and each CodeDen session has its own role-scoped MCP token. `close()` ends stdin and kills the process tree (`taskkill /T` on Windows) if it lingers; the user's own MCP servers run as its children. The npm `opencode.cmd` shim points at a native `opencode.exe`, which is spawned directly.
+- **The user's OpenCode stays theirs.** The server reads the user's config, credentials and sessions (`~/.config/opencode`, `~/.local/share/opencode`). CodeDen adds only an inline config layered on top: its MCP servers (`mcp.servers.<name>`, `type: "remote"`, `headers`, `oauth: false`, and `codemode: false` so the tools are listed directly instead of behind OpenCode's `execute` tool) and an env-guard plugin. A user's own `OPENCODE_CONFIG_CONTENT` is merged underneath, and `plugins` arrays concatenate, so the user's plugins still load. Sessions created by CodeDen are archived in OpenCode's own session list (see Sessions), so they don't clutter the user's OpenCode history.
+- **Secrets stay out of the agent's shell.** OpenCode passes its whole environment to shell commands, which would hand the agent the server password (and with it, its own permission requests). A tiny local plugin (`src/opencode/plugin.ts`, written to a private `mkdtemp` folder) removes `OPENCODE_PASSWORD`, `OPENCODE_SERVER_PASSWORD` and `OPENCODE_CONFIG_CONTENT` in a shell `create.before` hook. `PUT /session/:id/environment` would also work but stores the whole environment in OpenCode's database, so it is not used. Same-user processes can still read another process's environment with OS tools (`/proc/<pid>/environ`, `ps eww`): this is defence in depth, not a sandbox.
+- **Sessions.** `POST /api/session` with `location.directory` = the worktree, the permission rules and the model (`{ providerID, id, variant }`). CodeDen's role prompt goes in a session instruction entry (`PUT /api/experimental/session/:id/instructions/entries/codeden`, rendered as `<context key="codeden">` in the system prompt), with a fallback that prefixes the first prompt. `POST /prompt` (`{ text, files }`) returns once queued; a turn spans one `session.execution.started` ... `succeeded|failed|interrupted` of the root session. OpenCode has no turn ids, so CodeDen makes its own. OpenCode doesn't echo prompts as events, so the session records each prompt as its turn's `user_message` (emitted right after `turn.started`, before any agent output) and each steer once it is queued, with the input as sent: its sender (`from`, so briefs show as brief cards) and attachments, without CodeDen's instructions. Sessions can't be created archived, so CodeDen sends `PATCH /api/session/:id` `{ archived: true }` right after creating one and again on every resume (a no-op once archived). Archived sessions still accept prompts and stay archived (checked on OpenCode 2.2.7). The PATCH is its own best-effort request, so an OpenCode that rejects the field never breaks a session.
+- **Events (`GET /api/event`, SSE).** `session.text.*` and `session.reasoning.*` (per `assistantMessageID` + `ordinal`) become messages and reasoning (the streamed text is kept on the open item, so a turn cut off by an interrupt keeps it); `session.tool.input.started` names a tool, `tool.called` carries its input, `tool.success|failed` its content and metadata (`exit` for shell, `files` diffs for edits, `matches` for grep). `session.step.ended|failed` carry each model call's tokens and USD cost, so a turn's usage is their sum, subagents included. OpenCode's `output` excludes reasoning (CodeDen's includes it); a cost of 0 is left out so the ledger can price the model.
+- **Permissions.** `permission.asked` (`action`, `resources`, `metadata.files` with the diff for edits, `source.id` = the tool call) is answered with `POST /session/:id/permission/:id/reply` `{ decision: once|always|reject, message }`. A `reject` without a message ends the whole execution; with a message the tool fails with that text and the agent carries on, so CodeDen always sends one. `always` saves the rule for the whole project (every worktree of the repo) in OpenCode's database, so `allow_session` is remembered by CodeDen instead and `always` is never sent. Remembered approvals never override read-only, and a switch to read-only forgets them.
+- **Questions.** The `question` tool opens a form (`form.created`, `metadata.kind: "question"`, string and multiselect fields with options); it becomes a `user_question`, answered with `POST /form/:id/reply` `{ answer: { <key>: value } }` or cancelled with `DELETE /form/:id`.
+- **Steer, interrupt, resume.** A prompt with `delivery: "steer"` joins the running execution at the next step boundary; if the turn is interrupted first, the steer is delivered with the next prompt. `POST /interrupt` ends with `step.failed` (`aborted`) and `execution.interrupted`. OpenCode keeps sessions in its database, so after a crash or restart a new server continues the same session id (`GET /session/:id`, then `PATCH` its permission rules).
+- **Subagents** run as child sessions (`session.created` with `parentID`, linked through the `subagent` tool's `tool.progress` metadata) and become child threads of the `subagent` item (`src/opencode/subagents.ts`).
+- **Approved by policy.** Every edit and command asks (see Permissions), so most asks are approved on the spot by CodeDen's policy. Those approvals show no card: the tool call itself is in the transcript from start to finish, as with Claude. Only the asks that need the user become approval cards.
+- **Models** come from `GET /api/model` and `/api/model/default` on a short-lived server (no session, no model call; about 1 s on Windows), which also lists providers and credentials for `detect()`. Ids are `<providerID>/<modelID>` (the model id may itself contain slashes). Efforts are the model's `variants` that match CodeDen's (`none` and `thinking` are dropped); an effort a model lacks falls back to its nearest variant. Models without tool calling and deprecated ones are left out.
+- **Sign-in.** OpenCode's own free models work without an account (`authMethod: "free"`); providers activated by environment variables or config count as signed in (`"environment"`); saved credentials from `opencode auth login` are `"credentials"`.
+- **Utility model.** `POST /api/experimental/generate/text` (`{ prompt, model }`, no tools, no session) on a short-lived server; it takes no system prompt, so `system` goes in front of the prompt. A model chosen in Settings is sent as is. With none, `cheapUtilityModel()` (`src/opencode/models.ts`) reads `/api/model/default` and `/api/model` on the same server and picks the cheapest model from the default model's provider, by listed input + output price per million tokens (the base price, not a context tier), a free one included. Disabled, deprecated and unpriced models are skipped (the default too), and the default wins ties. Staying on the default's provider keeps side jobs on the account the user already chose (an Anthropic default gives Haiku, never another provider's free tier). With no default, no prices or a failed lookup, no model is sent and OpenCode uses its own default.
+- **Not wired up yet:** OpenCode's revert (rollback), fork, the `plan` agent (plan mode) and skills, so those capabilities are `false`.
 
 ## Image generation (`src/image/`, §12.5)
 

@@ -1,7 +1,7 @@
 {
   "name": "codeden",
-  "version": "0.6.0",
-  "description": "A local-first harness for coding agents: Claude Code and Codex sessions, an orchestrator and project managers, an inbox, GitHub traceability, automations and an experimental dark factory.",
+  "version": "0.6.1",
+  "description": "A local-first harness for coding agents: Claude Code, Codex and OpenCode sessions, an orchestrator and project managers, an inbox, GitHub traceability, automations and an experimental dark factory.",
   "license": "MIT",
   "author": "Leon van Zyl",
   "repository": {
@@ -34,6 +34,7 @@
     "claude",
     "codex",
     "openai-codex",
+    "opencode",
     "orchestration",
     "automation",
     "software-factory",

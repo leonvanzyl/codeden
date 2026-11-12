@@ -39,6 +39,12 @@ export interface ProviderAdapter {
    */
   onModelsChanged?(listener: () => void): () => void;
   openSession(opts: SessionOptions): Promise<ProviderSession>;
+  /**
+   * Copy the conversation behind `resumeToken` into a new one and return the copy's resume
+   * token; the original is never written to. Present exactly when `capabilities().fork`.
+   * `cwd` is an existing folder of the project (the copy is resumed from its own worktree).
+   */
+  forkConversation?(resumeToken: string, opts: { cwd: string }): Promise<string>;
   /** One-shot, tool-less model calls for side jobs (§7.4), when the provider supports them. */
   utilityModel?(): UtilityModel;
 }
@@ -92,6 +98,27 @@ export interface ProviderSession {
 export interface SessionConfigChange {
   model?: string | null;
   effort?: ReasoningEffort | null;
+}
+
+/**
+ * Session options ready to open (`SessionOptions.forkFrom`): with `forkFrom` and no
+ * `resumeToken`, the conversation is copied first (`forkConversation`) and the session resumes
+ * the copy. A `resumeToken` wins. A provider that can't fork refuses, rather than quietly
+ * opening a conversation without the history.
+ */
+export async function withFork(
+  adapter: ProviderAdapter,
+  opts: SessionOptions,
+): Promise<SessionOptions> {
+  if (!opts.forkFrom || opts.resumeToken) return opts;
+  if (!adapter.capabilities().fork || !adapter.forkConversation) {
+    throw new ProviderSessionError(
+      "unsupported",
+      `${adapter.displayName} cannot fork a conversation`,
+    );
+  }
+  const resumeToken = await adapter.forkConversation(opts.forkFrom, { cwd: opts.cwd });
+  return { ...opts, resumeToken };
 }
 
 /** Static description of an adapter, as sent in the runner handshake. */

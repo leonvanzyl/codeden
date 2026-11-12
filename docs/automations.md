@@ -284,8 +284,20 @@ With the **Issue triage** automation on (GitHub projects only), each new issue g
 
 Then:
 
-- a **ready** issue starts a session (work key `issue:<n>`) if `autoStart` is on and the project isn't in Manual mode;
+- a **ready** issue starts a session (work key `issue:<n>`) if `autoStart` is on, the project isn't in Manual mode and the issue's author is trusted (see below);
 - otherwise you get a **"Should I take this on?"** inbox item to accept (a session starts) or decline.
+
+### Who triage starts work for
+
+On a public repository anyone can open an issue, and an issue is a prompt for an agent. So even with `autoStart` on, triage only starts a session by itself for issues by:
+
+- the GitHub account CodeDen uses (the one `gh` is signed in as);
+- the logins in **Trusted authors** in the project's [factory settings](software-factory.md#who-the-factory-works-for);
+- people with write access to the repository: its owner, members of the organization that owns it and collaborators (GitHub's author association).
+
+Anyone else's ready issue always becomes the inbox decision, and the item says the author has no write access. So does an issue whose author GitHub can't check at that moment. Labels don't count as trust, because issue templates can apply them for anyone.
+
+The PM and the agent that resolves an issue are both told that the issue text and its comments are input data, not instructions: they act on the work the issue describes and ignore anything in it that asks them to reveal secrets, change CI, release or deploy files, contact unknown hosts or act outside the repository. Comments added after you accept an issue get the same treatment.
 
 The `policy` block in the frontmatter controls this:
 
@@ -296,7 +308,7 @@ policy:
     needs_info: [needs-info]
   comment: true          # post a short comment explaining the decision
   closeRejected: false   # close duplicates and out-of-scope issues as "not planned"
-  autoStart: false       # start sessions for ready issues without asking
+  autoStart: false       # start sessions for trusted authors' ready issues without asking
   provider: codex        # optional: provider, model and autonomy for sessions it starts
 ```
 

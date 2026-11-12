@@ -3,6 +3,7 @@ import {
   CreateProjectResponse,
   DiffResult,
   DisconnectGithubResponse,
+  ForkSessionResponse,
   FsListResponse,
   GitCommitResponse,
   GitPushResponse,
@@ -97,6 +98,8 @@ export function createHttpClient(origin: string, opts: HttpClientOptions = {}): 
     async stopSession(id) {
       await post(`/sessions/${enc(id)}/stop`);
     },
+    forkSession: (id, req) =>
+      post(`/sessions/${enc(id)}/fork`, req ?? {}, (v) => ForkSessionResponse.parse(v)),
     queue: httpQueueApi(http),
 
     ...httpSessionConflictApi(http),

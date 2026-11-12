@@ -41,7 +41,7 @@ export function makeTempRepo(parent: string): string {
 }
 
 export interface E2eServerOptions {
-  /** Load the real Claude Code and Codex adapters. */
+  /** Load the real Claude Code, Codex and OpenCode adapters. */
   builtin?: boolean;
   /**
    * Adjust the server's environment, e.g. a PATH with fake CLIs. Gets the run's temp folder
@@ -69,7 +69,16 @@ export async function startE2eServer(opts: E2eServerOptions = {}): Promise<E2eSe
   mkdirSync(join(userHome, ".claude"), { recursive: true });
   mkdirSync(join(userHome, ".codex"), { recursive: true });
   writeFileSync(join(userHome, ".claude", "CLAUDE.md"), E2E_CLAUDE_MD);
-  const baseEnv = { ...process.env, CODEDEN_HOME: home, CODEDEN_UPDATE_CHECK: "0" };
+  const baseEnv = {
+    ...process.env,
+    CODEDEN_HOME: home,
+    CODEDEN_UPDATE_CHECK: "0",
+    // A real OpenCode on this machine (the setup check) never sees the user's own data.
+    XDG_DATA_HOME: join(base, "xdg", "data"),
+    XDG_CONFIG_HOME: join(base, "xdg", "config"),
+    XDG_STATE_HOME: join(base, "xdg", "state"),
+    XDG_CACHE_HOME: join(base, "xdg", "cache"),
+  };
   const child: ChildProcess = spawn(
     process.execPath,
     [

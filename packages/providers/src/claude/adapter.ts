@@ -5,7 +5,12 @@ import type {
   ReasoningEffort,
   SessionOptions,
 } from "@codeden/contracts";
-import type { ProviderAdapter, ProviderSession, RefreshModelsOptions } from "../adapter";
+import {
+  type ProviderAdapter,
+  type ProviderSession,
+  type RefreshModelsOptions,
+  withFork,
+} from "../adapter";
 import { executableFingerprint, ModelFreshness } from "../freshness";
 import { ModelCatalog } from "../models";
 import type { ResolvedCommand } from "../util/exec";
@@ -27,7 +32,8 @@ const capabilities: ProviderCapabilities = {
   userQuestions: true,
   subagents: true,
   rollback: false,
-  fork: false,
+  // The SDK copies a conversation into a new session file (`forkConversation`).
+  fork: true,
   images: true,
   planMode: true,
   reasoningEffort: true,
@@ -63,7 +69,7 @@ export interface ClaudeAdapterOptions {
    * Load the SDK (tests stub it). By default sessions use `loadClaudeSdk()`, and discovery
    * uses it only when the SDK is ready without an install (`claudeSdkReady()`).
    */
-  loadSdk?: () => Promise<Pick<ClaudeSdkModule, "query">>;
+  loadSdk?: () => Promise<Pick<ClaudeSdkModule, "query" | "forkSession">>;
 }
 
 /** Claude Code through the Claude Agent SDK and the user's installed `claude` (§7.2). */
@@ -128,7 +134,7 @@ export class ClaudeAdapter implements ProviderAdapter {
     const executable = this.executable();
     if (!executable) throw new Error("Claude Code is not installed (no `claude` on PATH)");
     const { query } = await (this.options.loadSdk ?? loadClaudeSdk)();
-    return new ClaudeSession(opts, {
+    return new ClaudeSession(await withFork(this, opts), {
       executable,
       query,
       // Every session start reports the list of the `claude` it runs: the cheapest refresh.
@@ -138,6 +144,21 @@ export class ClaudeAdapter implements ProviderAdapter {
         this.catalog.set(toModelInfos(models));
       },
     });
+  }
+
+  /**
+   * Copy a conversation with the SDK's `forkSession()`: the transcript is written to a new
+   * session file at once (fresh message ids, the original untouched) and the new session id is
+   * returned for resuming. The copy is found from any worktree of the project.
+   */
+  async forkConversation(resumeToken: string): Promise<string> {
+    const { forkSession } = await (this.options.loadSdk ?? loadClaudeSdk)();
+    try {
+      return (await forkSession(resumeToken)).sessionId;
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      throw new Error(`Could not fork the Claude conversation ${resumeToken}: ${reason}`);
+    }
   }
 
   utilityModel(): UtilityModel {

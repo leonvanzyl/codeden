@@ -1,4 +1,4 @@
-import type { SetupCheck, SetupCommand } from "@codeden/contracts";
+import type { LoginToolId, SetupCheck, SetupCommand } from "@codeden/contracts";
 import { brokenInstallMessage, type ExecutableLookup, shellCommandLine } from "@codeden/providers";
 import type { Exec, ExecResult } from "../exec";
 
@@ -22,10 +22,11 @@ export function execLocate(exec: Exec): Locate {
 export const LOGIN_COMMANDS = {
   claude: ["claude", "auth", "login"],
   codex: ["codex", "login"],
+  opencode: ["opencode", "auth", "login"],
   gh: ["gh", "auth", "login", "--web", "--git-protocol", "https"],
-} as const satisfies Record<string, readonly string[]>;
+} as const satisfies Record<LoginToolId, readonly string[]>;
 
-export type LoginTool = keyof typeof LOGIN_COMMANDS;
+export type LoginTool = LoginToolId;
 
 /**
  * The sign-in command typed into the setup terminal (§14 step 3). With a resolved `program`

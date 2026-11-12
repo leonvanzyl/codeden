@@ -8,7 +8,7 @@ Open **Usage** in the sidebar.
 
 ## The ledger
 
-Every turn records a **usage delta**, computed from the provider's own numbers (Claude reports cumulative session totals, so CodeDen stores the per-turn difference):
+Every turn records a **usage delta**, computed from the provider's own numbers (Claude reports cumulative session totals, so CodeDen stores the per-turn difference; OpenCode reports every model call with its tokens and cost, so a turn is their sum, subagents included):
 
 - input, output, cache-read and cache-write tokens, and reasoning tokens where reported;
 - cost in USD;
@@ -24,11 +24,13 @@ The ledger lives in your local database, never anywhere else.
 | **Estimated** (shown with ≈) | Tokens multiplied by the price table for that model |
 | **API-equivalent** | You're on a subscription login (claude.ai or ChatGPT): this is what the same work would cost on API credits, not what you're billed |
 
-The billing mode comes from how each CLI reports its login: API keys and console accounts are pay-per-token; claude.ai and ChatGPT logins are subscriptions.
+The billing mode comes from how each CLI reports its login: API keys and console accounts are pay-per-token; claude.ai and ChatGPT logins are subscriptions. OpenCode reports how each of its providers is connected (API key, OAuth, environment).
 
 ### The price table
 
 CodeDen bundles list prices for current Claude and OpenAI models, taken from the providers' pricing pages. Open **Prices** on the Usage page to see them and to add or override a model's price; your entries win over the bundled table. Turns whose model has no price and no reported cost are counted as **unpriced**, so a missing price never hides spend silently.
+
+OpenCode usually reports each turn's cost itself. When it doesn't (OpenCode's free models, or a provider it has no prices for), OpenCode model ids such as `anthropic/claude-opus-5-5` and `openai/gpt-5.5` are priced from the Claude and OpenAI rows; other vendors' models are unpriced unless you add a price for the full id under provider `opencode`.
 
 ## Reports
 

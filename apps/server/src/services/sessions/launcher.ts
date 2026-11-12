@@ -15,6 +15,7 @@ import type { InboxService } from "../inbox-service";
 import type { ProjectService } from "../projects/project-service";
 import { type RunnerPort, runnerErrorCode } from "../runner-port";
 import { slugWords } from "./conflicts";
+import type { ForkStart } from "./fork";
 import { ownBranch } from "./own-branch";
 import type { SessionRepo } from "./repo";
 import { setupFailureNote, withSetupNote } from "./setup-failure";
@@ -33,6 +34,25 @@ export interface LauncherDeps {
   log?: (message: string) => void;
   /** How long to wait for the runner before failing a start. */
   connectTimeoutMs?: number;
+}
+
+/**
+ * A fork's start (§9): its worktree branches from the source's branch (`WorkspaceRequest.baseRef`),
+ * then gets the source's latest checkpoint as uncommitted changes; its pull request still
+ * targets the source's base branch.
+ */
+export interface LaunchFork {
+  /** The branch the fork's pull request targets (the source's base branch). */
+  baseBranch: string | null;
+  /** The source's latest checkpoint; omitted when it has none yet. */
+  restoreCheckpoint?: { sessionId: string; index: number };
+}
+
+/** What a start needs: the first input, the workspace to prepare and, for a fork, its plan. */
+export interface LaunchOptions {
+  input?: UserInput;
+  workspace: WorkspaceRequest;
+  fork?: LaunchFork;
 }
 
 interface PreparedWorkspace {
@@ -57,63 +77,76 @@ const START_TIMEOUT_MS = 60_000;
 export class SessionLauncher {
   constructor(private readonly deps: LauncherDeps) {}
 
-  async launch(
-    sessionId: string,
-    opts: { input?: UserInput; workspace: WorkspaceRequest },
-  ): Promise<void> {
-    const { repo, runner } = this.deps;
+  /** Start a new session in the background: failures mark it failed (see `start`). */
+  async launch(sessionId: string, opts: LaunchOptions): Promise<void> {
     try {
-      const session = repo.get(sessionId);
-      await this.requireRunner();
-      const project = session.projectId ? this.deps.projects.get(session.projectId) : null;
-      const ws = await this.prepareWorkspace(session, project, opts.workspace);
-      repo.update(sessionId, (s) => ({
-        ...s,
-        cwd: ws.cwd,
-        worktreePath: ws.worktreePath,
-        branch: ws.branch,
-        baseBranch: ws.baseBranch,
-      }));
-      if (ws.fallback) {
-        const fallback = ws.fallback;
-        repo.setStartMeta(sessionId, (m) => ({
-          ...defaultMeta(opts.workspace),
-          ...m,
-          workspaceFallback: fallback,
-        }));
-      }
-      const result = await runner.request(
-        {
-          name: "session.start",
-          sessionId,
-          providerId: session.provider,
-          options: this.sessionOptions({
-            ...session,
-            cwd: ws.cwd,
-            worktreePath: ws.worktreePath,
-            branch: ws.branch,
-            baseBranch: ws.baseBranch,
-          }),
-          input: withSetupNote(opts.input, ws.setupNote),
-        },
-        START_TIMEOUT_MS,
-      );
-      repo.update(sessionId, (s) => ({
-        ...s,
-        resumeToken: s.resumeToken ?? result.resumeToken,
-        runnerId: runner.runnerId(),
-        status: s.status === "starting" ? (opts.input ? "running" : "idle") : s.status,
-      }));
+      await this.start(sessionId, opts);
     } catch (error) {
       this.fail(sessionId, "start", error);
     }
   }
 
   /**
+   * Prepare the session's workspace, record it on the session, then open the provider session.
+   * Throws on failure; nothing reaches the provider when the workspace could not be prepared.
+   */
+  private async start(sessionId: string, opts: LaunchOptions): Promise<void> {
+    const { repo, runner } = this.deps;
+    const session = repo.get(sessionId);
+    await this.requireRunner();
+    const project = session.projectId ? this.deps.projects.get(session.projectId) : null;
+    const ws = await this.prepareWorkspace(session, project, opts.workspace, opts.fork);
+    repo.update(sessionId, (s) => ({
+      ...s,
+      cwd: ws.cwd,
+      worktreePath: ws.worktreePath,
+      branch: ws.branch,
+      baseBranch: ws.baseBranch,
+    }));
+    if (ws.fallback) {
+      const fallback = ws.fallback;
+      repo.setStartMeta(sessionId, (m) => ({
+        ...defaultMeta(opts.workspace),
+        ...m,
+        workspaceFallback: fallback,
+      }));
+    }
+    const result = await runner.request(
+      {
+        name: "session.start",
+        sessionId,
+        providerId: session.provider,
+        options: this.sessionOptions({
+          ...session,
+          cwd: ws.cwd,
+          worktreePath: ws.worktreePath,
+          branch: ws.branch,
+          baseBranch: ws.baseBranch,
+        }),
+        input: withSetupNote(opts.input, ws.setupNote),
+      },
+      START_TIMEOUT_MS,
+    );
+    repo.update(sessionId, (s) => ({
+      ...s,
+      resumeToken: s.resumeToken ?? result.resumeToken,
+      runnerId: runner.runnerId(),
+      status: s.status === "starting" ? (opts.input ? "running" : "idle") : s.status,
+    }));
+  }
+
+  /**
    * Re-open a session the runner no longer hosts (runner restart, stopped session) through the
-   * provider's resume token, optionally starting a turn. Throws on failure.
+   * provider's resume token, optionally starting a turn. Throws on failure. A fork whose
+   * worktree was never made (its first start failed) gets it made now, as at its first start:
+   * it never runs anywhere else.
    */
   async resume(session: Session, input?: UserInput): Promise<void> {
+    const forkStart = this.pendingForkStart(session);
+    if (forkStart) {
+      await this.start(session.id, { ...forkStart, ...(input ? { input } : {}) });
+      return;
+    }
     await this.requireRunner();
     const { session: current, setupNote } = await this.restoreWorktree(session);
     const result = await this.deps.runner.request(
@@ -220,6 +253,12 @@ export class SessionLauncher {
     });
   }
 
+  /** A fork's workspace plan while its worktree doesn't exist yet (`ForkStart`). */
+  private pendingForkStart(session: Session): ForkStart | null {
+    if (session.worktreePath) return null;
+    return this.deps.repo.find(session.id)?.startMeta?.forkStart ?? null;
+  }
+
   /** The session's project for its system prompt; null without one (or once it is gone). */
   private projectOf(session: Session): Project | null {
     if (!session.projectId) return null;
@@ -239,6 +278,7 @@ export class SessionLauncher {
     session: Session,
     project: Project | null,
     req: WorkspaceRequest,
+    fork?: LaunchFork,
   ): Promise<PreparedWorkspace> {
     if (!project) {
       mkdirSync(this.deps.orchestratorDir, { recursive: true });
@@ -276,6 +316,7 @@ export class SessionLauncher {
           baseRef,
           setupCommands: req.setupCommands ?? [],
           ...(fetch ? { fetch: true } : {}),
+          ...(fork?.restoreCheckpoint ? { restoreCheckpoint: fork.restoreCheckpoint } : {}),
         },
         PREPARE_TIMEOUT_MS,
       );
@@ -283,12 +324,13 @@ export class SessionLauncher {
         cwd: result.cwd,
         worktreePath: req.mode === "worktree" ? result.cwd : null,
         branch: result.branch,
-        baseBranch: baseRef ?? null,
+        baseBranch: fork ? fork.baseBranch : (baseRef ?? null),
         fallback: null,
         setupNote: setupFailureNote(result.setup),
       };
     } catch (error) {
-      if (runnerErrorCode(error) !== "not_implemented") throw error;
+      // A fork needs its own worktree (the source's code); it never falls back to the root.
+      if (fork || runnerErrorCode(error) !== "not_implemented") throw error;
       if (req.mode === "existing") return plain(path);
       return {
         ...plain(project.path),

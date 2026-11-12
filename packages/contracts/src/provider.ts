@@ -20,6 +20,11 @@ export const ProviderCapabilities = z.object({
   subagents: z.boolean(),
   /** The conversation can be rolled back to an earlier turn. */
   rollback: z.boolean(),
+  /**
+   * A conversation can be forked, leaving the original untouched: the runner's `provider.fork`
+   * copies it into a new one (a new resume token), and `SessionOptions.forkFrom` does the same
+   * as a session opens.
+   */
   fork: z.boolean(),
   /** Image attachments are accepted as input. */
   images: z.boolean(),
@@ -161,6 +166,14 @@ export const SessionOptions = z.object({
   systemPrompt: z.string().optional(),
   /** Provider session/thread id from a previous `resumeToken()`. */
   resumeToken: z.string().optional(),
+  /**
+   * Provider session/thread id of a conversation to fork as the session opens
+   * (`capabilities.fork`): the provider copies it and the session resumes the copy, whose id
+   * `resumeToken()` returns at once; the original is untouched. Ignored when `resumeToken` is
+   * set, which wins. CodeDen's own forks copy the conversation earlier, in the fork request
+   * (`provider.fork`), and so arrive with a `resumeToken`.
+   */
+  forkFrom: z.string().min(1).optional(),
   mcpServers: z.array(McpServerConfig).default([]),
   /** Extra env vars for the agent process (CodeDen secrets are never included). */
   env: z.record(z.string(), z.string()).optional(),

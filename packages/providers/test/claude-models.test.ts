@@ -85,7 +85,10 @@ function stubSdk(initial: Behaviour = "list") {
     };
     return q as unknown as Query;
   }) as unknown as ClaudeSdkModule["query"];
-  return { query, state, load: async () => ({ query }) };
+  const forkSession: ClaudeSdkModule["forkSession"] = async () => {
+    throw new Error("not used here");
+  };
+  return { query, state, load: async () => ({ query, forkSession }) };
 }
 
 const EXPECTED = [
