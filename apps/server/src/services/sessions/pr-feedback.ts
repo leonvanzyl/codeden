@@ -10,9 +10,9 @@ import type {
 import type { EventStore } from "../../events/store";
 import { errorMessage } from "../errors";
 import {
-  isTrustedReview,
+  isTrustedReviewEvent,
   PR_COMMENTS_ARE_INPUT,
-  type ReviewerLogins,
+  type TrustedAuthors,
 } from "../github/review-trust";
 import type { SessionRepo, StoredStartMeta } from "./repo";
 
@@ -72,16 +72,20 @@ export function receivesPrFeedback(session: Session): boolean {
 
 /**
  * The feedback one GitHub event carries for the PR's session, if any. Pure. Requested changes
- * are passed on only from a trusted reviewer (`isTrustedReview`, with the project's
- * `trustedLogins`): on a public repository anyone can request changes, and an untrusted
- * review is never an instruction to the agent.
+ * are passed on only from a trusted reviewer (`isTrustedReviewEvent`: write access, the account
+ * the review was read with, or one of the project's `trustedAuthors`): on a public repository
+ * anyone can request changes, and an untrusted review is never an instruction to the agent.
  */
 export function prFeedbackFor(
   event: RawEventEnvelope,
-  trustedLogins: ReadonlySet<string> = new Set(),
+  trustedAuthors: readonly string[] = [],
 ): PrFeedback[] {
   if (!PR_EVENTS.has(event.type)) return [];
-  const { pr, review } = event.payload as { pr: GithubPr; review?: GithubReview };
+  const { pr, review, viewer } = event.payload as {
+    pr: GithubPr;
+    review?: GithubReview;
+    viewer?: string | null;
+  };
   if (pr.state !== "open" && pr.state !== "draft") return [];
   const head = pr.headSha ?? "unknown";
   const short = head.slice(0, 7);
@@ -104,7 +108,7 @@ export function prFeedbackFor(
   if (
     event.type === "review.submitted" &&
     review?.state === "changes_requested" &&
-    isTrustedReview(review, trustedLogins)
+    isTrustedReviewEvent({ review, viewer }, trustedAuthors)
   ) {
     const who = review.author ? `@${review.author}` : "A reviewer";
     const body = review.body.trim() ? `\n\n${clip(review.body.trim())}` : "";
@@ -130,18 +134,16 @@ export interface PrFeedbackDeps {
   settings: () => Settings;
   /** Send (or queue behind a running turn) a message from CodeDen to a session. */
   send: (sessionId: string, input: UserInput) => Promise<unknown>;
-  /**
-   * Logins whose reviews count besides those with write access (the project's trusted authors,
-   * the account CodeDen uses). Default: none.
-   */
-  trustedLogins?: ReviewerLogins;
+  /** The project's trusted authors, whose reviews count without write access. Default: none. */
+  trustedAuthors?: TrustedAuthors;
   log?: (message: string) => void;
 }
 
 /**
  * PR feedback for sessions the user started (§9): when the pull request a session owns fails
- * its checks, gets a review requesting changes from someone with write access (or a trusted
- * author; see `review-trust.ts`) or runs into merge conflicts, the session is sent a message
+ * its checks, gets a review requesting changes from someone with write access (or the account
+ * CodeDen read it with, or a trusted author; see `review-trust.ts`) or runs into merge
+ * conflicts, the session is sent a message
  * from CodeDen (queued behind a running turn) so the agent can fix it without the user
  * relaying it. Each problem is sent once per head commit, and at most
  * `PR_FEEDBACK_MAX_ROUNDS` messages go out per PR. Off with `sessions.prFeedback`.
@@ -172,7 +174,7 @@ export class PrFeedbackService {
     for (const event of events) {
       if (!PR_EVENTS.has(event.type)) continue;
       const { pr } = event.payload as { pr: GithubPr };
-      const feedback = prFeedbackFor(event, this.deps.trustedLogins?.(pr.projectId));
+      const feedback = prFeedbackFor(event, this.deps.trustedAuthors?.(pr.projectId));
       if (feedback.length === 0) continue;
       const found = pr.sessionId ? this.deps.repo.find(pr.sessionId) : undefined;
       if (!found || !receivesPrFeedback(found.session)) continue;

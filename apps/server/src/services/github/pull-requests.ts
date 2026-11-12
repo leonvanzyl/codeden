@@ -188,12 +188,14 @@ export async function refreshPr(
   number: number,
   sessionId?: string | null,
 ): Promise<GithubPr> {
-  const [node] = await fetchPullRequests(deps.client, repo.owner, repo.repo, [number]);
-  if (!node)
+  const [fetched] = await fetchPullRequests(deps.client, repo.owner, repo.repo, [number]);
+  if (!fetched)
     throw notFound(`No pull request #${number} in ${repo.owner}/${repo.repo}`, "pr_not_found");
   const prev = deps.store.pr(projectId, number);
-  const next = GithubPr.parse(toGithubPr(projectId, node, sessionId ?? prev?.sessionId ?? null));
-  const events = diffPr(prev, next);
+  const next = GithubPr.parse(
+    toGithubPr(projectId, fetched.node, sessionId ?? prev?.sessionId ?? null),
+  );
+  const events = diffPr(prev, next, { viewer: fetched.viewer });
   if (events.length > 0) deps.events.append(events);
   return deps.store.pr(projectId, number) ?? { ...next, id: githubPrId(projectId, number) };
 }

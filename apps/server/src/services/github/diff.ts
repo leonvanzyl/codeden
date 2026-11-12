@@ -48,6 +48,11 @@ export function toGithubIssue(projectId: string, raw: RestIssue): GithubIssue {
  */
 export interface DiffOptions {
   importedBefore?: string | null;
+  /**
+   * Login of the account `next` was read with (`FetchedPr.viewer`); carried on
+   * `review.submitted`, where it decides which reviews count as CodeDen's own account's.
+   */
+  viewer?: string | null;
 }
 
 function isOld(createdAt: string | null, opts: DiffOptions): boolean {
@@ -141,7 +146,11 @@ export function diffPr(
   const seen = new Set(prev.reviews.map((r) => r.id));
   for (const review of next.reviews) {
     if (!seen.has(review.id) && review.state !== "pending") {
-      events.push({ type: "review.submitted", sessionId, payload: { pr, review } });
+      events.push({
+        type: "review.submitted",
+        sessionId,
+        payload: { pr, review, viewer: opts.viewer ?? null },
+      });
     }
   }
   const reviewers = newReviewRequests(prev, next);

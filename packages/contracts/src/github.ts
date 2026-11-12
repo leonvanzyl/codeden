@@ -231,7 +231,17 @@ export const GITHUB_EVENT_PAYLOADS = {
   "pr.checks_failed": z.object(prPayload),
   "pr.merged": z.object(prPayload),
   "pr.closed": z.object(prPayload),
-  "review.submitted": z.object({ ...prPayload, review: GithubReview }),
+  /**
+   * A new review. `viewer` is the login of the GitHub account CodeDen read it with (GraphQL
+   * `viewer`, answered in the same request), so trusting "the account CodeDen uses" follows the
+   * credential actually used. Null when GitHub didn't say; absent on events from before it was
+   * tracked. Either way no account counts as CodeDen's own.
+   */
+  "review.submitted": z.object({
+    ...prPayload,
+    review: GithubReview,
+    viewer: z.string().nullable().optional(),
+  }),
 } as const;
 export type GithubEventType = keyof typeof GITHUB_EVENT_PAYLOADS;
 export const GITHUB_EVENT_TYPES = Object.keys(GITHUB_EVENT_PAYLOADS) as GithubEventType[];

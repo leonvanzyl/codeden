@@ -101,29 +101,41 @@ export interface GqlPullRequest {
   };
 }
 
+/** A PR as read, with the account that read it. */
+export interface FetchedPr {
+  node: GqlPullRequest;
+  /**
+   * Login of the account the request ran as (GraphQL `viewer`, answered in the same request, so
+   * it is the credential actually used, after any 401 refresh). Null when GitHub didn't say.
+   */
+  viewer: string | null;
+}
+
 /** Fetch up to `PR_BATCH_SIZE` PRs per request; missing numbers are left out. */
 export async function fetchPullRequests(
   client: GithubClient,
   owner: string,
   repo: string,
   numbers: number[],
-): Promise<GqlPullRequest[]> {
-  const out: GqlPullRequest[] = [];
+): Promise<FetchedPr[]> {
+  const out: FetchedPr[] = [];
   const unique = [...new Set(numbers)];
   for (let i = 0; i < unique.length; i += PR_BATCH_SIZE) {
     const batch = unique.slice(i, i + PR_BATCH_SIZE);
     const fields = batch.map((n) => `pr${n}: pullRequest(number: ${n}) { ...PrFields }`).join("\n");
     const query = `query($owner: String!, $repo: String!) {
+  viewer { login }
   repository(owner: $owner, name: $repo) {
 ${fields}
   }
 }
 ${PR_FIELDS}`;
-    const data = await client.graphql<{ repository: Record<string, GqlPullRequest | null> | null }>(
-      query,
-      { owner, repo },
-    );
-    for (const node of Object.values(data.repository ?? {})) if (node) out.push(node);
+    const data = await client.graphql<{
+      viewer?: { login?: string | null } | null;
+      repository: Record<string, GqlPullRequest | null> | null;
+    }>(query, { owner, repo });
+    const viewer = data.viewer?.login || null;
+    for (const node of Object.values(data.repository ?? {})) if (node) out.push({ node, viewer });
   }
   return out;
 }

@@ -145,11 +145,6 @@ export class GithubService {
     this.unsubscribe = undefined;
   }
 
-  /** The login CodeDen last used on GitHub (from `connection()`), without asking GitHub. */
-  viewerLogin(): string | null {
-    return this.login?.value ?? null;
-  }
-
   /** Whether GitHub is reachable with the user's `gh` login or keychain token. */
   async connection(): Promise<GithubConnection> {
     const token = await this.auth.token();

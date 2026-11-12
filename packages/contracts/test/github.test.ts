@@ -128,6 +128,20 @@ describe("github contracts", () => {
     expect(requested.type === "pr.review_requested" && requested.payload.reviewers).toEqual([
       "lee",
     ]);
+    const review = {
+      id: "r1",
+      author: "lee",
+      authorAssociation: "none",
+      state: "changes_requested",
+      body: "Fix it",
+      submittedAt: ts,
+      url: null,
+    };
+    // The account the review was read with; older events have none.
+    for (const viewer of [{ viewer: "octo" }, { viewer: null }, {}]) {
+      const submitted = { ...base, type: "review.submitted", payload: { pr, review, ...viewer } };
+      expect(EventEnvelope.parse(submitted)).toEqual(submitted);
+    }
   });
 
   it("builds and parses PR ids", () => {

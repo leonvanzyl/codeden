@@ -24,6 +24,8 @@ export class FakeGithub {
   issues = new Map<number, FakeIssue>();
   requests: FakeRequest[] = [];
   validTokens = new Set(["tok-1"]);
+  /** The account each token signs in as (`/user`, GraphQL `viewer`); default `octo`. */
+  accounts = new Map<string, string>();
   rateLimited = false;
   /** Git objects created through the Git Data API. */
   readonly gitData = new FakeGitData();
@@ -124,7 +126,7 @@ export class FakeGithub {
         },
       );
     }
-    const result = this.route(method, record.path, url.searchParams, body);
+    const result = this.route(method, record.path, url.searchParams, body, token);
     if (result.status === 200 && method === "GET") {
       const etag = `"${createHash("sha1").update(JSON.stringify(result.data)).digest("hex")}"`;
       if (record.ifNoneMatch === etag) return respond(304, null, { etag });
@@ -138,12 +140,14 @@ export class FakeGithub {
     path: string,
     query: URLSearchParams,
     body: unknown,
+    token: string,
   ): { status: number; data: unknown } {
     const ok = (data: unknown, status = 200) => ({ status, data });
     const notFound = { status: 404, data: { message: "Not Found" } };
     const b = (body ?? {}) as Record<string, unknown>;
-    if (method === "GET" && path === "/user") return ok({ login: "octo" });
-    if (method === "POST" && path === "/graphql") return ok(this.graphql(String(b.query)));
+    const login = this.accounts.get(token) ?? "octo";
+    if (method === "GET" && path === "/user") return ok({ login });
+    if (method === "POST" && path === "/graphql") return ok(this.graphql(String(b.query), login));
     const prefix = `/repos/${OWNER}/${REPO}`;
     if (!path.startsWith(prefix)) return notFound;
     const rest = path.slice(prefix.length);
@@ -295,13 +299,14 @@ export class FakeGithub {
     };
   }
 
-  private graphql(query: string) {
+  private graphql(query: string, login: string) {
     const repository: Record<string, unknown> = {};
     for (const m of query.matchAll(/pr(\d+): pullRequest\(number: (\d+)\)/g)) {
       const issue = this.issues.get(Number(m[2]));
       repository[`pr${m[1]}`] = issue?.pr ? this.prNode(issue) : null;
     }
-    return { data: { repository } };
+    const viewer = /\bviewer\s*\{\s*login\s*\}/.test(query) ? { viewer: { login } } : {};
+    return { data: { ...viewer, repository } };
   }
 
   private prNode(i: FakeIssue) {

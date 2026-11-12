@@ -6,7 +6,7 @@ import type {
   RawEventEnvelope,
   Session,
 } from "@codeden/contracts";
-import { isTrustedReview, type ReviewerLogins } from "../github/review-trust";
+import { isTrustedReviewEvent, type TrustedAuthors } from "../github/review-trust";
 import { type DerivedNotice, prOpenedNoticeId, wakesPm } from "./notices";
 
 /** GitHub domain events that become PM notices (§8.2 step 4, §9). */
@@ -37,13 +37,14 @@ function failedChecks(pr: GithubPr): string[] {
  * that session's own notices do (`wakesPm`); for other PRs, opened PRs and reviews wake the PM
  * while check results and merges only show up in its next digest. New issues always wake it,
  * so it can triage them. Ids derive from the event source, so a repeated sync adds nothing.
- * A review from someone without write access (who is not a trusted login either) carries no
- * body and doesn't wake the PM: on a public repository anyone can review.
+ * A review from someone without write access (neither the account it was read with nor one of
+ * the project's `trustedAuthors`) carries no body and doesn't wake the PM: on a public
+ * repository anyone can review.
  */
 export function deriveGithubNotices(
   events: RawEventEnvelope[],
   session: (id: string) => Session | undefined,
-  trustedLogins?: ReviewerLogins,
+  trustedAuthors?: TrustedAuthors,
 ): DerivedNotice[] {
   const out: DerivedNotice[] = [];
   for (const e of events) {
@@ -68,7 +69,11 @@ export function deriveGithubNotices(
       });
       continue;
     }
-    const { pr, review } = e.payload as { pr: GithubPr; review?: GithubReview };
+    const { pr, review, viewer } = e.payload as {
+      pr: GithubPr;
+      review?: GithubReview;
+      viewer?: string | null;
+    };
     const owner = pr.sessionId ? session(pr.sessionId) : undefined;
     const ownerWakes = owner ? wakesPm(owner) : null;
     const common = { projectId: pr.projectId, target: "pm" as const, sessionId: pr.sessionId };
@@ -124,7 +129,10 @@ export function deriveGithubNotices(
         break;
       case "review.submitted": {
         if (!review) break;
-        const trusted = isTrustedReview(review, trustedLogins?.(pr.projectId) ?? new Set());
+        const trusted = isTrustedReviewEvent(
+          { review, viewer },
+          trustedAuthors?.(pr.projectId) ?? [],
+        );
         out.push({
           // An outsider's review never wakes the PM; it shows up in the next digest.
           wake: trusted ? (ownerWakes ?? true) : false,

@@ -44,6 +44,11 @@ export interface GithubEnv {
   githubProject: Project;
   localProject: Project;
   addSession: (patch?: Partial<Session>) => Session;
+  /**
+   * `gh` signs in as another account: every earlier token is revoked (the next request gets a
+   * 401) and `gh auth token` prints `token`, which GitHub knows as `login`.
+   */
+  switchAccount: (token: string, login: string) => void;
   close: () => void;
 }
 
@@ -201,6 +206,11 @@ export function createGithubEnv(): GithubEnv {
         queuedBehind: [],
       });
       return session;
+    },
+    switchAccount: (token: string, login: string) => {
+      gh.validTokens = new Set([token]);
+      gh.accounts.set(token, login);
+      env.ghTokens = [token];
     },
     close: () => {
       service.stop();
