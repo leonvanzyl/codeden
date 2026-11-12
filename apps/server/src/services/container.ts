@@ -224,6 +224,7 @@ export function createServices(opts: ServicesOptions): AppServices {
     launcher,
     outbox,
     questions,
+    tokens: mcpTokens,
   });
   const queue = new QueueService({
     outbox,

@@ -16,6 +16,7 @@ import type {
   UpdateSessionRequest,
   UserInput,
 } from "@codeden/contracts";
+import type { McpTokenStore } from "../../mcp/tokens";
 import type { SettingsStore } from "../../settings-store";
 import type { ArtifactService } from "../artifacts";
 import { badRequest, conflict, ServiceError } from "../errors";
@@ -44,6 +45,8 @@ export interface SessionServiceDeps {
   launcher: SessionLauncher;
   outbox: Outbox;
   questions: QuestionBroker;
+  /** Revokes a stopped session's MCP tokens. */
+  tokens: Pick<McpTokenStore, "revokeSession">;
   /** Wait before retrying a queued message the runner could not take (default 30 s). */
   outboxRetryMs?: number;
 }
@@ -287,8 +290,9 @@ export class SessionService {
   }
 
   /**
-   * Stop a session: drop its queued messages, end its provider process and dismiss its open
-   * questions. A session that already finished (completed, failed) keeps its status.
+   * Stop a session: drop its queued messages, end its provider process, revoke its MCP tokens
+   * and dismiss its open questions. A session that already finished (completed, failed) keeps
+   * its status.
    */
   async stop(id: string): Promise<Session> {
     const session = this.deps.repo.get(id);
@@ -303,6 +307,9 @@ export class SessionService {
           throw toServiceError(error);
       }
     }
+    // The provider process is gone, so its tokens go too (§8.3), whatever status the session
+    // keeps: a failed session isn't revoked by the lifecycle. Resuming mints a new token.
+    this.deps.tokens.revokeSession(id);
     this.deps.inbox.dismissRequestsForSession(id, "session stopped");
     return this.deps.repo.update(id, (s) =>
       FINISHED.has(s.status) ? s : { ...s, status: "stopped", endedAt: new Date().toISOString() },
