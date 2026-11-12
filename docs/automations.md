@@ -42,6 +42,8 @@ Choose **Starts off** or **Starts on** in the header, then **Save**, or **Save a
 
 **From a template.** On the Templates tab, **Use template** opens the same editor filled in from a built-in or global template, to adjust before saving. **Add and enable** adds it as it is.
 
+**From a session.** Did something once by hand that worked ("audit the auth routes", "update the dependencies and open a PR")? Choose **Make an automation…** in the session's **⋯** menu, or **Make an automation from this session…** in the command palette (**Ctrl K**) while the session is open. The same editor opens for the session's project, filled in from the session: its opening message as the prompt (attachments are left out), its provider, model, effort and permissions, and its title as the name and session title. It runs **only when you run it** until you pick a schedule or an event. Nothing is saved until you press **Save**, and like every new automation it starts off.
+
 **Later.** The automation's page is the same editor plus its schedule, **Run now**, pause and skip, and recent runs. **Duplicate** makes an editable copy (off), **Export** shares it, and the bin icon deletes it (its past runs and sessions stay).
 
 **Files are read-only here.** Automations defined in a `.md` file (see [The file format](#the-file-format)) show a **From file** badge and are edited in the file; **Duplicate to edit** makes a copy you can change in CodeDen.
