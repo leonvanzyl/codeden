@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it } from "vitest";
 import { DiffPanel } from "@/components/workbench/diff-panel";
 import { createMockClient } from "@/lib/api/mock";
-import { useDiffReviewStore } from "@/stores/diff-review";
+import { sessionComments, useDiffReviewStore } from "@/stores/diff-review";
 import { renderWithClient } from "./utils";
 
 /**
@@ -14,13 +14,15 @@ import { renderWithClient } from "./utils";
 
 const sid = "s-keys";
 const path = "src/cart.ts";
+/** Rows: unchanged new 1, added new 2, removed old 2, added new 3, unchanged new 4 and 5. */
 const patch = `diff --git a/${path} b/${path}
 --- a/${path}
 +++ b/${path}
 @@ -1,4 +1,5 @@
  export function total(items: Item[]) {
 +  if (items.length === 0) return 0;
-   let sum = 0;
+-  let sum = 0;
++  let sum = 0; // cents
    for (const item of items) sum += item.price;
    return sum;
 `;
@@ -34,7 +36,7 @@ function renderPanel() {
     gitStatus: async () => ({ branch: "b", baseBranch: "main", ahead: 0, behind: 0, files: [] }),
     getDiff: async (_id: string, scope: DiffResult["scope"]): Promise<DiffResult> => ({
       scope,
-      files: [{ path, change: "modify", additions: 1, deletions: 0, patch }],
+      files: [{ path, change: "modify", additions: 2, deletions: 1, patch }],
       turns: [],
     }),
   };
@@ -84,12 +86,31 @@ function spoken(el: HTMLElement): string {
 /** The first Tab stop in the file's diff that tells the user it starts a comment. */
 const commentStop = (card: HTMLElement) => tabStops(card).find((el) => /comment/i.test(spoken(el)));
 
+/** Press Tab from the top of the page until `target` has the focus. */
+async function tabTo(user: ReturnType<typeof userEvent.setup>, target: HTMLElement) {
+  for (let i = 0; i < 40 && document.activeElement !== target; i++) await user.tab();
+  expect(document.activeElement, "Tab never reaches the comment control").toBe(target);
+}
+
+/** Tab to the file's comment control and open its list of lines with Enter. */
+async function openLines() {
+  const user = userEvent.setup();
+  renderPanel();
+  const stop = commentStop(await fileCard());
+  expect(stop, "no Tab stop in the file's diff starts a comment").toBeDefined();
+  await tabTo(user, stop as HTMLElement);
+  await user.keyboard("{Enter}");
+  const list = await screen.findByRole("listbox", { name: `Lines of ${path}` });
+  expect(document.activeElement).toBe(list);
+  return { user, stop: stop as HTMLElement, list };
+}
+
 afterEach(() => {
   useDiffReviewStore.setState({ comments: {}, sending: {} });
 });
 
 describe("Diff review comments from the keyboard", () => {
-  it("(control) finds the view's own + once a pointer moves over a line", async () => {
+  it("(control) the view's own + still shows, labelled, once a pointer moves over a line", async () => {
     renderPanel();
     const card = await fileCard();
     const line = card.querySelector("diffs-container")?.shadowRoot?.querySelector("[data-line]");
@@ -97,9 +118,8 @@ describe("Diff review comments from the keyboard", () => {
       new PointerEvent("pointermove", { bubbles: true, composed: true, pointerType: "mouse" }),
     );
 
-    const stop = commentStop(card);
-    expect(stop?.hasAttribute("data-utility-button")).toBe(true);
-    expect(stop?.getAttribute("aria-label")).toBe("Comment");
+    const plus = tabStops(card).find((el) => el.hasAttribute("data-utility-button"));
+    expect(plus?.getAttribute("aria-label")).toBe("Comment");
   });
 
   it("offers a Tab stop in a file's diff that says it starts a comment, before any pointer use", async () => {
@@ -107,23 +127,42 @@ describe("Diff review comments from the keyboard", () => {
     const card = await fileCard();
 
     const stops = tabStops(card).map((el) => spoken(el).trim() || el.tagName);
-    expect(
-      commentStop(card),
-      `Tab stops in the file's diff: ${JSON.stringify(stops)}`,
-    ).toBeDefined();
+    const stop = commentStop(card);
+    expect(stop, `Tab stops in the file's diff: ${JSON.stringify(stops)}`).toBeDefined();
+    expect(stop?.getAttribute("aria-label")).toContain(path);
   });
 
   it("starts a comment on a line picked with the arrow keys and Enter", async () => {
-    const user = userEvent.setup();
-    renderPanel();
-    const stop = commentStop(await fileCard());
-    expect(stop, "no Tab stop in the file's diff starts a comment").toBeDefined();
-    stop?.focus();
+    const { user } = await openLines();
 
     // The first row is `export function total`; one row down is the added guard, new line 2.
     await user.keyboard("{ArrowDown}{Enter}");
 
     const editor = await screen.findByRole("textbox", { name: "Comment on new line 2" });
-    expect(document.activeElement).toBe(editor);
+    await waitFor(() => expect(document.activeElement).toBe(editor));
+    expect(screen.queryByRole("listbox")).toBeNull();
+  });
+
+  it("picks several lines with Shift, across both sides of the diff", async () => {
+    const { user } = await openLines();
+
+    await user.keyboard("{ArrowDown}{ArrowDown}{Shift>}{ArrowDown}{/Shift}{Enter}");
+
+    const editor = await screen.findByRole("textbox", {
+      name: "Comment on old line 2 to new line 3",
+    });
+    await waitFor(() => expect(document.activeElement).toBe(editor));
+    const [comment] = sessionComments(useDiffReviewStore.getState(), sid);
+    expect(comment?.quote).toEqual(["-  let sum = 0;", "+  let sum = 0; // cents"]);
+  });
+
+  it("closes the list with Escape, back on the comment control, without a comment", async () => {
+    const { user, stop } = await openLines();
+
+    await user.keyboard("{ArrowDown}{Escape}");
+
+    await waitFor(() => expect(screen.queryByRole("listbox")).toBeNull());
+    expect(document.activeElement).toBe(stop);
+    expect(sessionComments(useDiffReviewStore.getState(), sid)).toHaveLength(0);
   });
 });

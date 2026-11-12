@@ -37,6 +37,7 @@ import { useSession } from "@/lib/queries";
 import { cn } from "@/lib/utils";
 import { type ReviewComment, sessionComments, useDiffReviewStore } from "@/stores/diff-review";
 import { useResolvedTheme } from "@/stores/theme";
+import { DiffLinePicker } from "./diff-line-picker";
 import {
   LineComments,
   OutdatedComments,
@@ -48,6 +49,8 @@ import { GitBar } from "./git-bar";
 
 const noFiles: DiffFile[] = [];
 const noComments: CommentAnchor[] = [];
+/** A file card's buttons show on hover or focus, and always on touch screens. */
+const hoverReveal = "opacity-0 group-hover:opacity-100 focus-visible:opacity-100 touch:opacity-100";
 
 function scopeLabel(scope: DiffScope, turns: { id: string; label: string }[]): string {
   if (scope.kind === "session") return "All changes";
@@ -313,17 +316,28 @@ function FilePatch({
       data-file={file.path}
       ref={card}
     >
-      {onRestore && (
-        <Button
-          variant="secondary"
-          size="xs"
-          className="absolute top-1.5 right-1.5 z-10 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 touch:opacity-100"
-          onClick={onRestore}
-          title={`Restore ${file.path}`}
-        >
-          <RotateCcw /> Restore file
-        </Button>
-      )}
+      <div className="absolute top-1.5 right-1.5 z-10 flex gap-1">
+        {!file.binary && (
+          <DiffLinePicker
+            path={file.path}
+            patch={file.patch}
+            onComment={onComment}
+            onPreview={setPicked}
+            className={hoverReveal}
+          />
+        )}
+        {onRestore && (
+          <Button
+            variant="secondary"
+            size="xs"
+            className={hoverReveal}
+            onClick={onRestore}
+            title={`Restore ${file.path}`}
+          >
+            <RotateCcw /> Restore file
+          </Button>
+        )}
+      </div>
       {file.binary ? (
         <div className="px-3 py-2 font-mono text-xs text-muted-foreground">
           {file.path} · binary file changed
@@ -338,6 +352,7 @@ function FilePatch({
             overflow: options.wrap ? "wrap" : "scroll",
             stickyHeader: true,
             // A "+" by the hovered line (or the picked lines) starts a comment; drag it for a range.
+            // It needs a pointer: `DiffLinePicker` above is the keyboard way in.
             enableGutterUtility: true,
             enableLineSelection: true,
             onGutterUtilityClick: onComment,
