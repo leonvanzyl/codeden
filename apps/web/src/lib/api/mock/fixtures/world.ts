@@ -297,7 +297,6 @@ export const providers: ProviderInfo[] = [
     displayName: "Codex",
     capabilities: {
       ...caps,
-      subagents: false,
       userQuestions: false,
       skills: true,
       liveAutonomy: false,
