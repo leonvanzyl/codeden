@@ -13,6 +13,7 @@ import {
   PanelRight,
   Square,
   SquareTerminal,
+  Workflow,
   X,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -264,6 +265,11 @@ export function ThreadHeader({ session, running }: { session: Session; running: 
                     {actions.forkBlocked ?? "Try another approach in a new worktree"}
                   </span>
                 </span>
+              </DropdownMenuItem>
+            )}
+            {actions.canMakeAutomation && (
+              <DropdownMenuItem onSelect={actions.makeAutomation}>
+                <Workflow /> Make an automation…
               </DropdownMenuItem>
             )}
             {session.role === "agent" && (

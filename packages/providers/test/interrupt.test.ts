@@ -1,3 +1,4 @@
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Options, Query, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
@@ -56,6 +57,8 @@ const sessions: Array<{ close(): Promise<void> }> = [];
 afterEach(async () => {
   await Promise.all(sessions.splice(0).map((s) => s.close()));
   delete process.env.FAKE_CODEX_TURN;
+  delete process.env.FAKE_CODEX_REQUESTS;
+  delete process.env.FAKE_CODEX_LOG;
 });
 
 function collect(events: AsyncIterable<AgentEvent>): AgentEvent[] {
@@ -143,4 +146,209 @@ describe("Codex interrupt", () => {
     await settle();
     expect(events.filter((e) => e.type === "turn.interrupted")).toHaveLength(1);
   });
+
+  const notify = (method: string, params: object, afterInterrupt = false) => ({
+    notify: true,
+    method,
+    params,
+    ...(afterInterrupt ? { afterInterrupt } : {}),
+  });
+
+  /**
+   * A session on the fake app-server whose turn sends `script`, ready once `ready` holds.
+   * Returns the session, its events and the `turn/interrupt` requests it made.
+   */
+  async function scriptedSession(
+    script: object[],
+    ready: (events: AgentEvent[]) => boolean,
+    turnMode?: "open",
+  ) {
+    const dir = mkdtempSync(join(tmpdir(), "codeden-codex-stop-"));
+    writeFileSync(join(dir, "requests.json"), JSON.stringify(script));
+    process.env.FAKE_CODEX_REQUESTS = join(dir, "requests.json");
+    process.env.FAKE_CODEX_LOG = join(dir, "requests.log");
+    if (turnMode) process.env.FAKE_CODEX_TURN = turnMode;
+    const session = new CodexSession(base, { executable: fakeCodex, interruptTimeoutMs: 50 });
+    sessions.push(session);
+    const events = collect(session.events);
+    await session.start();
+    await session.send({ text: "go", attachments: [] });
+    await waitFor(() => ready(events));
+    const interrupts = () =>
+      readFileSync(join(dir, "requests.log"), "utf8")
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line))
+        .filter((r) => r.method === "turn/interrupt")
+        .map((r) => r.params);
+    return { session, events, interrupts };
+  }
+
+  /** A turn that spawns a sub-agent (`child-1`) and leaves its turn running a command. */
+  function withRunningSubagent(turnMode?: "open") {
+    return scriptedSession(
+      [
+        notify("item/completed", {
+          item: {
+            type: "subAgentActivity",
+            id: "call-1",
+            kind: "started",
+            agentThreadId: "child-1",
+            agentPath: "/root/auditor",
+          },
+        }),
+        notify("turn/started", {
+          threadId: "child-1",
+          turn: { id: "ct-1", status: "inProgress", items: [], error: null },
+        }),
+        notify("item/started", {
+          threadId: "child-1",
+          turnId: "ct-1",
+          item: {
+            type: "commandExecution",
+            id: "cmd-1",
+            command: "pnpm test",
+            cwd: "/w",
+            status: "inProgress",
+            commandActions: [],
+            aggregatedOutput: null,
+            exitCode: null,
+            durationMs: null,
+          },
+        }),
+      ],
+      (events) => events.some((e) => e.type === "item.started" && e.item.id === "cmd-1"),
+      turnMode,
+    );
+  }
+
+  /** A v1 spawn of `child-2` whose agent isn't known yet: no receiver, no turn. */
+  const spawnCall = (status: string, receivers: string[]) => ({
+    type: "collabAgentToolCall",
+    id: "call-2",
+    tool: "spawnAgent",
+    status,
+    senderThreadId: "thread-1",
+    receiverThreadIds: receivers,
+    prompt: "Audit the parser",
+    model: null,
+    reasoningEffort: null,
+    agentsStates: {},
+  });
+  const pendingCard = (events: AgentEvent[]) =>
+    events.some((e) => e.type === "item.started" && e.item.id === "call-2");
+  const cards = (events: AgentEvent[], id: string) =>
+    events.flatMap((e) =>
+      (e.type === "item.completed" || e.type === "item.updated") && e.item.id === id
+        ? [{ type: e.type, item: e.item }]
+        : [],
+    );
+
+  const childEnded = (events: AgentEvent[]) =>
+    events.some((e) => e.type === "turn.interrupted" && e.threadId === "s1:thread-call-1");
+
+  it("stops running sub-agents too, closing a child turn its interrupt never ends", async () => {
+    const { session, events, interrupts } = await withRunningSubagent("open");
+    await session.interrupt();
+    // The root confirms at once; the child never does, so its deadline closes it.
+    await waitFor(() => childEnded(events));
+    expect(interrupts()).toEqual(
+      expect.arrayContaining([
+        { threadId: "child-1", turnId: "ct-1" },
+        { threadId: "thread-1", turnId: "turn-1" },
+      ]),
+    );
+    expect(
+      events.filter((e) => e.type === "turn.interrupted").map((e) => [e.threadId, e.turnId]),
+    ).toEqual(
+      expect.arrayContaining([
+        ["s1:thread-root", "turn-1"],
+        ["s1:thread-call-1", "ct-1"],
+      ]),
+    );
+    const card = events.filter((e) => e.type === "item.completed" && e.item.kind === "subagent");
+    expect(card.at(-1)).toMatchObject({
+      threadId: "s1:thread-root",
+      // The command the turn's end closed still counts as a tool call.
+      item: { id: "call-1", status: "cancelled", stats: { toolUses: 1 } },
+    });
+  });
+
+  it("cancels a spawn still pending when Stop comes", async () => {
+    const { session, events, interrupts } = await scriptedSession(
+      [notify("item/started", { item: spawnCall("inProgress", []) })],
+      pendingCard,
+      "open",
+    );
+    await session.interrupt();
+    expect(cards(events, "call-2").at(-1)).toMatchObject({
+      type: "item.completed",
+      item: { status: "cancelled" },
+    });
+    await waitFor(() =>
+      events.some((e) => e.type === "turn.interrupted" && e.threadId === "s1:thread-root"),
+    );
+    expect(interrupts()).toEqual([{ threadId: "thread-1", turnId: "turn-1" }]);
+  });
+
+  it("stops the agent of a pending spawn that starts after Stop", async () => {
+    const { session, events, interrupts } = await scriptedSession(
+      [
+        notify("item/started", { item: spawnCall("inProgress", []) }),
+        // After the root turn is interrupted, the spawn completes and its agent starts.
+        notify("item/completed", { item: spawnCall("completed", ["child-2"]) }, true),
+        notify(
+          "turn/started",
+          {
+            threadId: "child-2",
+            turn: { id: "ct-2", status: "inProgress", items: [], error: null },
+          },
+          true,
+        ),
+      ],
+      pendingCard,
+      "open",
+    );
+    await session.interrupt();
+    // Its interrupt is never confirmed, so the deadline closes that turn.
+    await waitFor(() =>
+      events.some((e) => e.type === "turn.interrupted" && e.threadId === "s1:thread-call-2"),
+    );
+    expect(interrupts()).toEqual(
+      expect.arrayContaining([
+        { threadId: "thread-1", turnId: "turn-1" },
+        { threadId: "child-2", turnId: "ct-2" },
+      ]),
+    );
+    // The card stayed cancelled: it never showed the stopped agent as working again.
+    expect(cards(events, "call-2").map((e) => e.item.status)).not.toContain("in_progress");
+    expect(cards(events, "call-2").at(-1)).toMatchObject({ item: { status: "cancelled" } });
+  });
+
+  it("stops sub-agents still working after the session's own turn ended", async () => {
+    const { session, events, interrupts } = await withRunningSubagent();
+    await waitFor(() =>
+      events.some((e) => e.type === "turn.completed" && e.threadId === "s1:thread-root"),
+    );
+    await session.interrupt();
+    await waitFor(() => childEnded(events));
+    expect(interrupts()).toEqual([{ threadId: "child-1", turnId: "ct-1" }]);
+    expect(
+      events.filter((e) => e.type === "item.completed" && e.item.kind === "subagent").at(-1),
+    ).toMatchObject({ item: { status: "cancelled" } });
+  });
 });
+
+const fakeCodex = {
+  kind: "node-script" as const,
+  path: process.execPath,
+  script: join(import.meta.dirname, "fixtures", "fake-codex", "app-server.mjs"),
+};
+
+async function waitFor(check: () => boolean): Promise<void> {
+  const deadline = Date.now() + 3000;
+  while (!check()) {
+    if (Date.now() > deadline) throw new Error("timed out waiting");
+    await settle();
+  }
+}

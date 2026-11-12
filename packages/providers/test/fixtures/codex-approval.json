@@ -12,7 +12,7 @@
   "interrupt": true,
   "approvals": true,
   "userQuestions": true,
-  "subagents": false,
+  "subagents": true,
   "rollback": false,
   "fork": true,
   "images": true,

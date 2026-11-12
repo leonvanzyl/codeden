@@ -25,9 +25,8 @@ import { CodexSession } from "./session";
 export const CODEX_PROVIDER_ID = "codex";
 
 /**
- * Honest flags: subagents (collab agents) are experimental in app-server and not surfaced as
- * child threads yet; rollback exists in the protocol but is not wired up. Fork is
- * `thread/fork` (`forkConversation`).
+ * Honest flags: agents Codex spawns surface as child threads (`CodexSubagents`); rollback
+ * exists in the protocol but is not wired up. Fork is `thread/fork` (`forkConversation`).
  */
 const capabilities: ProviderCapabilities = {
   resume: true,
@@ -35,7 +34,7 @@ const capabilities: ProviderCapabilities = {
   interrupt: true,
   approvals: true,
   userQuestions: true,
-  subagents: false,
+  subagents: true,
   rollback: false,
   fork: true,
   images: true,

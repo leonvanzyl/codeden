@@ -3,6 +3,7 @@
  * Everything that crosses a process or network boundary is defined here first.
  */
 export * from "./agent-config";
+export * from "./agent-config-hooks";
 export * from "./agent-events";
 export * from "./api";
 export * from "./automations-api";

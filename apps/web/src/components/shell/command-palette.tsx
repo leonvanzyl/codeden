@@ -14,6 +14,7 @@ import {
   Settings,
   SlidersHorizontal,
   SquareTerminal,
+  Workflow,
 } from "lucide-react";
 import type { ReactNode } from "react";
 import { Hotkey } from "@/components/common/bits";
@@ -28,8 +29,8 @@ import {
   CommandList,
   CommandSeparator,
 } from "@/components/ui/command";
-import { useSession, useSnapshot } from "@/lib/queries";
-import { useSessionActions } from "@/lib/session-actions";
+import { useSnapshot } from "@/lib/queries";
+import { canMakeAutomation, useSessionActions } from "@/lib/session-actions";
 import { formatCombo, type ShortcutId, shortcut } from "@/lib/shortcuts";
 import { useLayoutStore } from "@/stores/layout";
 import { useThemeStore } from "@/stores/theme";
@@ -116,8 +117,11 @@ export function CommandPalette() {
   const navigate = useNavigate();
   const layout = useLayoutStore();
   const toggleTheme = useThemeStore((s) => s.toggle);
+  // The session page that's open, if any: "Make an automation from this session…" and "Fork this
+  // session" act on it.
   const { sessionId } = useParams({ strict: false }) as { sessionId?: string };
-  const current = useSession(sessionId);
+  const current = sessionId ? data?.sessions.find((s) => s.id === sessionId) : undefined;
+  const automationSource = current && canMakeAutomation(current) ? current : undefined;
 
   const run = (fn: () => void) => () => {
     setOpen(false);
@@ -181,6 +185,22 @@ export function CommandPalette() {
           <CommandSeparator />
           <CommandGroup heading="Actions">
             {current && <ForkCurrentSession session={current} close={() => setOpen(false)} />}
+            {automationSource?.projectId && (
+              <Row
+                icon={<Workflow />}
+                label="Make an automation from this session…"
+                hint={automationSource.title ?? automationSource.purpose}
+                onSelect={run(
+                  () =>
+                    automationSource.projectId &&
+                    navigate({
+                      to: "/projects/$projectId/automations/new",
+                      params: { projectId: automationSource.projectId },
+                      search: { session: automationSource.id },
+                    }),
+                )}
+              />
+            )}
             <Row
               icon={<MessageSquarePlus />}
               label="New session…"

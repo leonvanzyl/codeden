@@ -139,6 +139,7 @@ The published `codeden` npm package bundles the server, runner and CLI with tsdo
   - `runner/`: the runner lock file and event journal.
   - `wt/<project>/<session>/`: git worktrees. Short paths, to stay clear of Windows path-length limits.
   - `artifacts/`: screenshots and files shared in chat.
+  - `agent-config/disabled-hooks.json`: hooks switched off on the Agents page, until they are enabled again (§12.4).
   - `logs/`
 - **Secrets** (an optional ElevenLabs key, API keys if a user chooses that mode) live in the **OS keychain** through `@napi-rs/keyring`, never in files. GitHub and provider credentials are inherited at runtime, not stored (§14).
 - **Event log.** Append-only `events` table (`seq`, `session_id`, `type`, `payload`, `ts`). **It's never pruned**: it's the audit trail and the replay source.
@@ -189,6 +190,7 @@ interface ProviderSession {
   - **Methods:** threads, turns, items, approvals and steering. A fork is `thread/fork` through a short-lived app-server, closed before the copy is resumed. The session that resumes it sets its own cwd, policy and instructions.
   - **Types:** protocol types are generated from the installed Codex version.
   - **Permissions:** sandbox and approval policies map onto CodeDen's autonomy levels (§11.2).
+  - **Subagents:** an agent Codex spawns (a `collabAgentToolCall` spawn, or a `subAgentActivity` start) becomes a subagent card, and the spawned agent's thread, whose notifications arrive under its own thread id, becomes the card's child thread. The card follows the agent's turns, its approvals go to the child thread, and its calls to other agents (message, wait, close) show as tool calls named after their targets. Threads no spawn claims are not shown.
   - **CodeDen tools:** the MCP server is injected through config overrides.
 - **Fake and Replay** (development and tests only):
   - **Fake** is a scripted provider for demos and deterministic tests.
@@ -357,7 +359,7 @@ The orchestrator must always know what's happening across all projects, and each
   - issue triage
   - stale PR follow-up
 - **Where they live.** Global templates live in `~/.codeden/automations/`. Project automations live in the repo's `.codeden/automations/` (commit them or not) or in the database.
-- **Creating and editing in the UI.** **New automation** opens one editor: name and target, when it runs (human schedule choices that compile to cron, with a plain-English summary and the next three runs in a chosen timezone; an event in plain words; or only when run by hand), the prompt with an "Insert placeholder" menu, the unified provider/model/effort picker, the permissions ladder, and advanced options (session title, work key, guards) collapsed. Templates open the same editor prefilled. Database automations stay editable on their page, with duplicate and delete; file-based ones are read-only there, with "Duplicate to edit". PMs create and change database automations with `create_automation` and `update_automation`, under the same validation (`createdBy: pm`).
+- **Creating and editing in the UI.** **New automation** opens one editor: name and target, when it runs (human schedule choices that compile to cron, with a plain-English summary and the next three runs in a chosen timezone; an event in plain words; or only when run by hand), the prompt with an "Insert placeholder" menu, the unified provider/model/effort picker, the permissions ladder, and advanced options (session title, work key, guards) collapsed. Templates open the same editor prefilled, and so does an agent session's **Make an automation…** (its ⋯ menu or the command palette): the opening message as the prompt, the session's agent and permissions as the session action, its title as the name, run by hand; nothing is saved until Save. Database automations stay editable on their page, with duplicate and delete; file-based ones are read-only there, with "Duplicate to edit". PMs create and change database automations with `create_automation` and `update_automation`, under the same validation (`createdBy: pm`).
 - **Sharing.** The Markdown + frontmatter format is also the exchange format: export one automation (`<slug>.md`, or copied as Markdown) or a project's automations as a `.zip`; import `.md` files, a zip or pasted text. Imports go through the file parser and validation, refuse unknown fields, are size- and count-limited before parsing, never run anything, and create database automations (`createdBy: import`) that start off; Full permissions are flagged in the preview.
 - **Control.** Everything is toggleable globally, per project and per automation. **All automations are off by default**: a new project offers a starter set to enable; new, imported and PM-created automations start off too.
 - **Issue triage.** The PM reads new issues and classifies them as ready, needs info, unsafe, out of scope or duplicate. It applies labels and comments according to project policy, and either starts a session or puts a decision in your inbox when unsure ("Should I take this on?").
@@ -534,6 +536,7 @@ First-class screens for each provider's own files:
 - **Skills:** each provider's user and project skill folders, with create, edit and enable controls.
 - **Subagents:** `.claude/agents/` and `~/.claude/agents/`, plus Codex equivalents where they exist.
 - **MCP servers:** `.mcp.json`, Claude user config and `~/.codex/config.toml`. Add, edit, test the connection, and enable per provider.
+- **Hooks:** the `hooks` key of Claude's `~/.claude/settings.json`, `.claude/settings.json` and `.claude/settings.local.json`, listed by file with event, matcher, type, command and timeout. Add, edit, disable and delete; only the `hooks` value is rewritten. Claude has no per-hook switch, so disabling moves the hook to a shelf in CodeDen's data folder and enabling writes it back. The tab shows for providers whose native config has hooks (`agentConfigFeatures` in contracts).
 - **What's loaded:** for any session, a view of which memory files, skills and MCP servers are in its context.
 
 Edits are written to the native files in place (Principle 2), with a diff preview and a backup before overwriting.

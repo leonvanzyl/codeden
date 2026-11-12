@@ -31,6 +31,13 @@ export function forkBlocked(session: Session): string | null {
   return null;
 }
 
+/**
+ * Sessions that can be turned into an automation ("Make an automation…"): agent sessions in a
+ * project. PM and orchestrator sessions are conversations, not repeatable tasks.
+ */
+export const canMakeAutomation = (session: Pick<Session, "role" | "projectId">) =>
+  session.role === "agent" && session.projectId !== null;
+
 /** A link to the session in this CodeDen (no token: the browser's cookie signs it in). */
 export const sessionLink = (sessionId: string, origin = window.location.origin) =>
   `${origin}/sessions/${encodeURIComponent(sessionId)}`;
@@ -76,8 +83,8 @@ export function announceArchive(
 
 /**
  * What you can do to a session from its row menu, the thread header's ⋯ menu or the command
- * palette: open, rename, copy its link, stop, fork, archive (with Undo) and unarchive. They all
- * use this, so they show the same toasts.
+ * palette: open, rename, copy its link, make an automation from it, stop, fork, archive (with
+ * Undo) and unarchive. They all use this, so they show the same toasts.
  */
 export function useSessionActions(session: Session) {
   const client = useClient();
@@ -141,6 +148,16 @@ export function useSessionActions(session: Session) {
       } catch (error) {
         onError(error);
       }
+    },
+    canMakeAutomation: canMakeAutomation(session),
+    /** Open the New automation editor prefilled from this session; nothing is saved yet. */
+    makeAutomation: () => {
+      if (!session.projectId) return;
+      void navigate({
+        to: "/projects/$projectId/automations/new",
+        params: { projectId: session.projectId },
+        search: { session: session.id },
+      });
     },
     canStop: canStop(session),
     stop: () => stop.mutate(),
