@@ -211,7 +211,7 @@ Settings are **enforced by the server**, never left to agent judgement. Open the
 | Protected paths | none | Added to the vision's protected areas |
 | Allow deploy and release changes (`allowDeploys`) | off | While off, deploy files (`.github/workflows/*deploy*`, `*release*`, `*publish*`, `Dockerfile`, `fly.toml`, `vercel.json`, `netlify.toml`) are protected |
 
-**Tuning.** The **Merge checks** and (in a dark factory) **The scout** sections of the settings cover every knob below except `areas` and `builderProvider`, which are set through the API's `tuning` field. Saving changes only the knobs you send; the rest keep their saved values.
+**Tuning.** The **Merge checks** and (in a dark factory) **The scout** sections of the settings cover every knob below except `areas`, `builderProvider` and `idleGraceMin`, which are set through the API's `tuning` field. Saving changes only the knobs you send; the rest keep their saved values.
 
 | Setting | In the settings | Default |
 |---|---|---|
@@ -226,6 +226,7 @@ Settings are **enforced by the server**, never left to agent judgement. Open the
 | `maxIssuesPerRound` | The scout: Issues per round | `3` |
 | `areas` (dark factory: the review areas the scout may use) | API only | all eight |
 | `builderProvider` | API only | `auto` (the agent role default) |
+| `idleGraceMin` (minutes a builder or reviewer may stay idle after its last turn, once reminded of its step, before the item or review fails) | API only | `10` |
 
 Spend comes from the same ledger as the [usage reports](usage-and-costs.md).
 

@@ -1,6 +1,7 @@
 import type { FactoryItem, FactoryLoop, Project } from "@codeden/contracts";
 import { errorMessage } from "../errors";
 import { type FactoryContext, factoryNotice, pauseLoop, raiseInbox } from "./context";
+import { stoppedSinceNudge } from "./idle";
 import { failItem } from "./outcomes";
 import { ANALYZE_NUDGE, BUILDER_NUDGE, REPRODUCE_NUDGE } from "./prompts";
 
@@ -9,7 +10,7 @@ const BUSY = new Set(["created", "queued", "starting", "running", "waiting"]);
 /**
  * Building (§10.1): wait for the builder's turn to end with its first step reported (bugs and
  * features) and then an open PR; nudge it once when it ends without, fail the item when the
- * session dies or ends again without.
+ * session dies, or ends again without and stays idle past the grace period (`idleGraceMin`).
  */
 export async function advanceBuilding(
   ctx: FactoryContext,
@@ -51,7 +52,7 @@ export async function advanceBuilding(
       await ctx.sessions.message(s.id, item.type === "bug" ? REPRODUCE_NUDGE : ANALYZE_NUDGE);
       return loop;
     }
-    if (Date.parse(s.updatedAt) > Date.parse(asked)) {
+    if (stoppedSinceNudge(s, asked, ctx.now(), loop.tuning)) {
       return failItem(ctx, loop, item, `The builder ended without reporting its ${step}`);
     }
     return loop;
@@ -63,7 +64,7 @@ export async function advanceBuilding(
     await ctx.sessions.message(s.id, BUILDER_NUDGE);
     return loop;
   }
-  if (Date.parse(s.updatedAt) > Date.parse(nudged)) {
+  if (stoppedSinceNudge(s, nudged, ctx.now(), loop.tuning)) {
     const why = s.result ? `${s.result.outcome}: ${s.result.summary}` : "no pull request";
     return failItem(ctx, loop, item, `The builder finished without a pull request (${why})`);
   }

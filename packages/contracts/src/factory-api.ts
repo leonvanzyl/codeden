@@ -246,6 +246,13 @@ export const FactoryTuning = z.object({
   builderProvider: z.union([z.literal("auto"), ProviderId]).default("auto"),
   /** Minutes to wait for main CI after a merge before calling it done. */
   watchTimeoutMin: z.int().positive().default(120),
+  /**
+   * Minutes a builder or reviewer may stay idle, after it was reminded of its step (report,
+   * pull request or verdict) and ended its turn again, before the item fails. An agent waiting
+   * on its own background command ends its turn and is woken when the command exits, so a turn
+   * end alone doesn't mean it stopped working.
+   */
+  idleGraceMin: z.int().positive().default(10),
 });
 export type FactoryTuning = z.infer<typeof FactoryTuning>;
 

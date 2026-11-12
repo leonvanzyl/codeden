@@ -137,6 +137,8 @@ describe("factory API contracts (§10.1)", () => {
     expect(loop.tuning.maxChangedLines).toBe(5_000);
     expect(loop.tuning.maxChangedFiles).toBeNull();
     expect(loop.tuning.areas).toContain("security");
+    // Loops saved before the idle grace existed get its default.
+    expect(loop.tuning.idleGraceMin).toBe(10);
     expect(loop.seenFailedShas).toEqual([]);
     expect(loop.scout).toEqual({
       sessionId: null,
@@ -174,6 +176,13 @@ describe("factory API contracts (§10.1)", () => {
     ).toEqual({ maxChangedLines: null });
     expect(
       SetAutonomyModeRequest.safeParse({ mode: "dark_factory", tuning: { maxChangedLines: 0 } })
+        .success,
+    ).toBe(false);
+    expect(
+      SetAutonomyModeRequest.parse({ mode: "dark_factory", tuning: { idleGraceMin: 30 } }).tuning,
+    ).toEqual({ idleGraceMin: 30 });
+    expect(
+      SetAutonomyModeRequest.safeParse({ mode: "dark_factory", tuning: { idleGraceMin: 0 } })
         .success,
     ).toBe(false);
     expect(

@@ -15,6 +15,7 @@ import {
 } from "./checks";
 import { type FactoryContext, factoryNotice, visionOf } from "./context";
 import type { FactoryPr, PrEvidence } from "./github-port";
+import { stoppedSinceNudge } from "./idle";
 import { autoMerge, prDecidedOutside, readyForYou } from "./merge";
 import { escalate, failItem, runAudit } from "./outcomes";
 import { isUiFile, mayMerge, pickReviewer } from "./policy";
@@ -239,7 +240,10 @@ async function ensureReviewer(
   }));
 }
 
-/** While checks are pending: nudge a reviewer that ended its turn without a verdict. */
+/**
+ * While checks are pending: nudge a reviewer that ended its turn without a verdict, and fail
+ * the review once it ends again without one and stays idle past the grace period.
+ */
 async function reviewerStalled(
   ctx: FactoryContext,
   project: Project,
@@ -266,7 +270,7 @@ async function reviewerStalled(
     await ctx.sessions.message(s.id, REVIEWER_NUDGE);
     return loop;
   }
-  if (Date.parse(s.updatedAt) > Date.parse(nudged)) {
+  if (stoppedSinceNudge(s, nudged, ctx.now(), loop.tuning)) {
     return failReview(ctx, project, loop, item, "The reviewer ended without a verdict");
   }
   return loop;
