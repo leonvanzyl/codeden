@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import {
   Automation,
   type AutomationCreator,
@@ -43,6 +44,20 @@ export interface CreateOptions {
   /** Who creates it (`user` when omitted). */
   createdBy?: AutomationCreator;
 }
+
+/** Options of `AutomationDefinitions.update`. */
+export interface UpdateOptions {
+  /**
+   * When the change gives an automation that is on a different trigger, action or guards,
+   * switch it off in the same change, so a person approves what it now does before it runs
+   * again (a PM's edits, §10). Only the automation's own switch: an automation for all
+   * projects keeps its per-project overrides.
+   */
+  switchOffOnChange?: boolean;
+}
+
+/** The fields that decide what an automation does, when and how often. */
+export const BEHAVIOUR_FIELDS = ["trigger", "action", "guards"] as const;
 
 /**
  * Database-stored automations (§10): create (from a template or from scratch), update,
@@ -99,7 +114,7 @@ export class AutomationDefinitions {
     return this.save(automation);
   }
 
-  update(id: string, req: UpdateAutomationRequest): Automation {
+  update(id: string, req: UpdateAutomationRequest, opts: UpdateOptions = {}): Automation {
     const current = this.editable(id);
     if (req.target?.type === "project") this.deps.projects.get(req.target.projectId);
     const { workKey: _drop, ...rest } = current;
@@ -116,7 +131,13 @@ export class AutomationDefinitions {
       updatedAt: new Date().toISOString(),
     });
     validateAutomation(next);
-    return this.save(next);
+    const switchOff =
+      opts.switchOffOnChange &&
+      next.enabled &&
+      BEHAVIOUR_FIELDS.some(
+        (key) => req[key] !== undefined && !isDeepStrictEqual(current[key], next[key]),
+      );
+    return this.save(switchOff ? { ...next, enabled: false } : next);
   }
 
   remove(id: string): void {

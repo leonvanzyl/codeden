@@ -5,7 +5,8 @@ import {
   AutomationTrigger,
 } from "@codeden/contracts";
 import { z } from "zod";
-import { defineTool } from "../../define";
+import { pmChangeInbox } from "../../../services/automations/pm-change-notice";
+import { defineTool, ToolError } from "../../define";
 
 const fields = {
   name: z.string().trim().min(1).max(200),
@@ -53,11 +54,15 @@ export const createAutomation = defineTool({
   },
 });
 
-/** `update_automation` (§10): change an automation created in CodeDen (not a file). */
+/**
+ * `update_automation` (§10): change an automation of this project created in CodeDen (not a
+ * file). A change to what an automation that is on does (trigger, action, guards) switches it
+ * off and tells the user, who switches it on again; automations for all projects are the user's.
+ */
 export const updateAutomation = defineTool({
   name: "update_automation",
   description:
-    "Change an automation of this project that lives in CodeDen (not a .md file): any of name, description, trigger, action, guards or work key. Validated like automation files. Does not switch it on or off. File-based automations are edited in their file.",
+    "Change an automation of this project that lives in CodeDen (not a .md file): any of name, description, trigger, action, guards or work key. Validated like automation files. Changing the trigger, action or guards of an automation that is on switches it OFF: tell the user, who reviews the change (it is in their inbox) and switches it on again in Automations. Renaming or a new description keeps it as it is. File-based automations are edited in their file; automations for all projects only by the user.",
   roles: ["pm"],
   scope: "project",
   input: z.object({
@@ -69,13 +74,27 @@ export const updateAutomation = defineTool({
     guards: fields.guards.optional(),
     workKey: fields.workKey.optional(),
   }),
-  handler: async ({ automationId, ...patch }, { services, projectId }) => {
+  handler: async ({ automationId, ...patch }, { services, projectId, sessionId }) => {
     const current = services.automations.definitions.get(automationId);
-    if (current.target.type === "project" && current.target.projectId !== projectId) {
-      throw new Error(`Automation ${automationId} belongs to another project`);
+    if (current.target.type === "all_projects") {
+      throw new ToolError(
+        `Automation ${automationId} runs in all projects; only the user changes it, in Automations`,
+      );
     }
-    const updated = services.automations.definitions.update(automationId, patch);
+    if (current.target.projectId !== projectId) {
+      throw new ToolError(`Automation ${automationId} belongs to another project`);
+    }
+    const updated = services.automations.definitions.update(automationId, patch, {
+      switchOffOnChange: true,
+    });
     services.automations.refresh();
-    return { updated: summary(updated) };
+    if (!current.enabled || updated.enabled) return { updated: summary(updated) };
+    services.inbox.put(
+      pmChangeInbox(current, updated, { projectId, sessionId }, new Date().toISOString()),
+    );
+    return {
+      updated: summary(updated),
+      note: "Switched off because it was on and you changed what it does. The user reviews the change in their inbox and switches it on again in Automations.",
+    };
   },
 });
