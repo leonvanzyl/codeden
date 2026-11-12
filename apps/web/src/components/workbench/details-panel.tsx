@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import { ProviderMark } from "@/components/common/bits";
 import { AutonomyBadge } from "@/components/thread/autonomy";
 import { Switch } from "@/components/ui/switch";
+import { forkOriginText } from "@/lib/fork-origin";
 import { ago, compact, statusLabel, usd } from "@/lib/format";
 import { useSession } from "@/lib/queries";
 import { useTranscriptsStore } from "@/stores/transcripts";
@@ -33,6 +34,7 @@ const startedByLabel = {
  */
 function ForkedFromRow({ origin }: { origin: ForkOrigin }) {
   const source = useSession(origin.sessionId);
+  const text = forkOriginText(origin);
   return (
     <Row label="Forked from">
       <Link
@@ -42,19 +44,9 @@ function ForkedFromRow({ origin }: { origin: ForkOrigin }) {
       >
         {source ? (source.title ?? source.purpose) : origin.sessionId}
       </Link>
-      <span className="block text-2xs text-muted-foreground">
-        {origin.checkpoint === null
-          ? "Code: its branch"
-          : origin.checkpoint === 0
-            ? "Code: its files when it started"
-            : `Code: its files after turn ${origin.checkpoint}`}
-      </span>
-      {origin.turnId && (
-        <span className="block text-2xs text-muted-foreground">
-          {origin.checkpoint
-            ? `Conversation: up to the end of turn ${origin.checkpoint}`
-            : "Conversation: up to the end of the turn it was forked from"}
-        </span>
+      <span className="block text-2xs text-muted-foreground">{text.code}</span>
+      {text.conversation && (
+        <span className="block text-2xs text-muted-foreground">{text.conversation}</span>
       )}
     </Row>
   );

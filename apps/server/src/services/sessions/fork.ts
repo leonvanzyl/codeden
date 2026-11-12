@@ -9,7 +9,7 @@ import type {
 import { badRequest, conflict, type ServiceError } from "../errors";
 import type { ProjectService } from "../projects/project-service";
 import { type RunnerPort, toServiceError } from "../runner-port";
-import { confirmedCheckpoint, forkTurn } from "./fork-turn";
+import { confirmedCheckpoint, forkPointMissing, forkTurn } from "./fork-turn";
 import type { LaunchFork } from "./launcher";
 import type { SessionRepo, StoredStartMeta } from "./repo";
 
@@ -130,12 +130,15 @@ export async function planFork(
       },
       FORK_TIMEOUT_MS,
     )
-    .catch(rethrow);
+    .catch((error: unknown) => {
+      throw forkPointMissing(error) ?? toServiceError(error);
+    });
   if (!earlier) {
     const late = sourceMoved(repo, source, turns, provider);
     if (late) throw late;
   }
-  return forkPlan(source, project, { checkpoint, resumeToken, turnId: at?.turnId }, req);
+  const origin = { checkpoint, resumeToken, turnId: at?.turnId, turnNumber: at?.turnNumber };
+  return forkPlan(source, project, origin, req);
 }
 
 /**
@@ -186,10 +189,16 @@ function forkProject(
 export function forkPlan(
   source: Session,
   project: Project,
-  origin: { checkpoint: number | null; resumeToken: string; turnId?: string },
+  origin: {
+    checkpoint: number | null;
+    resumeToken: string;
+    turnId?: string;
+    /** The source's turn number of `turnId` (1 is its first); 0 or absent when unknown. */
+    turnNumber?: number;
+  },
   req: ForkSessionRequest,
 ): ForkPlan {
-  const { checkpoint, turnId } = origin;
+  const { checkpoint, turnId, turnNumber } = origin;
   const now = new Date().toISOString();
   const session: Session = {
     id: randomUUID(),
@@ -220,7 +229,12 @@ export function forkPlan(
     runnerId: null,
     automationRunId: null,
     rootThreadId: null,
-    forkedFrom: { sessionId: source.id, checkpoint, ...(turnId ? { turnId } : {}) },
+    forkedFrom: {
+      sessionId: source.id,
+      checkpoint,
+      ...(turnId ? { turnId } : {}),
+      ...(turnId && turnNumber ? { turnNumber } : {}),
+    },
     createdAt: now,
     updatedAt: now,
     endedAt: null,

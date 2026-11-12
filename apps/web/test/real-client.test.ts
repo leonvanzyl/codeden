@@ -7,6 +7,7 @@ import { openTerminalSocket } from "@/lib/api/terminal-channel";
 import { buildFileTree } from "@/lib/file-tree";
 import { applyTranscriptMessage } from "@/lib/transcript/apply-transcript";
 import { transcriptFromSnapshot } from "@/lib/transcript/reducer";
+import { buildTimeline } from "@/lib/transcript/timeline";
 
 /** Minimal WebSocket double: records sent frames, lets the test push server frames. */
 class FakeSocket {
@@ -231,6 +232,59 @@ describe("transcript watch", () => {
     expect(next.items.a?.item).toMatchObject({ text: "Hello" });
     expect(next.turns.u1?.status).toBe("completed");
     expect(state.threads.t1?.itemIds).toEqual(["a"]);
+  });
+
+  it("keeps each turn's fork point as turns finish live", () => {
+    const turn = (id: string, patch: object) =>
+      ({ ...snap.turns[0], id, ...patch }) as TranscriptMessage["turns"][number];
+    const say = (turnId: string, position: number) =>
+      ({
+        sessionId: "s1",
+        threadId: "t1",
+        turnId,
+        position,
+        item: { id: `m-${turnId}`, kind: "assistant_message", status: "completed", text: turnId },
+        createdAt: ts,
+        updatedAt: ts,
+      }) as TranscriptMessage["items"][number];
+    const message = (seq: number, turns: TranscriptMessage["turns"], items = [] as never[]) =>
+      ({
+        type: "transcript",
+        sessionId: "s1",
+        seq,
+        threads: [],
+        turns,
+        items,
+      }) as TranscriptMessage;
+
+    // The hydrated turn u1 finishes, then u2 runs and finishes, then u3 starts.
+    let state = transcriptFromSnapshot(snap);
+    state = applyTranscriptMessage(
+      state,
+      message(8, [turn("u1", { status: "completed", completedAt: ts, forkPoint: "fp-1" })]),
+    );
+    state = applyTranscriptMessage(
+      state,
+      message(9, [turn("u2", { status: "completed", completedAt: ts, forkPoint: "fp-2" })], [
+        say("u2", 3),
+      ] as never[]),
+    );
+    state = applyTranscriptMessage(
+      state,
+      message(10, [turn("u3", { status: "running", completedAt: null, forkPoint: null })], [
+        say("u3", 4),
+      ] as never[]),
+    );
+
+    expect(state.turns.u1?.forkPoint).toBe("fp-1");
+    expect(state.turns.u2?.forkPoint).toBe("fp-2");
+    const ends = buildTimeline(state, "t1").flatMap((r) =>
+      r.type === "turn-end" ? [[r.turn.id, r.turn.forkPoint, r.latest]] : [],
+    );
+    expect(ends).toEqual([
+      ["u1", "fp-1", false],
+      ["u2", "fp-2", false],
+    ]);
   });
 });
 

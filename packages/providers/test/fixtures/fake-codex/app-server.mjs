@@ -119,6 +119,18 @@ createInterface({ input: process.stdin }).on("line", (line) => {
     case "thread/start":
     case "thread/resume":
       return send({ id: msg.id, result: { thread: { id: "thread-1" }, model: "gpt-configured" } });
+    // "thread-source" holds turn-1 to turn-3, listed two per page (newest first); "old-codex"
+    // stands for an app-server without the method; any other thread holds no turns.
+    case "thread/turns/list": {
+      if (msg.params?.threadId === "old-codex") {
+        return send({ id: msg.id, error: { code: -32601, message: "method not found" } });
+      }
+      const all = msg.params?.threadId === "thread-source" ? ["turn-3", "turn-2", "turn-1"] : [];
+      const from = Number(msg.params?.cursor ?? 0);
+      const data = all.slice(from, from + 2).map((id) => ({ id, items: [], status: "completed" }));
+      const next = from + 2 < all.length ? String(from + 2) : null;
+      return send({ id: msg.id, result: { data, nextCursor: next, backwardsCursor: null } });
+    }
     // A thread id of "missing" has nothing to fork, like a thread deleted from disk.
     case "thread/fork":
       if (msg.params?.threadId === "missing") {

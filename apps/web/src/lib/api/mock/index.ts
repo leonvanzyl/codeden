@@ -185,6 +185,11 @@ export function createMockClient(opts: MockClientOptions = {}): CodeDenClient {
       if (running.has(sessionId)) throw new Error("Wait for the running turn to finish");
       const id = uid("s");
       const project = world.snapshot.projects.find((p) => p.id === source.projectId);
+      // The named turn's number among the source's own turns, like the server records it.
+      const t = world.transcript(sessionId);
+      const turnNumber = req?.turnId
+        ? (t.threads[t.rootThreadId ?? ""]?.turnIds.indexOf(req.turnId) ?? -1) + 1
+        : 0;
       const session = makeSession({
         ...source,
         id,
@@ -203,6 +208,7 @@ export function createMockClient(opts: MockClientOptions = {}): CodeDenClient {
           sessionId,
           checkpoint: null,
           ...(req?.turnId ? { turnId: req.turnId } : {}),
+          ...(turnNumber > 0 ? { turnNumber } : {}),
         },
         rootThreadId: `t-${id.slice(2)}`,
         createdAt: new Date().toISOString(),

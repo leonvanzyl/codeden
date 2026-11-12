@@ -1,15 +1,21 @@
 import type { Session } from "@codeden/contracts";
-import { badRequest, conflict, notFound } from "../errors";
+import { badRequest, conflict, notFound, type ServiceError } from "../errors";
+import { runnerErrorCode } from "../runner-port";
 import type { SessionRepo } from "./repo";
 
 /**
- * Where a fork that names a turn ("Fork from here", §9) starts: through the end of `turnId`.
- * An earlier turn is copied up to its fork point (`upTo`) and its own checkpoint (`checkpoint`,
- * from the server's projection); the latest turn is the latest moment, forked as a whole.
+ * Where a fork that names a turn ("Fork from here", §9) starts: through the end of `turnId`,
+ * the source's turn number `turnNumber`. An earlier turn is copied up to its fork point
+ * (`upTo`) and its own checkpoint (`checkpoint`, from the server's projection); the latest turn
+ * is the latest moment, forked as a whole.
  */
-export type ForkTurn =
-  | { turnId: string; latest: true }
-  | { turnId: string; latest: false; upTo: string; checkpoint: number };
+export type ForkTurn = { turnId: string; turnNumber: number } & (
+  | { latest: true }
+  | { latest: false; upTo: string; checkpoint: number }
+);
+
+/** Runner error code (from the provider): the conversation no longer holds the fork point. */
+const FORK_POINT_MISSING = "fork_point_missing";
 
 /**
  * Check that `source` can be forked at `turnId`, before asking the runner anything: a turn of
@@ -25,7 +31,9 @@ export function forkTurn(repo: SessionRepo, source: Session, turnId: string): Fo
   if (turn.status === "running") {
     throw conflict("Wait for the turn to finish before forking from it", "turn_running");
   }
-  if (repo.latestRootTurnId(source) === turnId) return { turnId, latest: true };
+  const rootTurns = repo.rootTurnIds(source);
+  const turnNumber = rootTurns.indexOf(turnId) + 1;
+  if (rootTurns.at(-1) === turnId) return { turnId, turnNumber, latest: true };
   if (!turn.forkPoint) {
     throw conflict(
       "This turn can't be forked from: the provider didn't record where its conversation ended",
@@ -36,7 +44,7 @@ export function forkTurn(repo: SessionRepo, source: Session, turnId: string): Fo
   if (checkpoint === null) {
     throw conflict("CodeDen has no snapshot of the code at the end of this turn", "no_checkpoint");
   }
-  return { turnId, latest: false, upTo: turn.forkPoint, checkpoint };
+  return { turnId, turnNumber, latest: false, upTo: turn.forkPoint, checkpoint };
 }
 
 /**
@@ -48,4 +56,18 @@ export function confirmedCheckpoint(at: ForkTurn & { latest: false }, indexes: n
     throw conflict("CodeDen has no snapshot of the code at the end of this turn", "no_checkpoint");
   }
   return at.checkpoint;
+}
+
+/**
+ * A provider that no longer finds the fork point in the conversation (it was replaced or
+ * deleted since the turn ended) answers 409 `fork_point_missing`; anything else is left to
+ * the usual runner error mapping.
+ */
+export function forkPointMissing(error: unknown): ServiceError | null {
+  if (runnerErrorCode(error) !== FORK_POINT_MISSING) return null;
+  const detail = error instanceof Error ? ` (${error.message})` : "";
+  return conflict(
+    `This turn can't be forked from any more: its conversation changed since it ended${detail}`,
+    FORK_POINT_MISSING,
+  );
 }

@@ -199,9 +199,13 @@ export class ClaudeEventMapper {
 
   // ------------------------------------------------------------ full messages
 
-  /** Keep a root turn's latest main-chain message as its fork point (subagents' don't count). */
+  /**
+   * Keep a root turn's latest main-chain message as its fork point. Subagents' messages don't
+   * count, nor do meta or synthetic ones, which the transcript read that confirms a fork point
+   * (`getSessionMessages`) may leave out.
+   */
   private noteChainMessage(msg: Raw): void {
-    if (msg.parent_tool_use_id || !this.rootTurnId) return;
+    if (msg.parent_tool_use_id || !this.rootTurnId || msg.isMeta || msg.isSynthetic) return;
     const uuid = str(msg, "uuid");
     if (uuid) this.lastChainUuid = uuid;
   }

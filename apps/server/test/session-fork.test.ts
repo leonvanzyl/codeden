@@ -49,6 +49,8 @@ interface RunnerScript {
   failPrepares: number;
   /** Runs while the provider copies the conversation. */
   duringFork?: () => void;
+  /** Fail the conversation copy with this runner error. */
+  forkError?: RunnerCommandError;
 }
 
 let env: GithubEnv;
@@ -83,6 +85,7 @@ const runner = {
         };
       case "provider.fork":
         script.duringFork?.();
+        if (script.forkError) throw script.forkError;
         return { resumeToken: `${command.resumeToken}:fork` };
       case "workspace.prepare":
         if (script.failPrepares > 0) {
@@ -497,7 +500,8 @@ describe("forking from an earlier turn", () => {
     const src = history({ "turn-1": "fp-1" });
     expect(env.repo.turn(src.id, "turn-1")?.forkPoint).toBe("fp-1");
     expect(env.repo.turn(src.id, "turn-2")?.forkPoint).toBeNull();
-    expect(env.repo.latestRootTurnId(src)).toBe("turn-2");
+    // The subagent's turn is not one of the session's own.
+    expect(env.repo.rootTurnIds(src)).toEqual(["turn-1", "turn-2"]);
   });
 
   it("copies the conversation through that turn and starts from its checkpoint", async () => {
@@ -509,7 +513,7 @@ describe("forking from an earlier turn", () => {
     expect(call("provider.fork")).toMatchObject({ resumeToken: "claude-source", upTo: "fp-1" });
     expect(call("workspace.prepare").restoreCheckpoint).toEqual({ sessionId: src.id, index: 1 });
     expect(env.repo.get(sessionId)).toMatchObject({
-      forkedFrom: { sessionId: src.id, checkpoint: 1, turnId: "turn-1" },
+      forkedFrom: { sessionId: src.id, checkpoint: 1, turnId: "turn-1", turnNumber: 1 },
       resumeToken: "claude-source:fork",
       status: "idle",
     });
@@ -526,6 +530,7 @@ describe("forking from an earlier turn", () => {
       sessionId: src.id,
       checkpoint: 2,
       turnId: "turn-2",
+      turnNumber: 2,
     });
   });
 
@@ -595,6 +600,67 @@ describe("forking from an earlier turn", () => {
     expect(await refusal(lost.id, "turn-1")).toEqual({ status: 409, code: "no_checkpoint" });
     expect(all("provider.fork")).toEqual([]);
     expect(sessions.launching.size).toBe(0);
+  });
+
+  it("answers 409 and creates nothing when the conversation no longer holds the fork point", async () => {
+    const { sessions } = services();
+    const src = history({ "turn-1": "fp-1" });
+    script.forkError = new RunnerCommandError(
+      "fork_point_missing",
+      "The conversation no longer holds the end of that turn",
+    );
+    await expect(sessions.fork(src.id, { turnId: "turn-1" })).rejects.toMatchObject({
+      status: 409,
+      code: "fork_point_missing",
+    });
+    expect(call("provider.fork").upTo).toBe("fp-1");
+    expect(all("workspace.prepare")).toEqual([]);
+    expect(env.repo.list({ projectId: src.projectId ?? undefined })).toHaveLength(1);
+
+    // Any other provider failure keeps the usual mapping.
+    script.forkError = new RunnerCommandError("fork_failed", "codex app-server exited");
+    await expect(sessions.fork(src.id, {})).rejects.toMatchObject({
+      status: 502,
+      code: "fork_failed",
+    });
+    expect(sessions.launching.size).toBe(0);
+  });
+
+  it("names the turn by its number, not its checkpoint's, when the two differ", async () => {
+    const { sessions } = services();
+    const src = source({ rootThreadId: "t-root" });
+    const turn = (turnId: string) => [
+      agentEventToNewEvent(src.id, { type: "turn.started", threadId: "t-root", turnId }),
+      agentEventToNewEvent(src.id, {
+        type: "turn.completed",
+        threadId: "t-root",
+        turnId,
+        forkPoint: `fp-${turnId}`,
+      }),
+    ];
+    // Turn a's checkpoint failed to write, so turn b's is checkpoint 1 and turn c's is 2.
+    const checkpoint = (index: number, turnId: string) => ({
+      ...checkpointEvent(src.id, index),
+      payload: { checkpoint: { ...checkpointEvent(src.id, index).payload.checkpoint, turnId } },
+    });
+    env.store.append([
+      agentEventToNewEvent(src.id, { type: "thread.started", thread: { id: "t-root" } }),
+      ...turn("a"),
+      ...turn("b"),
+      checkpoint(1, "b"),
+      ...turn("c"),
+      checkpoint(2, "c"),
+    ]);
+    script.checkpoints[src.id] = [0, 1, 2];
+    const { sessionId } = await sessions.fork(src.id, { turnId: "b" });
+    await settle(sessions);
+    expect(env.repo.get(sessionId).forkedFrom).toEqual({
+      sessionId: src.id,
+      checkpoint: 1,
+      turnId: "b",
+      turnNumber: 2,
+    });
+    expect(call("workspace.prepare").restoreCheckpoint).toEqual({ sessionId: src.id, index: 1 });
   });
 
   it("refuses an earlier turn that has no checkpoint", async () => {

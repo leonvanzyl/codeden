@@ -3,6 +3,7 @@ import { Link } from "@tanstack/react-router";
 import { GitFork, MessageSquareDashed } from "lucide-react";
 import { EmptyState } from "@/components/common/bits";
 import { ThreadView } from "@/components/thread/thread-view";
+import { forkOriginText } from "@/lib/fork-origin";
 import { useSession } from "@/lib/queries";
 
 /** A new fork's empty transcript: where it came from and that the agent remembers it. */
@@ -10,11 +11,7 @@ function ForkedEmpty({ origin }: { origin: ForkOrigin }) {
   const sourceId = origin.sessionId;
   const source = useSession(sourceId);
   // Forked from a turn ("Fork from here"): the conversation and code end with that turn.
-  const upTo = origin.turnId
-    ? origin.checkpoint
-      ? `as they were after turn ${origin.checkpoint}`
-      : "as they were after the turn it was forked from"
-    : "so far";
+  const { upTo } = forkOriginText(origin);
   return (
     <EmptyState icon={<GitFork />} title="Forked session" className="flex-1">
       Forked from{" "}

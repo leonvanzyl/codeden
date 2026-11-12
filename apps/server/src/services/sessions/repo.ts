@@ -349,17 +349,16 @@ export class SessionRepo {
     return row?.index ?? null;
   }
 
-  /** The id of the session's latest root-thread turn (by start), or null before its first. */
-  latestRootTurnId(session: Session): string | null {
-    if (!session.rootThreadId) return null;
-    const row = this.db
+  /** The ids of the session's root-thread turns, oldest first (by start); turn N is at N - 1. */
+  rootTurnIds(session: Session): string[] {
+    if (!session.rootThreadId) return [];
+    return this.db
       .select({ id: turns.id })
       .from(turns)
       .where(and(eq(turns.sessionId, session.id), eq(turns.threadId, session.rootThreadId)))
-      .orderBy(desc(turns.startedAt), desc(sql`rowid`))
-      .limit(1)
-      .get();
-    return row?.id ?? null;
+      .orderBy(asc(turns.startedAt), asc(sql`rowid`))
+      .all()
+      .map((r) => r.id);
   }
 
   /** Follow-ups of the latest root-thread turn that produced some (§7.5). */

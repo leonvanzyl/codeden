@@ -430,6 +430,16 @@ describe("ClaudeEventMapper", () => {
     mapper.handle({ ...toolResult("toolu_1", "file contents"), uuid: "u1" });
     // A subagent's messages live in its own transcript: never a fork point of the session.
     mapper.handle({ ...assistant("m3", [{ type: "text", text: "sub" }], "toolu_1"), uuid: "s1" });
+    // Nor are meta or synthetic messages, which a transcript read may leave out.
+    const note = (uuid: string, flag: object) => ({
+      type: "user",
+      message: { role: "user", content: [{ type: "text", text: "note" }] },
+      parent_tool_use_id: null,
+      uuid,
+      ...flag,
+    });
+    mapper.handle(note("meta-1", { isMeta: true }));
+    mapper.handle(note("synthetic-1", { isSynthetic: true }));
     mapper.handle(result({ uuid: "r1" }));
     expect(events.at(-1)).toMatchObject({ type: "turn.completed", forkPoint: "u1" });
 

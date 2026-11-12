@@ -55,11 +55,16 @@ export interface ForkConversationOptions {
   cwd: string;
   /**
    * Copy only through the turn that reported this fork point (`forkPoint` on a root turn's
-   * end event); later turns are left out. Throws when the conversation doesn't hold that
-   * point, never falling back to a whole copy. Only adapters that report fork points get one.
+   * end event); later turns are left out. When the conversation no longer holds that point
+   * (it was replaced or deleted), throws a `ProviderSessionError` with code
+   * `FORK_POINT_MISSING`, never falling back to a whole copy. Only adapters that report fork
+   * points get one.
    */
   upTo?: string;
 }
+
+/** `ProviderSessionError` code: the conversation doesn't hold the fork point it was asked for. */
+export const FORK_POINT_MISSING = "fork_point_missing";
 
 /** Options for `ProviderAdapter.refreshModels`. */
 export interface RefreshModelsOptions {

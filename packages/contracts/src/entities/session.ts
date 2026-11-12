@@ -53,6 +53,12 @@ export const ForkOrigin = z.object({
    * moment.
    */
   turnId: Id.nullable().optional(),
+  /**
+   * That turn's number among the source's own turns (1 is its first), counted when it was
+   * forked. Checkpoint numbers can differ from it (a checkpoint that failed to write takes no
+   * number), so this is what to show as "turn N". Absent when unknown.
+   */
+  turnNumber: z.int().positive().nullable().optional(),
 });
 export type ForkOrigin = z.infer<typeof ForkOrigin>;
 

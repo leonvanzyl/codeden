@@ -237,6 +237,16 @@ describe("entities", () => {
       ...sampleSession,
       forkedFrom: { sessionId: "s0", checkpoint: 1, turnId: "turn-1" },
     });
+    roundTrip(Session, {
+      ...sampleSession,
+      forkedFrom: { sessionId: "s0", checkpoint: 1, turnId: "turn-2", turnNumber: 2 },
+    });
+    expect(
+      Session.safeParse({
+        ...sampleSession,
+        forkedFrom: { sessionId: "s0", checkpoint: 1, turnId: "t", turnNumber: 0 },
+      }).success,
+    ).toBe(false);
     expect(
       Session.safeParse({ ...sampleSession, forkedFrom: { sessionId: "s0", checkpoint: -1 } })
         .success,

@@ -2,6 +2,7 @@ import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { FORK_POINT_MISSING } from "../src/adapter";
 import { CodexAdapter } from "../src/codex/adapter";
 import { forkCodexThread } from "../src/codex/fork";
 
@@ -52,17 +53,45 @@ describe("Codex fork", () => {
     });
   });
 
-  it("ends the copy with a turn when given one (lastTurnId)", async () => {
+  it("confirms the thread holds the turn, then ends the copy with it (lastTurnId)", async () => {
     const log = logFile();
     const cwd = tmpdir();
     const adapter = new CodexAdapter({ executable: fakeCodex });
-    await expect(adapter.forkConversation("thread-source", { cwd, upTo: "turn-2" })).resolves.toBe(
+    // turn-1 is on the second page of the turn list.
+    await expect(adapter.forkConversation("thread-source", { cwd, upTo: "turn-1" })).resolves.toBe(
       "thread-fork-1",
     );
+    expect(requests(log).map((r) => r.method)).toEqual([
+      "initialize",
+      "thread/turns/list",
+      "thread/turns/list",
+      "thread/fork",
+    ]);
     expect(requests(log).find((r) => r.method === "thread/fork")?.params).toEqual({
       threadId: "thread-source",
       cwd,
       excludeTurns: true,
+      lastTurnId: "turn-1",
+    });
+  });
+
+  it("refuses a turn the thread no longer holds, without forking", async () => {
+    const log = logFile();
+    const adapter = new CodexAdapter({ executable: fakeCodex });
+    await expect(
+      adapter.forkConversation("thread-source", { cwd: tmpdir(), upTo: "turn-gone" }),
+    ).rejects.toMatchObject({ code: FORK_POINT_MISSING });
+    expect(requests(log).some((r) => r.method === "thread/fork")).toBe(false);
+  });
+
+  it("leaves the decision to thread/fork when the turn list can't be read", async () => {
+    const log = logFile();
+    const cwd = tmpdir();
+    const adapter = new CodexAdapter({ executable: fakeCodex });
+    await expect(adapter.forkConversation("old-codex", { cwd, upTo: "turn-2" })).resolves.toBe(
+      "thread-fork-1",
+    );
+    expect(requests(log).find((r) => r.method === "thread/fork")?.params).toMatchObject({
       lastTurnId: "turn-2",
     });
   });

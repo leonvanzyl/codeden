@@ -77,7 +77,7 @@ Did the agent go the wrong way a few turns ago? Hover the line under that turn's
 - **The conversation ends with that turn.** The agent remembers everything up to and including it, and none of the turns after it.
 - **The code is as it was right after that turn**, uncommitted changes included, in a new worktree and branch.
 
-The original session is unchanged. The fork's empty transcript and **Details** say which turn it was forked from. You can fork from turns that ran in this version of CodeDen or later; for older turns, only the latest one offers it, and forking from it is the same as **Fork session**.
+The original session is unchanged. The fork's empty transcript and **Details** say which turn it was forked from. You can fork from turns that ran in this version of CodeDen or later; for older turns, only the latest one offers it, and forking from it is the same as **Fork session**. If the agent's own record of the conversation changed since that turn (it was replaced or deleted), CodeDen says it can't fork from there and creates nothing, rather than copying the whole conversation.
 
 ## Files
 

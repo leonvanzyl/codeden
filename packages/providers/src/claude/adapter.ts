@@ -18,6 +18,7 @@ import type { ResolvedCommand } from "../util/exec";
 import { quickLocate } from "../util/locate";
 import type { UtilityModel } from "../utility";
 import { detectClaude } from "./detect";
+import { forkClaudeConversation } from "./fork";
 import { listClaudeModels, toModelInfos } from "./models";
 import { ClaudeUtilityModel } from "./one-shot";
 import { type ClaudeSdkModule, claudeSdkReady, loadClaudeSdk } from "./sdk";
@@ -70,7 +71,7 @@ export interface ClaudeAdapterOptions {
    * Load the SDK (tests stub it). By default sessions use `loadClaudeSdk()`, and discovery
    * uses it only when the SDK is ready without an install (`claudeSdkReady()`).
    */
-  loadSdk?: () => Promise<Pick<ClaudeSdkModule, "query" | "forkSession">>;
+  loadSdk?: () => Promise<Pick<ClaudeSdkModule, "query" | "forkSession" | "getSessionMessages">>;
 }
 
 /** Claude Code through the Claude Agent SDK and the user's installed `claude` (§7.2). */
@@ -148,22 +149,13 @@ export class ClaudeAdapter implements ProviderAdapter {
   }
 
   /**
-   * Copy a conversation with the SDK's `forkSession()`: the transcript is written to a new
-   * session file at once (fresh message ids, the original untouched) and the new session id is
-   * returned for resuming. The copy is found from any worktree of the project. With `upTo` (a
-   * turn's fork point: its last transcript message), the copy ends with that message; the SDK
-   * refuses a message the transcript doesn't hold, so it never copies the whole conversation
-   * instead.
+   * Copy a conversation (see `forkClaudeConversation`): at once, with fresh message ids, the
+   * original untouched; with `upTo`, only through the turn that ended with that message. The
+   * copy is found from any worktree of the project.
    */
   async forkConversation(resumeToken: string, opts?: ForkConversationOptions): Promise<string> {
-    const { forkSession } = await (this.options.loadSdk ?? loadClaudeSdk)();
-    try {
-      const upTo = opts?.upTo;
-      return (await forkSession(resumeToken, upTo ? { upToMessageId: upTo } : undefined)).sessionId;
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error);
-      throw new Error(`Could not fork the Claude conversation ${resumeToken}: ${reason}`);
-    }
+    const sdk = await (this.options.loadSdk ?? loadClaudeSdk)();
+    return forkClaudeConversation(sdk, resumeToken, opts?.upTo);
   }
 
   utilityModel(): UtilityModel {

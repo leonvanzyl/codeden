@@ -89,7 +89,8 @@ function stubSdk(initial: Behaviour = "list") {
   const forkSession: ClaudeSdkModule["forkSession"] = async () => {
     throw new Error("not used here");
   };
-  return { query, state, load: async () => ({ query, forkSession }) };
+  const getSessionMessages: ClaudeSdkModule["getSessionMessages"] = async () => [];
+  return { query, state, load: async () => ({ query, forkSession, getSessionMessages }) };
 }
 
 const EXPECTED = [
