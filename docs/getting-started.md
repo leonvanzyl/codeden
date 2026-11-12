@@ -84,7 +84,7 @@ Commit this file to tell CodeDen how to prepare a fresh worktree:
 
 ## 5. Start your first session
 
-Open the project and click **New session**. Describe the task ("Add a README section describing this project and a tiny test for src/math.js"), pick the provider, model and effort if you want something other than the defaults, and start it.
+Open the project and click **New session** (or the **+** next to the project in the sidebar). A new session opens with the message box you use in every session: describe the task ("Add a README section describing this project and a tiny test for src/math.js"), attach or paste screenshots and files if they help, pick the provider, model, effort, permissions or **Plan** under the message box if you want something other than the defaults, and send. Nothing is created until you send: the first message starts the session, and the view becomes that session. A draft you leave is kept in the browser for when you come back.
 
 What happens next:
 

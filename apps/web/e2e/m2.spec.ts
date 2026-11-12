@@ -112,17 +112,22 @@ test("conflict cards resolve inline and from the inbox", async ({ page }) => {
   expect(running.status).toBe("started");
 
   await test.step("starting duplicate work shows the conflict card inline", async () => {
+    // The old dialog link still opens the New session draft.
     await page.goto(`${env("CODEDEN_E2E_URL")}/projects/${project}?newSession=true`);
-    const dialog = page.getByRole("dialog");
-    await dialog.getByLabel("What should the agent do?").fill("Do the same thing again");
-    await dialog.getByLabel(/Work key/).fill(workKey);
-    await dialog.getByRole("button", { name: "Start session" }).click();
-    const card = dialog.getByTestId("conflict-card");
+    await expect(page).toHaveURL(new RegExp(`/projects/${project}/new$`));
+    const draft = page.getByTestId("new-session");
+    await draft.getByRole("button", { name: "Session options" }).click();
+    await page.getByLabel(/Work key/).fill(workKey);
+    await page.keyboard.press("Escape");
+    await expect(draft.getByTestId("work-key-chip")).toHaveText(workKey);
+    await draft.getByRole("textbox", { name: "Message" }).fill("Do the same thing again");
+    await draft.getByRole("button", { name: "Send" }).click();
+    const card = draft.getByTestId("conflict-card");
     await expect(card).toBeVisible();
     await expect(card).toContainText("Hold the work key");
     await card.getByRole("button", { name: /Skip/ }).click();
     await expect(page.getByText("Skipped")).toBeVisible();
-    await expect(dialog).toBeHidden();
+    await expect(page).toHaveURL(new RegExp(`/projects/${project}$`));
   });
 
   await test.step("a persisted conflict is listed in the inbox and forced with a reason", async () => {

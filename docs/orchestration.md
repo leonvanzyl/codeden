@@ -70,7 +70,7 @@ Every session and automation run records **what** it is, so CodeDen can stop dup
 | `scope` | the project, optionally narrowed to paths (`src/auth`) or an area (`ui`) |
 | progress | the agent's last `report_progress` line |
 
-If you don't give a work key, CodeDen derives one: `issue:<n>` when an issue is linked, otherwise `request:<slug of the purpose>`. You can set one in the **New session** dialog.
+If you don't give a work key, CodeDen derives one: `issue:<n>` when an issue is linked, otherwise `request:<slug of the purpose>`. You can set one from the **⋯** button at the top of a **New session**, before you send its first message.
 
 **Conflict check.** Starting a session, running an automation or a scheduled trigger first looks for running or queued work in the same project with the **same work key**, or the **same kind** of work (the part before the colon) with an **overlapping scope** (the same area, or paths where one contains the other). Work scoped to the whole project never counts as overlapping.
 

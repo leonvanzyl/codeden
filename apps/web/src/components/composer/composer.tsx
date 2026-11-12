@@ -1,7 +1,7 @@
 import type { Session, UserInputInit } from "@codeden/contracts";
 import { useMutation } from "@tanstack/react-query";
 import { ArrowUp, ListPlus, Square, Zap } from "lucide-react";
-import { type KeyboardEvent, useRef, useState } from "react";
+import { type KeyboardEvent, type ReactNode, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { type SendMode, useClient } from "@/lib/api";
@@ -15,51 +15,60 @@ import { ComposerBox, canSendDraft, composerPlaceholders, isSendKey } from "./co
 import { SessionOptions } from "./session-options";
 import { SuggestionMenu } from "./suggestion-menu";
 import { applyTrigger } from "./trigger";
-import { useSuggestions } from "./use-suggestions";
+import { type SuggestionSource, useSuggestions } from "./use-suggestions";
 
-/** Composer (§13): text, attachments, mentions, commands, pickers, queue/steer, stop, voice. */
-export function Composer({ session, running }: { session: Session; running: boolean }) {
-  const client = useClient();
-  const providers = useSnapshotData((s) => s.runner.providers, []);
-  const draft = useComposerStore((s) => getDraft(s, session.id));
-  const { setText, clear } = useComposerStore.getState();
+/**
+ * The composer (§13): text, attachments, `@` mentions, `/` commands, the options slot (pickers),
+ * queue or steer and stop while a turn runs, dictation and the send keys. The same component
+ * serves a session (`SessionComposer`) and the New session draft, where nothing runs yet; the
+ * draft lives in the composer store under `draftKey`, and `onSend` decides what sending does.
+ */
+export function Composer({
+  draftKey,
+  source,
+  placeholder,
+  options,
+  running = false,
+  canSteer = false,
+  sending,
+  onSend,
+  onStop,
+}: {
+  draftKey: string;
+  /** Where `@` and `/` suggestions come from. */
+  source: SuggestionSource;
+  placeholder: string;
+  /** Pickers after the attach button. */
+  options: ReactNode;
+  /** A turn is running: sending queues or steers, and an empty composer offers Stop. */
+  running?: boolean;
+  /** The provider can steer a running turn. */
+  canSteer?: boolean;
+  /** A send is in flight: the send button waits (Enter still calls `onSend`). */
+  sending: boolean;
+  onSend: (input: UserInputInit, mode: SendMode) => void;
+  onStop?: () => void;
+}) {
+  const draft = useComposerStore((s) => getDraft(s, draftKey));
+  const { setText } = useComposerStore.getState();
   const ref = useRef<HTMLTextAreaElement>(null);
   const [caret, setCaret] = useState(0);
   const [mode, setMode] = useState<Exclude<SendMode, "send">>("queue");
-
-  const provider = providers.find((p) => p.id === session.provider);
-  const canSteer = provider?.capabilities.steer ?? false;
-  const suggestions = useSuggestions(session.id, draft.text, caret);
-
-  // The input is captured at submit time: `onMutate` clears the draft before `mutationFn` runs.
-  const send = useMutation({
-    mutationFn: ({ sendMode, input }: { sendMode: SendMode; input: UserInputInit }) =>
-      sendToSession(client, session, input, sendMode),
-    onMutate: () => clear(session.id),
-    onSuccess: (_d, { sendMode }) => {
-      // Queued messages show in the tray above the composer.
-      if (sendMode === "steer") toast("Sent to the running turn");
-    },
-    onError: (e, { input }) => {
-      setText(session.id, input.text);
-      toast.error("Message not sent", { description: e.message });
-    },
-  });
-  const stop = useMutation({ mutationFn: () => client.interrupt(session.id) });
+  const suggestions = useSuggestions(source, draft.text, caret);
 
   const canSend = canSendDraft(draft);
   const submit = (override?: SendMode) => {
     if (!canSend) return;
-    send.mutate({
-      sendMode: override ?? (running ? (canSteer ? mode : "queue") : "send"),
-      input: { text: draft.text.trim(), attachments: toInputAttachments(draft.attachments) },
-    });
+    onSend(
+      { text: draft.text.trim(), attachments: toInputAttachments(draft.attachments) },
+      override ?? (running ? (canSteer ? mode : "queue") : "send"),
+    );
   };
 
   const pick = (insert: string) => {
     if (!suggestions.trigger) return;
     const next = applyTrigger(draft.text, caret, suggestions.trigger, insert);
-    setText(session.id, next.text);
+    setText(draftKey, next.text);
     requestAnimationFrame(() => {
       ref.current?.setSelectionRange(next.caret, next.caret);
       setCaret(next.caret);
@@ -91,9 +100,9 @@ export function Composer({ session, running }: { session: Session; running: bool
         return;
       }
     }
-    if (matchesCombo(e.nativeEvent, shortcut("stop").combo) && running) {
+    if (matchesCombo(e.nativeEvent, shortcut("stop").combo) && running && onStop) {
       e.preventDefault();
-      stop.mutate();
+      onStop();
       return;
     }
     if (isSendKey(e)) {
@@ -104,12 +113,8 @@ export function Composer({ session, running }: { session: Session; running: bool
 
   return (
     <ComposerBox
-      draftKey={session.id}
-      placeholder={
-        running
-          ? "Queue a follow-up, or steer the running turn…"
-          : composerPlaceholders[session.role]
-      }
+      draftKey={draftKey}
+      placeholder={placeholder}
       onKeyDown={onKeyDown}
       onCaret={setCaret}
       textareaRef={ref}
@@ -124,7 +129,7 @@ export function Composer({ session, running }: { session: Session; running: bool
           />
         )
       }
-      options={<SessionOptions session={session} running={running} />}
+      options={options}
       actions={
         running &&
         canSteer && (
@@ -151,12 +156,12 @@ export function Composer({ session, running }: { session: Session; running: bool
         )
       }
     >
-      {running && !canSend ? (
+      {running && !canSend && onStop ? (
         <Button
           size="icon-sm"
           variant="secondary"
           className="rounded-full"
-          onClick={() => stop.mutate()}
+          onClick={onStop}
           aria-label="Stop"
         >
           <Square className="size-3 fill-current" />
@@ -166,12 +171,54 @@ export function Composer({ session, running }: { session: Session; running: bool
           size="icon-sm"
           className="rounded-full transition-transform hover:scale-105"
           onClick={() => submit()}
-          disabled={!canSend || send.isPending}
+          disabled={!canSend || sending}
           aria-label={running ? (canSteer ? `${mode} message` : "Queue message") : "Send"}
         >
           {running ? mode === "steer" && canSteer ? <Zap /> : <ListPlus /> : <ArrowUp />}
         </Button>
       )}
     </ComposerBox>
+  );
+}
+
+/** The composer of a session: sends, queues or steers, stops a turn, and edits its options. */
+export function SessionComposer({ session, running }: { session: Session; running: boolean }) {
+  const client = useClient();
+  const providers = useSnapshotData((s) => s.runner.providers, []);
+  const { setText, clear } = useComposerStore.getState();
+  const provider = providers.find((p) => p.id === session.provider);
+
+  // The input is captured at submit time: `onMutate` clears the draft before `mutationFn` runs.
+  const send = useMutation({
+    mutationFn: ({ sendMode, input }: { sendMode: SendMode; input: UserInputInit }) =>
+      sendToSession(client, session, input, sendMode),
+    onMutate: () => clear(session.id),
+    onSuccess: (_d, { sendMode }) => {
+      // Queued messages show in the tray above the composer.
+      if (sendMode === "steer") toast("Sent to the running turn");
+    },
+    onError: (e, { input }) => {
+      setText(session.id, input.text);
+      toast.error("Message not sent", { description: e.message });
+    },
+  });
+  const stop = useMutation({ mutationFn: () => client.interrupt(session.id) });
+
+  return (
+    <Composer
+      draftKey={session.id}
+      source={{ kind: "session", sessionId: session.id }}
+      placeholder={
+        running
+          ? "Queue a follow-up, or steer the running turn…"
+          : composerPlaceholders[session.role]
+      }
+      options={<SessionOptions session={session} running={running} />}
+      running={running}
+      canSteer={provider?.capabilities.steer ?? false}
+      sending={send.isPending}
+      onSend={(input, sendMode) => send.mutate({ sendMode, input })}
+      onStop={() => stop.mutate()}
+    />
   );
 }

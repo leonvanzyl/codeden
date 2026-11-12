@@ -187,6 +187,10 @@ export interface CodeDenClient {
   searchMentions(sessionId: string, query: string): Promise<MentionCandidate[]>;
   /** The session's `/` commands and skills for the composer, sorted by name. */
   listSlashCommands(sessionId: string): Promise<SlashCommand[]>;
+  /** `@` mention candidates from the project folder, for the New session draft. */
+  searchProjectMentions(projectId: string, query: string): Promise<MentionCandidate[]>;
+  /** The `/` commands and skills `provider` would load in the project (the New session draft). */
+  listProjectSlashCommands(projectId: string, provider: string): Promise<SlashCommand[]>;
   openTerminal(opts: OpenTerminalOptions): TerminalChannel;
   /** The session browser: live viewer socket, tabs, navigation, dev servers (§12.2). */
   readonly browser: BrowserApi;

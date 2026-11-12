@@ -71,7 +71,17 @@ export function createHttpClient(origin: string, opts: HttpClientOptions = {}): 
   const wsBase = origin.replace(/^http/, "ws");
   const socket = new RealtimeSocket(`${wsBase}/ws`);
   const enc = encodeURIComponent;
+  // File lists for `@` mentions, by URL, reused for 30 seconds while the user types.
   const fileCache = new Map<string, { at: number; list: SessionFileList }>();
+  const mentionsFrom = async (path: string, query: string) => {
+    const cached = fileCache.get(path);
+    const list =
+      cached && Date.now() - cached.at < 30_000
+        ? cached.list
+        : await get(path, (v) => SessionFileList.parse(v));
+    fileCache.set(path, { at: cached?.list === list ? cached.at : Date.now(), list });
+    return rankMentions(list, query);
+  };
 
   return {
     kind: "http",
@@ -161,17 +171,14 @@ export function createHttpClient(origin: string, opts: HttpClientOptions = {}): 
       get(`/sessions/${enc(id)}/files/content?path=${enc(path)}`, (v) =>
         SessionFileContent.parse(v),
       ),
-    async searchMentions(id, query) {
-      const cached = fileCache.get(id);
-      const list =
-        cached && Date.now() - cached.at < 30_000
-          ? cached.list
-          : await get(`/sessions/${enc(id)}/files`, (v) => SessionFileList.parse(v));
-      fileCache.set(id, { at: cached?.list === list ? cached.at : Date.now(), list });
-      return rankMentions(list, query);
-    },
+    searchMentions: (id, query) => mentionsFrom(`/sessions/${enc(id)}/files`, query),
     listSlashCommands: (id) =>
       get(`/sessions/${enc(id)}/commands`, (v) => SlashCommandList.parse(v)),
+    searchProjectMentions: (id, query) => mentionsFrom(`/projects/${enc(id)}/files`, query),
+    listProjectSlashCommands: (id, provider) =>
+      get(`/projects/${enc(id)}/commands?provider=${enc(provider)}`, (v) =>
+        SlashCommandList.parse(v),
+      ),
     openTerminal: (o) => openTerminalSocket(wsBase, o),
     artifactUrl: (id) => `${origin}/api/artifacts/${enc(id)}`,
     speechSummary: (text) =>

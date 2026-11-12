@@ -53,6 +53,8 @@ type WorkbenchApi = Pick<
   | "readFile"
   | "searchMentions"
   | "listSlashCommands"
+  | "searchProjectMentions"
+  | "listProjectSlashCommands"
   | "openTerminal"
   | "artifactUrl"
 >;
@@ -78,6 +80,14 @@ export function workbenchApi(world: MockWorld): WorkbenchApi {
             : "Checking the install",
       error: null,
     };
+  };
+
+  const mentionHits = (query: string) => {
+    const q = query.toLowerCase();
+    return allPaths()
+      .filter((p) => p.path.toLowerCase().includes(q))
+      .sort((a, b) => a.path.length - b.path.length)
+      .slice(0, 8);
   };
 
   const setupStatus = (): SetupStatus => {
@@ -202,15 +212,10 @@ export function workbenchApi(world: MockWorld): WorkbenchApi {
         `// ${path}\n// (mock) File contents are loaded from the session worktree.\n\nexport {};\n`;
       return delay({ path, content, sizeBytes: content.length, binary: false, truncated: false });
     },
-    searchMentions: (_sessionId, query) => {
-      const q = query.toLowerCase();
-      const hits = allPaths()
-        .filter((p) => p.path.toLowerCase().includes(q))
-        .sort((a, b) => a.path.length - b.path.length)
-        .slice(0, 8);
-      return delay(hits, 40);
-    },
+    searchMentions: (_sessionId, query) => delay(mentionHits(query), 40),
     listSlashCommands: () => delay(slashCommands, 20),
+    searchProjectMentions: (_projectId, query) => delay(mentionHits(query), 40),
+    listProjectSlashCommands: () => delay(slashCommands, 20),
     openTerminal: (opts) => mockTerminal(opts),
     artifactUrl: (id) => artifacts[id]?.() ?? generatedIllustration(id.length),
   };

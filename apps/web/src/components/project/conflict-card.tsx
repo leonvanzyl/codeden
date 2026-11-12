@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { type CodeDenClient, useClient } from "@/lib/api";
 import { ago } from "@/lib/format";
+import { LOCAL_CONFLICT_PREFIX } from "@/lib/new-session";
 
 const startedBy = {
   user: "You",
@@ -28,9 +29,6 @@ const doneText: Record<ConflictDecision["resolution"], string> = {
   join: "Sent to the running session",
   force: "Started anyway",
 };
-
-/** Conflicts not persisted by the server (no `conflictId`) are retried with a fresh start. */
-export const LOCAL_CONFLICT_PREFIX = "local:";
 
 async function decide(
   client: CodeDenClient,

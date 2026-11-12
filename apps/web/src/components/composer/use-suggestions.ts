@@ -4,22 +4,43 @@ import { useClient } from "@/lib/api";
 import type { Suggestion } from "./suggestion-menu";
 import { detectTrigger, rankCommands, type Trigger } from "./trigger";
 
+/**
+ * Where `@` and `/` suggestions come from: a session (its worktree, its provider's commands),
+ * or a project and the provider a New session draft would start with (none when no provider is
+ * ready: no `/` entries).
+ */
+export type SuggestionSource =
+  | { kind: "session"; sessionId: string }
+  | { kind: "project"; projectId: string; provider: string | null };
+
 /** Suggestions for the active `@` or `/` trigger at the caret. */
-export function useSuggestions(sessionId: string, text: string, caret: number) {
+export function useSuggestions(source: SuggestionSource, text: string, caret: number) {
   const client = useClient();
   const trigger: Trigger | null = useMemo(() => detectTrigger(text, caret), [text, caret]);
   const [dismissedAt, setDismissedAt] = useState<number | null>(null);
   const [active, setActive] = useState(0);
+  const sourceKey =
+    source.kind === "session" ? [source.sessionId] : ["project", source.projectId, source.provider];
 
   const mentions = useQuery({
-    queryKey: ["mentions", sessionId, trigger?.kind === "mention" ? trigger.query : null],
-    queryFn: () => client.searchMentions(sessionId, trigger?.query ?? ""),
+    queryKey: ["mentions", ...sourceKey, trigger?.kind === "mention" ? trigger.query : null],
+    queryFn: () => {
+      const query = trigger?.query ?? "";
+      return source.kind === "session"
+        ? client.searchMentions(source.sessionId, query)
+        : client.searchProjectMentions(source.projectId, query);
+    },
     enabled: trigger?.kind === "mention",
     staleTime: 30_000,
   });
   const commands = useQuery({
-    queryKey: ["commands", sessionId],
-    queryFn: () => client.listSlashCommands(sessionId),
+    queryKey: ["commands", ...sourceKey],
+    queryFn: () =>
+      source.kind === "session"
+        ? client.listSlashCommands(source.sessionId)
+        : source.provider
+          ? client.listProjectSlashCommands(source.projectId, source.provider)
+          : Promise.resolve([]),
     enabled: trigger?.kind === "command",
     staleTime: 60_000,
   });

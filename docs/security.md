@@ -41,7 +41,7 @@ They always run read-only, whatever their level: Claude gets no edit tools and a
 
 ## Permissions
 
-Each agent session and each automation runs at a **permission level**, from Read-only to Full. The default comes from **Settings → Autonomy**; change it per session in the composer's **Permissions** picker or the new-session dialog, and per automation in its editor. Each level maps onto the provider's **native** enforcement:
+Each agent session and each automation runs at a **permission level**, from Read-only to Full. The default comes from **Settings → Autonomy**; change it per session in the composer's **Permissions** picker (in a new session too, before its first message), and per automation in its editor. Each level maps onto the provider's **native** enforcement:
 
 | Level | Claude Code | Codex | OpenCode |
 |---|---|---|---|
@@ -65,7 +65,7 @@ Changing the level while a session runs is saved on the session and sent to the 
 
 ### Plan mode
 
-**Plan** in the composer or the new-session dialog has the agent plan before it builds. While it plans, CodeDen refuses file edits and writing commands at **every** level, Full included, with the same command rules as Read-only: the agent can read, search and run the project's checks, and write only its own plan notes (Claude's plans folder), at Read-only too (under Supervised that write still asks). Claude Code's own plan mode would otherwise send edits to CodeDen's approval policy, which Auto and Full approve, so CodeDen enforces it itself. The plan ends in a **Plan ready** card: approving lets the agent implement at the session's permission level, and **Keep planning** sends your note back so it revises the plan. Turning Plan off without approving returns the session to its permission level straight away.
+**Plan** in the composer (in a new session too, before its first message) has the agent plan before it builds. While it plans, CodeDen refuses file edits and writing commands at **every** level, Full included, with the same command rules as Read-only: the agent can read, search and run the project's checks, and write only its own plan notes (Claude's plans folder), at Read-only too (under Supervised that write still asks). Claude Code's own plan mode would otherwise send edits to CodeDen's approval policy, which Auto and Full approve, so CodeDen enforces it itself. The plan ends in a **Plan ready** card: approving lets the agent implement at the session's permission level, and **Keep planning** sends your note back so it revises the plan. Turning Plan off without approving returns the session to its permission level straight away.
 
 ## Automations
 

@@ -627,6 +627,7 @@ Detailed, trustworthy reports on spend and usage across every provider, project 
   - queue or steer while a turn runs
   - the voice button
   - **follow-up chips** after a turn completes (§7.5)
+- **New session.** Opens a draft in the centre that looks and works like a session, with the same composer (pickers, attachments, `@` and `/` from the project folder and the chosen provider, send keys) and the optional work key behind the header's ⋯. Nothing is created until the first send, which starts the session (`POST /api/sessions`, with the duplicate-work check of §8.4 shown inline); the draft then becomes that session in place. An unsent draft (text, options, work key) is kept in the browser per project.
 - **Right panel** (tabs): diff, files, browser, terminal, issue/PR, session details. A bottom terminal drawer is optional.
 - **Global:** command palette, keyboard shortcuts, settings, light and dark themes.
 - **Session actions.** The thread header's ⋯ menu offers **Fork session** (§9) when the provider reports `fork`. It is disabled with the reason while a turn runs, and the command palette offers **Fork this session** for the session on screen. A fork shows where it came from: a "Fork of …" chip in its header, a **Forked from** row in Session details, and a note in its empty transcript.

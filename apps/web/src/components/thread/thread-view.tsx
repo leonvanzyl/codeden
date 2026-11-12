@@ -3,13 +3,15 @@ import { useMutation } from "@tanstack/react-query";
 import { Sparkles } from "lucide-react";
 import { useMemo } from "react";
 import { EmptyState } from "@/components/common/bits";
-import { Composer } from "@/components/composer/composer";
+import { SessionComposer } from "@/components/composer/composer";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useClient } from "@/lib/api";
 import { useSession, useSnapshotData, useTranscript } from "@/lib/queries";
 import { activeTurn } from "@/lib/transcript/reducer";
 import { latestFollowups } from "@/lib/transcript/timeline";
 import { useComposerStore } from "@/stores/composer";
+import { useNewSessionStore } from "@/stores/new-session";
+import { FirstMessage } from "./first-message";
 import { QueuedMessages } from "./queued-messages";
 import { ThreadHeader } from "./thread-header";
 import { Transcript } from "./transcript";
@@ -77,8 +79,19 @@ export function ThreadView({ sessionId, empty }: { sessionId: string; empty?: Re
   const hasItems = Boolean(
     transcript && threadId && (transcript.threads[threadId]?.itemIds.length ?? 0) > 0,
   );
+  // Sent from the New session draft: shown until the transcript has the turn.
+  const firstMessage = useNewSessionStore((s) => s.firstMessages[sessionId]);
 
   if (!session) {
+    // Just started from the draft and not in the snapshot yet: its realtime event is on the way.
+    if (firstMessage) {
+      return (
+        <div className="flex min-h-0 flex-1 flex-col">
+          <div className="h-12 shrink-0 border-b border-border" />
+          <FirstMessage input={firstMessage} status="starting" />
+        </div>
+      );
+    }
     return (
       <EmptyState icon={<Sparkles />} title="Session not found" className="flex-1">
         It may have been archived.
@@ -93,18 +106,20 @@ export function ThreadView({ sessionId, empty }: { sessionId: string; empty?: Re
         <EmptyState icon={<Sparkles />} title="Couldn't load this session" className="flex-1">
           {error.message}
         </EmptyState>
+      ) : hasItems && transcript && threadId ? (
+        <Transcript transcript={transcript} threadId={threadId} sessionId={sessionId} />
+      ) : firstMessage ? (
+        <FirstMessage input={firstMessage} status={session.status} />
       ) : isLoading || !transcript || !threadId ? (
         <div className="flex-1">
           <TranscriptSkeleton />
         </div>
-      ) : hasItems ? (
-        <Transcript transcript={transcript} threadId={threadId} sessionId={sessionId} />
       ) : (
         <div className="flex min-h-0 flex-1 flex-col">{empty}</div>
       )}
       {followups && !running && <FollowupChips sessionId={sessionId} suggestions={followups} />}
       <QueuedMessages session={session} running={running} />
-      <Composer session={session} running={running} />
+      <SessionComposer session={session} running={running} />
     </div>
   );
 }

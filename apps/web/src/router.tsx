@@ -16,6 +16,7 @@ import { AutomationsPage, type AutomationsTab } from "@/routes/automations";
 import { FactoryItemPage } from "@/routes/factory-item";
 import { HomePage } from "@/routes/home";
 import { InboxPage } from "@/routes/inbox";
+import { NewSessionPage } from "@/routes/new-session";
 import { PmPage } from "@/routes/pm";
 import { ProjectPage, type ProjectTab } from "@/routes/project";
 import { ReportsPage } from "@/routes/reports";
@@ -61,18 +62,32 @@ const projectRoute = createRoute({
     // The sessions list shows archived sessions (from the sidebar's "N archived" row).
     ...(s.archived ? { archived: true } : {}),
   }),
+  // `?newSession=true` opened the old New session dialog; links to it open the draft now.
+  beforeLoad: ({ search, params }) => {
+    if (search.newSession) {
+      throw redirect({ to: "/projects/$projectId/new", params, replace: true });
+    }
+  },
   component: function Project() {
     const { projectId } = projectRoute.useParams();
-    const { newSession, tab, archived } = projectRoute.useSearch();
+    const { tab, archived } = projectRoute.useSearch();
     return (
       <ProjectPage
         key={projectId}
         projectId={projectId}
-        newSession={Boolean(newSession)}
         tab={tab ?? "overview"}
         sessionView={archived ? "archived" : "active"}
       />
     );
+  },
+});
+
+const newSessionRoute = createRoute({
+  getParentRoute: () => shell,
+  path: "/projects/$projectId/new",
+  component: function NewSession() {
+    const { projectId } = newSessionRoute.useParams();
+    return <NewSessionPage key={projectId} projectId={projectId} />;
   },
 });
 
@@ -201,6 +216,7 @@ const routeTree = rootRoute.addChildren([
     reportsRoute,
     sessionRoute,
     projectRoute,
+    newSessionRoute,
     pmRoute,
     automationsRoute,
     newAutomationRoute,

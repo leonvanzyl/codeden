@@ -66,12 +66,14 @@ test("M1 flow with the Fake provider", async ({ page }) => {
     await expect(page.getByTestId("next-runs")).toContainText("No scheduled runs");
   });
 
-  await test.step("start a Fake session and stream the transcript", async () => {
-    await page.getByRole("button", { name: "New session" }).click();
-    const dialog = page.getByRole("dialog");
-    await dialog.getByLabel("What should the agent do?").fill("Say hello [approval]");
-    await expect(dialog.getByRole("button", { name: "Provider and model" })).toContainText(/Fake/);
-    await dialog.getByRole("button", { name: "Start session" }).click();
+  await test.step("start a Fake session from the draft and stream the transcript", async () => {
+    // The project page's button (the sidebar's "+" is a link of the same name).
+    await page.getByRole("main").getByRole("link", { name: "New session" }).click();
+    await expect(page).toHaveURL(/\/projects\/[^/]+\/new$/);
+    const draft = page.getByTestId("new-session");
+    await expect(draft.getByRole("button", { name: "Provider and model" })).toContainText(/Fake/);
+    await draft.getByRole("textbox", { name: "Message" }).fill("Say hello [approval]");
+    await draft.getByRole("textbox", { name: "Message" }).press("Enter");
     await expect(page).toHaveURL(/\/sessions\//);
     await expect(page.getByText("Echo: Say hello [approval]")).toBeVisible();
   });
