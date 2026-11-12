@@ -9,6 +9,9 @@ import {
   McpServerTarget,
   McpServerTestRequest,
   McpServerUpsertRequest,
+  type SkillSwitchDiff,
+  SkillSwitchRequest,
+  type SkillSwitchResponse,
   type SlashCommandList,
 } from "@codeden/contracts";
 import { Hono } from "hono";
@@ -16,8 +19,9 @@ import type { AppServices } from "../services/container";
 import { jsonBody, queryOf } from "./validate";
 
 /**
- * `/api/agent-config` (§12.4): provider memory files, skills, subagents, MCP servers and hooks
- * in their native files. Every overwrite and delete is backed up first; `diff` routes preview.
+ * `/api/agent-config` (§12.4): provider memory files, skills (and their switches), subagents,
+ * MCP servers and hooks in their native files. Every overwrite and delete is backed up first;
+ * `diff` routes preview.
  */
 export function agentConfigRoutes(s: AppServices) {
   const ac = s.agentConfig;
@@ -57,8 +61,15 @@ export function agentConfigRoutes(s: AppServices) {
     .post("/hooks/diff", jsonBody(HookChangeRequest), (c) =>
       c.json(ac.hooks.diff(c.req.valid("json"))),
     )
-    .post("/hooks", jsonBody(HookChangeRequest), (c) =>
-      c.json(ac.hooks.apply(c.req.valid("json"))),
+    .post("/hooks", jsonBody(HookChangeRequest), (c) => c.json(ac.hooks.apply(c.req.valid("json"))))
+    .get("/skills", queryOf(AgentConfigListQuery.pick({ projectId: true })), (c) =>
+      c.json({ skills: ac.skills.list(c.req.valid("query").projectId) }),
+    )
+    .post("/skills/diff", jsonBody(SkillSwitchRequest), (c) =>
+      c.json<SkillSwitchDiff>(ac.skills.diff(c.req.valid("json"))),
+    )
+    .post("/skills", jsonBody(SkillSwitchRequest), (c) =>
+      c.json<SkillSwitchResponse>(ac.skills.apply(c.req.valid("json"))),
     );
 }
 

@@ -5,6 +5,7 @@ import {
   AgentConfigListResponse,
   type AgentConfigLocator,
   AgentConfigWriteResponse,
+  AgentSkillListResponse,
   BrowserNavigateResponse,
   BrowserOpenResponse,
   BrowserTabResponse,
@@ -20,6 +21,8 @@ import {
   McpServerTestResult,
   McpServerWriteResponse,
   SecretsStatus,
+  SkillSwitchDiff,
+  SkillSwitchResponse,
   SttResponse,
   VoiceListResponse,
 } from "@codeden/contracts";
@@ -111,6 +114,11 @@ export function httpAgentConfigApi(http: Fetcher): AgentConfigApi {
       get(`/agent-config/hooks${qs({ projectId })}`, (v) => HookListResponse.parse(v)),
     diffHook: (req) => post("/agent-config/hooks/diff", req, (v) => AgentConfigDiff.parse(v)),
     changeHook: (req) => post("/agent-config/hooks", req, (v) => HookWriteResponse.parse(v)),
+    listSkills: (projectId) =>
+      get(`/agent-config/skills${qs({ projectId })}`, (v) => AgentSkillListResponse.parse(v)),
+    diffSkillSwitch: (req) =>
+      post("/agent-config/skills/diff", req, (v) => SkillSwitchDiff.parse(v)),
+    switchSkill: (req) => post("/agent-config/skills", req, (v) => SkillSwitchResponse.parse(v)),
     loaded: (id) =>
       get(`/sessions/${enc(id)}/agent-config/loaded`, (v) => LoadedAgentConfig.parse(v)),
   };

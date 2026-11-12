@@ -38,6 +38,7 @@ import { HookShelf } from "./hook-shelf";
 import { AgentConfigHooks } from "./hooks-service";
 import { applyChange, claudeProjectKey, diffChange, readServers, sourceFor } from "./mcp";
 import { claudeAutoMemoryDir, findGitRoot, mainRepoRoot, readJson } from "./paths";
+import { AgentConfigSkills } from "./skills-service";
 import { loadedClaudeCommands, mergeSlashCommands, skillCommand } from "./slash-commands";
 
 export interface AgentConfigServiceDeps {
@@ -62,12 +63,13 @@ const MCP_TEST_SLACK_MS = 5_000;
 
 /**
  * Agent configuration (§12.4): discovery of each provider's memory files, skills, subagents,
- * MCP servers and hooks; edits in the native files with backups and diff previews; and the
- * "what's loaded" view of a session.
+ * MCP servers and hooks; edits in the native files with backups and diff previews; skill
+ * switches; and the "what's loaded" view of a session.
  */
 export class AgentConfigService {
   readonly files: AgentConfigFiles;
   readonly hooks: AgentConfigHooks;
+  readonly skills: AgentConfigSkills;
 
   constructor(private readonly deps: AgentConfigServiceDeps) {
     this.files = new AgentConfigFiles((l) => this.rootDir(l), deps.backupDir);
@@ -76,6 +78,12 @@ export class AgentConfigService {
       project: (id) => this.project(id),
       backup: (file) => this.files.backup(file),
       shelf: new HookShelf(deps.disabledHooksFile),
+    });
+    this.skills = new AgentConfigSkills({
+      home: deps.home,
+      project: (id) => this.project(id),
+      backup: (file) => this.files.backup(file),
+      resolve: (locator) => this.files.resolve(locator),
     });
   }
 
@@ -189,9 +197,9 @@ export class AgentConfigService {
 
   /**
    * The composer's `/` menu for a session (§13): the skills that apply to its working folder
-   * (as What's loaded finds them) and its provider's custom command files; once the provider
-   * has reported a non-empty list of what it runs for the session (built-in ones included),
-   * that list (`mergeSlashCommands`).
+   * (as What's loaded finds them, without those switched off) and its provider's custom
+   * command files; once the provider has reported a non-empty list of what it runs for the
+   * session (built-in ones included), that list (`mergeSlashCommands`).
    * Role sessions get what applies to their own folder: the orchestrator, outside any
    * project, only user-level entries.
    */
@@ -201,8 +209,9 @@ export class AgentConfigService {
       session.provider === "claude"
         ? loadedClaudeCommands(this.deps.home, session.cwd, gitRoot)
         : [];
+    const skills = files.skills.filter((s) => s.enabled).map(skillCommand);
     return mergeSlashCommands(
-      [...files.skills.map(skillCommand), ...custom],
+      [...skills, ...custom],
       this.deps.reportedCommands(sessionId),
       session.provider,
     );
@@ -210,19 +219,23 @@ export class AgentConfigService {
 
   // ------------------------------------------------------------------- helpers
 
-  /** A session's working folder, project and the native files its provider loads there. */
+  /**
+   * A session's working folder, project and the native files its provider loads there, with
+   * each skill's switch state for that folder.
+   */
   private discover(sessionId: string) {
     const session = this.deps.repo.get(sessionId);
     const project = session.projectId ? this.project(session.projectId) : null;
     const gitRoot = findGitRoot(session.cwd);
     const home = this.deps.home;
-    const files: LoadedFiles =
+    const found: LoadedFiles =
       session.provider === "codex"
         ? loadedCodex(home, session.cwd, gitRoot, project)
         : session.provider === "claude"
           ? loadedClaude(home, session.cwd, gitRoot, project)
           : { memory: [], skills: [], subagents: [] };
-    return { session, project, gitRoot, files };
+    const skills = this.skills.forSession(found.skills, session.cwd, gitRoot, session.projectId);
+    return { session, project, gitRoot, files: { ...found, skills } };
   }
 
   /** A project with its Claude auto-memory folder (keyed by the main repo root). */

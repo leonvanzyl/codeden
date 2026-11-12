@@ -12,6 +12,7 @@ import { mockBrowserApi } from "./browser";
 import { configContents, configFiles, mcpServers } from "./fixtures/config";
 import { mockHooksApi } from "./hooks";
 import { mockLocalStt } from "./local-stt";
+import { mockSkillsApi } from "./skills";
 import type { MockWorld } from "./world";
 
 const delay = <T>(value: T, ms = 120): Promise<T> =>
@@ -57,6 +58,7 @@ const key = (l: AgentConfigLocator) => `cfg:${l.root}:${l.projectId ?? ""}:${l.p
 function mockAgentConfig(world: MockWorld): AgentConfigApi {
   let servers: McpServerEntry[] = structuredClone(mcpServers);
   const hooksApi = mockHooksApi(naiveDiff);
+  const { skills, ...skillsApi } = mockSkillsApi(naiveDiff);
   const content = (l: AgentConfigLocator) =>
     world.files.get(key(l)) ?? configContents[l.path] ?? "";
   const read = (l: AgentConfigLocator): AgentConfigFileContent => {
@@ -164,6 +166,7 @@ function mockAgentConfig(world: MockWorld): AgentConfigApi {
       );
     },
     ...hooksApi,
+    ...skillsApi,
     loaded: async (sessionId) => {
       const files = configFiles.filter((f) => f.exists);
       // The storefront project's hooks; the disabled ones (on the shelf) don't run.
@@ -173,15 +176,7 @@ function mockAgentConfig(world: MockWorld): AgentConfigApi {
         provider: "claude",
         cwd: "C:\\Users\\you\\.codeden\\wt\\storefront\\fix-checkout-flake",
         memory: files.filter((f) => f.kind === "memory" || f.kind === "rule"),
-        skills: files
-          .filter((f) => f.kind === "skill")
-          .map((f) => ({
-            provider: f.provider,
-            scope: f.scope,
-            name: f.name,
-            description: f.description,
-            file: f,
-          })),
+        skills: skills().filter((s) => s.file.exists),
         subagents: files.filter((f) => f.kind === "subagent"),
         mcpServers: servers.filter((s) => s.provider !== "codex"),
         hooks: {

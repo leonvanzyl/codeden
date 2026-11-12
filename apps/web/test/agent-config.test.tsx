@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { formToHandler } from "@/components/agents/hook-form";
 import { HooksList } from "@/components/agents/hooks-list";
 import { McpServers } from "@/components/agents/mcp-servers";
+import { SkillsView } from "@/components/agents/memory-editor";
 import { PatchView } from "@/components/agents/patch-dialog";
 import { LoadedConfig } from "@/components/workbench/loaded-config";
 import { createMockClient } from "@/lib/api/mock";
@@ -131,7 +132,62 @@ describe("HooksList", () => {
   });
 });
 
+describe("SkillsView", () => {
+  it("switches a skill off after a diff preview and shows it as off", async () => {
+    const client = createMockClient();
+    const diffSkillSwitch = vi.spyOn(client.agentConfig, "diffSkillSwitch");
+    const switchSkill = vi.spyOn(client.agentConfig, "switchSkill");
+    renderWithClient(<SkillsView projectId="p-storefront" />, client, { withRouter: true });
+    const toggle = await screen.findByRole("switch", { name: "playwright-e2e: on" });
+    // A partial Claude state shows its native name; the skill stays switched on.
+    expect(screen.getByText("name-only")).toBeTruthy();
+    expect(screen.getByRole("switch", { name: "frontend-design: on" })).toBeTruthy();
+
+    fireEvent.click(toggle);
+    await waitFor(() =>
+      expect(diffSkillSwitch).toHaveBeenCalledWith({
+        root: "project",
+        projectId: "p-storefront",
+        path: ".claude/skills/playwright-e2e/SKILL.md",
+        provider: "claude",
+        enabled: false,
+        listProjectId: "p-storefront",
+      }),
+    );
+    expect(await screen.findByText(/applies in every project/)).toBeTruthy();
+    const confirm = (await screen.findByRole("button", {
+      name: "Switch off",
+    })) as HTMLButtonElement;
+    await waitFor(() => expect(confirm.disabled).toBe(false));
+    expect(screen.getByTestId("patch-view").textContent).toContain('"playwright-e2e": "off"');
+    fireEvent.click(confirm);
+    await waitFor(() => expect(switchSkill).toHaveBeenCalled());
+    expect(await screen.findByRole("switch", { name: "playwright-e2e: off" })).toBeTruthy();
+    expect(screen.getByText("off")).toBeTruthy();
+    const row = screen.getByText("playwright-e2e").closest("[data-muted]");
+    expect(row?.getAttribute("data-muted")).toBe("true");
+  });
+});
+
 describe("LoadedConfig", () => {
+  it("marks skills that are switched off for the session", async () => {
+    const client = createMockClient();
+    const base = await client.agentConfig.loaded("s1");
+    const [first, ...rest] = base.skills;
+    if (!first) throw new Error("the mock world has skills");
+    vi.spyOn(client.agentConfig, "loaded").mockResolvedValue({
+      ...base,
+      skills: [{ ...first, enabled: false, visibility: undefined }, ...rest],
+    });
+    renderWithClient(<LoadedConfig sessionId="s1" projectId="p-storefront" />, client, {
+      withRouter: true,
+    });
+    const skills = within(await screen.findByTestId("loaded-skills"));
+    expect(await skills.findByText(`${first.scope} · off`)).toBeTruthy();
+    const link = skills.getByRole("link", { name: "Switch skills" }) as HTMLAnchorElement;
+    expect(link.getAttribute("href")).toContain("tab=skills");
+  });
+
   it("shows memory, skills, subagents and MCP servers for a session", async () => {
     renderWithClient(<LoadedConfig sessionId="s1" projectId="p-storefront" />, createMockClient(), {
       withRouter: true,

@@ -1,7 +1,7 @@
 import type { AgentConfigFile, AgentConfigKind } from "@codeden/contracts";
 import { useQuery } from "@tanstack/react-query";
 import { FilePlus2, FileText, FolderOpen, Plus } from "lucide-react";
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import { EmptyState, ProviderMark } from "@/components/common/bits";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -22,6 +22,16 @@ const scopeLabel = { user: "user", project: "project", local: "local" };
 export const fileKey = (f: Pick<AgentConfigFile, "root" | "projectId" | "path">) =>
   `${f.root}:${f.projectId ?? ""}:${f.path}`;
 
+/** Extras a tab adds to a file's row (the Skills tab's switch). */
+export interface RowAddon {
+  /** Shown dimmed (a skill that is switched off). */
+  muted?: boolean;
+  /** Under the scope label. */
+  chip?: ReactNode;
+  /** A control at the row's end, outside its select button. */
+  end?: ReactNode;
+}
+
 /** The agent-config file list for a project (or the user's home only), shared by the tabs. */
 export function useAgentConfigFiles(projectId: string | null) {
   const client = useClient();
@@ -33,7 +43,9 @@ export function useAgentConfigFiles(projectId: string | null) {
 
 /**
  * Master-detail view of native agent-config files of some kinds (§12.4): grouped by provider,
- * edited in place with a diff preview. `create` adds a "New" button for skills or subagents.
+ * edited in place with a diff preview. `create` adds a "New" button for skills or subagents;
+ * `rowAddon` adds a control to rows, and `onFilesChanged` runs after a file is written,
+ * created or deleted here.
  */
 export function ConfigFilesView({
   projectId,
@@ -41,14 +53,22 @@ export function ConfigFilesView({
   create,
   placeholder,
   emptyText,
+  rowAddon,
+  onFilesChanged,
 }: {
   projectId: string | null;
   kinds: AgentConfigKind[];
   create?: NewConfigKind;
   placeholder?: string;
   emptyText: string;
+  rowAddon?: (file: AgentConfigFile) => RowAddon | undefined;
+  onFilesChanged?: () => void;
 }) {
   const files = useAgentConfigFiles(projectId);
+  const changed = () => {
+    void files.refetch();
+    onFilesChanged?.();
+  };
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const list = (files.data?.files ?? [])
@@ -97,6 +117,7 @@ export function ConfigFilesView({
                     file={f}
                     active={current ? fileKey(current) === fileKey(f) : false}
                     onSelect={() => setSelectedKey(fileKey(f))}
+                    addon={rowAddon?.(f)}
                   />
                 ))}
               </div>
@@ -118,7 +139,7 @@ export function ConfigFilesView({
           key={fileKey(current)}
           file={current}
           placeholder={placeholder}
-          onChanged={() => void files.refetch()}
+          onChanged={changed}
         />
       ) : (
         <div className="flex flex-1 items-center justify-center">
@@ -135,7 +156,7 @@ export function ConfigFilesView({
           onOpenChange={setCreating}
           onCreated={(created) => {
             setSelectedKey(fileKey(created));
-            void files.refetch();
+            changed();
           }}
         />
       )}
@@ -147,40 +168,49 @@ function FileRow({
   file: f,
   active,
   onSelect,
+  addon,
 }: {
   file: AgentConfigFile;
   active: boolean;
   onSelect: () => void;
+  addon?: RowAddon;
 }) {
   const label = f.kind === "skill" || f.kind === "subagent" ? f.name : f.path;
   return (
-    <button
-      type="button"
-      onClick={onSelect}
-      data-config-path={f.path}
-      className={cn(
-        "flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left hover:bg-accent/60",
-        active && "bg-accent",
-      )}
+    <div
+      className={cn("flex items-start rounded-md hover:bg-accent/60", active && "bg-accent")}
+      data-muted={addon?.muted ? "true" : undefined}
     >
-      {f.exists ? (
-        <FileText className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
-      ) : (
-        <FilePlus2 className="mt-0.5 size-3.5 shrink-0 text-muted-foreground/60" />
-      )}
-      <span className="min-w-0 flex-1">
-        <span className={cn("block truncate text-[13px]", !f.exists && "text-muted-foreground")}>
-          {label}
+      <button
+        type="button"
+        onClick={onSelect}
+        data-config-path={f.path}
+        className={cn(
+          "flex min-w-0 flex-1 items-start gap-2 rounded-md px-2 py-1.5 text-left",
+          addon?.muted && "opacity-55",
+        )}
+      >
+        {f.exists ? (
+          <FileText className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
+        ) : (
+          <FilePlus2 className="mt-0.5 size-3.5 shrink-0 text-muted-foreground/60" />
+        )}
+        <span className="min-w-0 flex-1">
+          <span className={cn("block truncate text-[13px]", !f.exists && "text-muted-foreground")}>
+            {label}
+          </span>
+          <span className="block truncate text-3xs text-muted-foreground">
+            {f.description ?? (f.root === "home" ? `~/${f.path}` : f.path)}
+          </span>
         </span>
-        <span className="block truncate text-3xs text-muted-foreground">
-          {f.description ?? (f.root === "home" ? `~/${f.path}` : f.path)}
+        <span className="mt-0.5 flex shrink-0 flex-col items-end gap-0.5 text-3xs">
+          <span className={scopeTone[f.scope]}>{scopeLabel[f.scope]}</span>
+          {f.onDemand && <span className="text-muted-foreground">on demand</span>}
+          {f.kind === "auto_memory" && <span className="text-muted-foreground">auto</span>}
+          {addon?.chip}
         </span>
-      </span>
-      <span className="mt-0.5 flex shrink-0 flex-col items-end gap-0.5 text-3xs">
-        <span className={scopeTone[f.scope]}>{scopeLabel[f.scope]}</span>
-        {f.onDemand && <span className="text-muted-foreground">on demand</span>}
-        {f.kind === "auto_memory" && <span className="text-muted-foreground">auto</span>}
-      </span>
-    </button>
+      </button>
+      {addon?.end && <span className="flex shrink-0 items-center py-2 pr-2">{addon.end}</span>}
+    </div>
   );
 }

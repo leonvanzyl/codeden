@@ -1,5 +1,6 @@
 import type { AgentConfigDiff } from "@codeden/contracts";
 import { Loader2, ShieldCheck } from "lucide-react";
+import type { ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -54,6 +55,7 @@ export function PatchDialog({
   onConfirm,
   saving,
   confirmLabel = "Save to file",
+  note,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -63,6 +65,8 @@ export function PatchDialog({
   onConfirm: () => void;
   saving?: boolean;
   confirmLabel?: string;
+  /** A line above the diff saying what the change means. */
+  note?: ReactNode;
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -80,6 +84,7 @@ export function PatchDialog({
             )}
           </DialogDescription>
         </DialogHeader>
+        {note && <p className="text-xs text-muted-foreground">{note}</p>}
         <div className="max-h-[55dvh] min-h-24 overflow-auto rounded-lg border border-border bg-background/60 scroll-thin">
           {error ? (
             <p className="p-4 text-xs text-status-failed">{error}</p>

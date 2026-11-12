@@ -1,8 +1,9 @@
-import type { AgentConfigFile } from "@codeden/contracts";
+import type { AgentConfigFile, AgentSkill } from "@codeden/contracts";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { Bot, FileText, Plug, Sparkles, Webhook } from "lucide-react";
 import type { ReactNode } from "react";
+import { skillStateLabel, skillStateTitle } from "@/components/agents/skill-state";
 import { useClient } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { hookNotices, hookRows, type LoadedRow } from "./loaded-hooks";
@@ -13,6 +14,18 @@ const fileRow = (f: AgentConfigFile): LoadedRow => ({
   detail: `${f.scope}${f.onDemand ? " · on demand" : ""}`,
   title: f.absolutePath,
 });
+
+/** A skill, dimmed and labelled "off" when its provider's setting switches it off. */
+const skillRow = (s: AgentSkill): LoadedRow => {
+  const state = skillStateLabel(s);
+  return {
+    ...fileRow(s.file),
+    label: s.name,
+    detail: state ? `${s.scope} · ${state}` : s.scope,
+    title: `${s.file.absolutePath}\n${skillStateTitle(s)}`,
+    dim: !s.enabled,
+  };
+};
 
 /** What the session's provider loads into its context from its working directory (§12.4). */
 export function LoadedConfig({
@@ -61,11 +74,17 @@ export function LoadedConfig({
         icon={<Sparkles />}
         title="Skills"
         loading={loaded.isLoading}
-        rows={(d?.skills ?? []).map((s) => ({
-          ...fileRow(s.file),
-          label: s.name,
-          detail: s.scope,
-        }))}
+        rows={(d?.skills ?? []).map(skillRow)}
+        testId="loaded-skills"
+        action={
+          <Link
+            to="/agents"
+            search={{ tab: "skills", project }}
+            className="text-3xs hover:text-foreground"
+          >
+            Switch skills
+          </Link>
+        }
       />
       <LoadedList
         icon={<Bot />}

@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   AgentConfigFile,
   AgentConfigLocator,
+  AgentSkill,
+  AgentSkillListResponse,
   HookChangeRequest,
   HookListResponse,
   HookWriteResponse,
@@ -11,6 +13,9 @@ import {
   McpServerTestResult,
   McpServerUpsertRequest,
   providersWith,
+  SkillSwitchDiff,
+  SkillSwitchRequest,
+  SkillSwitchResponse,
 } from "../src";
 
 const roundTrip = <T>(schema: { parse: (v: unknown) => T }, value: T) =>
@@ -48,7 +53,14 @@ describe("agent configuration contracts", () => {
       cwd: "C:/repo",
       memory: [file],
       skills: [
-        { provider: "claude", scope: "user", name: "deploy", file: { ...file, kind: "skill" } },
+        {
+          provider: "claude",
+          scope: "user",
+          name: "deploy",
+          file: { ...file, kind: "skill" },
+          enabled: false,
+          setIn: "C:/repo/.claude/settings.local.json",
+        },
       ],
       subagents: [],
       mcpServers: [
@@ -188,6 +200,46 @@ describe("agent configuration contracts", () => {
     expect(ok({ type: "agent", prompt: "Check it", timeout: 0 })).toBe(false);
     expect(ok({ type: "command", command: "x" }, "Pre Tool")).toBe(false);
     expect(ok({ type: "command", command: "x" }, "Stop2")).toBe(false);
+  });
+
+  it("round-trips skill states and switches", () => {
+    const skill = {
+      provider: "claude",
+      scope: "project",
+      name: "deploy",
+      description: "Ship it",
+      file: { ...file, kind: "skill", path: ".claude/skills/deploy/SKILL.md", name: "deploy" },
+      enabled: true,
+      visibility: "user-invocable-only",
+      setIn: null,
+    } as const;
+    roundTrip(AgentSkillListResponse, { skills: [skill] });
+    // The state is part of the contract: a skill without it is refused, not defaulted.
+    const { enabled: _, ...withoutState } = skill;
+    expect(AgentSkill.safeParse(withoutState).success).toBe(false);
+    expect(AgentSkill.safeParse({ ...skill, visibility: "off" }).success).toBe(false);
+    const req = {
+      root: "project",
+      projectId: "p1",
+      path: ".claude/skills/deploy/SKILL.md",
+      provider: "claude",
+      enabled: false,
+      listProjectId: "p1",
+    } as const;
+    roundTrip(SkillSwitchRequest, req);
+    expect(SkillSwitchRequest.safeParse({ ...req, enabled: "off" }).success).toBe(false);
+    roundTrip(SkillSwitchDiff, {
+      absolutePath: "C:/Users/me/.claude/settings.json",
+      exists: true,
+      patch: "--- a/settings.json\n+++ b/settings.json\n",
+      additions: 3,
+      deletions: 0,
+      changed: true,
+      scope: "user",
+    });
+    roundTrip(SkillSwitchResponse, { file: null, backupPath: null, skills: [skill] });
+    expect(SkillSwitchResponse.safeParse({ file: null, backupPath: null }).success).toBe(false);
+    expect(providersWith("skillSwitches")).toEqual(["claude", "codex"]);
   });
 
   it("validates locators and server names", () => {

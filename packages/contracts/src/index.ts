@@ -6,6 +6,7 @@ export * from "./agent-config";
 export * from "./agent-config-hooks";
 export * from "./agent-config-loaded";
 export * from "./agent-config-mcp-test";
+export * from "./agent-config-skills";
 export * from "./agent-events";
 export * from "./api";
 export * from "./automations-api";

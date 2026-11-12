@@ -8,6 +8,7 @@ import type {
   AgentConfigLocator,
   AgentConfigWriteRequest,
   AgentConfigWriteResponse,
+  AgentSkillListResponse,
   BrowserHistoryRequest,
   BrowserInput,
   BrowserNavigateResponse,
@@ -50,6 +51,9 @@ import type {
   SecretsStatus,
   Session,
   SessionGithubResponse,
+  SkillSwitchDiff,
+  SkillSwitchRequest,
+  SkillSwitchResponse,
   SttQuery,
   SttResponse,
   TriageIssueRequest,
@@ -147,6 +151,11 @@ export interface AgentConfigApi {
   /** Preview a hook change as a diff of its settings file. */
   diffHook(req: HookChangeRequest): Promise<AgentConfigDiff>;
   changeHook(req: HookChangeRequest): Promise<HookWriteResponse>;
+  /** User skills, plus the project's, each with whether its provider's setting switches it off. */
+  listSkills(projectId: string | null): Promise<AgentSkillListResponse>;
+  /** Preview switching a skill on or off as a diff of the native file it writes. */
+  diffSkillSwitch(req: SkillSwitchRequest): Promise<SkillSwitchDiff>;
+  switchSkill(req: SkillSwitchRequest): Promise<SkillSwitchResponse>;
   /** What a session's provider loads from its working directory. */
   loaded(sessionId: string): Promise<LoadedAgentConfig>;
 }
