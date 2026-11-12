@@ -20,6 +20,12 @@ export interface EndProcessesOptions {
    * manager (`endableForRemoval`). Without it, only what this runner's agents started.
    */
   removing?: boolean;
+  /**
+   * Only processes known to have started at or before this time (ms since the epoch): for a
+   * folder moved away at that time, so nothing started since (such as what runs in a worktree
+   * recreated at the same path) is ever chosen.
+   */
+  startedBefore?: number;
   /** Also allowed: processes seen as the runner's descendants earlier (`runnerDescendants`). */
   seen?: ReadonlySet<number>;
   /** Processes never ended, with everything they started (the user's terminals). */
@@ -73,44 +79,53 @@ function describe(row: ProcessRow): string {
  * command line names something inside it, matched as whole paths; and it was started by
  * CodeDen's agents or terminals (`startedByAgents`), or, when `removing`, by anyone but a person
  * in an editor, terminal or file manager (`endableForRemoval`). CodeDen itself is never ended:
- * not the runner, not the server, and not their ancestors (the CLI, the desktop app). Returns
- * the pids it ended; never throws.
+ * not the runner, not the server, and not their ancestors (the CLI, the desktop app). Each is
+ * ended with its whole tree, so nothing with one of those, or a person's app, running under it
+ * is chosen (`processesToEnd`). `dir` may name several folders (one moved away, by both its
+ * paths). Returns the pids it ended; never throws.
  */
 export async function endProcessesInside(
-  dir: string,
+  dir: string | readonly string[],
   opts: EndProcessesOptions,
 ): Promise<number[]> {
+  const dirs = typeof dir === "string" ? [dir] : dir;
   let rows: ProcessRow[];
   try {
     rows = await (opts.table ?? processTable)();
   } catch (error) {
-    opts.log?.(`could not list processes in ${dir}: ${(error as Error).message}`);
+    opts.log?.(`could not list processes in ${dirs.join(", ")}: ${(error as Error).message}`);
     return [];
   }
   const server = serverPid(opts.home);
   const windows = process.platform === "win32";
   const protect = [process.pid, ...(server !== undefined ? [server] : [])];
-  const allowed = opts.removing
-    ? endableForRemoval({ rows, runnerPid: process.pid, protect, dir, windows })
-    : startedByAgents(rows, process.pid, RUNNER_STARTED_AT);
-  for (const pid of opts.seen ?? []) allowed.add(pid);
-  const victims = processesToEnd({
-    dir,
-    rows,
-    windows,
-    protect,
-    allowed,
-    spare: opts.spare ? withDescendants(opts.spare, rows) : undefined,
-  });
-  if (victims.length === 0) return [];
+  const spare = opts.spare ? withDescendants(opts.spare, rows) : undefined;
+  const { startedBefore } = opts;
+  const startedInTime = new Set(
+    rows
+      .filter((r) => startedBefore === undefined || (r.startedAt ?? Infinity) <= startedBefore)
+      .map((r) => r.pid),
+  );
+  const victims = new Set<number>();
+  for (const folder of dirs) {
+    const allowed = opts.removing
+      ? endableForRemoval({ rows, runnerPid: process.pid, protect, dir: folder, windows })
+      : startedByAgents(rows, process.pid, RUNNER_STARTED_AT);
+    for (const pid of opts.seen ?? []) allowed.add(pid);
+    for (const pid of allowed) if (!startedInTime.has(pid)) allowed.delete(pid);
+    const chosen = processesToEnd({ dir: folder, rows, windows, protect, allowed, spare });
+    for (const pid of chosen) victims.add(pid);
+  }
+  if (victims.size === 0) return [];
+  const ended = [...victims];
   const kill = opts.kill ?? ((pid: number) => killTree(pid, 500));
-  await Promise.all(victims.map((pid) => kill(pid).catch(() => undefined)));
-  const names = victims.map((pid) => {
+  await Promise.all(ended.map((pid) => kill(pid).catch(() => undefined)));
+  const names = ended.map((pid) => {
     const row = rows.find((r) => r.pid === pid);
     return `${pid} (${row?.exe ?? row?.commandLine?.slice(0, 80) ?? "?"})`;
   });
-  opts.log?.(`ended ${victims.length} process(es) in ${dir}: ${names.join(", ")}`);
-  return victims;
+  opts.log?.(`ended ${ended.length} process(es) in ${dirs.join(", ")}: ${names.join(", ")}`);
+  return ended;
 }
 
 /**

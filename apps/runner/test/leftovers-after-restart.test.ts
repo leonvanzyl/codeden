@@ -1,10 +1,12 @@
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { CommandError } from "../src/errors";
 import { type ProcessRow, withDescendants } from "../src/process/inside";
 import { endProcessesInside } from "../src/process/worktree-processes";
+import { deleteTree } from "../src/workspace/delete-tree";
 import { removeWithLeftovers } from "../src/workspace/leftover-processes";
-import { emptyTrash } from "../src/workspace/trash";
+import { emptyTrash, trashDir, trashOrigin } from "../src/workspace/trash";
 import { makeRepo, removeDir, sh, tempDir } from "./helpers";
 
 /**
@@ -218,5 +220,101 @@ describe("the runner's workspace.remove after a restart (#99)", () => {
     expect(killed.sort((a, b) => a - b)).toEqual([...DEV_SERVER].sort((a, b) => a - b));
     expect(result).toEqual({ removed: true });
     expect(existsSync(wt)).toBe(false);
+  });
+});
+
+describe("a worktree moved to the trash before the restart (#99, P2 review)", () => {
+  let home = "";
+  afterEach(() => removeDir(home));
+
+  it("reads where a trash entry came from and when it was moved", () => {
+    const at = Date.parse("2026-11-12T09:48:27.824Z");
+    expect(trashOrigin(HOME, "codeden-c761f1f5-mwdd7vow8zv4")).toEqual({
+      path: join(HOME, "wt", "codeden", "c761f1f5"),
+      trashedAt: at,
+    });
+    expect(trashOrigin(HOME, "codeden-website-abcd1234-mwdd7vow8zv4")?.path).toBe(
+      join(HOME, "wt", "codeden-website", "abcd1234"),
+    );
+    for (const name of [
+      "c761f1f5-mwdd7vow8zv4", // no project
+      "codeden-c761f1f5", // no stamp
+      "codeden-C761F1F5-mwdd7vow8zv4", // not a session folder CodeDen makes
+      "codeden-c761f1f5-00000000abcd", // a stamp from before CodeDen
+      `codeden-c761f1f5-${(Date.now() + 7 * 24 * 3600_000).toString(36)}abcd`, // from the future
+      ".-c761f1f5-mwdd7vow8zv4",
+      "..-c761f1f5-mwdd7vow8zv4",
+      ".trash-c761f1f5-mwdd7vow8zv4",
+    ]) {
+      expect(trashOrigin(HOME, name)).toBeNull();
+    }
+  });
+
+  it("ends what still holds it, never what runs in the worktree recreated there since", async () => {
+    home = tempDir("codeden-home-");
+    const original = join(home, "wt", "codeden", "c761f1f5");
+    const trashedAt = Date.now() - 2 * 60 * MINUTE;
+    const entry = join(trashDir(home), `codeden-c761f1f5-${trashedAt.toString(36)}k3x9`);
+    const esbuild = join(entry, "node_modules", "esbuild.exe");
+    mkdirSync(join(entry, "node_modules"), { recursive: true });
+    writeFileSync(esbuild, "");
+    // The session was messaged again: its worktree is back at the same path, with a dev server.
+    mkdirSync(original, { recursive: true });
+
+    const editorFile = join(original, "README.md");
+    const table: ProcessRow[] = [
+      ...codeden,
+      // From the hooks builder, before the move: tsx running the runner, and its esbuild.
+      row(82596, 8956, {
+        exe: NODE,
+        commandLine: `"${NODE}" ${join(original, "apps", "runner", "src", "main.ts")}`,
+        startedAt: trashedAt - 90 * MINUTE,
+      }),
+      row(84536, 82596, {
+        exe: join(original, "node_modules", "esbuild.exe"),
+        commandLine: "esbuild.exe --service=0.28.2 --ping",
+        startedAt: trashedAt - 89 * MINUTE,
+      }),
+      // In the recreated worktree, started after the move.
+      row(90001, 90000, {
+        exe: NODE,
+        commandLine: `node ${join(original, "node_modules", "vite", "bin", "vite.js")}`,
+        cwd: original,
+        startedAt: trashedAt + 30 * MINUTE,
+      }),
+      // The user's editor, open on a file there since before the move.
+      row(5100, 5000, {
+        exe: p("C:\\Users\\leon\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe"),
+        commandLine: `Code.exe ${editorFile}`,
+        startedAt: trashedAt - 24 * 60 * MINUTE,
+      }),
+    ];
+    const alive = new Set(table.map((r) => r.pid));
+    const killed: number[] = [];
+    await emptyTrash(home, {
+      processes: {
+        table: async () => table.filter((r) => alive.has(r.pid)),
+        kill: async (pid) => {
+          killed.push(pid);
+          for (const gone of withDescendants([pid], table)) alive.delete(gone);
+        },
+      },
+      // As on Windows: the trashed esbuild.exe can't be deleted while it runs.
+      remove: async (path) => {
+        if (alive.has(84536)) {
+          throw new CommandError(
+            "worktree_in_use",
+            "A file in the worktree is in use (esbuild.exe).",
+          );
+        }
+        await deleteTree(path);
+      },
+    });
+
+    expect([...withDescendants(killed, table)].sort((a, b) => a - b)).toEqual([82596, 84536]);
+    expect(existsSync(entry)).toBe(false);
+    expect(existsSync(original)).toBe(true);
+    expect(alive.has(90001)).toBe(true);
+    expect(alive.has(5100)).toBe(true);
   });
 });

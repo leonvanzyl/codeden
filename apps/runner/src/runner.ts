@@ -263,7 +263,7 @@ export async function startRunner(opts: StartRunnerOptions): Promise<RunningRunn
   // Spawns provider CLIs, so it runs in the background; it never throws.
   void registry.refreshModels();
   // Finish deleting worktrees a previous run moved to the trash; it never throws.
-  void emptyTrash(opts.home, log);
+  void emptyTrash(opts.home, { log });
 
   const removeLock = () => removeOwnLock(lockFile);
   process.once("exit", removeLock);
