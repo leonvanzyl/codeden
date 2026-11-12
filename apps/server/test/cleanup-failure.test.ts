@@ -3,13 +3,23 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { RunnerCommandError } from "../src/runner/client";
 import type { ProjectService } from "../src/services/projects/project-service";
 import type { RunnerPort } from "../src/services/runner-port";
-import { cleanupInboxId, WorktreeCleanup } from "../src/services/sessions/worktree-cleanup";
+import {
+  cleanupInboxId,
+  RETRY_DELAYS_MS,
+  WorktreeCleanup,
+} from "../src/services/sessions/worktree-cleanup";
 import { createGithubEnv, type GithubEnv } from "./support/github-env";
 
 let env: GithubEnv;
 let cleanup: WorktreeCleanup;
-/** What `workspace.remove` does next: throw this error, or succeed. */
+/** What the next `workspace.remove` calls do, in order: throw this error, or succeed (null). */
+let failures: (Error | null)[];
+/** What `workspace.remove` does once `failures` is used up. */
 let failWith: Error | null;
+/** Every runner command, by name and session. */
+let commands: string[];
+/** The waits between attempts. */
+let waits: number[];
 
 const IN_USE = new RunnerCommandError(
   "worktree_in_use",
@@ -18,7 +28,10 @@ const IN_USE = new RunnerCommandError(
 
 beforeEach(() => {
   env = createGithubEnv();
+  failures = [];
   failWith = IN_USE;
+  commands = [];
+  waits = [];
   const runner = {
     isConnected: () => true,
     runnerId: () => "r1",
@@ -26,8 +39,12 @@ beforeEach(() => {
     mcpProxyUrl: () => null,
     waitForConnection: async () => true,
     request: (async (command: RunnerCommandOf<RunnerCommandName>) => {
-      if (command.name === "workspace.remove" && failWith) throw failWith;
-      return command.name === "workspace.remove" ? { removed: true } : {};
+      const sessionId = "sessionId" in command ? ` ${command.sessionId}` : "";
+      commands.push(`${command.name}${sessionId}`);
+      if (command.name !== "workspace.remove") return {};
+      const next = failures.length > 0 ? failures.shift() : failWith;
+      if (next) throw next;
+      return { removed: true };
     }) as RunnerPort["request"],
   } as unknown as RunnerPort;
   cleanup = new WorktreeCleanup({
@@ -38,12 +55,16 @@ beforeEach(() => {
     settings: () => defaultSettings(),
     stopSession: async () => undefined,
     inbox: env.inbox,
+    sleep: async (ms) => {
+      waits.push(ms);
+    },
   });
 });
 
 afterEach(() => env.close());
 
 const report = (sessionId: string) => env.inbox.find(cleanupInboxId(sessionId));
+const removals = () => commands.filter((c) => c === "workspace.remove").length;
 
 describe("a worktree removal that keeps failing", () => {
   it("is reported in the inbox once, and resolved when a later attempt removes it", async () => {
@@ -86,5 +107,54 @@ describe("a worktree removal that keeps failing", () => {
     failWith = new RunnerCommandError("worktree_dirty", "has uncommitted changes");
     expect((await cleanup.archive(session.id)).worktree.status).toBe("kept_changes");
     expect(report(session.id)).toBeUndefined();
+    expect(removals()).toBe(1);
+  });
+});
+
+describe("retrying a removal that failed on a file in use (#99)", () => {
+  it("removes the worktree on a later attempt without raising anything", async () => {
+    const session = env.addSession();
+    failures = [IN_USE, IN_USE];
+    failWith = null;
+    const archived = await cleanup.archive(session.id);
+    expect(archived.worktree).toEqual({ status: "removed", message: null });
+    expect(removals()).toBe(3);
+    expect(waits).toEqual([...RETRY_DELAYS_MS]);
+    expect(report(session.id)).toBeUndefined();
+    expect(env.repo.get(session.id).worktreeRemovedAt).not.toBeNull();
+  });
+
+  it("reports only once the backoff is used up", async () => {
+    const session = env.addSession();
+    expect((await cleanup.archive(session.id)).worktree.status).toBe("failed");
+    expect(removals()).toBe(RETRY_DELAYS_MS.length + 1);
+    expect(waits).toEqual([...RETRY_DELAYS_MS]);
+    expect(report(session.id)?.status).toBe("open");
+  });
+
+  it("doesn't wait on a failure another attempt can't fix", async () => {
+    const session = env.addSession();
+    failWith = new RunnerCommandError("not_a_worktree", "is not a worktree of this repository");
+    expect((await cleanup.archive(session.id)).worktree.status).toBe("failed");
+    expect(removals()).toBe(1);
+    expect(waits).toEqual([]);
+    expect(report(session.id)?.body).toContain("is not a worktree");
+  });
+
+  it("stops every session working in the worktree before removing it", async () => {
+    const builder = env.addSession({ worktreePath: "/wt/demo/b1", cwd: "/wt/demo/b1" });
+    // The reviewer works in the builder's worktree; its status already says it stopped.
+    const reviewer = env.addSession({
+      worktreePath: null,
+      cwd: "/wt/demo/b1",
+      status: "stopped",
+      archivedAt: "2026-11-12T09:47:20.911Z",
+    });
+    failWith = null;
+    await cleanup.archive(builder.id);
+    const removeAt = commands.indexOf("workspace.remove");
+    expect(commands.indexOf(`session.stop ${reviewer.id}`)).toBeGreaterThanOrEqual(0);
+    expect(commands.indexOf(`session.stop ${reviewer.id}`)).toBeLessThan(removeAt);
+    expect(commands.indexOf(`session.stop ${builder.id}`)).toBeLessThan(removeAt);
   });
 });
