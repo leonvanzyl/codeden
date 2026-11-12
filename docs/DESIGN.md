@@ -537,7 +537,7 @@ node-pty sessions owned by the runner, so they survive server restarts, with bou
 
 ### 12.3 Files and diffs
 
-A file tree for the worktree, a file viewer and editor (CodeMirror 6), turn and session diffs from checkpoints, and a PR view.
+A file tree for the worktree, a file viewer and editor (CodeMirror 6), turn and session diffs from checkpoints, and a PR view. Line comments drafted on a diff are sent to the agent as one review message, through the same send-or-queue path as the composer; the drafts live in the web app only.
 
 ### 12.4 Agent configuration
 

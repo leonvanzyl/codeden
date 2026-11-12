@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { type SendMode, useClient } from "@/lib/api";
 import { useSnapshotData } from "@/lib/queries";
+import { sendToSession } from "@/lib/send-to-session";
 import { matchesCombo, shortcut } from "@/lib/shortcuts";
 import { cn } from "@/lib/utils";
 import { getDraft, useComposerStore } from "@/stores/composer";
@@ -32,16 +33,8 @@ export function Composer({ session, running }: { session: Session; running: bool
 
   // The input is captured at submit time: `onMutate` clears the draft before `mutationFn` runs.
   const send = useMutation({
-    mutationFn: async ({ sendMode, input }: { sendMode: SendMode; input: UserInputInit }) => {
-      // Role sessions go through orchestration, which adds the fresh status digest (§8.4).
-      if (session.role === "agent") return client.sendMessage(session.id, input, sendMode);
-      await client.orchestration.send(
-        session.role,
-        session.projectId,
-        input,
-        sendMode === "steer" ? "steer" : "queue",
-      );
-    },
+    mutationFn: ({ sendMode, input }: { sendMode: SendMode; input: UserInputInit }) =>
+      sendToSession(client, session, input, sendMode),
     onMutate: () => clear(session.id),
     onSuccess: (_d, { sendMode }) => {
       // Queued messages show in the tray above the composer.
