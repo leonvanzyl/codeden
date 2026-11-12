@@ -53,9 +53,9 @@ export const ResolveConflictResponse = z.object({
 export type ResolveConflictResponse = z.infer<typeof ResolveConflictResponse>;
 
 /**
- * `PATCH /api/sessions/:id`: change the model, effort, autonomy or title mid-session.
- * Model and effort apply on the next turn (a running turn keeps its settings); `null` returns
- * to the role default.
+ * `PATCH /api/sessions/:id`: change the model, effort, autonomy, plan mode or title
+ * mid-session. Model and effort apply on the next turn (a running turn keeps its settings);
+ * `null` returns to the role default.
  */
 export const UpdateSessionRequest = z
   .object({
@@ -67,6 +67,12 @@ export const UpdateSessionRequest = z
      * from the next turn. Approvals already waiting stay waiting.
      */
     autonomy: AutonomyLevel.optional(),
+    /**
+     * Turn plan mode on or off (agent sessions on a provider with `capabilities.planMode`).
+     * Saved on the session and pushed to the live provider session like `autonomy`. Off
+     * returns the agent to the session's permission level.
+     */
+    planMode: z.boolean().optional(),
     title: z.string().trim().min(1).max(200).optional(),
   })
   .refine(
@@ -74,6 +80,7 @@ export const UpdateSessionRequest = z
       r.model !== undefined ||
       r.effort !== undefined ||
       r.autonomy !== undefined ||
+      r.planMode !== undefined ||
       r.title !== undefined,
     { message: "Nothing to change" },
   );

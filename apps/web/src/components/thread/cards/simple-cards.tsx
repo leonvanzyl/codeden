@@ -12,10 +12,9 @@ import {
   RotateCcw,
 } from "lucide-react";
 import { useState } from "react";
-import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { useClient } from "@/lib/api";
-import { platform } from "@/lib/platform";
+import { copyWithFeedback } from "@/lib/copy";
 import { cn } from "@/lib/utils";
 import { Markdown } from "../markdown";
 
@@ -34,10 +33,7 @@ export function PlanCard({ item }: { item: ItemOf<"plan"> }) {
           variant="ghost"
           size="xs"
           className="ml-auto text-muted-foreground"
-          onClick={() => {
-            void platform.writeClipboard(item.text);
-            toast.success("Plan copied");
-          }}
+          onClick={() => void copyWithFeedback(item.text, "Plan copied")}
         >
           Copy
         </Button>

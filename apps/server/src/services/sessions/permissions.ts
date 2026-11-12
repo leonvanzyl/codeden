@@ -15,3 +15,14 @@ export function readOnlyUnsupported(
   if (provider.capabilities.readOnly) return null;
   return `${provider.displayName} cannot run sessions with read-only permissions`;
 }
+
+/**
+ * Why a session cannot use plan mode, or null when it can: agent sessions only, on a provider
+ * that reports `capabilities.planMode` (never decided by provider id). An unknown provider
+ * (the runner is not connected yet) is let through, as for `read_only`.
+ */
+export function planModeUnsupported(role: Role, provider: ProviderInfo | undefined): string | null {
+  if (role !== "agent") return "Only agent sessions have plan mode";
+  if (!provider || provider.capabilities.planMode) return null;
+  return `${provider.displayName} has no plan mode`;
+}

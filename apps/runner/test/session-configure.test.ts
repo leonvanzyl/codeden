@@ -24,7 +24,7 @@ const options: SessionOptions = {
 function fakeAs(
   id: string,
   sessions: ProviderSession[],
-  missing: Array<"configure" | "setAutonomy"> = [],
+  missing: Array<"configure" | "setAutonomy" | "setPlanMode"> = [],
 ): ProviderAdapter {
   const fake = new FakeProvider();
   return {
@@ -93,5 +93,41 @@ describe("session.configure", () => {
     await expect(
       host.configure({ name: "session.configure", sessionId: "nope", autonomy: "full" }),
     ).rejects.toMatchObject({ code: "unknown_session" });
+  });
+
+  it("turns plan mode on and off, or refuses it on a provider without plan mode", async () => {
+    const sessions: ProviderSession[] = [];
+    const host = await start(fakeAs("fake", sessions));
+    const fake = () => sessions[0] as FakeSession;
+    expect(fake().planMode).toBe(false);
+    await host.configure({ name: "session.configure", sessionId: "s1", planMode: true });
+    expect(fake().planMode).toBe(true);
+    await host.configure({ name: "session.configure", sessionId: "s1", planMode: false });
+    expect(fake().planMode).toBe(false);
+
+    const others: ProviderSession[] = [];
+    const limited = await start(fakeAs("limited", others, ["setPlanMode"]));
+    await expect(
+      limited.configure({
+        name: "session.configure",
+        sessionId: "s1",
+        autonomy: "full",
+        planMode: true,
+      }),
+    ).rejects.toMatchObject({ code: "unsupported" });
+    expect((others[0] as FakeSession).autonomy).toBe("auto");
+  });
+
+  it("passes on a provider's refusal, so the server keeps the change for a retry", async () => {
+    const sessions: ProviderSession[] = [];
+    const host = await start(fakeAs("fake", sessions));
+    Object.assign(sessions[0] as FakeSession, {
+      setPlanMode: async () => {
+        throw new Error("Cannot set permission mode to plan");
+      },
+    });
+    await expect(
+      host.configure({ name: "session.configure", sessionId: "s1", planMode: true }),
+    ).rejects.toThrow(/permission mode/);
   });
 });

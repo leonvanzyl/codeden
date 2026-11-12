@@ -53,6 +53,8 @@ export const SessionUpdatedEvent = z.object({
   resumeToken: z.string().optional(),
   model: z.string().optional(),
   title: z.string().optional(),
+  /** The agent entered or left plan mode on its own, e.g. it left once its plan was approved. */
+  planMode: z.boolean().optional(),
 });
 
 /** A thread came into existence. Emitted for the root thread and every subagent thread. */

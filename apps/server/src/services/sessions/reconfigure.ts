@@ -4,18 +4,22 @@ import type { SessionRepo, StoredStartMeta } from "./repo";
 
 /**
  * Settings waiting for the runner: model/effort for the session's next turn, and an autonomy
- * change the runner could not take when it was made.
+ * or plan mode change the runner could not take when it was made.
  */
 export type PendingConfig = {
   model?: string | null;
   effort?: Session["effort"];
   autonomy?: AutonomyLevel;
+  planMode?: boolean;
 };
+
+/** The settings pushed to the live provider session at once. */
+type LiveConfig = Pick<PendingConfig, "autonomy" | "planMode">;
 
 type MetaWithPending = StoredStartMeta & { pendingConfig?: PendingConfig };
 
-/** How long `PATCH` waits for the runner to take an autonomy change. */
-const AUTONOMY_TIMEOUT_MS = 10_000;
+/** How long `PATCH` waits for the runner to take an autonomy or plan mode change. */
+const LIVE_TIMEOUT_MS = 10_000;
 
 function fallbackMeta(): StoredStartMeta {
   return { workspaceMode: "worktree", workspaceFallback: null, forced: null, queuedBehind: [] };
@@ -34,14 +38,14 @@ function setPending(repo: SessionRepo, id: string, change: Partial<PendingConfig
 }
 
 /**
- * `PATCH /api/sessions/:id`: update model, effort, autonomy or title. Every change is saved
- * on the session (`session.updated`), so it survives a restart and later starts and resumes
- * use it.
+ * `PATCH /api/sessions/:id`: update model, effort, autonomy, plan mode or title. Every change
+ * is saved on the session (`session.updated`), so it survives a restart and later starts and
+ * resumes use it.
  * - Model and effort are remembered as pending and applied right before the next turn
  *   (`applyPendingConfig`), so a running turn keeps its settings.
- * - Autonomy is pushed to the live provider session at once: from the next tool call where
- *   the provider supports it, otherwise from the next turn. If the runner cannot take it now,
- *   it is retried before the next turn.
+ * - Autonomy and plan mode are pushed to the live provider session at once: from the next
+ *   tool call where the provider supports it, otherwise from the next turn. If the runner
+ *   cannot take them now, they are retried before the next turn.
  */
 export async function updateSession(
   repo: SessionRepo,
@@ -57,27 +61,29 @@ export async function updateSession(
     ...(change.model !== undefined ? { model: change.model } : {}),
     ...(change.effort !== undefined ? { effort: change.effort } : {}),
     ...(req.autonomy !== undefined ? { autonomy: req.autonomy } : {}),
+    ...(req.planMode !== undefined ? { planMode: req.planMode } : {}),
     ...(req.title !== undefined ? { title: req.title } : {}),
   }));
   if (Object.keys(change).length > 0) setPending(repo, id, change);
-  if (req.autonomy !== undefined) await applyAutonomy(repo, runner, session);
+  const live: LiveConfig = {};
+  if (req.autonomy !== undefined) live.autonomy = session.autonomy;
+  if (req.planMode !== undefined) live.planMode = session.planMode ?? false;
+  if (Object.keys(live).length > 0) await applyLive(repo, runner, session.id, live);
   return session;
 }
 
 /**
- * Tell the runner about the session's autonomy. When the runner does not host the session,
- * or cannot be reached, the level stays pending; a later start or resume reads it from the
- * session anyway.
+ * Tell the runner about the session's autonomy and/or plan mode. When the runner does not
+ * host the session, or cannot be reached, the change stays pending; a later start or resume
+ * reads it from the session anyway.
  */
-async function applyAutonomy(repo: SessionRepo, runner: RunnerPort, session: Session) {
+async function applyLive(repo: SessionRepo, runner: RunnerPort, id: string, live: LiveConfig) {
   try {
-    await runner.request(
-      { name: "session.configure", sessionId: session.id, autonomy: session.autonomy },
-      AUTONOMY_TIMEOUT_MS,
-    );
-    setPending(repo, session.id, { autonomy: undefined });
+    await runner.request({ name: "session.configure", sessionId: id, ...live }, LIVE_TIMEOUT_MS);
+    const done = Object.fromEntries(Object.keys(live).map((key) => [key, undefined]));
+    setPending(repo, id, done);
   } catch {
-    setPending(repo, session.id, { autonomy: session.autonomy });
+    setPending(repo, id, live);
   }
 }
 

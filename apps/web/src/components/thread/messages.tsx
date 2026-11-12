@@ -1,12 +1,11 @@
 import { type Attachment, type ItemOf, splitSender } from "@codeden/contracts";
 import { Copy, FileText } from "lucide-react";
 import { useMemo } from "react";
-import { toast } from "sonner";
 import { ImageGallery, ImageThumbnail } from "@/components/common/image-viewer";
 import { useClient } from "@/lib/api";
 import { attachmentGallery } from "@/lib/attachments";
+import { copyWithFeedback } from "@/lib/copy";
 import { foldDigest } from "@/lib/orchestration";
-import { platform } from "@/lib/platform";
 import { DigestDisclosure, WakeLine } from "./digest-fold";
 import { Markdown } from "./markdown";
 import { SenderMessage } from "./sender-message";
@@ -127,10 +126,7 @@ export function AssistantMessage({
         <button
           type="button"
           className="absolute -bottom-5 left-0 flex items-center gap-1 text-3xs text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:text-foreground touch:opacity-100"
-          onClick={() => {
-            void platform.writeClipboard(item.text);
-            toast.success("Copied message");
-          }}
+          onClick={() => void copyWithFeedback(item.text, "Copied message")}
         >
           <Copy className="size-3" /> Copy
         </button>

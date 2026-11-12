@@ -1,4 +1,9 @@
-import { AgentEvent, type SessionOptions, UserInput } from "@codeden/contracts";
+import {
+  AgentEvent,
+  type RuntimeResponse,
+  type SessionOptions,
+  UserInput,
+} from "@codeden/contracts";
 import { describe, expect, it } from "vitest";
 import { FakeProvider, ProviderRegistry, type ProviderSession, providerInfo } from "../src";
 
@@ -110,6 +115,58 @@ describe("FakeProvider", () => {
     );
     expect(events.at(-1)?.type).toBe("turn.completed");
     await expect(session.respond("nope", { kind: "cancel" })).rejects.toThrow(/Unknown request/);
+    await session.close();
+  });
+
+  it("plans first in plan mode: approve to do the work, deny to keep planning", async () => {
+    expect(new FakeProvider().capabilities().planMode).toBe(true);
+    const session = await new FakeProvider().openSession({ ...options, planMode: true });
+    const events: AgentEvent[] = [];
+    let answer: RuntimeResponse = { kind: "approval", decision: "deny", message: "Add tests" };
+    void (async () => {
+      for await (const e of session.events) {
+        events.push(AgentEvent.parse(e));
+        if (e.type === "item.started" && e.item.kind === "approval_request") {
+          void session.respond(e.item.requestId, answer);
+        }
+      }
+    })();
+    /** Run a turn and return its events. */
+    const turn = async (text: string) => {
+      const from = events.length;
+      const ends = events.filter(isTurnEnd).length;
+      await session.send(UserInput.parse({ text }));
+      while (events.filter(isTurnEnd).length === ends) await new Promise((r) => setImmediate(r));
+      return events.slice(from);
+    };
+    const kinds = (list: AgentEvent[]) =>
+      list.flatMap((e) => (e.type === "item.completed" ? [e.item.kind] : []));
+
+    const declined = await turn("add a README");
+    expect(kinds(declined)).toEqual([
+      "user_message",
+      "plan",
+      "approval_request",
+      "assistant_message",
+    ]);
+    expect(declined.some((e) => e.type === "session.updated" && e.planMode !== undefined)).toBe(
+      false,
+    );
+
+    answer = { kind: "approval", decision: "allow_once" };
+    const approved = await turn("add a README with tests");
+    const approval = approved.find(
+      (e) => e.type === "item.completed" && e.item.kind === "approval_request",
+    );
+    expect(approval?.type === "item.completed" && approval.item).toMatchObject({
+      action: "plan",
+      status: "completed",
+    });
+    expect(approved).toContainEqual({ type: "session.updated", planMode: false });
+    expect(kinds(approved)).toContain("tool_call");
+
+    // Out of plan mode, the next turn does the work straight away.
+    expect(kinds(await turn("more"))).not.toContain("plan");
     await session.close();
   });
 

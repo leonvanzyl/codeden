@@ -49,6 +49,72 @@ describe("ApprovalCard", () => {
   });
 });
 
+describe("ApprovalCard for a plan", () => {
+  const planApproval: ItemOf<"approval_request"> = {
+    id: "ap-plan",
+    kind: "approval_request",
+    status: "in_progress",
+    requestId: "req-plan",
+    action: "plan",
+    title: "Approve the plan and start implementing",
+    options: ["allow_once", "deny"],
+  };
+
+  it("approves the plan", async () => {
+    const client = createMockClient();
+    const respond = vi.spyOn(client, "respond").mockResolvedValue();
+    renderWithClient(<ApprovalCard item={planApproval} sessionId="s1" />, client);
+    expect(screen.getByText("Plan ready")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Always allow/ })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /Approve plan/ }));
+    await waitFor(() =>
+      expect(respond).toHaveBeenCalledWith("s1", "req-plan", {
+        kind: "approval",
+        decision: "allow_once",
+      }),
+    );
+  });
+
+  it("keeps planning with feedback", async () => {
+    const client = createMockClient();
+    const respond = vi.spyOn(client, "respond").mockResolvedValue();
+    renderWithClient(<ApprovalCard item={planApproval} sessionId="s1" />, client);
+    fireEvent.click(screen.getByRole("button", { name: /Keep planning/ }));
+    fireEvent.change(screen.getByLabelText("Feedback on the plan"), {
+      target: { value: "Split step 2" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Keep planning/ }));
+    await waitFor(() =>
+      expect(respond).toHaveBeenCalledWith("s1", "req-plan", {
+        kind: "approval",
+        decision: "deny",
+        message: "Split step 2",
+      }),
+    );
+  });
+
+  it("shows the plan in the inbox and the outcome once answered", () => {
+    renderWithClient(
+      <ApprovalCard item={planApproval} sessionId="s1" compact plan={`## Plan\n\n1. Do x`} />,
+    );
+    expect(screen.getByText("Do x")).toBeTruthy();
+    renderWithClient(
+      <ApprovalCard
+        item={{ ...planApproval, status: "completed", decision: "allow_once" }}
+        sessionId="s1"
+      />,
+    );
+    expect(screen.getByText("Plan approved")).toBeTruthy();
+    renderWithClient(
+      <ApprovalCard
+        item={{ ...planApproval, status: "declined", decision: "deny" }}
+        sessionId="s1"
+      />,
+    );
+    expect(screen.getByText("Kept planning")).toBeTruthy();
+  });
+});
+
 describe("QuestionCard", () => {
   it("collects options and free text, then answers", async () => {
     const client = createMockClient();

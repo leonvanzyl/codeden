@@ -134,8 +134,8 @@ export class SessionHost {
   }
 
   /**
-   * Model/effort for the next turn and the autonomy level, when the provider can change them
-   * live. Checks every requested setting before applying any.
+   * Model/effort for the next turn, the autonomy level and plan mode, when the provider can
+   * change them live. Checks every requested setting before applying any.
    */
   async configure(cmd: RunnerCommandOf<"session.configure">): Promise<void> {
     const { session } = this.get(cmd.sessionId);
@@ -149,8 +149,12 @@ export class SessionHost {
     if (cmd.autonomy !== undefined && !session.setAutonomy) {
       throw new CommandError("unsupported", "This provider cannot change autonomy live");
     }
+    if (cmd.planMode !== undefined && !session.setPlanMode) {
+      throw new CommandError("unsupported", "This provider has no plan mode");
+    }
     if (modelOrEffort) await session.configure?.(change);
     if (cmd.autonomy !== undefined) await session.setAutonomy?.(cmd.autonomy);
+    if (cmd.planMode !== undefined) await session.setPlanMode?.(cmd.planMode);
   }
 
   async respond(cmd: RunnerCommandOf<"session.respond">): Promise<void> {

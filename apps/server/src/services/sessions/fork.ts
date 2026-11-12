@@ -52,6 +52,12 @@ export function forkBlocker(
     const name = provider?.displayName ?? source.provider;
     return conflict(`${name} cannot fork a conversation`, "unsupported");
   }
+  if (source.status === "waiting") {
+    return conflict(
+      "Answer what the session is waiting on (an approval, a question or its plan) before forking",
+      "turn_running",
+    );
+  }
   if (BUSY.has(source.status)) {
     return conflict("Wait for the running turn to finish before forking", "turn_running");
   }
@@ -156,7 +162,7 @@ function forkProject(
 
 /**
  * The fork itself: a new agent session in the same project with the same provider, model,
- * effort, permissions, work and issue, started by the user, with its own copy of the
+ * effort, permissions, plan mode, work and issue, started by the user, with its own copy of the
  * conversation (`resumeToken`). Its worktree branches from the source's branch and starts from
  * `checkpoint`; its pull request targets the source's base branch. There is no §8.4 conflict
  * check: the fork is a deliberate, visible duplicate (`forkedFrom`).
@@ -184,6 +190,9 @@ export function forkPlan(
     model: source.model,
     effort: source.effort,
     autonomy: source.autonomy,
+    // The fork continues the same conversation: still planning if the source is, implementing
+    // (at its permission level) if the source's plan was approved.
+    planMode: source.planMode ?? false,
     status: "starting",
     cwd: project.path,
     worktreePath: null,

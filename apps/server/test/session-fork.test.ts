@@ -356,6 +356,34 @@ describe("forking a session", () => {
     expect(calls).toEqual([]);
   });
 
+  it("keeps a planning session's fork planning, and one whose plan was approved implementing", async () => {
+    const { sessions } = services();
+    // Still planning: the fork continues the plan, and implements only once its own is approved.
+    const planning = source({ planMode: true });
+    const first = await sessions.fork(planning.id, {});
+    await settle(sessions);
+    expect(env.repo.get(first.sessionId).planMode).toBe(true);
+    expect(all("session.start").at(-1)?.options.planMode).toBe(true);
+
+    // The plan was approved (the source left plan mode): the fork implements, like the source.
+    const approved = source({ planMode: false });
+    const second = await sessions.fork(approved.id, {});
+    await settle(sessions);
+    expect(env.repo.get(second.sessionId).planMode).toBe(false);
+    expect(all("session.start").at(-1)?.options.planMode).toBe(false);
+  });
+
+  it("refuses to fork a session waiting for its plan to be approved, and says why", async () => {
+    const { sessions } = services();
+    const waiting = source({ planMode: true, status: "waiting" });
+    await expect(sessions.fork(waiting.id, {})).rejects.toMatchObject({
+      status: 409,
+      code: "turn_running",
+      message: expect.stringMatching(/waiting on .*its plan/),
+    });
+    expect(calls).toEqual([]);
+  });
+
   it("can fork a finished or stopped session", async () => {
     const { sessions } = services();
     for (const status of ["stopped", "failed", "completed", "interrupted"] as const) {

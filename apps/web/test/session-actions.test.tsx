@@ -175,7 +175,8 @@ describe("useSessionActions", () => {
     expect(forkBlocked(idle)).toBeNull();
     expect(forkBlocked({ ...idle, status: "stopped" })).toBeNull();
     expect(forkBlocked({ ...idle, status: "running" })).toMatch(/running turn/);
-    expect(forkBlocked({ ...idle, status: "waiting" })).toMatch(/running turn/);
+    // Waiting on the user (an approval, a question or a plan to approve).
+    expect(forkBlocked({ ...idle, status: "waiting" })).toMatch(/waiting on/);
     expect(forkBlocked({ ...idle, status: "starting" })).toMatch(/hasn't started/);
     expect(forkBlocked({ ...idle, resumeToken: null })).toMatch(/No conversation/);
     expect(forkBlocked({ ...idle, branch: null })).toMatch(/git branch/);

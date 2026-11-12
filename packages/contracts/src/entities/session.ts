@@ -65,6 +65,12 @@ export const Session = z.object({
   model: z.string().nullable(),
   effort: ReasoningEffort.nullable(),
   autonomy: AutonomyLevel,
+  /**
+   * True while the session is planning (where the provider reports `capabilities.planMode`):
+   * the agent explores and proposes a plan, and implements only once the plan is approved.
+   * Absent means false.
+   */
+  planMode: z.boolean().optional(),
   status: SessionStatus,
   /** Directory the agent runs in. */
   cwd: z.string(),

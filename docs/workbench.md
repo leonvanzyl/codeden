@@ -24,6 +24,7 @@ Everything an agent touches sits next to its chat. Open the right panel with **C
 - Text, pasted images and file attachments.
 - `@` to mention files, `/` for commands and skills.
 - Pickers for **provider**, **model** and **reasoning effort**, plus the session's **Permissions** (Read-only, Supervised, Auto or Full; see [Security](security.md#permissions)). Model and effort can be changed mid-session; they apply from the next turn. Permissions can be changed too: the level is saved on the session and applies from the next tool call where the provider allows (Claude), otherwise from the next turn (Codex).
+- **Plan** (agent sessions, on providers with a plan mode: Claude Code today): the agent explores and proposes a plan before it changes anything. Turn it on in the new-session dialog or the composer. The plan arrives as a card: **Approve plan** and the agent implements it with the session's permissions, or **Keep planning** with a note on what to change. While it plans, edits and writing commands are refused (see [Security](security.md#plan-mode)).
 - **Your own models in the picker:** star models to pin them to Favourites, hide the ones you never use, and add **custom model ids** a provider doesn't list yet (Settings › Providers › Custom models). A custom id is marked *Custom*, gets the effort levels of the provider's default model, and is sent to the provider unchanged; if the provider doesn't know it, the turn fails with the provider's error.
 - **While a turn runs:** Enter **queues** your message for when it ends. With providers that support it, you can **steer** instead, injecting the message into the running turn.
 - **Stop** the running turn with **Ctrl/Cmd+.**.
@@ -53,7 +54,7 @@ Want to try a second approach without losing the first? Open the session's **⋯
 - **Same conversation.** The agent continues from where the original left off, through the provider's own fork. It remembers everything said so far.
 - **Same code.** The new session gets its own worktree on a new branch, created from the original's branch. The original's files at the end of its last turn are copied in, including changes it hadn't committed yet, before setup runs. The conversation and the code are taken at the same moment, even right after a turn ends.
 - **Always in its own worktree.** If the worktree can't be made, the fork shows as failed. Your next message to it tries again, and the agent never runs in the project folder itself.
-- **Same agent.** It keeps the provider, model, effort, permissions and linked issue. Its pull request targets the same base branch.
+- **Same agent.** It keeps the provider, model, effort, permissions and linked issue. Its pull request targets the same base branch. If the original is still planning, the fork keeps planning too, and implements once you approve its own plan.
 - **Original unchanged.** Nothing about the original session changes. Both can carry on side by side.
 
 The fork's header shows **Fork of …** with a link back, and **Details** shows where it was forked from. Fork is offered when the provider supports it (Claude and Codex do). It's available once the session has had a turn and while no turn is running; while a turn runs, the menu says why it's disabled.

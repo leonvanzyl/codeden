@@ -69,6 +69,7 @@ export function rowToProject(r: ProjectRow): Project {
 export function sessionToRow(s: Session): Omit<SessionRow, "usage" | "startMeta"> {
   return {
     ...s,
+    planMode: s.planMode ?? false,
     result: s.result ?? null,
     archivedAt: s.archivedAt ?? null,
     worktreeRemovedAt: s.worktreeRemovedAt ?? null,

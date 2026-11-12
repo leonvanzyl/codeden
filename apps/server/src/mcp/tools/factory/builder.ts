@@ -1,7 +1,9 @@
 import {
   FactoryAnalysisReport,
   FactoryReproductionReport,
-  ReviewVerdict,
+  REVIEW_SUMMARY_MAX,
+  ReviewVerdictSubmission,
+  truncateReviewSummary,
 } from "@codeden/contracts";
 import { defineTool } from "../../define";
 import { asTool, forSession } from "./shared";
@@ -36,11 +38,16 @@ export const factorySubmitAnalysis = defineTool({
     asTool(() => services.factory.submitAnalysis(services.sessionRepo.get(sessionId), input)),
 });
 
-/** `factory_submit_review`: the independent reviewer's structured verdict. */
+const SUMMARY_MAX = REVIEW_SUMMARY_MAX.toLocaleString("en-US");
+
+/**
+ * `factory_submit_review`: the independent reviewer's structured verdict. A summary over
+ * `REVIEW_SUMMARY_MAX` is stored truncated rather than rejected, so a verdict is never lost
+ * over its length; the full text stays in the reviewer's session (its tool call).
+ */
 export const factorySubmitReview = defineTool({
   name: "factory_submit_review",
-  description:
-    "Submit your review verdict for the factory pull request you were asked to review: `approve`, `request_changes` (it goes back to the author for a revision) or `reject`, a specific summary, one entry per acceptance criterion (met or not), whether it fits the vision, whether its tests are adequate (or none are needed), and any security concerns.",
+  description: `Submit your review verdict for the factory pull request you were asked to review: \`approve\`, \`request_changes\` (it goes back to the author for a revision) or \`reject\`, a specific summary (up to ${SUMMARY_MAX} characters are stored; a longer one is cut), one entry per acceptance criterion (met or not), whether it fits the vision, whether its tests are adequate (or none are needed), and any security concerns. Submit one verdict; if the call is rejected for invalid input, fix what the error names and call it again.`,
   roles: ["agent"],
   scope: "session",
   alwaysLoad: true,
@@ -48,7 +55,17 @@ export const factorySubmitReview = defineTool({
     (services, id) =>
       services.sessionRepo.find(id)?.session.workKey.startsWith("factory:review:") ?? false,
   ),
-  input: ReviewVerdict,
-  handler: async (input, { services, sessionId }) =>
-    asTool(() => services.factory.submitReview(services.sessionRepo.get(sessionId), input)),
+  input: ReviewVerdictSubmission,
+  handler: async (input, { services, sessionId }) => {
+    const verdict = { ...input, summary: truncateReviewSummary(input.summary) };
+    const res = await asTool(() =>
+      services.factory.submitReview(services.sessionRepo.get(sessionId), verdict),
+    );
+    if (!res.recorded || verdict.summary === input.summary) return res;
+    const length = input.summary.length.toLocaleString("en-US");
+    return {
+      ...res,
+      message: `${res.message} Your summary was ${length} characters, so it was stored cut to ${SUMMARY_MAX}; the full text stays in this session. Don't submit it again.`,
+    };
+  },
 });

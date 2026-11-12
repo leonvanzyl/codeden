@@ -1,93 +1,44 @@
-import { writesConfig } from "./git";
+import { matchesLong } from "./read-only-options";
 
 /**
- * Read-only rules for `git`, `gh` and `sed` (§11.2): which of their forms only read. Used by
- * the read-only allowlist; each returns why a command is refused, or undefined.
+ * Read-only rules for `gh` and `sed` (§11.2): which of their forms only read. Used by the
+ * read-only allowlist; each returns why a command is refused, or undefined. Git's rules are in
+ * `read-only-git.ts`.
  */
 
-/** Git subcommands that never change the repository. */
-const READ_ONLY_GIT = new Set([
-  "status",
-  "log",
-  "show",
-  "diff",
-  "blame",
-  "grep",
-  "ls-files",
-  "ls-tree",
-  "ls-remote",
-  "rev-parse",
-  "rev-list",
-  "describe",
-  "shortlog",
-  "cat-file",
-  "remote",
-  "branch",
-  "tag",
-  "config",
-  "reflog",
-  "merge-base",
-  "name-rev",
-  "for-each-ref",
-  "show-ref",
-  "worktree",
-  "stash",
-  "check-ignore",
-  "check-attr",
-  "count-objects",
-  "cherry",
-  "whatchanged",
-  "range-diff",
-  "version",
+/** `gh` command groups whose reading verbs may run (extensions and other groups may not). */
+const GH_GROUPS = new Set([
+  "pr",
+  "issue",
+  "repo",
+  "run",
+  "workflow",
+  "release",
+  "gist",
+  "label",
+  "project",
+  "ruleset",
+  "cache",
+  "org",
+  "secret",
+  "variable",
 ]);
-
-/** Global options that take the next word as their value (`git -C dir log`). */
-const GIT_VALUED = new Set(["-C", "--git-dir", "--work-tree", "--namespace"]);
-/**
- * `git -c key=value` is allowed only with a plain value: a pager, editor or other command set
- * through it could run anything.
- */
-const SAFE_GIT_CONFIG = /^[a-z0-9.-]+=(false|true|cat|never|always|auto|0|1)?$/i;
-
-/** Why `git <args>` is refused in a read-only session. `args` keep their case. */
-export function gitDenial(args: string[]): string | undefined {
-  let i = 0;
-  for (; i < args.length && args[i]?.startsWith("-"); i += 1) {
-    const option = args[i] as string;
-    if (GIT_VALUED.has(option)) i += 1;
-    else if (option === "-c") {
-      if (!SAFE_GIT_CONFIG.test(args[i + 1] ?? "")) {
-        return "git -c with this setting is not allowed in a read-only session";
-      }
-      i += 1;
-    } else if (/^--(exec-path|config-env)/.test(option)) {
-      return `git ${option} is not allowed in a read-only session`;
-    }
-  }
-  const sub = args[i]?.toLowerCase();
-  const rest = args.slice(i + 1).map((a) => a.toLowerCase());
-  if (!sub || !READ_ONLY_GIT.has(sub)) return `git ${sub ?? ""} may change the repository`;
-  if (
-    (sub === "branch" || sub === "tag" || sub === "remote" || sub === "worktree") &&
-    rest.some((a) => /^-(d|m|f|-delete|-move|-force)$/.test(a) || a === "add")
-  ) {
-    return `git ${sub} with these options changes the repository`;
-  }
-  if (sub === "config" && writesConfig(rest)) return "Only reading git config is allowed";
-  if (sub === "stash" && rest[0] !== "list" && rest[0] !== "show") {
-    return "Only git stash list and show are allowed in a read-only session";
-  }
-  return undefined;
-}
-
-/** `gh` subcommand verbs that only read. */
+/** `gh <group> <verb>` verbs that only read. */
 const READ_ONLY_GH = new Set(["view", "list", "status", "diff", "checks"]);
+/** Global `gh` flags that take the next word as their value (`gh -R o/r pr list`). */
+const GH_VALUED = new Set(["-r", "--repo", "--hostname"]);
 
 /** Why `gh <args>` (lower-cased) is refused in a read-only session. */
 export function ghDenial(args: string[]): string | undefined {
-  const positional = args.filter((a) => !a.startsWith("-"));
-  if (positional[0] === "search") return undefined;
-  if (positional[0] === "api") {
+  const positional: string[] = [];
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i] as string;
+    if (GH_VALUED.has(arg)) i += 1;
+    else if (!arg.startsWith("-")) positional.push(arg);
+  }
+  const [group, verb] = positional;
+  if (group === "search" || group === "status") return undefined;
+  if (group === "api") {
     const at = args.findIndex((a) => a === "-x" || a === "--method");
     const method =
       at >= 0
@@ -101,7 +52,7 @@ export function ghDenial(args: string[]): string | undefined {
     }
     return undefined;
   }
-  if (!args.some((a) => READ_ONLY_GH.has(a))) {
+  if (!group || !GH_GROUPS.has(group) || !verb || !READ_ONLY_GH.has(verb)) {
     return "Only read-only gh commands are allowed (view, list, status, diff, checks, search, GET api)";
   }
   return undefined;
@@ -112,21 +63,56 @@ const ADDRESS = String.raw`(?:\d+|\$|/(?:[^/\\]|\\.)*/)`;
 const SED_PRINT = new RegExp(String.raw`^(?:${ADDRESS}(?:\s*,\s*(?:${ADDRESS}|\+\d+))?)?\s*[pq=]$`);
 /** sed substitutions without the `w` (write) and `e` (execute) flags. */
 const SED_SUBSTITUTE = /^s([^\w\s\\])(?:(?!\1)[^\\]|\\.)*\1(?:(?!\1)[^\\]|\\.)*\1[gip0-9]*$/i;
+const SED_REFUSED = "sed may not edit files or read scripts in a read-only session";
 
-/** Why `sed <args>` (with their case) is refused: only printing scripts may run. */
+/**
+ * Why `sed <args>` (with their case) is refused: only printing scripts may run. Scripts come
+ * from `-e` (also inside a cluster such as `-ne`, with the rest of the word as the script) and
+ * `--expression` (abbreviations count), else from the first operand.
+ */
 export function sedDenial(args: string[]): string | undefined {
-  if (args.some((a) => /^-[a-zA-Z]*i/.test(a) || /^--(in-place|file)/.test(a) || a === "-f")) {
-    return "sed may not edit files or read scripts in a read-only session";
-  }
   const scripts: string[] = [];
-  args.forEach((a, i) => {
-    if (a === "-e" || a === "--expression") scripts.push(args[i + 1] ?? "");
-    else if (a.startsWith("--expression=")) scripts.push(a.slice(13));
-  });
-  if (scripts.length === 0) {
-    const script = args.find((a) => !a.startsWith("-"));
-    if (script !== undefined) scripts.push(script);
+  const operands: string[] = [];
+  let explicit = false;
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i] as string;
+    if (arg === "--") {
+      operands.push(...args.slice(i + 1));
+      break;
+    }
+    if (arg.startsWith("--")) {
+      if (matchesLong(arg, "--in-place") || matchesLong(arg, "--file")) return SED_REFUSED;
+      if (matchesLong(arg, "--expression")) {
+        explicit = true;
+        const at = arg.indexOf("=");
+        if (at >= 0) scripts.push(arg.slice(at + 1));
+        else {
+          scripts.push(args[i + 1] ?? "");
+          i += 1;
+        }
+      } else if (matchesLong(arg, "--line-length") && !arg.includes("=")) i += 1;
+      continue;
+    }
+    if (arg.startsWith("-") && arg !== "-") {
+      for (let j = 1; j < arg.length; j += 1) {
+        const c = arg[j] as string;
+        // `-i`/`-I` edit in place (GNU and BSD), `-f` reads a script file.
+        if (c === "i" || c === "I" || c === "f") return SED_REFUSED;
+        if (c === "e" || c === "l") {
+          const value = arg.slice(j + 1) || args[i + 1] || "";
+          if (!arg.slice(j + 1)) i += 1;
+          if (c === "e") {
+            explicit = true;
+            scripts.push(value);
+          }
+          break;
+        }
+      }
+      continue;
+    }
+    operands.push(arg);
   }
+  if (!explicit && operands[0] !== undefined) scripts.push(operands[0]);
   const prints = (s: string) => SED_PRINT.test(s.trim()) || SED_SUBSTITUTE.test(s.trim());
   if (scripts.length === 0 || !scripts.every(prints)) {
     return "Only sed scripts that print (such as sed -n 1,40p) are allowed in a read-only session";

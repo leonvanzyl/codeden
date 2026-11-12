@@ -140,6 +140,11 @@ export const StartSessionRequest = z.object({
   model: z.string().min(1).optional(),
   effort: ReasoningEffort.optional(),
   autonomy: AutonomyLevel.optional(),
+  /**
+   * Start in plan mode: the agent explores and proposes a plan, and implements only once the
+   * plan is approved. Agent sessions on a provider with `capabilities.planMode` only.
+   */
+  planMode: z.boolean().optional(),
   workspace: WorkspaceRequest.prefault({}),
   /** One line describing the work; defaults to the first line of the input. */
   purpose: z.string().trim().min(1).max(300).optional(),

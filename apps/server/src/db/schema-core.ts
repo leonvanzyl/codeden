@@ -94,6 +94,7 @@ export const sessions = sqliteTable(
     model: text("model"),
     effort: text("effort"),
     autonomy: text("autonomy").notNull(),
+    planMode: integer("plan_mode", { mode: "boolean" }).notNull().default(false),
     status: text("status").notNull(),
     cwd: text("cwd").notNull(),
     worktreePath: text("worktree_path"),

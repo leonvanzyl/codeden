@@ -92,6 +92,9 @@ export interface QueryOptionsInput {
 export function buildQueryOptions(input: QueryOptionsInput): Options {
   const { session } = input;
   const permissionMode = permissionModeFor(session.autonomy, session.planMode);
+  // Under Full, a session that starts in plan mode switches to `bypassPermissions` once the
+  // plan is approved, which the CLI only accepts when it was launched allowing it.
+  const bypass = permissionModeFor(session.autonomy, false) === "bypassPermissions";
   const effort = claudeEffort(session.effort);
   return {
     ...executableOptions(input.executable),
@@ -100,7 +103,7 @@ export function buildQueryOptions(input: QueryOptionsInput): Options {
     ...(explicitModel(session.model) ? { model: explicitModel(session.model) } : {}),
     ...(effort ? { effort } : {}),
     permissionMode,
-    ...(permissionMode === "bypassPermissions" ? { allowDangerouslySkipPermissions: true } : {}),
+    ...(bypass ? { allowDangerouslySkipPermissions: true } : {}),
     includePartialMessages: true,
     forwardSubagentText: true,
     ...(input.resume ? { resume: input.resume } : {}),

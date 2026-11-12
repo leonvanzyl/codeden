@@ -84,6 +84,9 @@ export function buildTimeline(state: TranscriptState, threadId: string): Timelin
   let currentTurn: string | null = null;
   for (const entry of entries) {
     const { item, turnId } = entry;
+    // Follow-ups are no rows, and the server's own suggestions for a turn can arrive after the
+    // next turn began, so they must not split that turn in two.
+    if (item.kind === "followups") continue;
     if (currentTurn !== null && turnId !== currentTurn) {
       flush();
       lastTurnRows(currentTurn);

@@ -32,7 +32,8 @@ export function parseMcpName(name: string): { server: string; tool: string } | u
   return m?.[1] && m[2] ? { server: m[1], tool: m[2] } : undefined;
 }
 
-function editPath(input: Input): string {
+/** The file an edit tool writes (`file_path`, `notebook_path` or `path`), or "". */
+export function editPath(input: Input): string {
   return str(input, "file_path") ?? str(input, "notebook_path") ?? str(input, "path") ?? "";
 }
 

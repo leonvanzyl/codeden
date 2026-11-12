@@ -44,7 +44,7 @@ export function createMockClient(opts: MockClientOptions = {}): CodeDenClient {
     running.set(sessionId, script.start());
   };
 
-  const createSession = (projectId: string, prompt: string, workKey: string) => {
+  const createSession = (projectId: string, prompt: string, workKey: string, planMode = false) => {
     const id = uid("s");
     const project = world.snapshot.projects.find((p) => p.id === projectId);
     const session = makeSession({
@@ -56,6 +56,7 @@ export function createMockClient(opts: MockClientOptions = {}): CodeDenClient {
       model: "opus",
       purpose: prompt.split(/[.\n]/)[0]?.slice(0, 60) ?? "New session",
       workKey,
+      planMode,
       branch: `codeden/${id.slice(2, 10)}`,
       baseBranch: "main",
       worktreePath: `~/.codeden/wt/${project?.slug ?? "project"}/${id.slice(2, 10)}`,
@@ -167,7 +168,7 @@ export function createMockClient(opts: MockClientOptions = {}): CodeDenClient {
       }
       return {
         status: "started",
-        sessionId: createSession(projectId, prompt, workKey),
+        sessionId: createSession(projectId, prompt, workKey, input.planMode === true),
       };
     },
     async stopSession(sessionId) {

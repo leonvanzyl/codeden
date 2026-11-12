@@ -3,7 +3,7 @@ import { useMutation } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
 import { useClient } from "./api";
-import { platform } from "./platform";
+import { copyWithFeedback } from "./copy";
 import { useSnapshotData } from "./queries";
 
 /** Sessions that can be stopped from a menu: ones with a turn running or a question open. */
@@ -24,6 +24,7 @@ export const forkSupported = (session: Session, provider: ProviderInfo | undefin
  * server checks the same, §9).
  */
 export function forkBlocked(session: Session): string | null {
+  if (session.status === "waiting") return "Answer what it's waiting on first";
   if (canStop(session)) return "Wait for the running turn to finish";
   if (NOT_STARTED.has(session.status)) return "The session hasn't started yet";
   if (!session.resumeToken) return "No conversation to fork yet";
@@ -142,12 +143,7 @@ export function useSessionActions(session: Session) {
       if (next && next !== (session.title ?? session.purpose)) rename.mutate(next);
     },
     copyLink: async () => {
-      try {
-        await platform.writeClipboard(sessionLink(session.id));
-        toast.success("Link copied");
-      } catch (error) {
-        onError(error);
-      }
+      await copyWithFeedback(sessionLink(session.id), "Link copied");
     },
     canMakeAutomation: canMakeAutomation(session),
     /** Open the New automation editor prefilled from this session; nothing is saved yet. */

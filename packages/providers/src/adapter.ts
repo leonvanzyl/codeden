@@ -81,6 +81,13 @@ export interface ProviderSession {
    * already waiting stay waiting. Optional: without it, the level applies on the next resume.
    */
   setAutonomy?(level: AutonomyLevel): Promise<void>;
+  /**
+   * Turn plan mode on or off. Present only when `capabilities().planMode`. On: the agent plans
+   * without editing and asks to implement through a `plan` approval. Off: the session returns
+   * to its autonomy level. A session that leaves plan mode on its own (the plan was approved)
+   * reports it with `session.updated { planMode: false }`.
+   */
+  setPlanMode?(on: boolean): Promise<void>;
   /** Close the session and end `events`. Idempotent. */
   close(): Promise<void>;
   /** Provider session/thread id for resume, once known. */

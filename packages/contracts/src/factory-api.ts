@@ -83,10 +83,28 @@ export const MergeCheck = z.object({
 });
 export type MergeCheck = z.infer<typeof MergeCheck>;
 
-/** The independent reviewer's structured verdict (`factory_submit_review`). */
+/** Longest review summary stored with a verdict; a longer one is stored truncated. */
+export const REVIEW_SUMMARY_MAX = 20_000;
+
+/** Ends a review summary that was cut to `REVIEW_SUMMARY_MAX`. */
+export const REVIEW_SUMMARY_TRUNCATED = "… (truncated)";
+
+/**
+ * A review summary as stored: unchanged up to `REVIEW_SUMMARY_MAX` characters, otherwise cut
+ * to fit and ended with `REVIEW_SUMMARY_TRUNCATED`. A verdict is never lost over its length.
+ */
+export function truncateReviewSummary(summary: string): string {
+  if (summary.length <= REVIEW_SUMMARY_MAX) return summary;
+  let kept = summary.slice(0, REVIEW_SUMMARY_MAX - REVIEW_SUMMARY_TRUNCATED.length - 1);
+  // Don't leave half of a surrogate pair (an emoji) at the cut.
+  if (/[\uD800-\uDBFF]$/.test(kept)) kept = kept.slice(0, -1);
+  return `${kept.trimEnd()} ${REVIEW_SUMMARY_TRUNCATED}`;
+}
+
+/** The independent reviewer's structured verdict (`factory_submit_review`), as stored. */
 export const ReviewVerdict = z.object({
   verdict: z.enum(["approve", "request_changes", "reject"]),
-  summary: z.string().min(1).max(4_000),
+  summary: z.string().min(1).max(REVIEW_SUMMARY_MAX),
   /** One entry per acceptance criterion. */
   criteria: z
     .array(z.object({ criterion: z.string(), met: z.boolean(), note: z.string().optional() }))
@@ -102,6 +120,21 @@ export const ReviewVerdict = z.object({
 });
 export type ReviewVerdict = z.infer<typeof ReviewVerdict>;
 export type ReviewVerdictInit = z.input<typeof ReviewVerdict>;
+
+/**
+ * What a reviewer sends to `factory_submit_review`: a `ReviewVerdict` whose summary has no
+ * upper bound, so a long review is never rejected; the tool stores it with
+ * `truncateReviewSummary`.
+ */
+export const ReviewVerdictSubmission = ReviewVerdict.extend({
+  summary: z
+    .string()
+    .min(1)
+    .describe(
+      `What you found, specifically. Up to ${REVIEW_SUMMARY_MAX.toLocaleString("en-US")} characters are stored; anything longer is cut and marked "${REVIEW_SUMMARY_TRUNCATED}".`,
+    ),
+});
+export type ReviewVerdictSubmission = z.infer<typeof ReviewVerdictSubmission>;
 
 /** A work item of the factory loop. */
 export const FactoryItem = z.object({

@@ -1,9 +1,9 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "54297ee0-99cf-4e3e-a4e0-c3fa28a70e4a",
+  "id": "dfa407c5-731b-4eac-8fcb-1e75f163bc24",
   "prevIds": [
-    "691a51f8-ba7b-43a7-af73-beeca39da751"
+    "d5a83b57-e263-4f13-b057-1906775a9e78"
   ],
   "ddl": [
     {
@@ -1527,6 +1527,16 @@
       "notNull": true,
       "autoincrement": false,
       "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "sessions",
+      "name": "plan_mode",
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "false",
       "generated": null,
       "entityType": "columns"
     },

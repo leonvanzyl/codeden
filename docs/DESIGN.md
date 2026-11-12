@@ -168,6 +168,7 @@ interface ProviderSession {
   steer?(input: UserInput): Promise<void>;    // inject into a running turn
   interrupt(): Promise<void>;
   respond(requestId: string, response: RuntimeResponse): Promise<void>; // approvals, questions
+  setPlanMode?(on: boolean): Promise<void>;   // plan mode on/off (capabilities.planMode, §11.2)
   close(): Promise<void>;
   resumeToken(): string | undefined;          // provider session/thread id for resume
 }
@@ -329,7 +330,7 @@ The orchestrator must always know what's happening across all projects, and each
 - **Setup scripts.** `.codeden/project.json` can define commands such as `pnpm install`, which run when a worktree is created, plus a dev-server command and the default provider. Setup stops at the first failing command and the session starts anyway; the agent's first input is prefixed with "Setup command `X` failed (exit N):" and the end of the command's output, so it knows why the worktree may be incomplete.
 - **Turn checkpoints.** At the end of each turn the runner snapshots the worktree into a hidden ref (`refs/codeden/checkpoints/<session>/<n>`). It uses a temporary index (`write-tree` → `commit-tree` → `update-ref`), so the user's branch and index are never touched. This gives exact per-turn diffs and file-level undo; full rollback is offered only when the provider can also roll back its conversation.
 - **Forking a session.** **Fork** (`POST /api/sessions/:id/fork`, the thread header's ⋯ menu, the command palette) copies an agent session into a new one in the same project, so a second approach can run side by side.
-  - **What is copied:** the provider, model, effort, permissions, work key and issue. The fork records `forkedFrom` (the source and the checkpoint it started at).
+  - **What is copied:** the provider, model, effort, permissions, plan mode, work key and issue. A fork of a session that is still planning keeps planning and implements only once its own plan is approved; a session waiting for its plan to be approved can't be forked until it's answered. The fork records `forkedFrom` (the source and the checkpoint it started at).
   - **Code:** the fork's worktree is a new branch created from the source's branch, so it carries the source's real commits and no checkpoint commits. The runner then writes the source's latest checkpoint into it as uncommitted changes, before setup runs (`workspace.prepare` `restoreCheckpoint`). Its pull request targets the source's base branch.
   - **Conversation:** the provider's native fork (`provider.fork`, §7.1). The copy is the fork's resume token from the start, so every start of the fork is a plain resume.
   - **Same moment for both:** the server asks the runner for the source's checkpoints `settled`, which waits for the checkpoint of a turn that has just ended (the runner queues it before it reports the turn's end). Only then does it copy the conversation. If the source moved on meanwhile, the fork fails and nothing is created: a turn still running gives 409 `turn_running`, and a turn that started (even one that already finished, judged by the source's turn count) gives 409 `source_changed`.
@@ -462,6 +463,11 @@ The UI calls these **Permissions** and shows them as a ladder, **Read-only → S
 - **Claude's own notes** (its plans folder, `plansDirectory` or `~/.claude/plans`, and the project's auto-memory folder) count like the temp directory for Claude sessions under Auto and Full: plan mode and memory writes don't ask. Only the user's own Claude settings can move them, never a folder covering Claude's config folder, the home directory or a filesystem root, and a secrets file there still asks.
 - **The classifier reads commands like a shell:** quoted text, heredoc bodies and PowerShell here-strings are data, redirects count only outside quotes, and relative paths resolve from where a `cd` (in the same command, or an earlier one Claude reports) moved the shell.
 - **Changing the level on a running session** saves it on the session (`PATCH /api/sessions/:id`, recorded as `session.updated`) and sends it to the live provider session. Claude applies it from the next tool call (`liveAutonomy`); Codex from the next turn, through per-turn approval and sandbox overrides. Approvals already waiting stay waiting.
+- **Plan mode** sits on top of the level, for agent sessions on providers that report `capabilities.planMode` (Claude today):
+  - Turned on when a session starts or from the composer (`Session.planMode`, sent like the level). The agent explores and proposes a plan.
+  - While planning, file edits and writing commands are refused at every level, Full included, by the read-only command rules (which also refuse writing options such as `sort -o`, and unquoted parentheses and braces); reads and the project's checks run. The agent's own notes stay writable at every level, Read-only included, since Claude writes its plan file there. **Claude:** the `plan` permission mode, plus CodeDen's PreToolUse hook (Claude's plan mode hands edits to `canUseTool`, which Auto and Full would approve).
+  - The plan ends in a `plan` approval. Approving lets the agent implement at the session's level, and the provider reports leaving plan mode (`session.updated { planMode: false }`). Declining keeps it planning, with the user's note as feedback.
+  - Turning plan mode off without approving returns to the level. A resumed session keeps its current plan state.
 
 The orchestrator and PMs have no write access to project code; they act only through CodeDen tools.
 
@@ -599,7 +605,7 @@ Detailed, trustworthy reports on spend and usage across every provider, project 
   - typed notice cards
 - **Composer:**
   - text, pasted images and file attachments, `@` file mentions, `/` commands and skills
-  - provider, model and effort pickers, plus the autonomy level
+  - provider, model and effort pickers, plus the autonomy level and a **Plan** toggle where the provider reports `planMode` (§11.2)
   - queue or steer while a turn runs
   - the voice button
   - **follow-up chips** after a turn completes (§7.5)
