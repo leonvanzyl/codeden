@@ -79,8 +79,13 @@ export class OpenCodeEventMapper {
     return callId ? this.tools.get(callId) : undefined;
   }
 
-  /** Start a turn by id. Idempotent, and a no-op for a turn that already ended. */
+  /**
+   * Start a turn by id. Idempotent, and a no-op for a turn that already ended. Consumes
+   * `pendingTurnId` when it names this turn, so a later execution OpenCode starts on its own
+   * (a late steer, a queued prompt) gets a turn of its own instead of this ended one.
+   */
   beginTurn(turnId: string): void {
+    if (this.pendingTurnId === turnId) this.pendingTurnId = undefined;
     if (this.turnId === turnId || this.ended.has(turnId)) return;
     if (this.turnId) this.endTurn({ type: "interrupted" });
     this.turnId = turnId;
@@ -226,8 +231,13 @@ export class OpenCodeEventMapper {
 
   private onExecutionStarted(): void {
     if (this.turnId) return;
-    const id = this.pendingTurnId ?? `turn-${this.turnCount + 1}-${Date.now().toString(36)}`;
+    const pending = this.pendingTurnId;
     this.pendingTurnId = undefined;
+    // An execution always opens a turn: never under an id that already ended.
+    const id =
+      pending && !this.ended.has(pending)
+        ? pending
+        : `turn-${this.turnCount + 1}-${Date.now().toString(36)}`;
     this.beginTurn(id);
   }
 

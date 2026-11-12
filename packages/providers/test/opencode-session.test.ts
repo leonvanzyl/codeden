@@ -447,6 +447,38 @@ describe("OpenCode session", () => {
     expect(new Set(sent.map((e) => e.turnId)).size).toBe(1);
   });
 
+  it("follows an execution OpenCode starts without a send: a steer delivered after the turn", async () => {
+    const { session, reader } = await open({ autonomy: "supervised" });
+    let requestId = "";
+    reader.answer = (item) => {
+      requestId = item.requestId;
+      return undefined; // answered below, once the steer is queued
+    };
+    await session.send({ text: "shell", attachments: [] });
+    await reader.until((e) => e.type === "item.started" && e.item.kind === "approval_request");
+    // The step waits on the approval, so the steer is still queued when the turn ends.
+    await session.steer?.({ text: "also say hi", attachments: [] });
+    await session.respond(requestId, { kind: "approval", decision: "allow_once" });
+    const first = await reader.until(isRootEnd);
+    expect(first).toMatchObject({ type: "turn.completed" });
+    const firstTurn = first.type === "turn.completed" ? first.turnId : "";
+
+    // OpenCode then runs the steer as an execution of its own: it opens a new turn, and the
+    // agent's reply lands in it.
+    const at = reader.all.length;
+    const late = await reader.until((e) => e.type === "turn.started", 3000);
+    expect(late).toMatchObject({ threadId: "s1:thread-root" });
+    const lateTurn = late.type === "turn.started" ? late.turnId : "";
+    expect(lateTurn).not.toBe(firstTurn);
+    const end = await reader.until(isRootEnd);
+    expect(end).toMatchObject({ type: "turn.completed", turnId: lateTurn });
+    expect(completed(reader.all.slice(at), "assistant_message")[0]).toMatchObject({
+      turnId: lateTurn,
+      item: { text: "Hello from fake OpenCode." },
+    });
+    expect(validateEventStream(reader.all)).toEqual([]);
+  });
+
   it("records what was sent as the turn's user message, sender included", async () => {
     const { session, reader } = await open({ systemPrompt: "You are a CodeDen agent." });
     const events = await reader.turn("hello");
