@@ -2,6 +2,7 @@ import {
   type ChecksState,
   type GitHubIssueRef,
   type GitHubPrRef,
+  type GithubAuthorAssociation,
   type GithubIssue,
   githubPrId,
   type Mergeable,
@@ -9,6 +10,7 @@ import {
 import { errorMessage } from "../errors";
 import { EVIDENCE_HEADING } from "../github/evidence";
 import type { GithubService } from "../github/github-service";
+import { authorAssociation } from "../github/graphql";
 
 /** A pull request as the merge checks read it. */
 export interface FactoryPr {
@@ -46,8 +48,8 @@ export interface PrEvidence {
 /** Who opened an issue, fresh from GitHub. */
 export interface IssueAuthor {
   login: string | null;
-  /** GitHub's `author_association`: `OWNER`, `MEMBER`, `COLLABORATOR`, `CONTRIBUTOR`, `NONE`... */
-  association: string | null;
+  /** Their relation to the repository (`owner`, `member` and `collaborator` have write access). */
+  association: GithubAuthorAssociation;
 }
 
 /**
@@ -131,7 +133,10 @@ export class GithubFactoryPort implements FactoryGithub {
         (await o.rest.issues.get({ owner: repo.owner, repo: repo.repo, issue_number: number }))
           .data,
     );
-    return { login: data.user?.login ?? null, association: data.author_association ?? null };
+    return {
+      login: data.user?.login ?? null,
+      association: authorAssociation(data.author_association),
+    };
   }
 
   isGithubProject(projectId: string): boolean {

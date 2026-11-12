@@ -1,4 +1,4 @@
-import type { FactoryItem, FactoryLimits } from "@codeden/contracts";
+import type { FactoryItem, FactoryLimits, GithubAuthorAssociation } from "@codeden/contracts";
 
 /**
  * Who the factory works for (§10.1). On a public repository anyone can open an issue, so the
@@ -24,15 +24,19 @@ export function isTrustedAuthor(author: string | null, trusted: ReadonlySet<stri
   return trusted.has(author.replace(/^@/, "").toLowerCase());
 }
 
-/**
- * GitHub's `author_association` values for the repository's owner, members of the organization
- * that owns it, and collaborators: the people with write access.
- */
-const WRITE_ASSOCIATIONS = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
+/** The repository's owner, members of the organization that owns it, and collaborators. */
+const WRITE_ACCESS: ReadonlySet<GithubAuthorAssociation> = new Set([
+  "owner",
+  "member",
+  "collaborator",
+]);
 
-/** Whether an issue author's association with the repository gives them write access. */
-export function hasWriteAssociation(association: string | null): boolean {
-  return association !== null && WRITE_ASSOCIATIONS.has(association.toUpperCase());
+/**
+ * Whether an author's association with the repository (of an issue, a review or a comment)
+ * gives them write access. Unknown (absent or null) never does.
+ */
+export function hasWriteAccess(association: GithubAuthorAssociation | null | undefined): boolean {
+  return association != null && WRITE_ACCESS.has(association);
 }
 
 /**

@@ -1,6 +1,6 @@
-import type { GithubAuthorAssociation, GithubReview, Project } from "@codeden/contracts";
+import type { GithubReview, Project } from "@codeden/contracts";
 import { INPUT_DATA_RULES } from "../factory/prompts";
-import { isTrustedAuthor, trustedLogins } from "../factory/trust";
+import { hasWriteAccess, isTrustedAuthor, trustedLogins } from "../factory/trust";
 
 /**
  * Whose pull request reviews may steer CodeDen's agents (§9). On a public repository anyone can
@@ -16,18 +16,12 @@ import { isTrustedAuthor, trustedLogins } from "../factory/trust";
  * connection check. An event without a viewer trusts no account as CodeDen's own.
  */
 
-const WRITE_ACCESS: ReadonlySet<GithubAuthorAssociation> = new Set([
-  "owner",
-  "member",
-  "collaborator",
-]);
-
 /** Whether a review is trusted: write access, or its author is one of `trusted` (lower-cased). */
 export function isTrustedReview(
   review: Pick<GithubReview, "author" | "authorAssociation">,
   trusted: ReadonlySet<string>,
 ): boolean {
-  if (review.authorAssociation && WRITE_ACCESS.has(review.authorAssociation)) return true;
+  if (hasWriteAccess(review.authorAssociation)) return true;
   return isTrustedAuthor(review.author, trusted);
 }
 

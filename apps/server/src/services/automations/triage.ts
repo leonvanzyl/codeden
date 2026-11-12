@@ -19,7 +19,7 @@ import type { Db } from "../../db/client";
 import { githubIssues } from "../../db/schema";
 import { badRequest, conflict } from "../errors";
 import type { FactoryGithub } from "../factory/github-port";
-import { hasWriteAssociation, isTrustedAuthor, trustedLogins } from "../factory/trust";
+import { hasWriteAccess, isTrustedAuthor, trustedLogins } from "../factory/trust";
 import { rowToIssue } from "../github/rows";
 import type { InboxService } from "../inbox-service";
 import type { OrchestrationService } from "../orchestration/orchestration-service";
@@ -237,7 +237,7 @@ export class TriageService {
     const live = await this.deps.github.issueAuthor(project.id, number).catch(() => null);
     const author = live?.login ?? synced;
     if (!live) return { trusted: false, author, checked: false };
-    const trusted = isTrustedAuthor(author, logins) || hasWriteAssociation(live.association);
+    const trusted = isTrustedAuthor(author, logins) || hasWriteAccess(live.association);
     return { trusted, author, checked: true };
   }
 

@@ -1,4 +1,10 @@
-import type { ChecksState, GitHubIssueRef, GitHubPrRef, GithubIssue } from "@codeden/contracts";
+import type {
+  ChecksState,
+  GitHubIssueRef,
+  GitHubPrRef,
+  GithubAuthorAssociation,
+  GithubIssue,
+} from "@codeden/contracts";
 import type {
   CommitChecks,
   FactoryGithub,
@@ -34,8 +40,8 @@ export class FakeFactoryGithub implements FactoryGithub {
   canRevertViaApi = true;
   /** The account CodeDen uses on GitHub (always trusted); null: unknown. */
   viewer: string | null = "codeden";
-  /** Issue authors' `author_association` by issue number (default `NONE`). */
-  associations = new Map<number, string>();
+  /** Issue authors' relation to the repository by issue number (default `none`). */
+  associations = new Map<number, GithubAuthorAssociation>();
   private next = 100;
 
   async viewerLogin(): Promise<string | null> {
@@ -45,7 +51,7 @@ export class FakeFactoryGithub implements FactoryGithub {
   async issueAuthor(projectId: string, number: number): Promise<IssueAuthor> {
     return {
       login: this.issue(projectId, number)?.author ?? null,
-      association: this.associations.get(number) ?? "NONE",
+      association: this.associations.get(number) ?? "none",
     };
   }
 

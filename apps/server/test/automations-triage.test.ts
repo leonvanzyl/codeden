@@ -233,7 +233,7 @@ describe("issue triage (§10)", () => {
   });
 
   it("auto-starts for people with write access and the project's trusted authors (#86)", async () => {
-    github.associations.set(47, "COLLABORATOR");
+    github.associations.set(47, "collaborator");
     synced(issue(47, "maintainer"));
     const collaborator = await report({ issueNumber: 47, decision: "ready", summary: "Small." });
     expect(collaborator).toMatchObject({ status: "started", start: { status: "started" } });
