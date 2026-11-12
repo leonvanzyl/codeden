@@ -103,3 +103,44 @@ describe("SessionOptions autonomy (§11.2)", () => {
     expect(updateSession).not.toHaveBeenCalled();
   });
 });
+
+describe("SessionOptions plan mode", () => {
+  it("shows Plan where the provider has plan mode and saves a change with PATCH", async () => {
+    const client = createMockClient();
+    const updateSession = vi.spyOn(client, "updateSession");
+    renderWithClient(<FromSnapshot id="s-checkout" />, client);
+    const plan = await screen.findByRole("button", { name: "Plan mode" });
+    expect(plan.getAttribute("aria-pressed")).toBe("false");
+
+    toast.success.mockClear();
+    fireEvent.click(plan);
+    await waitFor(() =>
+      expect(updateSession).toHaveBeenCalledWith("s-checkout", { planMode: true }),
+    );
+    await waitFor(() =>
+      expect(toast.success).toHaveBeenCalledWith("Plan mode on", {
+        id: "session-options-s-checkout",
+        description: "Applies from the next tool call.",
+      }),
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Plan mode" }).getAttribute("aria-pressed")).toBe(
+        "true",
+      ),
+    );
+  });
+
+  it("hides Plan for providers without plan mode and for role sessions", async () => {
+    const client = createMockClient();
+    const { queryClient, unmount } = renderWithClient(
+      <SessionOptions session={agent({ provider: "codex", model: "default" })} running={false} />,
+      client,
+    );
+    await waitFor(() => expect(queryClient.getQueryData(snapshotKey)).toBeTruthy());
+    expect(screen.queryByRole("button", { name: "Plan mode" })).toBeNull();
+    unmount();
+    renderWithClient(<SessionOptions session={agent({ role: "pm" })} running={false} />, client);
+    await screen.findByRole("button", { name: /opus/i });
+    expect(screen.queryByRole("button", { name: "Plan mode" })).toBeNull();
+  });
+});

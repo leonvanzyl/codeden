@@ -6,9 +6,10 @@ import { AUTONOMY, supportsReadOnly } from "@/components/thread/autonomy";
 import { useClient } from "@/lib/api";
 import { snapshotKey, useSnapshotData } from "@/lib/queries";
 import { ModelPicker } from "./model-picker/model-picker";
-import { AutonomyPicker } from "./pickers";
+import { AutonomyPicker, PlanToggle } from "./pickers";
 
 function changeSummary(patch: UpdateSessionRequest): string {
+  if (patch.planMode !== undefined) return patch.planMode ? "Plan mode on" : "Plan mode off";
   if (patch.autonomy !== undefined) return `Permissions: ${AUTONOMY[patch.autonomy].label}`;
   if (patch.model !== undefined && patch.effort !== undefined) return "Model and effort changed";
   return patch.model !== undefined ? "Model changed" : "Effort changed";
@@ -16,8 +17,8 @@ function changeSummary(patch: UpdateSessionRequest): string {
 
 /**
  * When a change made during a running turn takes effect. Model and effort always wait for the
- * next turn; autonomy reaches the running turn from its next tool call when the provider
- * reports `liveAutonomy`.
+ * next turn; autonomy and plan mode reach the running turn from its next tool call when the
+ * provider reports `liveAutonomy`.
  */
 export function appliesFrom(
   patch: UpdateSessionRequest,
@@ -25,16 +26,17 @@ export function appliesFrom(
   liveAutonomy: boolean,
 ): string | undefined {
   if (!running) return undefined;
-  if (patch.autonomy !== undefined && liveAutonomy) return "Applies from the next tool call.";
+  const live = patch.autonomy !== undefined || patch.planMode !== undefined;
+  if (live && liveAutonomy) return "Applies from the next tool call.";
   return "Applies from the next turn.";
 }
 
 /**
- * Model, effort and autonomy for a session: a change is saved with `PATCH /api/sessions/:id`.
- * Model and effort apply from the next turn (a running turn keeps its settings); autonomy
- * applies from the next tool call or the next turn, as the provider allows. The provider is
- * fixed for the life of a session, so the picker shows the other providers locked. The
- * pickers show the server's values, never a local-only choice.
+ * Model, effort, autonomy and plan mode for a session: a change is saved with
+ * `PATCH /api/sessions/:id`. Model and effort apply from the next turn (a running turn keeps
+ * its settings); autonomy and plan mode apply from the next tool call or the next turn, as the
+ * provider allows. The provider is fixed for the life of a session, so the picker shows the
+ * other providers locked. The pickers show the server's values, never a local-only choice.
  */
 export function SessionOptions({ session, running }: { session: Session; running: boolean }) {
   const client = useClient();
@@ -83,6 +85,9 @@ export function SessionOptions({ session, running }: { session: Session; running
             if (autonomy !== session.autonomy) save({ autonomy });
           }}
         />
+      )}
+      {session.role === "agent" && providerInfo?.capabilities.planMode && (
+        <PlanToggle value={session.planMode ?? false} onChange={(planMode) => save({ planMode })} />
       )}
     </>
   );

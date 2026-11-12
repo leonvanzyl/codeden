@@ -44,6 +44,8 @@ export function reduceAgentEvent(
         ...(event.resumeToken !== undefined ? { resumeToken: event.resumeToken } : {}),
         ...(event.model !== undefined ? { model: event.model } : {}),
         ...(event.title !== undefined ? { title: event.title } : {}),
+        // The agent left (or entered) plan mode itself, e.g. once its plan was approved.
+        ...(event.planMode !== undefined ? { planMode: event.planMode } : {}),
       }));
       break;
     case "thread.started":

@@ -1,9 +1,7 @@
 import { randomUUID } from "node:crypto";
 import os from "node:os";
-import path from "node:path";
 import type {
   CanUseTool,
-  HookCallback,
   PermissionResult,
   Query,
   SDKUserMessage,
@@ -15,7 +13,6 @@ import type {
   RuntimeResponse,
   SessionOptions,
   UserInput,
-  UserQuestion,
 } from "@codeden/contracts";
 import { type ProviderSession, ProviderSessionError, type SessionConfigChange } from "../adapter";
 import { ApprovalBroker } from "../approvals";
@@ -24,12 +21,15 @@ import type { ResolvedCommand } from "../util/exec";
 import { interruptWithDeadline } from "../util/interrupt";
 import { explicitModel } from "../util/model";
 import { str, toJson } from "../util/text";
+import { policyHook, type ShellState } from "./hook";
 import { ClaudeEventMapper } from "./mapper";
 import { claudeNotesDirs } from "./notes-dirs";
 import { buildQueryOptions, claudeEffort, toSdkUserMessage } from "./options";
 import { ClaudePolicy, permissionModeFor } from "./permissions";
+import { carriesToolResult, planApprovalItem, planDecision, planText } from "./plan-review";
+import { askQuestion } from "./questions";
 import type { ClaudeSdkModule } from "./sdk";
-import { approvalTitle, QUESTION_TOOL } from "./tools";
+import { approvalTitle, PLAN_TOOL, QUESTION_TOOL } from "./tools";
 
 /**
  * `Query.interrupt` as the SDK implements it: `cancelQueued` also cancels user messages still
@@ -79,9 +79,13 @@ export class ClaudeSession implements ProviderSession {
   private stderrTail = "";
   private closed = false;
   /** The shell's current directory from the latest PreToolUse hook, for relative paths. */
-  private shellDir: string | undefined;
+  private readonly shell: ShellState = {};
   /** Current autonomy: a query restarted after the CLI exits starts with it. */
   private autonomy: AutonomyLevel;
+  /** Plan mode right now (not just at launch): a restarted query starts with it too. */
+  private planMode: boolean;
+  /** The approved ExitPlanMode call whose result re-applies the permission level. */
+  private planExitToolUseId: string | undefined;
   /** Uuids of messages steered into the running turn, so a Stop can tell which it cancelled. */
   private readonly steered = new Set<string>();
 
@@ -104,6 +108,8 @@ export class ClaudeSession implements ProviderSession {
       },
       opts.readOnly,
     );
+    this.planMode = opts.planMode;
+    this.policy.setPlanning(opts.planMode);
     this.mapper.start(opts.resumeToken);
     this.ensureQuery();
   }
@@ -115,22 +121,26 @@ export class ClaudeSession implements ProviderSession {
   /**
    * Switch autonomy. The policy changes at once, so the next tool call (even in a running
    * turn) follows the new level; approvals already waiting stay waiting. The CLI's own
-   * permission mode follows where it can (`setPermissionMode`); when the CLI refuses a mode
-   * (`bypassPermissions` needs a launch flag), it keeps `acceptEdits` and CodeDen's policy
-   * decides through the PreToolUse hook and `canUseTool` either way. Plan mode is left alone.
+   * permission mode follows (`applyPermissionMode`), except while planning: the CLI stays in
+   * `plan` and the new level applies once the plan is approved or plan mode is turned off.
+   * Rejects when the CLI refuses the mode, so CodeDen keeps the change pending and sends it
+   * again.
    */
   async setAutonomy(level: AutonomyLevel): Promise<void> {
     this.autonomy = level;
     this.policy.setAutonomy(level);
-    const q = this.q;
-    if (!q || this.opts.planMode) return;
-    const mode = permissionModeFor(level, false);
-    try {
-      await q.setPermissionMode(mode);
-    } catch {
-      if (mode !== "bypassPermissions") return;
-      await q.setPermissionMode("acceptEdits").catch(() => {});
-    }
+    if (!this.planMode) await this.applyPermissionMode();
+  }
+
+  /**
+   * Turn plan mode on or off, from the next tool call. Off returns to the autonomy level.
+   * CodeDen's policy follows at once. Rejects when the CLI refuses the mode; the change is never
+   * skipped as already done, so sending it again (CodeDen keeps it pending) retries the CLI.
+   */
+  async setPlanMode(on: boolean): Promise<void> {
+    this.planMode = on;
+    this.policy.setPlanning(on);
+    await this.applyPermissionMode();
   }
 
   /** Model/effort for the following turns, applied live through the SDK's streaming query. */
@@ -211,6 +221,46 @@ export class ClaudeSession implements ProviderSession {
 
   // ---------------------------------------------------------------- internals
 
+  /**
+   * Put the CLI in the permission mode for the current level and plan state. Without a running
+   * CLI there is nothing to do: the next query starts in that mode. When the CLI refuses
+   * `bypassPermissions` (it needs a launch flag), `acceptEdits` serves, as CodeDen's policy
+   * decides through the PreToolUse hook and `canUseTool` either way. Any other refusal, or a
+   * refused fallback, rejects.
+   */
+  private async applyPermissionMode(): Promise<void> {
+    const q = this.q;
+    if (!q) return;
+    const mode = permissionModeFor(this.autonomy, this.planMode);
+    try {
+      await q.setPermissionMode(mode);
+    } catch (error) {
+      if (mode !== "bypassPermissions") throw error;
+      await q.setPermissionMode("acceptEdits");
+    }
+  }
+
+  /** The plan was approved: implement at the session's level, and tell CodeDen. */
+  private leavePlanMode(toolUseId: string): void {
+    this.planExitToolUseId = toolUseId;
+    if (!this.planMode) return;
+    this.planMode = false;
+    this.policy.setPlanning(false);
+    this.events.push({ type: "session.updated", planMode: false });
+  }
+
+  /**
+   * Once the approved ExitPlanMode call has run, set the permission level again, in case the
+   * CLI picked its own mode on the way out of `plan`.
+   */
+  private afterMessage(message: unknown): void {
+    const id = this.planExitToolUseId;
+    if (!id || !carriesToolResult(message, id)) return;
+    this.planExitToolUseId = undefined;
+    // Only a guard: the CLI already took the level's mode with the approval.
+    if (!this.planMode) void this.applyPermissionMode().catch(() => {});
+  }
+
   /** Say in the transcript when a Stop dropped steered messages the agent never read. */
   private noteCancelled(turnId: string, cancelled: string[]): void {
     const count = cancelled.filter((uuid) => this.steered.has(uuid)).length;
@@ -241,39 +291,11 @@ export class ClaudeSession implements ProviderSession {
     if (this.q && this.prompts) return this.prompts;
     const prompts = new AsyncQueue<SDKUserMessage>();
     const abort = new AbortController();
-    const preToolUse: HookCallback = async (hookInput) => {
-      const name = str(hookInput, "tool_name") ?? "";
-      const toolInput = ((hookInput as { tool_input?: unknown }).tool_input ?? {}) as Record<
-        string,
-        unknown
-      >;
-      // The shell's current directory: a `cd` in an earlier Bash call persists.
-      const cwd = str(hookInput, "cwd");
-      if (cwd && (path.isAbsolute(cwd) || path.win32.isAbsolute(cwd))) this.shellDir = cwd;
-      const denied = this.policy.denial(name, toolInput);
-      if (denied) {
-        return {
-          hookSpecificOutput: {
-            hookEventName: "PreToolUse",
-            permissionDecision: "deny",
-            permissionDecisionReason: denied,
-          },
-        };
-      }
-      const gate = this.policy.gate(name, toolInput, this.shellDir);
-      if (!gate.ask) return {};
-      return {
-        hookSpecificOutput: {
-          hookEventName: "PreToolUse",
-          permissionDecision: "ask",
-          permissionDecisionReason: gate.reason,
-        },
-      };
-    };
+    const preToolUse = policyHook(this.policy, this.shell);
     const q = this.config.query({
       prompt: prompts,
       options: buildQueryOptions({
-        session: { ...this.opts, autonomy: this.autonomy },
+        session: { ...this.opts, autonomy: this.autonomy, planMode: this.planMode },
         executable: this.config.executable,
         canUseTool: this.canUseTool,
         hooks: { PreToolUse: [{ hooks: [preToolUse] }] },
@@ -297,7 +319,10 @@ export class ClaudeSession implements ProviderSession {
   private async pump(q: Query): Promise<void> {
     let failure: unknown;
     try {
-      for await (const message of q) this.mapper.handle(message);
+      for await (const message of q) {
+        this.mapper.handle(message);
+        this.afterMessage(message);
+      }
     } catch (error) {
       failure = error;
     }
@@ -325,11 +350,14 @@ export class ClaudeSession implements ProviderSession {
   }
 
   private readonly canUseTool: CanUseTool = async (toolName, input, options) => {
-    if (toolName === QUESTION_TOOL)
-      return this.askQuestion(input, options.toolUseID, options.signal);
+    if (toolName === QUESTION_TOOL) {
+      const deps = { broker: this.broker, mapper: this.mapper };
+      return askQuestion(deps, input, options.toolUseID, options.signal);
+    }
+    if (toolName === PLAN_TOOL) return this.reviewPlan(input, options);
     const denied = this.policy.denial(toolName, input);
     if (denied) return { behavior: "deny", message: denied };
-    const gate = this.policy.needsUser(toolName, input, this.shellDir);
+    const gate = this.policy.needsUser(toolName, input, this.shell.dir);
     if (!gate.ask) return { behavior: "allow", updatedInput: input };
     const ctx = this.mapper.ctxForTool(options.toolUseID);
     const item: ItemOf<"approval_request"> = {
@@ -369,48 +397,28 @@ export class ClaudeSession implements ProviderSession {
     return { behavior: "deny", message: "The request was cancelled.", interrupt: true };
   }
 
-  private async askQuestion(
+  /**
+   * ExitPlanMode: show the plan and ask the user to approve it. Approving leaves plan mode at
+   * the session's level; declining keeps Claude planning, with the user's note as feedback.
+   * `bypassPermissions` is set after the tool has run (`afterMessage`), where a refusal can
+   * fall back to `acceptEdits`.
+   */
+  private async reviewPlan(
     input: Record<string, unknown>,
-    toolUseId: string,
-    signal: AbortSignal,
+    options: Parameters<CanUseTool>[2],
   ): Promise<PermissionResult> {
-    const raw = Array.isArray(input.questions)
-      ? (input.questions as Record<string, unknown>[])
-      : [];
-    const questions: UserQuestion[] = raw.map((q, i) => ({
-      id: `q${i + 1}`,
-      header: str(q, "header"),
-      question: str(q, "question") ?? "",
-      options: (Array.isArray(q.options) ? (q.options as Record<string, unknown>[]) : []).map(
-        (o) => ({
-          label: str(o, "label") ?? "",
-          ...(str(o, "description") ? { description: str(o, "description") } : {}),
-        }),
-      ),
-      multiSelect: q.multiSelect === true,
-      allowFreeText: true,
-    }));
-    if (questions.length === 0) return { behavior: "allow", updatedInput: input };
-    const ctx = this.mapper.ctxForTool(toolUseId);
-    const response = await this.broker.request(
-      ctx,
-      {
-        id: `question-${toolUseId}`,
-        kind: "user_question",
-        status: "in_progress",
-        requestId: toolUseId,
-        questions,
-      },
-      signal,
-    );
-    if (response.kind !== "answer") {
-      return { behavior: "deny", message: "The user dismissed the question." };
+    const ctx = this.mapper.ctxForTool(options.toolUseID);
+    const text = planText(input);
+    if (text) {
+      const id = `plan-${options.toolUseID}`;
+      this.mapper.item(ctx, "item.completed", { id, kind: "plan", status: "completed", text });
     }
-    const answers: Record<string, string> = {};
-    for (const q of questions) {
-      const picked = response.answers[q.id];
-      if (picked?.length) answers[q.question] = picked.join(", ");
-    }
-    return { behavior: "allow", updatedInput: { ...input, answers } };
+    const item = planApprovalItem(options.requestId ?? options.toolUseID, input);
+    const response = await this.broker.request(ctx, item, options.signal);
+    const level = permissionModeFor(this.autonomy, false);
+    const mode = level === "bypassPermissions" ? "acceptEdits" : level;
+    const result = planDecision(input, response, mode);
+    if (result.behavior === "allow") this.leavePlanMode(options.toolUseID);
+    return result;
   }
 }

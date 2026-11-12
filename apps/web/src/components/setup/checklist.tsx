@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/dialog";
 import { TerminalView } from "@/components/workbench/terminal-view";
 import { useClient } from "@/lib/api";
+import { copyWithFeedback } from "@/lib/copy";
 import { platform } from "@/lib/platform";
 import { useSetupStatus } from "@/lib/queries";
 import { cn } from "@/lib/utils";
@@ -183,11 +184,7 @@ export function SetupChecklist() {
                       variant="ghost"
                       className="max-w-56 font-mono text-muted-foreground"
                       title={c.fix.command}
-                      onClick={() =>
-                        void platform
-                          .writeClipboard(c.fix?.command ?? "")
-                          .then(() => toast("Command copied"))
-                      }
+                      onClick={() => void copyWithFeedback(c.fix?.command ?? "", "Command copied")}
                     >
                       <Copy /> <span className="truncate">{c.fix.command}</span>
                     </Button>

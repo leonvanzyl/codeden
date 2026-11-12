@@ -1,4 +1,10 @@
-import type { FactoryItem, MergeCheck, ReviewVerdict, WorkType } from "@codeden/contracts";
+import {
+  type FactoryItem,
+  type MergeCheck,
+  REVIEW_SUMMARY_MAX,
+  type ReviewVerdict,
+  type WorkType,
+} from "@codeden/contracts";
 
 /**
  * Prompts of the software factory's pipelines (§10.1): the builder's steps (reproduce and fix a
@@ -158,6 +164,10 @@ const REVIEW_FOCUS: Record<WorkType, string> = {
   docs: "Is every command, path, option and API it mentions correct for the code as written?",
 };
 
+/** One verdict per review, but a call rejected for invalid input never counts as it. */
+const SUBMIT_REVIEW_RETRY =
+  "If the call is rejected for invalid input, nothing was recorded: fix what the error names and call it again. Once a verdict is recorded, don't submit another.";
+
 /** The independent reviewer of one pull request. */
 export function reviewerPrompt(
   item: FactoryItem,
@@ -188,7 +198,7 @@ export function reviewerPrompt(
     `Judge: ${REVIEW_FOCUS[type]} Does it fit the vision and stay out of its out-of-scope list and protected areas? Are there tests that prove the behaviour (or are none needed)? Any security problems (injection, secrets, unsafe input, risky dependencies)?`,
     UNTRUSTED_INPUT,
     "",
-    "Then call `factory_submit_review` exactly once with your verdict: `approve` only when everything holds, `request_changes` for fixable problems (they go back to the author), `reject` when the change should not exist. Be specific in the summary.",
+    `Then submit one verdict with \`factory_submit_review\`: \`approve\` only when everything holds, \`request_changes\` for fixable problems (they go back to the author), \`reject\` when the change should not exist. Be specific in the summary (up to ${REVIEW_SUMMARY_MAX.toLocaleString("en-US")} characters are stored). ${SUBMIT_REVIEW_RETRY}`,
   ]
     .filter((l) => l !== "")
     .join("\n");
@@ -273,7 +283,7 @@ export function tooLargePrompt(item: FactoryItem, detail: string, failed: MergeC
 
 /** Ask a reviewer to look again after a revision. */
 export function reReviewPrompt(item: FactoryItem): string {
-  return `The author pushed a revision to pull request #${item.pr?.number ?? "?"}. Review the updated change again against the same criteria and call \`factory_submit_review\` once with a fresh verdict.`;
+  return `The author pushed a revision to pull request #${item.pr?.number ?? "?"}. Review the updated change again against the same criteria and submit one fresh verdict with \`factory_submit_review\`. ${SUBMIT_REVIEW_RETRY}`;
 }
 
 export const BUILDER_NUDGE =

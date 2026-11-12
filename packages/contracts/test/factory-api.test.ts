@@ -10,8 +10,12 @@ import {
   FactoryStatus,
   isFactoryMode,
   Notice,
+  REVIEW_SUMMARY_MAX,
+  REVIEW_SUMMARY_TRUNCATED,
   ReviewVerdict,
+  ReviewVerdictSubmission,
   SetAutonomyModeRequest,
+  truncateReviewSummary,
 } from "../src";
 import { ts } from "./fixtures";
 
@@ -69,6 +73,39 @@ const item: FactoryItem = {
   mergedAt: null,
   finishedAt: null,
 };
+
+describe("review summaries (§10.1)", () => {
+  const verdict = (summary: string) => ({
+    verdict: "request_changes",
+    summary,
+    vision: { aligned: true },
+    tests: { adequate: false },
+    security: {},
+  });
+
+  it("keeps a summary up to the limit and cuts a longer one with a marker", () => {
+    const fits = "a".repeat(REVIEW_SUMMARY_MAX);
+    expect(truncateReviewSummary(fits)).toBe(fits);
+    const cut = truncateReviewSummary(`${"b".repeat(REVIEW_SUMMARY_MAX)} and more`);
+    expect(cut.length).toBeLessThanOrEqual(REVIEW_SUMMARY_MAX);
+    expect(cut.endsWith(` ${REVIEW_SUMMARY_TRUNCATED}`)).toBe(true);
+    expect(cut.startsWith("bbbb")).toBe(true);
+    // An emoji at the cut is dropped whole, never split into half a surrogate pair.
+    const keep = REVIEW_SUMMARY_MAX - REVIEW_SUMMARY_TRUNCATED.length - 2;
+    const emoji = truncateReviewSummary(`${"c".repeat(keep)}😀${"d".repeat(100)}`);
+    expect(emoji).toBe(`${"c".repeat(keep)} ${REVIEW_SUMMARY_TRUNCATED}`);
+  });
+
+  it("accepts a submission of any length but stores at most the limit", () => {
+    const long = "e".repeat(REVIEW_SUMMARY_MAX + 1);
+    expect(ReviewVerdictSubmission.safeParse(verdict(long)).success).toBe(true);
+    expect(ReviewVerdictSubmission.safeParse(verdict("")).success).toBe(false);
+    expect(ReviewVerdict.safeParse(verdict(long)).success).toBe(false);
+    expect(ReviewVerdict.safeParse(verdict(truncateReviewSummary(long))).success).toBe(true);
+    // Verdicts stored under the old 4,000-character limit still parse.
+    expect(ReviewVerdict.safeParse(verdict("f".repeat(4_000))).success).toBe(true);
+  });
+});
 
 describe("factory API contracts (§10.1)", () => {
   it("round-trips items, loops and the item event", () => {
@@ -161,6 +198,7 @@ describe("factory API contracts (§10.1)", () => {
     expect(verdict.criteria).toEqual([]);
     expect(verdict.security.concerns).toEqual([]);
     expect(ReviewVerdict.safeParse({ verdict: "maybe", summary: "x" }).success).toBe(false);
+    expect(ReviewVerdict.parse(JSON.parse(JSON.stringify(verdict)))).toEqual(verdict);
     const decision = FactoryDecisionRequest.parse({
       question: "Polish index.html or migrate first?",
       decision: "Migrate first",

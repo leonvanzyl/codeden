@@ -134,8 +134,9 @@ export const RunnerCommand = z.discriminatedUnion("name", [
   z.object({ name: z.literal("session.stop"), sessionId: Id }),
   /**
    * Change model/effort for the next turn, and/or the autonomy level (§11.2): from the next
-   * tool call when the provider reports `liveAutonomy`, otherwise from the next turn.
-   * `unsupported` when the provider cannot change a requested setting live.
+   * tool call when the provider reports `liveAutonomy`, otherwise from the next turn. `planMode`
+   * turns plan mode on or off (`capabilities.planMode`). `unsupported` when the provider
+   * cannot change a requested setting live.
    */
   z.object({
     name: z.literal("session.configure"),
@@ -143,6 +144,7 @@ export const RunnerCommand = z.discriminatedUnion("name", [
     model: z.string().nullable().optional(),
     effort: ReasoningEffort.nullable().optional(),
     autonomy: AutonomyLevel.optional(),
+    planMode: z.boolean().optional(),
   }),
   z.object({
     name: z.literal("pty.open"),

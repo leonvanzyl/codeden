@@ -26,7 +26,7 @@ import type { InputDecorator } from "./input-decorator";
 import type { SessionLauncher } from "./launcher";
 import type { Outbox } from "./outbox";
 import { isTransientRunnerError, OutboxHolds } from "./outbox-holds";
-import { readOnlyUnsupported } from "./permissions";
+import { planModeUnsupported, readOnlyUnsupported } from "./permissions";
 import type { Answerer, QuestionBroker } from "./questions";
 import { applyPendingConfig, updateSession } from "./reconfigure";
 import type { SessionRepo, StoredStartMeta } from "./repo";
@@ -76,11 +76,17 @@ export class SessionService {
     this.inputDecorator = fn;
   }
 
-  /** Model and effort (applied on the next turn), autonomy (pushed to the runner) or title. */
+  /**
+   * Model and effort (applied on the next turn), autonomy and plan mode (pushed to the runner)
+   * or title.
+   */
   update(id: string, req: UpdateSessionRequest): Promise<Session> {
-    if (req.autonomy === "read_only") {
+    if (req.autonomy === "read_only" || req.planMode !== undefined) {
       const session = this.deps.repo.get(id);
-      this.assertReadOnlySupported(session.role, session.provider, req.autonomy);
+      if (req.autonomy === "read_only") {
+        this.assertReadOnlySupported(session.role, session.provider, req.autonomy);
+      }
+      if (req.planMode !== undefined) this.assertPlanModeSupported(session.role, session.provider);
     }
     return updateSession(this.deps.repo, this.deps.runner, id, req);
   }
@@ -89,6 +95,12 @@ export class SessionService {
   private assertReadOnlySupported(role: Session["role"], providerId: string, level: AutonomyLevel) {
     const problem = readOnlyUnsupported(role, level, this.provider(providerId));
     if (problem) throw badRequest(problem, "read_only_unsupported");
+  }
+
+  /** Reject plan mode for role sessions and on providers without `capabilities.planMode`. */
+  private assertPlanModeSupported(role: Session["role"], providerId: string) {
+    const problem = planModeUnsupported(role, this.provider(providerId));
+    if (problem) throw badRequest(problem, "plan_mode_unsupported");
   }
 
   detail(id: string): SessionDetail {
@@ -430,6 +442,8 @@ export class SessionService {
     const provider = this.resolveProvider(req, project ? projectDefaultProvider(project) : null);
     const autonomy = req.autonomy ?? project?.autonomy ?? settings.autonomy.default;
     this.assertReadOnlySupported(req.role, provider, autonomy);
+    // Either value is refused where plan mode doesn't exist, as for PATCH.
+    if (req.planMode !== undefined) this.assertPlanModeSupported(req.role, provider);
     return {
       id: randomUUID(),
       projectId: req.projectId,
@@ -445,6 +459,7 @@ export class SessionService {
       model: req.model ?? roleDefaults.model,
       effort: req.effort ?? roleDefaults.effort,
       autonomy,
+      planMode: req.planMode ?? false,
       status: work.queued ? "queued" : "starting",
       cwd: project?.path ?? ".",
       worktreePath: null,

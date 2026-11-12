@@ -67,7 +67,7 @@ export class ToolRegistry {
     if (!tool) return { text: `Unknown tool: ${name}`, isError: true };
     const parsed = tool.input.safeParse(args ?? {});
     if (!parsed.success) {
-      return { text: `Invalid input: ${z.prettifyError(parsed.error)}`, isError: true };
+      return { text: invalidInputMessage(name, parsed.error, args ?? {}), isError: true };
     }
     if (tool.scope === "session" && !caller.sessionId) {
       return { text: `${name} needs a session`, isError: true };
@@ -98,6 +98,47 @@ export class ToolRegistry {
       return { text: `${name} failed: ${errorMessage(error)}`, isError: true };
     }
   }
+}
+
+/** `a.b[0].c` for an issue path; `input` for the arguments as a whole. */
+function pathLabel(path: readonly PropertyKey[]): string {
+  const label = path.reduce<string>((acc, key) => {
+    if (typeof key === "number") return `${acc}[${key}]`;
+    return acc ? `${acc}.${String(key)}` : String(key);
+  }, "");
+  return label || "input";
+}
+
+function valueAt(args: unknown, path: readonly PropertyKey[]): unknown {
+  let value = args;
+  for (const key of path) {
+    if (value === null || typeof value !== "object") return undefined;
+    value = (value as Record<PropertyKey, unknown>)[key];
+  }
+  return value;
+}
+
+const count = (n: number) => n.toLocaleString("en-US");
+
+/**
+ * What a model needs to fix a rejected call: each problem with the field it is in (an over-long
+ * string with its length and the limit), and that it may call again. Agents told to call a
+ * tool once must not read a validation error as the end of it.
+ */
+export function invalidInputMessage(name: string, error: z.ZodError, args: unknown): string {
+  const problems = error.issues.map((issue) => {
+    const at = pathLabel(issue.path);
+    const value = valueAt(args, issue.path);
+    if (issue.code === "too_big" && issue.origin === "string" && typeof value === "string") {
+      return `- ${at} is ${count(value.length)} characters; the limit is ${count(Number(issue.maximum))}. Shorten it.`;
+    }
+    return `- ${at}: ${issue.message}`;
+  });
+  return [
+    `Invalid input for ${name}, nothing was done:`,
+    ...problems,
+    `Fix the arguments and call \`${name}\` again.`,
+  ].join("\n");
 }
 
 /** JSON Schema and metadata of a tool for MCP clients. */

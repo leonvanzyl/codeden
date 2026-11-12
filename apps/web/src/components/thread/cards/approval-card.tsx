@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { useClient } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { PlanApprovalCard } from "./plan-approval-card";
 
 const actionLabel: Record<ItemOf<"approval_request">["action"], string> = {
   command: "Command",
@@ -14,6 +15,7 @@ const actionLabel: Record<ItemOf<"approval_request">["action"], string> = {
   git_destructive: "Destructive git",
   secrets: "Secrets access",
   tool: "Tool",
+  plan: "Plan",
   other: "Action",
 };
 
@@ -23,15 +25,35 @@ const decisionLabel: Record<ApprovalDecision, string> = {
   deny: "Denied",
 };
 
-/** An approval the agent is waiting on (§11.2), answerable inline. */
+/**
+ * An approval the agent is waiting on (§11.2), answerable inline. Plan approvals (plan mode)
+ * get their own card; `plan` is the plan they approve, for views without the plan card.
+ */
 export function ApprovalCard({
   item,
   sessionId,
   compact = false,
+  plan,
 }: {
   item: ItemOf<"approval_request">;
   sessionId: string;
   compact?: boolean;
+  plan?: string;
+}) {
+  if (item.action === "plan") {
+    return <PlanApprovalCard item={item} sessionId={sessionId} compact={compact} plan={plan} />;
+  }
+  return <ActionApprovalCard item={item} sessionId={sessionId} compact={compact} />;
+}
+
+function ActionApprovalCard({
+  item,
+  sessionId,
+  compact,
+}: {
+  item: ItemOf<"approval_request">;
+  sessionId: string;
+  compact: boolean;
 }) {
   const client = useClient();
   const pending = item.status === "in_progress";

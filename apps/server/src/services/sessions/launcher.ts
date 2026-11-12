@@ -179,9 +179,10 @@ export class SessionLauncher {
   }
 
   /**
-   * Provider options for a start or resume: model, effort, autonomy, cwd, the CodeDen system
-   * prompt, and CodeDen's MCP server through the runner's local proxy with a freshly minted
-   * session token (minting revokes the previous one).
+   * Provider options for a start or resume: model, effort, autonomy, plan mode, cwd, the
+   * CodeDen system prompt, and CodeDen's MCP server through the runner's local proxy with a
+   * freshly minted session token (minting revokes the previous one). A session still planning
+   * reopens in plan mode; one whose plan was approved reopens at its permission level.
    */
   sessionOptions(session: Session): SessionOptions {
     const proxyUrl = this.deps.runner.mcpProxyUrl();
@@ -208,6 +209,7 @@ export class SessionLauncher {
       model: session.model ?? undefined,
       effort: session.effort ?? undefined,
       autonomy: session.autonomy,
+      planMode: session.planMode ?? false,
       resumeToken: session.resumeToken ?? undefined,
       systemPrompt: codedenSystemPrompt(session, this.projectOf(session)),
       // The orchestrator and PMs never write project code (§11.2). Agent sessions at the

@@ -1,4 +1,5 @@
 import type { CodedenDesktopApi, CodedenDesktopBrowserApi } from "@codeden/contracts";
+import { copyText } from "./clipboard";
 import { createDesktopPlatform } from "./platform-desktop";
 
 /**
@@ -27,7 +28,8 @@ export interface PlatformBridge {
   openExternal(url: string): void;
   /** Unread count on the app icon (or the tab title as a fallback). */
   setBadge(count: number): void;
-  writeClipboard(text: string): Promise<void>;
+  /** Copies text, also on insecure origins (phones on the LAN); false when it failed. Never rejects. */
+  writeClipboard(text: string): Promise<boolean>;
   readClipboardImage(): Promise<Blob | null>;
   isFocused(): boolean;
   /** Native folder picker (when `capabilities.folderPicker`); null when cancelled or absent. */
@@ -82,9 +84,7 @@ export function createWebPlatform(): PlatformBridge {
       document.title = count > 0 ? `(${count}) ${baseTitle}` : baseTitle;
       if (nav?.setAppBadge) void (count > 0 ? nav.setAppBadge(count) : nav.clearAppBadge?.());
     },
-    async writeClipboard(text) {
-      await navigator.clipboard.writeText(text);
-    },
+    writeClipboard: (text) => copyText(text),
     async readClipboardImage() {
       if (!nav?.clipboard || !("read" in nav.clipboard)) return null;
       const items = await nav.clipboard.read();

@@ -10,7 +10,8 @@ import { TimelineRowView } from "./timeline-row";
 const gapAfter = (row: TimelineRow, next: TimelineRow | undefined): number => {
   if (!next) return 0;
   if (row.type === "work" && next.type === "work") return 4;
-  if (row.type === "user" || next.type === "user") return 24;
+  // An assistant message's Copy action hangs 20px below it; the next row would cover it.
+  if (row.type === "user" || next.type === "user" || row.type === "assistant") return 24;
   if (next.type === "turn-end" || row.type === "turn-end") return 18;
   return 14;
 };

@@ -6,8 +6,8 @@ import { QrCode } from "@/components/common/qr-code";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { useClient } from "@/lib/api";
+import { copyWithFeedback } from "@/lib/copy";
 import { ago } from "@/lib/format";
-import { platform } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 import { NETWORK_KEY, NetworkPassword } from "./network-password";
 import { SettingRow, SettingsSection } from "./settings-ui";
@@ -67,9 +67,7 @@ function AddressCard({ address, live }: { address: NetworkAddress; live: boolean
         <button
           type="button"
           className="mt-1 flex max-w-full items-center gap-1.5 font-mono text-[12.5px] text-muted-foreground hover:text-foreground pointer-coarse:min-h-10"
-          onClick={() =>
-            void platform.writeClipboard(address.url).then(() => toast.success("Address copied"))
-          }
+          onClick={() => void copyWithFeedback(address.url, "Address copied")}
           title="Copy address"
         >
           <span className="truncate">{address.url}</span>

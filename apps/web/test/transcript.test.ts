@@ -151,6 +151,38 @@ describe("buildTimeline", () => {
     expect(rows.at(-1)?.type).toBe("working");
   });
 
+  it("keeps a turn whole when an earlier turn's follow-ups arrive during it", () => {
+    const say = (turnId: string, id: string): AgentEvent => ({
+      type: "item.completed",
+      threadId: T,
+      turnId,
+      item: { id, kind: "assistant_message", status: "completed", text: id },
+    });
+    const s = run([
+      { type: "turn.started", threadId: T, turnId: "u1" },
+      say("u1", "a"),
+      { type: "turn.completed", threadId: T, turnId: "u1" },
+      { type: "turn.started", threadId: T, turnId: "u2" },
+      say("u2", "b"),
+      // Suggestions for u1, written by the server once u2 had begun.
+      {
+        type: "item.completed",
+        threadId: T,
+        turnId: "u1",
+        item: {
+          id: "f1",
+          kind: "followups",
+          status: "completed",
+          source: "utility",
+          suggestions: [],
+        },
+      },
+      say("u2", "c"),
+    ]);
+    const keys = buildTimeline(s, T).map((r) => r.key);
+    expect(keys).toEqual(["a", "end:u1", "b", "c", "working:u2"]);
+  });
+
   it("only offers follow-ups when the last turn completed", () => {
     expect(latestFollowups(t, "t-checkout")).toBeNull();
     const a11y = world.transcript("s-a11y");

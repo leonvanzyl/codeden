@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useClient } from "@/lib/api";
-import { platform } from "@/lib/platform";
+import { copyWithFeedback } from "@/lib/copy";
 
 export const NETWORK_KEY = ["network"] as const;
 
@@ -25,10 +25,7 @@ function GeneratedPassword({ value, onDone }: { value: string; onDone: () => voi
           size="sm"
           variant="outline"
           onClick={() =>
-            void platform.writeClipboard(value).then(() => {
-              setCopied(true);
-              toast.success("Password copied");
-            })
+            void copyWithFeedback(value, "Password copied").then((ok) => setCopied(ok))
           }
         >
           {copied ? <Check /> : <Copy />} {copied ? "Copied" : "Copy"}
