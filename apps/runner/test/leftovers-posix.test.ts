@@ -53,12 +53,29 @@ const agentsDevServer = (wt: string): ProcessRow[] => [
 const AGENTS = [3001, 3002];
 
 /**
+ * An app an agent opened on the worktree from its shell (a terminal, an editor), with a shell a
+ * person works in there and the dev server they run in it. All of it is the agent's by
+ * ancestry, but ending the shell would close the app, and the shell and server in it are the
+ * person's: none of it is ended.
+ */
+const inAgentOpenedApp = (wt: string, app: Partial<ProcessRow>): ProcessRow[] => [
+  row(3010, process.pid, { commandLine: "/bin/sh -c open .", cwd: wt, startedAt: AFTER }),
+  row(3011, 3010, { cwd: wt, startedAt: AFTER, ...app }),
+  row(3012, 3011, { commandLine: "/bin/bash", cwd: wt, startedAt: AFTER + MINUTE }),
+  row(3013, 3012, {
+    commandLine: `node ${slashed(wt)}/server.js`,
+    cwd: wt,
+    startedAt: AFTER + MINUTE,
+  }),
+];
+
+/**
  * A Linux dev box CodeDen runs on over SSH. A person has two SSH sessions of their own in the
  * worktree, one opened before CodeDen started and one since, each with a shell and the dev
- * server they run in it, and a test watcher in a terminal that isn't on the app list (`foot`)
- * in their desktop session. With `hidden`, the rows of other users' processes are missing, as
- * when `/proc` is mounted with `hidepid=2`: init, the sshd listener and each session's
- * privileged sshd run as root.
+ * server they run in it, a test watcher in a terminal that isn't on the app list (`foot`) in
+ * their desktop session, and a dev server in a terminal an agent opened (`xterm`). With
+ * `hidden`, the rows of other users' processes are missing, as when `/proc` is mounted with
+ * `hidepid=2`: init, the sshd listener and each session's privileged sshd run as root.
  */
 function linux(wt: string, hidden = false): ProcessRow[] {
   const sshd = "/usr/sbin/sshd";
@@ -99,6 +116,7 @@ function linux(wt: string, hidden = false): ProcessRow[] {
       cwd: wt,
       startedAt: HOUR_BEFORE,
     }),
+    ...inAgentOpenedApp(wt, { exe: "/usr/bin/xterm", commandLine: "xterm" }),
     ...agentsDevServer(wt),
   ];
   const root = new Set([1, 600, 610, 618, 630]);
@@ -157,7 +175,7 @@ function container(wt: string): ProcessRow[] {
  * A Mac running the CodeDen desktop app. `ps` reports no executable paths, only command lines.
  * The person runs a dev server in a terminal of their editor in the worktree, and has an SSH
  * session there (sshd is started for each connection by launchd). An agent opened the editor on
- * the worktree from its shell: ending that shell would close the editor's windows.
+ * the worktree from its shell, and the person runs a dev server in a terminal of that one too.
  */
 const VS_CODE = "/Applications/Visual Studio Code.app/Contents/MacOS/Electron";
 function mac(wt: string): ProcessRow[] {
@@ -178,8 +196,7 @@ function mac(wt: string): ProcessRow[] {
     row(1101, 1100, { commandLine: "sshd: leon [priv]", startedAt: HOUR_BEFORE }),
     row(1102, 1101, { commandLine: "sshd: leon@ttys003", startedAt: HOUR_BEFORE }),
     row(1103, 1102, { commandLine: "-zsh", cwd: wt, startedAt: HOUR_BEFORE }),
-    row(3010, process.pid, { commandLine: "/bin/zsh -c code .", cwd: wt, startedAt: AFTER }),
-    row(3011, 3010, { commandLine: `${VS_CODE} ${slashed(wt)}`, cwd: wt, startedAt: AFTER }),
+    ...inAgentOpenedApp(wt, { commandLine: `${VS_CODE} ${slashed(wt)}` }),
     ...agentsDevServer(wt),
   ];
 }
@@ -232,7 +249,7 @@ describe("removing a worktree on Linux and macOS (#109)", () => {
     return [...withDescendants(killed, rows)].sort((a, b) => a - b);
   }
 
-  it("Linux: never ends a person's SSH shell or terminal in the worktree", async () => {
+  it("Linux: never ends a person's SSH shell or terminal, nor their work in one an agent opened", async () => {
     expect(await archive("linux", (wt) => linux(wt))).toEqual(AGENTS);
   });
 
@@ -244,7 +261,7 @@ describe("removing a worktree on Linux and macOS (#109)", () => {
     expect(await archive("linux", container)).toEqual(AGENTS);
   });
 
-  it("macOS: never ends a person's terminal or SSH shell, nor an editor an agent opened", async () => {
+  it("macOS: never ends a person's terminal or SSH shell, nor an editor an agent opened or their work in it", async () => {
     expect(await archive("darwin", mac)).toEqual(AGENTS);
   });
 });
@@ -275,6 +292,8 @@ describe("a session stopping on Linux (#109)", () => {
     expect(await stop([3101, 3102])).toEqual([...AGENTS, 3101, 3102]);
     // A parent missing from the table is one the runner can't see, not one that exited.
     expect(await stop([])).toEqual(AGENTS);
+    // What runs in an app the agent opened stays, also when it was seen as the agent's.
+    expect(await stop([3010, 3011, 3012, 3013, 3101, 3102])).toEqual([...AGENTS, 3101, 3102]);
   });
 });
 

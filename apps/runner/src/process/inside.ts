@@ -206,22 +206,55 @@ export interface SelectOptions {
  * The processes inside `dir` that may be ended, by pid. Each is ended with its whole tree
  * (`killTree`), so a process is never chosen when anything that must survive runs under it: it
  * is an ancestor of CodeDen (`protect`), of an app a person works in (an editor opened from a
- * shell in the folder), or of a spared terminal. Ancestry is followed by parent pid, as tree
- * kills do.
+ * shell in the folder), or of a spared terminal. Nor is one that runs under such an app, even
+ * one an agent opened: a shell a person works in there, and what they run in it, are theirs
+ * (`runsUnderApp`). Ancestry is followed by parent pid, as tree kills do.
  */
 export function processesToEnd(opts: SelectOptions): number[] {
-  const kept = [
-    ...opts.protect,
-    ...opts.rows.filter((r) => isUserApp(r, opts.dir, opts.windows)).map((r) => r.pid),
-    ...(opts.spare ?? []),
-  ];
+  const apps = new Set(
+    opts.rows.filter((r) => isUserApp(r, opts.dir, opts.windows)).map((r) => r.pid),
+  );
   const safe = new Set<number>();
-  for (const pid of kept) for (const p of withAncestors(pid, opts.rows)) safe.add(p);
+  for (const pid of [...opts.protect, ...apps, ...(opts.spare ?? [])]) {
+    for (const p of withAncestors(pid, opts.rows)) safe.add(p);
+  }
+  const codeden = new Set<number>();
+  for (const pid of opts.protect) for (const p of withAncestors(pid, opts.rows)) codeden.add(p);
+  const byPid = new Map(opts.rows.map((r) => [r.pid, r]));
   return opts.rows
     .filter((r) => r.pid > 0 && !safe.has(r.pid))
     .filter((r) => opts.allowed.has(r.pid))
     .filter((r) => runsInside(opts.dir, r, opts.windows))
+    .filter((r) => !runsUnderApp(r, byPid, apps, codeden))
     .map((r) => r.pid);
+}
+
+/**
+ * Whether one of `apps` (apps a person works in) is an ancestor of `row`, below CodeDen: the
+ * walk up stops at the runner, the server or one of their ancestors (`codeden`), so neither the
+ * terminal CodeDen was started from nor the desktop app's bundle (macOS) makes every agent's
+ * process a person's. It stops too at a parent that is gone, or younger than its child (a
+ * reused pid).
+ */
+function runsUnderApp(
+  row: ProcessRow,
+  byPid: ReadonlyMap<number, ProcessRow>,
+  apps: ReadonlySet<number>,
+  codeden: ReadonlySet<number>,
+): boolean {
+  const visited = new Set([row.pid]);
+  for (let current = row; ; ) {
+    const parent = byPid.get(current.ppid);
+    if (!parent || visited.has(parent.pid)) return false;
+    const { startedAt } = current;
+    if (parent.startedAt !== null && startedAt !== null && parent.startedAt > startedAt) {
+      return false;
+    }
+    if (codeden.has(parent.pid)) return false;
+    if (apps.has(parent.pid)) return true;
+    visited.add(parent.pid);
+    current = parent;
+  }
 }
 
 /**
