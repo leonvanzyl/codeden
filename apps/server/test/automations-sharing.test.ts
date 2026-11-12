@@ -177,6 +177,14 @@ describe("automations API: create, duplicate, export and import", () => {
     AutomationListResponse.parse(
       (await h.api("GET", `/automations?projectId=${h.projectId}`)).body,
     );
+  const pmTool = async (name: string, args: unknown) =>
+    h.server.services.tools.call(name, args, {
+      role: "pm",
+      sessionId: "pm-test",
+      projectId: h.projectId,
+      caller: "mcp",
+      signal: new AbortController().signal,
+    });
 
   it("creates from scratch off, validates, and updates any field", async () => {
     const res = await h.api("POST", "/automations", {
@@ -301,14 +309,6 @@ describe("automations API: create, duplicate, export and import", () => {
   });
 
   it("lets the PM create and update automations, created off and marked", async () => {
-    const pmTool = async (name: string, args: unknown) =>
-      h.server.services.tools.call(name, args, {
-        role: "pm",
-        sessionId: "pm-test",
-        projectId: h.projectId,
-        caller: "mcp",
-        signal: new AbortController().signal,
-      });
     const res = await pmTool("create_automation", {
       name: "Nightly lint report",
       trigger: { type: "cron", expression: "0 2 * * *" },
@@ -344,5 +344,42 @@ describe("automations API: create, duplicate, export and import", () => {
       name: "Renamed",
     });
     expect(readOnly.isError).toBe(true);
+  });
+
+  // #132: a PM must not change what an automation a person switched on does and leave it running.
+  const nightly = {
+    name: "Dependency updates",
+    trigger: { type: "cron" as const, expression: "0 3 * * *" },
+    action: {
+      type: "start_session" as const,
+      prompt: "Update dependencies",
+      autonomy: "auto" as const,
+    },
+    enabled: true,
+  };
+  const rewrite = {
+    trigger: { type: "cron", expression: "*/5 * * * *" },
+    action: { type: "start_session", prompt: "Something else entirely", autonomy: "full" },
+  };
+
+  it("switches off an automation that was on when the PM changes what it does", async () => {
+    const defs = h.server.services.automations.definitions;
+    const on = defs.create({ ...nightly, projectId: h.projectId });
+    expect(on.enabled).toBe(true);
+    const res = await pmTool("update_automation", { automationId: on.id, ...rewrite });
+    expect(res.isError).toBeFalsy();
+    const saved = defs.get(on.id);
+    expect(saved.action).toMatchObject({ autonomy: "full" });
+    expect(saved.enabled).toBe(false);
+    expect((JSON.parse(res.text) as { updated: { enabled: boolean } }).updated.enabled).toBe(false);
+  });
+
+  it("refuses the PM's changes to an automation for all projects", async () => {
+    const defs = h.server.services.automations.definitions;
+    const global = defs.create(nightly);
+    expect(global.target).toEqual({ type: "all_projects" });
+    const res = await pmTool("update_automation", { automationId: global.id, ...rewrite });
+    expect(res.isError).toBe(true);
+    expect(defs.get(global.id)).toMatchObject({ enabled: true, action: nightly.action });
   });
 });
