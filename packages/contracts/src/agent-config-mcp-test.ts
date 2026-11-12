@@ -28,6 +28,17 @@ export const MCP_TEST_MAX_TIMEOUT_MS = 120_000;
 export const McpServerTestRequest = McpServerTarget.extend({ spec: McpServerSpec.optional() });
 export type McpServerTestRequest = z.infer<typeof McpServerTestRequest>;
 
+/**
+ * How a connection test builds a stdio server's environment, the way the agent's CLI does:
+ * - `inherit` (Claude Code): the runner's environment, minus CodeDen's own secrets, plus the
+ *   server's `env`.
+ * - `allowlist` (Codex): only the platform's default variables (PATH, HOME or USERPROFILE, the
+ *   temp folder and the like) and CA bundle variables, the names in the server's native
+ *   `env_vars` list (kept in the spec's `extra`), then the server's `env`.
+ */
+export const McpStdioEnv = z.enum(["inherit", "allowlist"]);
+export type McpStdioEnv = z.infer<typeof McpStdioEnv>;
+
 /** One tool a server offers. */
 export const McpTestTool = z.object({
   name: z.string(),
@@ -77,6 +88,11 @@ export const McpServerTestResult = z.discriminatedUnion("ok", [
     timedOut: z.boolean(),
     /** The end of a stdio server's stderr, when it wrote any. */
     stderrTail: z.string().max(MCP_TEST_STDERR_LIMIT).optional(),
+    /**
+     * What may explain the failure beyond the error itself, such as the provider giving a
+     * stdio server only some of the environment (`McpStdioEnv` `allowlist`).
+     */
+    note: z.string().max(MCP_TEST_ERROR_LIMIT).optional(),
   }),
 ]);
 export type McpServerTestResult = z.infer<typeof McpServerTestResult>;

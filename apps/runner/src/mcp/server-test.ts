@@ -9,6 +9,7 @@ import {
   MCP_TEST_STDERR_LIMIT,
   type McpServerSpec,
   type McpServerTestResult,
+  type McpStdioEnv,
   type McpTestStage,
   type McpTestTool,
 } from "@codeden/contracts";
@@ -20,6 +21,7 @@ import { childEnv } from "../process/env";
 import type { ProcessSupervisor } from "../process/supervisor";
 import { killTreeAndOrphans } from "../process/tree";
 import { type ResolvedMcpServer, resolveMcpSpec } from "./resolve-spec";
+import { ALLOWLIST_NOTE, codexEnvVarNames, stdioServerEnv } from "./stdio-env";
 import { McpStdioTransport, type SpawnServer } from "./stdio-transport";
 
 export interface McpServerTestOptions {
@@ -33,6 +35,10 @@ export interface McpServerTestOptions {
   clientVersion: string;
   /** Environment for placeholders and stdio servers; the runner's (minus secrets) by default. */
   env?: Record<string, string>;
+  /** How much of `env` a stdio server gets (`McpStdioEnv`); `inherit` when omitted. */
+  stdioEnv?: McpStdioEnv;
+  /** The platform whose rules `allowlist` follows; this one by default. */
+  platform?: NodeJS.Platform;
   /** Tracks a stdio server while it runs, so a runner shutdown stops it too. */
   supervisor?: Pick<ProcessSupervisor, "adopt" | "release">;
   /** Starts a stdio server (`cross-spawn` by default; tests pass a fake child process). */
@@ -72,8 +78,14 @@ export async function testMcpServer(opts: McpServerTestOptions): Promise<McpServ
   let protocolVersion: string | null = null;
   let stdio: McpStdioTransport | null = null;
 
+  const stdioEnv = opts.stdioEnv ?? "inherit";
   const fail = (error: unknown): McpServerTestResult => {
     const tail = stderr.value();
+    // A server that started and then failed may have missed a variable the policy left out.
+    const note =
+      stdioEnv === "allowlist" && opts.spec.type === "stdio" && stage !== "start"
+        ? ALLOWLIST_NOTE
+        : undefined;
     return {
       ok: false,
       durationMs: elapsed(),
@@ -81,6 +93,7 @@ export async function testMcpServer(opts: McpServerTestOptions): Promise<McpServ
       error: describeError(error, { timedOut, timeoutMs, type: opts.spec.type }),
       timedOut,
       ...(tail ? { stderrTail: tail } : {}),
+      ...(note ? { note } : {}),
     };
   };
 
@@ -88,7 +101,15 @@ export async function testMcpServer(opts: McpServerTestOptions): Promise<McpServ
   try {
     const server = resolveMcpSpec(opts.spec, { expandEnv: opts.expandEnv, env });
     const cwd = (server.type === "stdio" ? server.cwd : undefined) ?? opts.cwd ?? homedir();
-    const transport: Transport = createTransport(server, { cwd, env, stderr, spawn: opts.spawn });
+    const transport: Transport = createTransport(server, {
+      cwd,
+      env,
+      stdioEnv,
+      envVars: opts.spec.type === "stdio" ? codexEnvVarNames(opts.spec.extra) : [],
+      platform: opts.platform,
+      stderr,
+      spawn: opts.spawn,
+    });
     // The client starts the transport, then negotiates the protocol version; both are
     // observed here so a failure names its stage and a success reports the version.
     const start = transport.start.bind(transport);
@@ -139,7 +160,15 @@ export async function testMcpServer(opts: McpServerTestOptions): Promise<McpServ
 
 function createTransport(
   server: ResolvedMcpServer,
-  ctx: { cwd: string; env: Record<string, string>; stderr: TailBuffer; spawn?: SpawnServer },
+  ctx: {
+    cwd: string;
+    env: Record<string, string>;
+    stdioEnv: McpStdioEnv;
+    envVars: string[];
+    platform?: NodeJS.Platform;
+    stderr: TailBuffer;
+    spawn?: SpawnServer;
+  },
 ): Transport {
   if (server.type === "stdio") {
     if (!existsSync(ctx.cwd) || !statSync(ctx.cwd).isDirectory()) {
@@ -148,7 +177,13 @@ function createTransport(
     return new McpStdioTransport({
       command: server.command,
       args: server.args,
-      env: { ...ctx.env, ...server.env },
+      env: stdioServerEnv({
+        policy: ctx.stdioEnv,
+        base: ctx.env,
+        serverEnv: server.env,
+        envVars: ctx.envVars,
+        platform: ctx.platform,
+      }),
       cwd: ctx.cwd,
       onStderr: (chunk) => ctx.stderr.append(chunk),
       spawn: ctx.spawn,

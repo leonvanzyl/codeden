@@ -1,6 +1,10 @@
 import { z } from "zod";
 import { McpServerSpec } from "../agent-config";
-import { MCP_TEST_MAX_TIMEOUT_MS, McpServerTestResult } from "../agent-config-mcp-test";
+import {
+  MCP_TEST_MAX_TIMEOUT_MS,
+  McpServerTestResult,
+  McpStdioEnv,
+} from "../agent-config-mcp-test";
 import { AutonomyLevel, Id, ProviderId, ReasoningEffort } from "../common";
 import { UserInput } from "../input";
 import { ProjectConfigFile } from "../project-config";
@@ -269,6 +273,8 @@ export const RunnerCommand = z.discriminatedUnion("name", [
     cwd: z.string().min(1).optional(),
     /** Expand `${VAR}` and `${VAR:-default}` from the runner's environment, as Claude Code does. */
     expandEnv: z.boolean(),
+    /** How a stdio server's environment is built; `inherit` when omitted. */
+    stdioEnv: McpStdioEnv.optional(),
     /** Default `MCP_TEST_DEFAULT_TIMEOUT_MS`. */
     timeoutMs: z.int().positive().max(MCP_TEST_MAX_TIMEOUT_MS).optional(),
   }),

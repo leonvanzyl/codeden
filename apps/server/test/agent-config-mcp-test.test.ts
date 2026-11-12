@@ -73,15 +73,46 @@ describe("MCP connection test requests", () => {
         spec: { type: "stdio", command: "npx", args: ["-y", "fs-mcp"] },
         cwd: repo,
         expandEnv: true,
+        stdioEnv: "inherit",
       },
-      { name: "mcp.test", spec: { type: "http", url: "https://x/mcp" }, expandEnv: true },
+      {
+        name: "mcp.test",
+        spec: { type: "http", url: "https://x/mcp" },
+        expandEnv: true,
+        stdioEnv: "inherit",
+      },
     ]);
   });
 
   it("tests unsaved values as given, expanding variables only for Claude", async () => {
     const spec = { type: "stdio" as const, command: "node", args: ["${HOME}/srv.js"] };
     await service.mcpTest({ provider: "codex", scope: "user", name: "unsaved", spec });
-    expect(sent).toEqual([{ name: "mcp.test", spec, expandEnv: false }]);
+    expect(sent).toEqual([{ name: "mcp.test", spec, expandEnv: false, stdioEnv: "allowlist" }]);
+  });
+
+  it("tests a saved Codex server with its env_vars, which an edit keeps", async () => {
+    mkdirSync(join(home, ".codex"));
+    writeFileSync(
+      join(home, ".codex", "config.toml"),
+      '[mcp_servers.gh]\ncommand = "gh-mcp"\nenv_vars = ["GITHUB_TOKEN", { name = "ORG", source = "local" }]\n',
+    );
+    await service.mcpTest({ provider: "codex", scope: "user", name: "gh" });
+    const spec = {
+      type: "stdio" as const,
+      command: "gh-mcp",
+      extra: { env_vars: ["GITHUB_TOKEN", { name: "ORG", source: "local" }] },
+    };
+    expect(sent).toEqual([{ name: "mcp.test", spec, expandEnv: false, stdioEnv: "allowlist" }]);
+
+    // The edit dialog sends the spec back with its `extra`.
+    service.mcpUpsert({
+      provider: "codex",
+      scope: "user",
+      name: "gh",
+      spec: { ...spec, args: ["-v"] },
+    });
+    const saved = service.mcpList().find((s) => s.provider === "codex" && s.name === "gh");
+    expect(saved?.spec).toEqual({ ...spec, args: ["-v"] });
   });
 
   it("is a 404 for a server that is not saved there", async () => {

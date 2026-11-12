@@ -4,7 +4,12 @@ import { createServer, type IncomingHttpHeaders, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { PassThrough } from "node:stream";
-import { MCP_TEST_MAX_PAGES, McpServerTestResult } from "@codeden/contracts";
+import {
+  MCP_TEST_MAX_PAGES,
+  type McpServerSpec,
+  McpServerTestResult,
+  type McpStdioEnv,
+} from "@codeden/contracts";
 import { Server as LowLevelServer } from "@modelcontextprotocol/sdk/server/index.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
@@ -13,6 +18,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { startRunner } from "../src";
 import { expandEnvVars, MissingEnvError, resolveMcpSpec } from "../src/mcp/resolve-spec";
 import { testMcpServer } from "../src/mcp/server-test";
+import { codexEnvVarNames, stdioServerEnv } from "../src/mcp/stdio-env";
 import type { SpawnServer } from "../src/mcp/stdio-transport";
 import { killTreeAndOrphans } from "../src/process/tree";
 import { removeDir, TestServer, tempDir } from "./helpers";
@@ -446,5 +452,101 @@ describe("stopping a stdio server", () => {
       "kill 10",
       "group 10",
     ]);
+  });
+});
+
+describe("a stdio server's environment", () => {
+  const runner = { PATH: "/bin", HOME: "/home/me", GITHUB_TOKEN: "t1", DATABASE_URL: "db" };
+
+  /** Tests a server that exits at `initialize` unless `GITHUB_TOKEN` is in its environment. */
+  const runNeedsToken = async (spec: Pick<McpServerSpec, "extra">, stdioEnv?: McpStdioEnv) => {
+    let serverEnv: Record<string, string | undefined> = {};
+    const spawn: SpawnServer = (_command, _args, options) => {
+      serverEnv = { ...options?.env };
+      return new FakeServerProcess((message, server) => {
+        if (message.method !== "initialize") return;
+        if (!serverEnv.GITHUB_TOKEN) {
+          server.stderr.write("GITHUB_TOKEN is not set\n");
+          server.exit();
+          return;
+        }
+        server.reply(message.id, {
+          result: {
+            protocolVersion: "2025-06-18",
+            capabilities: {},
+            serverInfo: { name: "needs-token", version: "1" },
+          },
+        });
+      }) as unknown as ChildProcess;
+    };
+    const result = await testMcpServer({
+      spec: { type: "stdio", command: "github-mcp", env: { A: "1" }, ...spec },
+      cwd: tmpdir(),
+      expandEnv: stdioEnv !== "allowlist",
+      ...(stdioEnv ? { stdioEnv } : {}),
+      platform: "linux",
+      clientVersion: "0.0.0-test",
+      env: runner,
+      spawn,
+      stopTree: async () => undefined,
+    });
+    return { result, serverEnv };
+  };
+
+  it("gives a Codex server only the default variables, its env_vars and its env", async () => {
+    // Codex wouldn't start it with the runner's GITHUB_TOKEN, so the test fails too.
+    const missing = await runNeedsToken({}, "allowlist");
+    expect(missing.result).toMatchObject({
+      ok: false,
+      stage: "connect",
+      stderrTail: "GITHUB_TOKEN is not set",
+      note: expect.stringContaining("add its name to the server's env_vars"),
+    });
+    expect(missing.serverEnv).toEqual({ PATH: "/bin", HOME: "/home/me", A: "1" });
+
+    const listed = await runNeedsToken({ extra: { env_vars: ["GITHUB_TOKEN"] } }, "allowlist");
+    expect(listed.result).toMatchObject({ ok: true, server: { name: "needs-token" } });
+    expect(listed.serverEnv).toEqual({
+      PATH: "/bin",
+      HOME: "/home/me",
+      GITHUB_TOKEN: "t1",
+      A: "1",
+    });
+  });
+
+  it("gives a Claude server the runner's whole environment", async () => {
+    const claude = await runNeedsToken({});
+    expect(claude.result).toMatchObject({ ok: true });
+    expect(claude.serverEnv).toEqual({ ...runner, A: "1" });
+  });
+
+  it("follows Codex's rules: Windows names in any case, CA bundles, local env_vars only", () => {
+    expect(
+      codexEnvVarNames({
+        env_vars: ["A", { name: "B", source: "local" }, { name: "C", source: "remote" }, 5],
+      }),
+    ).toEqual(["A", "B"]);
+    expect(
+      stdioServerEnv({
+        policy: "allowlist",
+        base: {
+          Path: "C:\\bin",
+          SystemRoot: "C:\\Windows",
+          Github_Token: "t1",
+          NODE_EXTRA_CA_CERTS: "ca.pem",
+          SSL_CERT_FILE: "",
+          DATABASE_URL: "db",
+        },
+        envVars: ["GITHUB_TOKEN"],
+        // The server's own env wins over a default of any casing.
+        serverEnv: { path: "D:\\bin" },
+        platform: "win32",
+      }),
+    ).toEqual({
+      SYSTEMROOT: "C:\\Windows",
+      GITHUB_TOKEN: "t1",
+      NODE_EXTRA_CA_CERTS: "ca.pem",
+      path: "D:\\bin",
+    });
   });
 });

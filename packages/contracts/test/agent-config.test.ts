@@ -238,6 +238,15 @@ describe("agent configuration contracts", () => {
       timedOut: false,
       stderrTail: "command not found",
     });
+    roundTrip(McpServerTestResult, {
+      ok: false,
+      durationMs: 30,
+      stage: "connect",
+      error: "MCP error -32000: Connection closed",
+      timedOut: false,
+      stderrTail: "GITHUB_TOKEN is not set",
+      note: "Codex starts a stdio server with only a few variables from your environment",
+    });
     const failed = { ok: false, durationMs: 1, stage: "connect", timedOut: true };
     expect(McpServerTestResult.safeParse({ ...failed, error: "x".repeat(2001) }).success).toBe(
       false,

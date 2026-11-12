@@ -118,7 +118,8 @@ export class AgentConfigService {
   /**
    * Connection test in the runner: the request's (unsaved) spec, or the server saved at the
    * target. stdio servers start in the project folder (`local`, `project`) or, for `user`
-   * scope, the runner's home; Claude's `${VAR}` placeholders are expanded there.
+   * scope, the runner's home; Claude's `${VAR}` placeholders are expanded there. A Codex stdio
+   * server gets only the variables Codex would give it.
    */
   async mcpTest(req: McpServerTestRequest): Promise<McpServerTestResult> {
     const source = this.mcpSource(req);
@@ -134,7 +135,13 @@ export class AgentConfigService {
       req.scope !== "user" && req.projectId ? this.project(req.projectId).path : undefined;
     try {
       return await this.deps.runner.request(
-        { name: "mcp.test", spec, expandEnv: req.provider === "claude", ...(cwd ? { cwd } : {}) },
+        {
+          name: "mcp.test",
+          spec,
+          expandEnv: req.provider === "claude",
+          stdioEnv: req.provider === "codex" ? "allowlist" : "inherit",
+          ...(cwd ? { cwd } : {}),
+        },
         MCP_TEST_DEFAULT_TIMEOUT_MS + MCP_TEST_SLACK_MS,
       );
     } catch (error) {

@@ -233,6 +233,12 @@ describe("runner protocol", () => {
         spec: { type: "http", url: "https://example.com/mcp", headers: { A: "b" } },
         expandEnv: false,
       },
+      {
+        name: "mcp.test",
+        spec: { type: "stdio", command: "gh-mcp", extra: { env_vars: ["GITHUB_TOKEN"] } },
+        expandEnv: false,
+        stdioEnv: "allowlist",
+      },
     ];
     for (const command of commands) roundTrip(RunnerCommand, command);
     expect(
@@ -241,6 +247,7 @@ describe("runner protocol", () => {
     ).toBe(false);
     const mcpTest = { name: "mcp.test", spec: { type: "http", url: "http://x" }, expandEnv: true };
     expect(RunnerCommand.safeParse({ ...mcpTest, timeoutMs: 120_001 }).success).toBe(false);
+    expect(RunnerCommand.safeParse({ ...mcpTest, stdioEnv: "none" }).success).toBe(false);
     roundTrip(RunnerCommandResults["mcp.test"], {
       ok: true,
       durationMs: 5,

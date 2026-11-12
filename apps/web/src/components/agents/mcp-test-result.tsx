@@ -150,6 +150,7 @@ export function McpTestResultView({
             {r.stderrTail}
           </pre>
         )}
+        {r.note && <p className="text-2xs text-muted-foreground">{r.note}</p>}
       </>
     );
   }

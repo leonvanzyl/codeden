@@ -121,6 +121,7 @@ function mockAgentConfig(world: MockWorld): AgentConfigApi {
       // A command or URL containing "fail" shows the failed result.
       const target = spec?.type === "stdio" ? spec.command : (spec?.url ?? "");
       if (!spec || target.includes("fail")) {
+        const codexStdio = req.provider === "codex" && spec?.type === "stdio";
         return delay(
           {
             ok: false as const,
@@ -128,7 +129,18 @@ function mockAgentConfig(world: MockWorld): AgentConfigApi {
             stage: "connect" as const,
             error: "MCP error -32000: Connection closed. The server stopped before it answered",
             timedOut: false,
-            stderrTail: "npm error 404 Not Found - GET https://registry.npmjs.org/@acme%2fmcp",
+            stderrTail: codexStdio
+              ? "Error: GITHUB_TOKEN is not set"
+              : "npm error 404 Not Found - GET https://registry.npmjs.org/@acme%2fmcp",
+            ...(codexStdio
+              ? {
+                  note:
+                    "Codex starts a stdio server with only a few variables from your environment " +
+                    "(PATH, HOME or USERPROFILE, the temp folder and the like), the names listed " +
+                    "in its env_vars and its env table. If the server needs another variable, " +
+                    "such as a token, add its name to the server's env_vars in ~/.codex/config.toml.",
+                }
+              : {}),
           },
           900,
         );
