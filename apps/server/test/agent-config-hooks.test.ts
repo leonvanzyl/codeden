@@ -15,7 +15,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { HookShelf } from "../src/services/agent-config/hook-shelf";
 import { AgentConfigHooks } from "../src/services/agent-config/hooks-service";
 import { setTopLevelMember } from "../src/services/agent-config/json-edit";
-import { ServiceError } from "../src/services/errors";
+import { notFound, ServiceError } from "../src/services/errors";
 
 function put(path: string, content: string): void {
   mkdirSync(dirname(path), { recursive: true });
@@ -89,7 +89,11 @@ describe("hooks in Claude Code settings files", () => {
     mkdirSync(repo, { recursive: true });
     svc = new AgentConfigHooks({
       home,
-      project: (id) => ({ id, path: repo }),
+      // Like the real project service: only known projects resolve.
+      project: (id) => {
+        if (id !== "p1") throw notFound(`No project ${id}`, "project_not_found");
+        return { id, path: repo };
+      },
       backup: (file) => {
         mkdirSync(backups, { recursive: true });
         const copy = join(backups, `${Date.now()}-${basename(file)}`);
@@ -442,6 +446,60 @@ describe("hooks in Claude Code settings files", () => {
     };
     expect(errorCode(() => apply(add))).toBe("403 path_outside_root");
     expect(readFileSync(outsideFile, "utf8")).toBe("{}\n");
+  });
+
+  it("checks the list's project before changing the settings file, the shelf or backups", () => {
+    const guard = { type: "command", command: "guard.sh" };
+    const original = `${JSON.stringify({ hooks: { Stop: [{ hooks: [guard] }] } }, null, 2)}\n`;
+    put(userFile(), original);
+    const target = {
+      provider: "claude",
+      scope: "user",
+      event: "Stop",
+      groupIndex: 0,
+      handlerIndex: 0,
+      expected: guard,
+    };
+    // Put one hook on the shelf so shelf-only removals have something to lose.
+    apply({ action: "disable", target });
+    const shelfId = svc.list().hooks[0]?.shelfId as string;
+    const shelfFile = join(dir, "data", "disabled-hooks.json");
+    const shelfBefore = readFileSync(shelfFile, "utf8");
+    put(userFile(), original);
+    rmSync(backups, { recursive: true, force: true });
+
+    const missing = { listProjectId: "missing-project" };
+    const add = {
+      action: "add",
+      provider: "claude",
+      scope: "user",
+      event: "Stop",
+      handler: { type: "command", command: "echo example" },
+      ...missing,
+    };
+    const requests = [
+      add,
+      { action: "update", target, event: "Stop", handler: guard, ...missing },
+      { action: "remove", target, ...missing },
+      { action: "disable", target, ...missing },
+      { action: "enable", target: { shelfId }, ...missing },
+      { action: "remove", target: { shelfId }, ...missing },
+    ];
+    for (const req of requests) {
+      expect(
+        errorCode(() => svc.diff(HookChange.parse(req))),
+        req.action,
+      ).toBe("404 project_not_found");
+      expect(
+        errorCode(() => apply(req)),
+        req.action,
+      ).toBe("404 project_not_found");
+    }
+    // Retrying the rejected add doesn't stack handlers either.
+    expect(errorCode(() => apply(add))).toBe("404 project_not_found");
+    expect(readFileSync(userFile(), "utf8")).toBe(original);
+    expect(readFileSync(shelfFile, "utf8")).toBe(shelfBefore);
+    expect(existsSync(backups)).toBe(false);
   });
 
   it("refuses unparsable files, missing projects and providers without hooks", () => {

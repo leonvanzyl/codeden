@@ -369,6 +369,14 @@ describe("agent configuration API", () => {
     expect(bad.status).toBe(400);
     const digits = await h.api("POST", "/agent-config/hooks", { ...add, event: "Stop2" });
     expect(digits.status).toBe(400);
+    // An unknown list project is refused before anything is written.
+    const before = readFileSync(settings, "utf8");
+    const unknown = await h.api("POST", "/agent-config/hooks", {
+      ...add,
+      listProjectId: "missing-project",
+    });
+    expect(unknown.status).toBe(404);
+    expect(readFileSync(settings, "utf8")).toBe(before);
   });
 
   it("reports what a session loads, including CodeDen's MCP server", async () => {

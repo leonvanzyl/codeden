@@ -90,7 +90,10 @@ export class AgentConfigHooks {
     return unifiedDiff(plan.file.file, existed, before, after);
   }
 
-  /** Apply a change; the response carries the list for `req.listProjectId` afterwards. */
+  /**
+   * Apply a change; the response carries the list for `req.listProjectId` afterwards. `plan`
+   * has already resolved that project, so listing can't fail after the write for that reason.
+   */
   apply(req: HookChangeRequest): HookWriteResponse {
     const written = this.write(req);
     return { ...written, hooks: this.list(req.listProjectId) };
@@ -122,7 +125,13 @@ export class AgentConfigHooks {
     return { file, backupPath };
   }
 
+  /**
+   * What a change will do, with every input checked first: the project of the list to return
+   * (`listProjectId`, 404 if unknown) is resolved here, before anything is read or written, so a
+   * request that fails never changes a settings file, the shelf or the backups.
+   */
   private plan(req: HookChangeRequest): Plan {
+    if (req.listProjectId) this.deps.project(req.listProjectId);
     const shelf = this.deps.shelf;
     switch (req.action) {
       case "add": {
