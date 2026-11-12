@@ -1,9 +1,12 @@
 import { randomUUID } from "node:crypto";
-import type { FactoryItem, Session } from "@codeden/contracts";
+import type { FactoryItem, Session, UserInput } from "@codeden/contracts";
 import { afterEach, describe, expect, it } from "vitest";
+import { RunnerCommandError } from "../src/runner/client";
 import { BUILDER_RESUME } from "../src/services/factory/prompts";
 import { FACTORY_STARTER } from "../src/services/factory/sessions";
 import { BUILDER_FAILED_REASON } from "../src/services/factory/turn-race";
+import { Outbox } from "../src/services/sessions/outbox";
+import { SessionService, type SessionServiceDeps } from "../src/services/sessions/session-service";
 import { sampleSession } from "./helpers";
 import { createFactoryEnv, type FactoryEnv } from "./support/factory-env";
 
@@ -84,14 +87,19 @@ async function building(n = 91): Promise<{ id: string; builderId: string }> {
 }
 
 /**
- * An item the factory failed before the fix: its builder lost a message race, the item failed
- * and the builder was archived.
+ * An item the factory failed before the fix: its builder lost a message race and the item
+ * failed. Its builder was then archived (`stopped`), or is still `failed`.
  */
-async function failedBeforeTheFix(n: number): Promise<{ id: string; builderId: string }> {
+async function failedBeforeTheFix(
+  n: number,
+  builder: "stopped" | "failed" = "stopped",
+): Promise<{ id: string; builderId: string }> {
   const at = new Date().toISOString();
   const builderId = factorySession("failed");
   env.inbox.raiseRunFailed(env.repo.get(builderId), `send-${n}`, RACE);
-  env.repo.update(builderId, (s) => ({ ...s, status: "stopped", archivedAt: at }));
+  if (builder === "stopped") {
+    env.repo.update(builderId, (s) => ({ ...s, status: "stopped", archivedAt: at }));
+  }
   const created = env.factory.data.createItem({
     ...feature(n),
     stage: "failed",
@@ -106,6 +114,66 @@ async function failedBeforeTheFix(n: number): Promise<{ id: string; builderId: s
   // Distinct creation times keep the oldest-first order deterministic.
   await new Promise((resolve) => setTimeout(resolve, 5));
   return { id: created.id, builderId };
+}
+
+const activeAgents = async () => (await env.factory.status(env.project.id)).activeSessions;
+
+/**
+ * The real session service (its queue, delivery and errors) behind the factory, over a runner
+ * that can be away. A session the runner hosts takes a message as a turn; one it doesn't (an
+ * archived builder) is opened again through the launcher, as `session.start` does.
+ */
+function realDelivery() {
+  const runner = {
+    up: false,
+    hosted: new Set<string>(),
+    /** Sessions whose turn the runner started, in order. */
+    turns: [] as string[],
+    /** An error code the runner answers every send with (a session it can't start). */
+    refuse: null as string | null,
+  };
+  const away = () => new RunnerCommandError("runner_unavailable", "Runner is not connected");
+  const port = {
+    isConnected: () => runner.up,
+    providers: () => [],
+    request: async (command: { name: string; sessionId?: string }) => {
+      if (!runner.up) throw away();
+      if (command.name !== "session.send") return {};
+      if (runner.refuse) throw new RunnerCommandError(runner.refuse, "The provider refused");
+      const id = command.sessionId as string;
+      if (!runner.hosted.has(id)) throw new RunnerCommandError("unknown_session", "Not hosted");
+      runner.turns.push(id);
+      return {};
+    },
+  };
+  const launcher = {
+    resume: async (session: Session) => {
+      if (!runner.up) throw away();
+      runner.hosted.add(session.id);
+      runner.turns.push(session.id);
+    },
+    fail: () => {},
+  };
+  const outbox = new Outbox(env.db.db, env.store);
+  const service = new SessionService({
+    repo: env.repo,
+    runner: port,
+    outbox,
+    launcher,
+    artifacts: {
+      externalizeAttachments: (i: UserInput) => i,
+      resolveAttachments: (i: UserInput) => i,
+    },
+  } as unknown as SessionServiceDeps);
+  env.sessions.send = service.send.bind(service);
+  /** The runner is back: what `SessionRecovery` then does is deliver every waiting queue. */
+  const reconnect = async () => {
+    runner.up = true;
+    service.releaseOutboxes();
+    for (const id of service.sessionsWithQueuedMessages()) await service.flushOutbox(id);
+  };
+  const queued = (...ids: string[]) => ids.reduce((n, id) => n + outbox.count(id), 0);
+  return { runner, reconnect, queued };
 }
 
 describe("factory builders hit by 'turn already running' (#96)", () => {
@@ -203,5 +271,94 @@ describe("factory builders hit by 'turn already running' (#96)", () => {
     await tick();
     expect(resumes()).toEqual([{ sessionId: builderId, text: BUILDER_RESUME }]);
     expect(item(id).stage).toBe("building");
+  });
+});
+
+describe("telling a builder to carry on, through the real session service (#96)", () => {
+  it("recovers only once the turn starts: nothing queued while the runner is away, and the limit holds after", async () => {
+    factory(1);
+    const { runner, reconnect, queued } = realDelivery();
+    const a = await failedBeforeTheFix(91, "failed");
+    const b = await failedBeforeTheFix(89, "stopped");
+    runner.hosted.add(a.builderId);
+
+    // The runner is away: no turn starts and none waits in a queue to start later. Both
+    // items stay failed and recoverable; the builders are as they were.
+    await tick();
+    expect(runner.turns).toEqual([]);
+    expect(queued(a.builderId, b.builderId)).toBe(0);
+    expect(item(a.id)).toMatchObject({
+      stage: "failed",
+      reason: BUILDER_FAILED_REASON,
+      note: expect.stringMatching(/again next tick/),
+    });
+    expect(item(b.id).stage).toBe("failed");
+    expect(env.repo.get(a.builderId).status).toBe("failed");
+    expect(env.repo.get(b.builderId)).toMatchObject({ status: "stopped" });
+    expect(await activeAgents()).toBe(0);
+
+    // The runner is back: there is nothing queued for it to start past the limit.
+    await reconnect();
+    expect(runner.turns).toEqual([]);
+
+    // The next tick admits the oldest; the other waits for an agent.
+    await tick();
+    expect(runner.turns).toEqual([a.builderId]);
+    expect(item(a.id).stage).toBe("building");
+    expect(item(b.id)).toMatchObject({ stage: "failed", note: expect.stringMatching(/free/) });
+    expect(await activeAgents()).toBe(1);
+    await tick();
+    expect(runner.turns).toEqual([a.builderId]);
+
+    // A second agent: the archived builder is opened again and carries on.
+    env.updateProject({
+      factoryLimits: { ...env.project.factoryLimits, maxConcurrentSessions: 2 },
+    });
+    await tick();
+    expect(runner.turns).toEqual([a.builderId, b.builderId]);
+    expect(item(b.id).stage).toBe("building");
+    expect(env.repo.get(b.builderId)).toMatchObject({ status: "running", archivedAt: null });
+    expect(await activeAgents()).toBe(2);
+    expect(queued(a.builderId, b.builderId)).toBe(0);
+  });
+
+  it("tells a live builder again on a later tick when the runner was away", async () => {
+    factory(1);
+    const { id, builderId } = await building();
+    const { runner, reconnect, queued } = realDelivery();
+    runner.hosted.add(builderId);
+    await raceFails(builderId);
+
+    await tick();
+    expect(runner.turns).toEqual([]);
+    expect(queued(builderId)).toBe(0);
+    expect(item(id)).toMatchObject({ stage: "building", note: expect.stringMatching(/again/) });
+    expect(env.repo.get(builderId).status).toBe("failed");
+
+    await reconnect();
+    await tick();
+    expect(runner.turns).toEqual([builderId]);
+    expect(env.repo.get(builderId).status).toBe("running");
+    await tick();
+    expect(runner.turns).toEqual([builderId]);
+  });
+
+  it("fails the item once when its builder can't be started at all", async () => {
+    factory(1);
+    const { id, builderId } = await building();
+    const { runner } = realDelivery();
+    runner.up = true;
+    runner.hosted.add(builderId);
+    runner.refuse = "provider_error";
+    await raceFails(builderId);
+
+    await tick();
+    expect(item(id)).toMatchObject({ stage: "failed", reason: BUILDER_FAILED_REASON });
+    // Recovery doesn't try it again: it was told once, and that failed.
+    runner.refuse = null;
+    await tick();
+    await tick();
+    expect(item(id).stage).toBe("failed");
+    expect(runner.turns).toEqual([]);
   });
 });

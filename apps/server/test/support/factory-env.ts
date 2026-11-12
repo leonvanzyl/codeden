@@ -45,6 +45,11 @@ export interface FactoryEnv {
   starts: StartSessionRequest[];
   /** Messages sent to sessions. */
   messages: Array<{ sessionId: string; text: string }>;
+  /**
+   * The scripted session service the factory uses: every message is sent at once and marks the
+   * session running. A test can replace a method (e.g. `send` with a real `SessionService`'s).
+   */
+  sessions: SessionService;
   stopped: string[];
   /** Sessions the factory archived (through `archiveSession`), in order. */
   archived: string[];
@@ -193,6 +198,7 @@ export function createFactoryEnv(
       return repo.update(sessionId, (s) => ({ ...s, status: "stopped" }));
     },
   } as unknown as SessionService;
+  env.sessions = sessions;
   const runner = {
     providers: () => env.providers.map((id) => ({ id }) as ProviderInfo),
   } as unknown as RunnerPort;

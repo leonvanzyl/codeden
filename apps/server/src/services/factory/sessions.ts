@@ -183,6 +183,21 @@ export class FactorySessions {
     await this.deps.sessions.send(sessionId, { input: brief(text), whenBusy: "queue" }, "factory");
   }
 
+  /**
+   * Start a turn with this message now, or not at all: it is never queued, so a turn the
+   * factory admitted under its agent limit can't start later, past that limit. Throws when a
+   * turn is running or the runner can't take it (away, timed out). For a session that is not
+   * busy (the queue is only used for one that hasn't started yet).
+   */
+  async startTurn(sessionId: string, text: string): Promise<void> {
+    const res = await this.deps.sessions.send(
+      sessionId,
+      { input: brief(text), whenBusy: "reject" },
+      "factory",
+    );
+    if (res.status !== "sent") throw new Error(`The message was ${res.status}, not sent`);
+  }
+
   /** Stop every live factory session of a project (kill switch). Returns the stopped ids. */
   async stopAll(projectId: string): Promise<string[]> {
     const stopped: string[] = [];
