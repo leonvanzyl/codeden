@@ -9,10 +9,11 @@ import { isSecretPath } from "./paths";
 /**
  * The argument as a path, or undefined when it can't be one: inline code, multi-line text
  * or anything with shell or code punctuation (`selected={row.key`) is not a file name. A
- * variable in braces (`${HOME}/.env`) is a path.
+ * variable in braces (`${HOME}/.env`) is a path, and so is an option's value: `--file=x`, or
+ * PowerShell's colon-bound `-Path:x` and `-LiteralPath:x`.
  */
 function asPath(arg: string): string | undefined {
-  const value = arg.replace(/^-+[a-z-]*=/i, "");
+  const value = arg.replace(/^-+[a-z-]*=/i, "").replace(/^-[a-z][a-z-]*:(?=.)/i, "");
   if (!value || /[\n\r{}()<>|;=`]/.test(value.replace(/\$\{\w+\}/g, ""))) return undefined;
   return value;
 }
@@ -118,7 +119,7 @@ function searchPatterns(bin: string, args: string[]): Set<string> {
       const value = args[i + 1];
       if (value !== undefined) patterns.add(value);
       i += 1;
-    } else if (a.startsWith("--regexp=") || /^\/c:/i.test(a)) {
+    } else if (a.startsWith("--regexp=") || /^-pattern:/i.test(a) || /^\/c:/i.test(a)) {
       explicit = true;
       patterns.add(a);
     } else if (a === "-f" || a.startsWith("--file") || /^\/g:/i.test(a)) explicit = true;
@@ -170,7 +171,7 @@ const MAX_ALTERNATIVES = 64;
  * The words a shell's brace expansion makes of `word` (`~/.ssh/{id_rsa,x}` -> `~/.ssh/id_rsa`,
  * `~/.ssh/x`), capped; just `word` when it has no `{a,b}` group.
  */
-function braceAlternatives(word: string): string[] {
+export function braceAlternatives(word: string): string[] {
   const group = /\{([^{}]*,[^{}]*)\}/.exec(word);
   if (!group?.[1]) return [word];
   const before = word.slice(0, group.index);

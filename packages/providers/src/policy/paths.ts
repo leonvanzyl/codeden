@@ -218,9 +218,6 @@ const SECRET_BASENAMES = new Set([
   "secrets.yaml",
   "secrets.yml",
   "service-account.json",
-  // CodeDen's own, wherever a copy of one lands (its home is guarded by `./codeden-home`).
-  "install-token",
-  "remote-access.json",
 ]);
 const SAFE_ENV_SUFFIXES = [".example", ".sample", ".template", ".dist", ".defaults"];
 const SECRET_EXTENSIONS = [".pem", ".key", ".p12", ".pfx", ".keystore", ".jks"];

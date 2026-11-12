@@ -394,7 +394,9 @@ export class ClaudeSession implements ProviderSession {
     response: RuntimeResponse,
   ): PermissionResult {
     if (response.kind === "approval" && response.decision !== "deny") {
-      if (response.decision === "allow_session") this.policy.allowForSession(toolName, input);
+      if (response.decision === "allow_session") {
+        this.policy.allowForSession(toolName, input, this.shell.dir);
+      }
       return { behavior: "allow", updatedInput: input };
     }
     if (response.kind === "approval") {

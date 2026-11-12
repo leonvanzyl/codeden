@@ -1,4 +1,5 @@
 import type { AutonomyLevel } from "@codeden/contracts";
+import { mostSevere } from "../policy/assessment";
 import {
   classifyCommand,
   classifyRead,
@@ -29,17 +30,13 @@ export function levelAllows(autonomy: AutonomyLevel, risk: RiskAssessment): bool
   return false;
 }
 
-/** The first risky assessment of `items`, or safe. */
-function first(items: RiskAssessment[]): RiskAssessment {
-  return items.find((r) => r.risky) ?? { risky: false };
-}
-
 /**
  * Risk of a command Codex asks to run: the command line as sent and each parsed action, so a
- * redirect or path the parsed form drops still counts.
+ * redirect or path the parsed form drops still counts. Here and below, CodeDen's own
+ * credentials win over an earlier ordinary risk (`mostSevere`).
  */
 export function commandRisk(texts: string[], ctx: RiskContext): RiskAssessment {
-  return first(texts.filter(Boolean).map((text) => classifyCommand(text, ctx)));
+  return mostSevere(texts.filter(Boolean).map((text) => classifyCommand(text, ctx)));
 }
 
 /**
@@ -55,7 +52,7 @@ export function patchRisk(
   if (targets.length === 0) {
     return { risky: true, action: "outside_worktree", reason: "Changes files Codex did not name" };
   }
-  return first(targets.map((target) => classifyWrite(target, ctx)));
+  return mostSevere(targets.map((target) => classifyWrite(target, ctx)));
 }
 
 /**
@@ -85,5 +82,5 @@ export function permissionsRisk(
         : { risky: false as const };
     }),
   ];
-  return first(checks);
+  return mostSevere(checks);
 }

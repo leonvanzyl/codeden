@@ -26,3 +26,11 @@ export const risky = (action: ApprovalAction, reason: string): RiskAssessment =>
 /** True for a verdict on CodeDen's own credential files. */
 export const touchesCodeden = (risk: RiskAssessment): boolean =>
   risk.risky && risk.codeden === true;
+
+/**
+ * The verdict for several checks of one action: CodeDen's own credentials first (a level may
+ * allow an ordinary risk that comes before them), then the first risky one, else safe.
+ */
+export function mostSevere(risks: readonly RiskAssessment[]): RiskAssessment {
+  return risks.find(touchesCodeden) ?? risks.find((r) => r.risky) ?? SAFE;
+}

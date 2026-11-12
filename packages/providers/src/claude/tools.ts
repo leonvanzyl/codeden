@@ -1,7 +1,9 @@
 import type { ApprovalAction, FileChange, ItemStatus, ToolCallItem } from "@codeden/contracts";
+import { mostSevere, SAFE } from "../policy/assessment";
 import {
   classifyCommand,
   classifyFetch,
+  classifyGlob,
   classifyRead,
   classifyWrite,
   type RiskAssessment,
@@ -226,13 +228,17 @@ export function assessClaudeTool(name: string, input: Input, ctx: RiskContext): 
   }
   if (EDIT_TOOLS.has(name)) return classifyWrite(editPath(input), ctx);
   if (name === "Read") return classifyRead(str(input, "file_path") ?? "", ctx);
-  // Grep reads the files under `path`; its `pattern` and `glob` are not files. Glob only lists
-  // names, so it never reads a secret.
+  // Grep reads the files under `path` (those its `glob` filter matches, at any depth); its
+  // `pattern` is not a file. Glob only lists names, so only CodeDen's own credential files ask.
   if (name === "Grep") {
     const target = str(input, "path");
-    return target ? classifyRead(target, ctx) : { risky: false };
+    const filter = str(input, "glob");
+    return mostSevere([
+      target ? classifyRead(target, ctx) : SAFE,
+      filter ? classifyGlob(filter.includes("/") ? filter : `**/${filter}`, target, ctx) : SAFE,
+    ]);
   }
-  if (name === "Glob") return { risky: false };
+  if (name === "Glob") return classifyGlob(str(input, "pattern") ?? "", str(input, "path"), ctx);
   if (name === "WebFetch") return classifyFetch(str(input, "url") ?? "", ctx);
   return { risky: false };
 }

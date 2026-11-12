@@ -284,6 +284,15 @@ describe("classifyCommand", () => {
     expect(action("Set-Content -Value hi -Path C:\\Users\\me\\x.txt", win)).toBe(
       "outside_worktree",
     );
+    // PowerShell parameters bound with a colon.
+    expect(action("Copy-Item a.txt -Destination:C:\\Users\\me\\x.txt", win)).toBe(
+      "outside_worktree",
+    );
+    expect(action("Set-Content -Value hi -Path:C:\\Users\\me\\x.txt", win)).toBe(
+      "outside_worktree",
+    );
+    expect(action("Set-Content -Path:src\\x.txt -Value hi", win)).toBeNull();
+    expect(action("Get-Content -LiteralPath:.env", win)).toBe("secrets");
   });
 
   it("finds commands inside substitutions, subshells and inline shell scripts", () => {

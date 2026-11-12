@@ -45,6 +45,8 @@ export function permissionModeFor(autonomy: AutonomyLevel, planMode: boolean): P
  */
 export class ClaudePolicy {
   private readonly sessionAllow = new Set<string>();
+  /** `allow_session` decisions on calls that touched CodeDen's own credentials (`credentialKey`). */
+  private readonly credentialAllow = new Set<string>();
   /** Plan mode: edits outside Claude's notes and writing commands are refused. */
   private planning = false;
 
@@ -143,11 +145,13 @@ export class ClaudePolicy {
       return { ask: true, action: "plan", reason: "The agent finished planning" };
     }
     const risk = this.assess(toolName, input, dir);
-    // Approving a tool for the session (`Read`) never covers CodeDen's own credentials; an
-    // approved command or edit matches exactly, so it may.
-    const exact = COMMAND_TOOLS.has(toolName) || EDIT_TOOLS.has(toolName);
-    const remembered = this.sessionAllow.has(this.key(toolName, input));
-    if (remembered && (exact || !touchesCodeden(risk))) return { ask: false };
+    // CodeDen's own credentials are covered only by an approval given for them, in the same
+    // directory: approving `cat runner/runner.json` in the worktree, or the whole Read tool,
+    // doesn't approve reading the runner's token after a `cd` into CodeDen's home.
+    const remembered = touchesCodeden(risk)
+      ? this.credentialAllow.has(this.credentialKey(toolName, input, dir))
+      : this.sessionAllow.has(this.key(toolName, input));
+    if (remembered) return { ask: false };
     if (this.autonomy === "supervised") {
       if (risk.risky) return { ask: true, action: risk.action, reason: risk.reason };
       if (COMMAND_TOOLS.has(toolName) || EDIT_TOOLS.has(toolName)) {
@@ -185,9 +189,20 @@ export class ClaudePolicy {
     };
   }
 
-  /** Remember an `allow_session` decision. Commands and edits match exactly; others by name. */
-  allowForSession(toolName: string, input: Record<string, unknown>): void {
+  /**
+   * Remember an `allow_session` decision. Commands and edits match exactly; others by name. A
+   * call that touches CodeDen's own credentials is remembered only as itself, in `dir`.
+   */
+  allowForSession(toolName: string, input: Record<string, unknown>, dir?: string): void {
     this.sessionAllow.add(this.key(toolName, input));
+    if (touchesCodeden(this.assess(toolName, input, dir))) {
+      this.credentialAllow.add(this.credentialKey(toolName, input, dir));
+    }
+  }
+
+  /** The exact call, in the directory its relative paths resolve from. */
+  private credentialKey(toolName: string, input: Record<string, unknown>, dir?: string): string {
+    return `${toolName}\n${dir ?? this.ctx.cwd}\n${JSON.stringify(input)}`;
   }
 
   private key(toolName: string, input: Record<string, unknown>): string {

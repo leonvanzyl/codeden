@@ -2,7 +2,7 @@ import type { AutonomyLevel } from "@codeden/contracts";
 import { describe, expect, it } from "vitest";
 import { ClaudePolicy } from "../src/claude/permissions";
 import { assessClaudeTool } from "../src/claude/tools";
-import { commandRisk, levelAllows, patchRisk } from "../src/codex/policy";
+import { commandRisk, levelAllows, patchRisk, permissionsRisk } from "../src/codex/policy";
 import { OpenCodePolicy, type PermissionCall } from "../src/opencode/policy";
 import { classifyCommand, classifyRead, classifyWrite, type RiskContext } from "../src/policy/risk";
 
@@ -67,10 +67,43 @@ describe("CodeDen's own credential files: the classifier", () => {
     expect(
       assessClaudeTool("Grep", { pattern: ".", path: "/home/me/.codeden/runner" }, posix),
     ).toMatchObject({ codeden: true });
-    // Listing names reads nothing.
-    expect(assessClaudeTool("Glob", { pattern: "*", path: "/home/me/.codeden" }, posix)).toEqual({
+    // A Grep filtered to the files' names, from a folder above the home, reads them too.
+    expect(
+      assessClaudeTool("Grep", { pattern: ".", path: "/home/me", glob: "install-token" }, posix),
+    ).toMatchObject({ codeden: true });
+    expect(assessClaudeTool("Grep", { pattern: "x", glob: "*.json" }, posix)).toEqual({
       risky: false,
     });
+  });
+
+  it("a Claude Glob that reaches them asks; ordinary globbing doesn't", () => {
+    for (const input of [
+      { path: "/home/me/.codeden", pattern: "install-token" },
+      { pattern: "/home/me/.codeden/install-token" },
+      { path: "/home/me/.codeden", pattern: "*" },
+      { path: "~/.codeden", pattern: "runner/*.json" },
+      { path: "/home/me", pattern: "**/remote-access.json" },
+      { pattern: "../../../{install-token,x}" },
+    ]) {
+      expect(assessClaudeTool("Glob", input, posix), JSON.stringify(input)).toMatchObject({
+        risky: true,
+        codeden: true,
+      });
+    }
+    expect(
+      assessClaudeTool("Glob", { path: "C:\\Users\\me\\.codeden", pattern: "*-token" }, win),
+    ).toMatchObject({ codeden: true });
+    for (const input of [
+      { pattern: "**/*.ts" },
+      { pattern: "**/*" },
+      { pattern: "src/**/runner.json" },
+      { path: "/home/me/.codeden/wt/repo/abc123", pattern: "**/install-token" },
+      { path: "/home/me/.codeden", pattern: "logs/*.log" },
+    ]) {
+      expect(assessClaudeTool("Glob", input, posix), JSON.stringify(input)).toEqual({
+        risky: false,
+      });
+    }
   });
 
   it("classifyRead and classifyWrite flag them (Codex and OpenCode paths)", () => {
@@ -126,6 +159,12 @@ describe("CodeDen's own credential files: the classifier", () => {
       "type %CODEDEN_HOME%\\install-token",
       "Get-Content C:\\Users\\me\\.codeden\\*",
       "Select-String -Pattern token -Path $env:CODEDEN_HOME\\install-token",
+      // Colon-bound parameters.
+      "Get-Content -LiteralPath:$env:CODEDEN_HOME\\runner\\runner.json",
+      "Get-Content -Path:C:\\Users\\me\\.codeden\\install-token",
+      "Select-String -Pattern . -Path:$env:CODEDEN_HOME\\runner\\runner.json",
+      "Select-String -Pattern:x $env:CODEDEN_HOME\\install-token",
+      "Set-Location -Path:$env:CODEDEN_HOME; Get-Content install-token",
     ]) {
       expect(guarded(cmd, win), cmd).toBe(true);
     }
@@ -139,13 +178,39 @@ describe("CodeDen's own credential files: the classifier", () => {
     ]) {
       expect(guarded(cmd, posix), cmd).toBe(true);
     }
-    expect(guarded("Set-Content $env:CODEDEN_HOME\\install-token x", win)).toBe(true);
+    for (const cmd of [
+      "Set-Content $env:CODEDEN_HOME\\install-token x",
+      "Set-Content -Path:$env:CODEDEN_HOME\\install-token -Value x",
+      "Out-File -FilePath:$env:CODEDEN_HOME\\runner\\runner.json",
+      "Copy-Item evil.json -Destination:$env:CODEDEN_HOME\\remote-access.json",
+    ]) {
+      expect(guarded(cmd, win), cmd).toBe(true);
+    }
+  });
+
+  it("an earlier ordinary risk can't hide them, nested or inline", () => {
+    for (const cmd of [
+      "cat .env; cat ~/.codeden/install-token",
+      "cat .env; echo x > ~/.codeden/install-token",
+      "git push --force && cat $CODEDEN_HOME/runner/runner.json",
+      "sudo cat ~/.codeden/install-token",
+      "npm i -g x; bash -c 'cat ~/.codeden/install-token'",
+      "echo $(cat .env) $(cat ~/.codeden/install-token)",
+      "printenv; cp ~/.codeden/remote-access.json /tmp/x",
+    ]) {
+      expect(guarded(cmd, posix), cmd).toBe(true);
+    }
+    expect(
+      guarded("Get-Content .env; Get-Content -LiteralPath:$env:CODEDEN_HOME\\install-token", win),
+    ).toBe(true);
   });
 
   it("leaves same-named files elsewhere, the rest of the home and other commands alone", () => {
     for (const cmd of [
-      // A project's own runner.json, in the worktree.
+      // A project's own files with the same names, in the worktree.
       "cat runner/runner.json",
+      "cat install-token",
+      "cat remote-access.json",
       "cat /home/me/.codeden/wt/repo/abc123/runner/runner.json",
       "pnpm test",
       "ls ~/.codeden",
@@ -158,25 +223,38 @@ describe("CodeDen's own credential files: the classifier", () => {
       "echo ~/.codeden/install-token",
       "git log --oneline",
     ]) {
-      expect(guarded(cmd, posix), cmd).toBe(false);
+      expect(action(cmd, posix), cmd).toBeNull();
     }
-    expect(
-      assessClaudeTool(
-        "Read",
-        { file_path: "/home/me/.codeden/wt/repo/abc123/runner/runner.json" },
-        posix,
-      ),
-    ).toEqual({ risky: false });
-    // Without the session's home the rule is off; copies named like the token are still secrets.
+    for (const file of ["install-token", "remote-access.json", "runner/runner.json"]) {
+      expect(classifyRead(file, posix), file).toEqual({ risky: false });
+      expect(classifyWrite(file, posix), file).toEqual({ risky: false });
+      expect(assessClaudeTool("Read", { file_path: file }, posix), file).toEqual({ risky: false });
+      expect(
+        assessClaudeTool("Read", { file_path: `/home/me/.codeden/wt/repo/abc123/${file}` }, posix),
+        file,
+      ).toEqual({ risky: false });
+    }
+    expect(action("Get-Content install-token", win)).toBeNull();
+    // Without the session's home the rule is off.
     const { codedenHome: _, ...noHome } = posix;
     expect(classifyRead("/home/me/.codeden/runner/runner.json", noHome)).toEqual({ risky: false });
-    expect(classifyRead("/tmp/copy/install-token", noHome)).toMatchObject({ action: "secrets" });
   });
 });
 
 describe("CodeDen's own credential files: every level", () => {
   const read = { file_path: "/home/me/.codeden/install-token" };
   const cat = { command: "cat $CODEDEN_HOME/runner/runner.json" };
+  /** An ordinary risk first, which Full allows, then CodeDen's credentials. */
+  const masked = [
+    "cat .env; cat ~/.codeden/install-token",
+    "cat .env; echo x > ~/.codeden/install-token",
+    "git push --force; cat $CODEDEN_HOME/runner/runner.json",
+  ];
+  const colonBound = [
+    "Get-Content -LiteralPath:$env:CODEDEN_HOME\\runner\\runner.json",
+    "Select-String -Pattern . -Path:$env:CODEDEN_HOME\\runner\\runner.json",
+    "Set-Content -Path:$env:CODEDEN_HOME\\install-token -Value x",
+  ];
 
   it("Claude asks under Supervised, Auto and Full", () => {
     for (const level of ["supervised", "auto", "full"] as const) {
@@ -188,9 +266,28 @@ describe("CodeDen's own credential files: every level", () => {
         p.gate("Write", { file_path: "/home/me/.codeden/install-token" }),
         level,
       ).toMatchObject({ ask: true });
+      expect(
+        p.gate("Glob", { path: "/home/me/.codeden", pattern: "install-token" }),
+        level,
+      ).toMatchObject({ ask: true });
+      for (const command of masked) {
+        expect(p.gate("Bash", { command }), `${level}: ${command}`).toMatchObject({
+          ask: true,
+          action: "secrets",
+          reason: expect.stringMatching(/CodeDen's own credentials/),
+        });
+      }
+      const pwsh = new ClaudePolicy(level, win);
+      for (const command of colonBound) {
+        expect(pwsh.gate("PowerShell", { command }), `${level}: ${command}`).toMatchObject({
+          ask: true,
+          action: "secrets",
+        });
+      }
     }
     // Under Full an ordinary secrets read still runs.
     expect(new ClaudePolicy("full", posix).gate("Read", { file_path: ".env" }).ask).toBe(false);
+    expect(new ClaudePolicy("full", posix).gate("Bash", { command: "cat .env" }).ask).toBe(false);
   });
 
   it("Claude refuses them at Read-only and for the orchestrator and PMs", () => {
@@ -198,29 +295,54 @@ describe("CodeDen's own credential files: every level", () => {
       expect(p.denial("Read", read)).toMatch(/credential files are off limits/);
       expect(p.denial("Bash", cat)).toMatch(/credential files are off limits/);
       expect(p.denial("Grep", { pattern: "x", path: "~/.codeden" })).toMatch(/off limits/);
+      expect(p.denial("Glob", { pattern: "/home/me/.codeden/*" })).toMatch(/off limits/);
+      for (const command of masked) {
+        expect(p.denial("Bash", { command }), command).toMatch(/off limits/);
+      }
       // Relative paths resolve from the shell's current directory.
       expect(p.denial("Bash", { command: "cat install-token" }, "/home/me/.codeden")).toMatch(
         /off limits/,
       );
       expect(p.denial("Read", { file_path: "src/a.ts" })).toBeUndefined();
     }
+    const pwsh = new ClaudePolicy("read_only", win);
+    for (const command of colonBound) {
+      expect(pwsh.denial("PowerShell", { command }), command).toMatch(/off limits/);
+    }
   });
 
-  it("a Read approved for the session doesn't cover them; an exact command does", () => {
-    const p = new ClaudePolicy("auto", posix);
-    p.allowForSession("Read", { file_path: ".env" });
-    expect(p.gate("Read", { file_path: ".env.local" }).ask).toBe(false);
-    expect(p.gate("Read", read).ask).toBe(true);
-    p.allowForSession("Bash", cat);
-    expect(p.gate("Bash", cat).ask).toBe(false);
+  it("a session approval covers them only as given: same call, same directory", () => {
+    const worktree = posix.cwd;
+    const home = "/home/me/.codeden";
+    const p = new ClaudePolicy("supervised", posix);
+    // A harmless read of the repository's own file, approved for the session...
+    const repoRead = { command: "cat runner/runner.json" };
+    expect(p.gate("Bash", repoRead, worktree).ask).toBe(true);
+    p.allowForSession("Bash", repoRead, worktree);
+    expect(p.gate("Bash", repoRead, worktree).ask).toBe(false);
+    // ...doesn't approve the same words once the shell is in CodeDen's home.
+    expect(p.gate("Bash", repoRead, home)).toMatchObject({ ask: true, action: "secrets" });
+    expect(p.needsUser("Bash", repoRead, home).ask).toBe(true);
+    // Approving the credential read itself covers that call, there.
+    p.allowForSession("Bash", repoRead, home);
+    expect(p.gate("Bash", repoRead, home).ask).toBe(false);
+    expect(p.gate("Bash", repoRead, worktree).ask).toBe(false);
+
+    // Approving the Read tool for the session doesn't cover them; approving one does.
+    const auto = new ClaudePolicy("auto", posix);
+    auto.allowForSession("Read", { file_path: ".env" });
+    expect(auto.gate("Read", { file_path: ".env.local" }).ask).toBe(false);
+    expect(auto.gate("Read", read).ask).toBe(true);
+    auto.allowForSession("Read", read);
+    expect(auto.gate("Read", read).ask).toBe(false);
+    expect(auto.gate("Read", { file_path: "/home/me/.codeden/remote-access.json" }).ask).toBe(true);
   });
 
-  it("OpenCode asks at every level and refuses read-only sessions", () => {
-    const ctx = posix;
-    const shell = (command: string): PermissionCall => ({
+  describe("OpenCode", () => {
+    const shell = (command: string, workdir?: string): PermissionCall => ({
       request: { id: "p", sessionID: "s", action: "shell", resources: [command] },
       toolName: "bash",
-      toolInput: { command },
+      toolInput: { command, ...(workdir ? { workdir } : {}) },
     });
     const outside = (resource: string): PermissionCall => ({
       request: { id: "p", sessionID: "s", action: "external_directory", resources: [resource] },
@@ -228,41 +350,97 @@ describe("CodeDen's own credential files: every level", () => {
     const edit = (file: string): PermissionCall => ({
       request: { id: "p", sessionID: "s", action: "edit", resources: [file] },
     });
-    for (const level of ["supervised", "auto", "full"] as AutonomyLevel[]) {
-      const p = new OpenCodePolicy(level, ctx);
-      expect(p.decide(shell("cat ~/.codeden/install-token")), level).toMatchObject({
+
+    it("asks at every level", () => {
+      for (const level of ["supervised", "auto", "full"] as AutonomyLevel[]) {
+        const p = new OpenCodePolicy(level, posix);
+        expect(p.decide(shell("cat ~/.codeden/install-token")), level).toMatchObject({
+          kind: "ask",
+          action: "secrets",
+        });
+        for (const command of masked) {
+          expect(p.decide(shell(command)), `${level}: ${command}`).toMatchObject({
+            kind: "ask",
+            action: "secrets",
+          });
+        }
+        // OpenCode names the folder of a file outside the worktree.
+        expect(p.decide(outside("/home/me/.codeden/*")), level).toMatchObject({ kind: "ask" });
+        expect(p.decide(outside("/home/me/.codeden/runner/*")), level).toMatchObject({
+          kind: "ask",
+        });
+        expect(p.decide(edit("/home/me/.codeden/remote-access.json")), level).toMatchObject({
+          kind: "ask",
+        });
+        const onWindows = new OpenCodePolicy(level, win);
+        for (const command of colonBound) {
+          expect(onWindows.decide(shell(command)), `${level}: ${command}`).toMatchObject({
+            kind: "ask",
+          });
+        }
+      }
+      expect(new OpenCodePolicy("full", posix).decide(outside("/home/me/other/*"))).toEqual({
+        kind: "allow",
+      });
+      expect(new OpenCodePolicy("full", posix).decide(shell("cat .env"))).toEqual({
+        kind: "allow",
+      });
+    });
+
+    it("refuses read-only sessions, the orchestrator and PMs", () => {
+      for (const p of [
+        new OpenCodePolicy("read_only", posix),
+        new OpenCodePolicy("auto", posix, true),
+      ]) {
+        expect(p.decide(shell("cat ~/.codeden/install-token"))).toMatchObject({
+          kind: "deny",
+          message: expect.stringMatching(/off limits/),
+        });
+        for (const command of masked) {
+          expect(p.decide(shell(command)), command).toMatchObject({ kind: "deny" });
+        }
+        expect(p.decide(outside("/home/me/.codeden/*"))).toMatchObject({ kind: "deny" });
+        expect(p.decide(shell("cat README.md"))).toEqual({ kind: "allow" });
+      }
+    });
+
+    it("a command approved for the session covers it in that directory only", () => {
+      const p = new OpenCodePolicy("supervised", posix);
+      const repoRead = shell("cat runner/runner.json");
+      p.allowForSession(repoRead);
+      expect(p.decide(repoRead)).toEqual({ kind: "allow" });
+      expect(p.decide(shell("cat runner/runner.json", "/home/me/.codeden"))).toMatchObject({
         kind: "ask",
         action: "secrets",
       });
-      // OpenCode names the folder of a file outside the worktree.
-      expect(p.decide(outside("/home/me/.codeden/*")), level).toMatchObject({ kind: "ask" });
-      expect(p.decide(outside("/home/me/.codeden/runner/*")), level).toMatchObject({
-        kind: "ask",
-      });
-      expect(p.decide(edit("/home/me/.codeden/remote-access.json")), level).toMatchObject({
-        kind: "ask",
-      });
-    }
-    expect(new OpenCodePolicy("full", ctx).decide(outside("/home/me/other/*"))).toEqual({
-      kind: "allow",
     });
-    for (const p of [new OpenCodePolicy("read_only", ctx), new OpenCodePolicy("auto", ctx, true)]) {
-      expect(p.decide(shell("cat ~/.codeden/install-token"))).toMatchObject({
-        kind: "deny",
-        message: expect.stringMatching(/off limits/),
-      });
-      expect(p.decide(outside("/home/me/.codeden/*"))).toMatchObject({ kind: "deny" });
-      expect(p.decide(shell("cat README.md"))).toEqual({ kind: "allow" });
-    }
   });
 
   it("Codex: requests that reach CodeDen are never approved by policy", () => {
     for (const level of ["auto", "full"] as const) {
-      expect(levelAllows(level, commandRisk(["cat ~/.codeden/install-token"], posix)), level).toBe(
-        false,
-      );
+      for (const texts of [
+        ["cat ~/.codeden/install-token"],
+        ...masked.map((command) => [command]),
+        // The command line as sent, then Codex's parsed actions.
+        ["cat .env", "cat ~/.codeden/install-token"],
+      ]) {
+        expect(levelAllows(level, commandRisk(texts, posix)), `${level}: ${texts}`).toBe(false);
+      }
+      for (const command of colonBound) {
+        expect(levelAllows(level, commandRisk([command], win)), `${level}: ${command}`).toBe(false);
+      }
       expect(
         levelAllows(level, patchRisk(["/home/me/.codeden/remote-access.json"], null, posix)),
+        level,
+      ).toBe(false);
+      expect(
+        levelAllows(
+          level,
+          permissionsRisk(
+            { network: null, fileSystem: { read: [".env", "/home/me/.codeden"], write: null } },
+            posix,
+          ),
+        ),
         level,
       ).toBe(false);
     }

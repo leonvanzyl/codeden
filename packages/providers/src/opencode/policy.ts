@@ -1,6 +1,6 @@
-import path from "node:path";
 import type { ApprovalAction, AutonomyLevel } from "@codeden/contracts";
-import { touchesCodeden } from "../policy/assessment";
+import { mostSevere, touchesCodeden } from "../policy/assessment";
+import { resolveAgainst } from "../policy/paths";
 import { readOnlyCommandDenial } from "../policy/read-only";
 import {
   classifyCommand,
@@ -94,16 +94,14 @@ export class OpenCodePolicy {
     }
   }
 
-  /** Remember an `allow_session` decision: commands and paths match exactly. */
+  /** Remember an `allow_session` decision: commands (in their directory) and paths match exactly. */
   allowForSession(call: PermissionCall): void {
     this.sessionAllow.add(this.key(call));
   }
 
   private shell(call: PermissionCall): PolicyDecision {
     const command = commandOf(call);
-    const workdir = str(call.toolInput, "workdir");
-    const dir = workdir ? path.resolve(this.ctx.cwd, workdir) : undefined;
-    const risk = classifyCommand(command, dir ? { ...this.ctx, dir } : this.ctx);
+    const risk = classifyCommand(command, { ...this.ctx, dir: this.workdir(call) });
     if (this.isReadOnly) {
       if (touchesCodeden(risk)) return this.credentialsDenial();
       // Agent sessions at `read_only` may run the project's checks; read-only roles may not.
@@ -135,15 +133,12 @@ export class OpenCodePolicy {
     return this.gate(this.firstRisk(paths, classifyWrite), "file_change");
   }
 
+  /** The verdict for every target: CodeDen's own credentials first, then the first risky one. */
   private firstRisk(
     targets: readonly string[],
     classify: (target: string, ctx: RiskContext) => RiskAssessment,
   ): RiskAssessment {
-    for (const target of targets) {
-      const risk = classify(target, this.ctx);
-      if (risk.risky) return risk;
-    }
-    return { risky: false };
+    return mostSevere(targets.map((target) => classify(target, this.ctx)));
   }
 
   /**
@@ -176,10 +171,20 @@ export class OpenCodePolicy {
     return { kind: "ask", action: risk.action, reason: risk.reason };
   }
 
+  /**
+   * What an approval for the session covers: a command in its working directory (the same
+   * relative path elsewhere is another file), or the exact paths.
+   */
   private key(call: PermissionCall): string {
     const { action, resources } = call.request;
-    if (action === "shell") return `shell:${commandOf(call)}`;
+    if (action === "shell") return `shell:${this.workdir(call)}\n${commandOf(call)}`;
     return `${action}:${[...resources].sort().join("\n")}`;
+  }
+
+  /** Where a shell call runs: its `workdir`, else the worktree. */
+  private workdir(call: PermissionCall): string {
+    const workdir = str(call.toolInput, "workdir");
+    return workdir ? resolveAgainst(workdir, this.ctx) : this.ctx.cwd;
   }
 }
 
