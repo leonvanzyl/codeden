@@ -124,8 +124,14 @@ export const Notice = z.discriminatedUnion("type", [
       pr: GitHubPrRef,
       reviewer: z.string().nullable(),
       state: z.enum(["approved", "changes_requested", "commented", "dismissed", "pending"]),
-      /** Start of the review body. */
+      /** Start of the review body; empty for an untrusted review. */
       body: z.string(),
+      /**
+       * The reviewer has no write access to the repository and is not a trusted author: the
+       * body is left out, and the review is no instruction to anyone. Absent on trusted
+       * reviews (and on notices from before it was tracked).
+       */
+      untrusted: z.boolean().optional(),
     }),
   }),
   z.object({

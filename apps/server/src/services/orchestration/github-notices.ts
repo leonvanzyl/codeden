@@ -6,6 +6,7 @@ import type {
   RawEventEnvelope,
   Session,
 } from "@codeden/contracts";
+import { isTrustedReview, type ReviewerLogins } from "../github/review-trust";
 import { type DerivedNotice, prOpenedNoticeId, wakesPm } from "./notices";
 
 /** GitHub domain events that become PM notices (§8.2 step 4, §9). */
@@ -36,10 +37,13 @@ function failedChecks(pr: GithubPr): string[] {
  * that session's own notices do (`wakesPm`); for other PRs, opened PRs and reviews wake the PM
  * while check results and merges only show up in its next digest. New issues always wake it,
  * so it can triage them. Ids derive from the event source, so a repeated sync adds nothing.
+ * A review from someone without write access (who is not a trusted login either) carries no
+ * body and doesn't wake the PM: on a public repository anyone can review.
  */
 export function deriveGithubNotices(
   events: RawEventEnvelope[],
   session: (id: string) => Session | undefined,
+  trustedLogins?: ReviewerLogins,
 ): DerivedNotice[] {
   const out: DerivedNotice[] = [];
   for (const e of events) {
@@ -120,8 +124,10 @@ export function deriveGithubNotices(
         break;
       case "review.submitted": {
         if (!review) break;
+        const trusted = isTrustedReview(review, trustedLogins?.(pr.projectId) ?? new Set());
         out.push({
-          wake: ownerWakes ?? true,
+          // An outsider's review never wakes the PM; it shows up in the next digest.
+          wake: trusted ? (ownerWakes ?? true) : false,
           notice: {
             ...common,
             id: `review.submitted:${pr.projectId}:${pr.number}:${review.id}`,
@@ -132,7 +138,8 @@ export function deriveGithubNotices(
               pr: prRef(pr),
               reviewer: review.author,
               state: review.state,
-              body: clip(review.body),
+              body: trusted ? clip(review.body) : "",
+              ...(trusted ? {} : { untrusted: true }),
             },
           },
         });

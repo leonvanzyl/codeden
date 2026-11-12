@@ -5,6 +5,7 @@ import {
   GithubIssue,
   GithubListQuery,
   GithubPr,
+  GithubReview,
   githubPrId,
   MergePrRequest,
   parseGithubPrId,
@@ -65,6 +66,23 @@ describe("github contracts", () => {
   it("round-trips entities", () => {
     expect(GithubIssue.parse(JSON.parse(JSON.stringify(issue)))).toEqual(issue);
     expect(GithubPr.parse(JSON.parse(JSON.stringify(pr)))).toEqual(pr);
+  });
+
+  it("round-trips a review's author association, and reads reviews stored without it", () => {
+    const review: GithubReview = {
+      id: "r1",
+      author: "lee",
+      authorAssociation: "collaborator",
+      state: "changes_requested",
+      body: "Add a test.",
+      submittedAt: ts,
+      url: null,
+    };
+    const withReview = { ...pr, reviews: [review] };
+    expect(GithubPr.parse(JSON.parse(JSON.stringify(withReview)))).toEqual(withReview);
+    const { authorAssociation: _, ...stored } = review;
+    expect(GithubReview.parse(stored).authorAssociation).toBeUndefined();
+    expect(GithubReview.safeParse({ ...review, authorAssociation: "OWNER" }).success).toBe(false);
   });
 
   it("parses every GitHub domain event in the envelope union", () => {

@@ -1,5 +1,6 @@
 import {
   type ChecksState,
+  GithubAuthorAssociation,
   type GithubCheck,
   type GithubChecksSummary,
   type GithubPr,
@@ -26,7 +27,7 @@ fragment PrFields on PullRequest {
       ... on StatusContext { context state targetUrl }
     } } } } }
   }
-  reviews(last: 20) { nodes { id author { login } state body submittedAt url } }
+  reviews(last: 20) { nodes { id author { login } authorAssociation state body submittedAt url } }
   reviewRequests(first: 20) { nodes { requestedReviewer {
     __typename
     ... on User { login }
@@ -90,6 +91,8 @@ export interface GqlPullRequest {
     nodes: Array<{
       id: string;
       author: { login: string } | null;
+      /** `OWNER`, `MEMBER`, `COLLABORATOR`, `CONTRIBUTOR`, `NONE`, ... */
+      authorAssociation?: string;
       state: string;
       body: string;
       submittedAt: string | null;
@@ -196,6 +199,12 @@ const REVIEW_STATES: Record<string, GithubReview["state"]> = {
   PENDING: "pending",
 };
 
+/** GitHub's `CommentAuthorAssociation`; a value this build doesn't know counts as `none`. */
+function authorAssociation(value: string | undefined): GithubAuthorAssociation {
+  const parsed = GithubAuthorAssociation.safeParse(value?.toLowerCase());
+  return parsed.success ? parsed.data : "none";
+}
+
 /** Issue numbers named by closing keywords in a PR body (`Fixes #12`, `closes #3`). */
 export function closingIssueNumbers(body: string): number[] {
   const out = new Set<number>();
@@ -262,6 +271,7 @@ export function toGithubPr(
       .map((r) => ({
         id: r.id,
         author: r.author?.login ?? null,
+        authorAssociation: authorAssociation(r.authorAssociation),
         state: REVIEW_STATES[r.state] ?? "commented",
         body: r.body,
         submittedAt: r.submittedAt,

@@ -9,7 +9,10 @@ import type { FactoryItem, FactoryLimits } from "@codeden/contracts";
  */
 
 /** Trusted logins, lower-cased (GitHub logins are case-insensitive). */
-export function trustedLogins(limits: FactoryLimits, viewer: string | null): Set<string> {
+export function trustedLogins(
+  limits: Pick<FactoryLimits, "trustedAuthors">,
+  viewer: string | null,
+): Set<string> {
   const logins = new Set(limits.trustedAuthors.map((l) => l.toLowerCase()));
   if (viewer) logins.add(viewer.toLowerCase());
   return logins;

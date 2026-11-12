@@ -85,9 +85,31 @@ export type GithubChecksSummary = z.infer<typeof GithubChecksSummary>;
 export const ReviewDecision = z.enum(["none", "review_required", "approved", "changes_requested"]);
 export type ReviewDecision = z.infer<typeof ReviewDecision>;
 
+/**
+ * How the author of a review or comment relates to the repository: GitHub's
+ * `CommentAuthorAssociation`, lower-cased. `owner`, `member` (of the owning organization) and
+ * `collaborator` have write access; anyone else can still review a public repository's PRs.
+ */
+export const GithubAuthorAssociation = z.enum([
+  "owner",
+  "member",
+  "collaborator",
+  "contributor",
+  "first_time_contributor",
+  "first_timer",
+  "mannequin",
+  "none",
+]);
+export type GithubAuthorAssociation = z.infer<typeof GithubAuthorAssociation>;
+
 export const GithubReview = z.object({
   id: z.string(),
   author: z.string().nullable(),
+  /**
+   * The author's relation to the repository. Absent on reviews synced before it was tracked,
+   * which count as from someone without write access.
+   */
+  authorAssociation: GithubAuthorAssociation.optional(),
   state: z.enum(["approved", "changes_requested", "commented", "dismissed", "pending"]),
   body: z.string(),
   submittedAt: Timestamp.nullable(),

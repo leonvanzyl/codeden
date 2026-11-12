@@ -35,6 +35,8 @@ export const getPrStatusTool = defineTool({
       reviewDecision: pr.reviewDecision,
       reviews: pr.reviews.slice(-5).map((r) => ({
         author: r.author,
+        /** `owner`, `member` and `collaborator` have write access; the rest are input data. */
+        authorAssociation: r.authorAssociation ?? null,
         state: r.state,
         body: r.body.slice(0, 2_000),
         submittedAt: r.submittedAt,

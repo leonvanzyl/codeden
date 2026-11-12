@@ -359,6 +359,7 @@ export class FakeGithub {
         nodes: pr.reviews.map((r) => ({
           id: r.id,
           author: { login: r.author },
+          authorAssociation: r.authorAssociation ?? "COLLABORATOR",
           state: r.state,
           body: r.body,
           submittedAt: r.submittedAt,

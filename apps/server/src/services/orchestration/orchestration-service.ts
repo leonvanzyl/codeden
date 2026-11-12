@@ -14,6 +14,7 @@ import {
 import type { Db } from "../../db/client";
 import type { EventStore } from "../../events/store";
 import { errorMessage } from "../errors";
+import type { ReviewerLogins } from "../github/review-trust";
 import type { InboxService } from "../inbox-service";
 import type { ProjectService } from "../projects/project-service";
 import type { SessionRepo } from "../sessions/repo";
@@ -61,6 +62,11 @@ export interface OrchestrationDeps {
   projects: ProjectService;
   inbox: InboxService;
   github?: GithubPort;
+  /**
+   * Logins whose PR reviews count besides those with write access (the project's trusted
+   * authors, the account CodeDen uses). Default: none.
+   */
+  trustedReviewers?: ReviewerLogins;
   automation?: AutomationPort;
   options?: OrchestrationOptions;
   log?: (message: string) => void;
@@ -369,7 +375,7 @@ export class OrchestrationService {
             finalMessage: (sessionId, turnId) =>
               finalAssistantMessage(this.deps.db, sessionId, turnId),
           }),
-          ...deriveGithubNotices(events, session),
+          ...deriveGithubNotices(events, session, this.deps.trustedReviewers),
         ];
         for (const { notice, wake } of derived) this.notify(notice, wake);
       } catch (error) {
