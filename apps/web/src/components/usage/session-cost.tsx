@@ -24,6 +24,36 @@ function costLabel(u: SessionUsage): string {
   return money(u.totals.costUsd, u.totals.estimatedCostUsd > 0);
 }
 
+/** "API-equivalent cost (estimated from list prices)": what kind of figure the cost is (§12.6). */
+function costHeading(u: SessionUsage): string {
+  const kind = u.billing === "subscription" ? "API-equivalent cost" : "Session cost";
+  return u.totals.estimatedCostUsd > 0 ? `${kind} (estimated from list prices)` : kind;
+}
+
+/**
+ * The session's cost for Session details, from the same ledger figures as the header chip:
+ * "No usage yet" before the first turn, "Not priced" when no turn has a price or a reported cost.
+ */
+export function SessionCostText({ sessionId }: { sessionId: string }) {
+  const { data } = useLiveSessionUsage(sessionId);
+  if (!data) return null;
+  const t = data.totals;
+  if (t.turns === 0) return <span>No usage yet</span>;
+  if (t.unpricedTurns === t.turns) {
+    return (
+      <span title="This model has no price in the price table and the provider reported no cost">
+        Not priced
+      </span>
+    );
+  }
+  const unpriced = t.unpricedTurns > 0 ? ` · ${t.unpricedTurns} turns not priced` : "";
+  return (
+    <span data-testid="details-cost" title={`${costHeading(data)}${unpriced}`}>
+      {costLabel(data)} {data.billing === "subscription" ? "API-equivalent" : "this session"}
+    </span>
+  );
+}
+
 /** Cost and tokens chip for the session header, with a breakdown on hover. */
 export function SessionCostChip({
   sessionId,
@@ -52,10 +82,7 @@ export function SessionCostChip({
         </span>
       </TooltipTrigger>
       <TooltipContent className="space-y-1 text-2xs">
-        <div className="font-medium">
-          {data.billing === "subscription" ? "API-equivalent cost" : "Session cost"}
-          {t.estimatedCostUsd > 0 ? " (estimated from list prices)" : ""}
-        </div>
+        <div className="font-medium">{costHeading(data)}</div>
         <div className="tabular-nums">
           {tokens(t.inputTokens)} input · {tokens(t.outputTokens)} output
         </div>
