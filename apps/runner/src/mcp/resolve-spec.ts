@@ -48,10 +48,26 @@ const mapValues = (o: Record<string, string> | undefined, f: (v: string) => stri
   Object.fromEntries(Object.entries(o ?? {}).map(([k, v]) => [k, f(v)]));
 
 /**
+ * Set a header, replacing every copy of it under any casing. HTTP header names are
+ * case-insensitive, and two spellings (`authorization` and `Authorization`) would otherwise
+ * be sent as one header with both values joined, such as an invalid `Bearer a, Bearer b`.
+ */
+function setHeader(headers: Record<string, string>, name: string, value: string): void {
+  const lower = name.toLowerCase();
+  for (const existing of Object.keys(headers)) {
+    if (existing.toLowerCase() === lower) delete headers[existing];
+  }
+  headers[name] = value;
+}
+
+/**
  * Apply the environment to a spec as the provider would before starting it.
  * - `expandEnv` (Claude): `${VAR}` placeholders in the command, args, env, URL and headers.
  * - Codex: `bearerTokenEnvVar` becomes an `Authorization: Bearer` header, and the native
  *   `env_http_headers` table (header name -> variable name) adds headers from set variables.
+ * Header names are matched case-insensitively and one value wins, in this order: the
+ * bearer-token variable, then `env_http_headers`, then the headers themselves (the last
+ * spelling in the file when the same header appears twice there).
  * Throws `MissingEnvError` naming every variable that is required but not set.
  */
 export function resolveMcpSpec(
@@ -71,18 +87,21 @@ export function resolveMcpSpec(
     };
   } else {
     const url = x(spec.url);
-    const headers = mapValues(spec.headers, x);
+    const headers: Record<string, string> = {};
+    for (const [name, value] of Object.entries(spec.headers ?? {})) {
+      setHeader(headers, name, x(value));
+    }
     const envHeaders = spec.extra?.env_http_headers;
     if (envHeaders && typeof envHeaders === "object" && !Array.isArray(envHeaders)) {
       for (const [header, variable] of Object.entries(envHeaders)) {
         const value = typeof variable === "string" ? opts.env[variable] : undefined;
-        if (value !== undefined) headers[header] = value;
+        if (value !== undefined) setHeader(headers, header, value);
       }
     }
     if (spec.bearerTokenEnvVar) {
       const token = opts.env[spec.bearerTokenEnvVar];
       if (token === undefined) missing.add(spec.bearerTokenEnvVar);
-      else headers.Authorization = `Bearer ${token}`;
+      else setHeader(headers, "Authorization", `Bearer ${token}`);
     }
     resolved = { type: spec.type, url, headers };
   }

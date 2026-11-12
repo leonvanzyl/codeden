@@ -247,6 +247,7 @@ describe("runner protocol", () => {
       server: { name: "s", version: "1" },
       protocolVersion: null,
       toolCount: 0,
+      morePages: false,
       tools: [],
     });
     expect(

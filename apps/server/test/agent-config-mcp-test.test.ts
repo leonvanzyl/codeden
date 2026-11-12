@@ -14,6 +14,7 @@ const passed: RunnerCommandResult<"mcp.test"> = {
   server: { name: "s", version: "1" },
   protocolVersion: "2025-06-18",
   toolCount: 0,
+  morePages: false,
   tools: [],
 };
 

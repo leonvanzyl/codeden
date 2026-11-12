@@ -140,6 +140,7 @@ function mockAgentConfig(world: MockWorld): AgentConfigApi {
           server: { name: req.name, version: "1.4.0" },
           protocolVersion: "2025-06-18",
           toolCount: 4,
+          morePages: false,
           tools: [
             { name: "browser_navigate", description: "Navigate to a URL" },
             { name: "browser_click", description: "Click an element" },

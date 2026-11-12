@@ -216,8 +216,20 @@ describe("agent configuration contracts", () => {
       server: { name: "fs", version: "1.2.0", title: "Files" },
       protocolVersion: "2025-06-18",
       toolCount: 2,
+      morePages: false,
       tools: [{ name: "read_file", description: "Reads a file" }, { name: "write_file" }],
     });
+    // A paged list cut off at the page cap says so: its count is a lower bound.
+    const partial = {
+      ok: true,
+      durationMs: 9,
+      server: { name: "big", version: "1" },
+      protocolVersion: null,
+      toolCount: 5000,
+      tools: [],
+    };
+    expect(McpServerTestResult.safeParse(partial).success).toBe(false);
+    roundTrip(McpServerTestResult, { ...partial, ok: true as const, morePages: true });
     roundTrip(McpServerTestResult, {
       ok: false,
       durationMs: 12,

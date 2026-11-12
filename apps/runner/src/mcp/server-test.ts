@@ -4,6 +4,7 @@ import {
   MCP_TEST_DEFAULT_TIMEOUT_MS,
   MCP_TEST_DESCRIPTION_LIMIT,
   MCP_TEST_ERROR_LIMIT,
+  MCP_TEST_MAX_PAGES,
   MCP_TEST_MAX_TOOLS,
   MCP_TEST_STDERR_LIMIT,
   type McpServerSpec,
@@ -13,15 +14,13 @@ import {
 } from "@codeden/contracts";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { childEnv } from "../process/env";
-import { killTree } from "../process/tree";
+import type { ProcessSupervisor } from "../process/supervisor";
+import { killTreeAndOrphans } from "../process/tree";
 import { type ResolvedMcpServer, resolveMcpSpec } from "./resolve-spec";
-
-/** Pages of `tools/list` followed before the list is cut off. */
-const MAX_TOOL_PAGES = 20;
+import { McpStdioTransport } from "./stdio-transport";
 
 export interface McpServerTestOptions {
   spec: McpServerSpec;
@@ -34,6 +33,8 @@ export interface McpServerTestOptions {
   clientVersion: string;
   /** Environment for placeholders and stdio servers; the runner's (minus secrets) by default. */
   env?: Record<string, string>;
+  /** Tracks a stdio server while it runs, so a runner shutdown stops it too. */
+  supervisor?: Pick<ProcessSupervisor, "adopt" | "release">;
 }
 
 /** Keeps the last `limit` characters written to it. */
@@ -65,7 +66,7 @@ export async function testMcpServer(opts: McpServerTestOptions): Promise<McpServ
   let stage: McpTestStage = "start";
   let timedOut = false;
   let protocolVersion: string | null = null;
-  let stdio: StdioClientTransport | null = null;
+  let stdio: McpStdioTransport | null = null;
 
   const fail = (error: unknown): McpServerTestResult => {
     const tail = stderr.value();
@@ -82,27 +83,31 @@ export async function testMcpServer(opts: McpServerTestOptions): Promise<McpServ
   const client = new Client({ name: "codeden-mcp-test", version: opts.clientVersion });
   try {
     const server = resolveMcpSpec(opts.spec, { expandEnv: opts.expandEnv, env });
-    const transport: Transport = createTransport(server, { cwd: opts.cwd, env, stderr });
+    const cwd = (server.type === "stdio" ? server.cwd : undefined) ?? opts.cwd ?? homedir();
+    const transport: Transport = createTransport(server, { cwd, env, stderr });
     // The client starts the transport, then negotiates the protocol version; both are
     // observed here so a failure names its stage and a success reports the version.
     const start = transport.start.bind(transport);
     transport.start = async () => {
       await start();
       stage = "connect";
+      if (stdio?.pid) {
+        opts.supervisor?.adopt({ pid: stdio.pid, label: "MCP server test", cwd });
+      }
     };
     const setVersion = transport.setProtocolVersion?.bind(transport);
     transport.setProtocolVersion = (version: string) => {
       protocolVersion = version;
       setVersion?.(version);
     };
-    if (transport instanceof StdioClientTransport) stdio = transport;
+    if (transport instanceof McpStdioTransport) stdio = transport;
 
     const work = (async () => {
       await client.connect(transport, { timeout: timeoutMs });
       stage = "list_tools";
       return listTools(client, timeoutMs);
     })();
-    const { toolCount, tools } = await withTimeout(work, timeoutMs, () => {
+    const { toolCount, morePages, tools } = await withTimeout(work, timeoutMs, () => {
       timedOut = true;
     });
     const info = client.getServerVersion();
@@ -116,33 +121,32 @@ export async function testMcpServer(opts: McpServerTestOptions): Promise<McpServ
       },
       protocolVersion,
       toolCount,
+      morePages,
       tools,
     };
   } catch (error) {
     return fail(error);
   } finally {
-    await stop(client, stdio);
+    await stop(client, stdio?.pid ?? null);
+    if (stdio?.pid) opts.supervisor?.release(stdio.pid);
   }
 }
 
 function createTransport(
   server: ResolvedMcpServer,
-  ctx: { cwd: string | undefined; env: Record<string, string>; stderr: TailBuffer },
+  ctx: { cwd: string; env: Record<string, string>; stderr: TailBuffer },
 ): Transport {
   if (server.type === "stdio") {
-    const cwd = server.cwd ?? ctx.cwd ?? homedir();
-    if (!existsSync(cwd) || !statSync(cwd).isDirectory()) {
-      throw new Error(`Working folder not found: ${cwd}`);
+    if (!existsSync(ctx.cwd) || !statSync(ctx.cwd).isDirectory()) {
+      throw new Error(`Working folder not found: ${ctx.cwd}`);
     }
-    const transport = new StdioClientTransport({
+    return new McpStdioTransport({
       command: server.command,
       args: server.args,
       env: { ...ctx.env, ...server.env },
-      cwd,
-      stderr: "pipe",
+      cwd: ctx.cwd,
+      onStderr: (chunk) => ctx.stderr.append(chunk),
     });
-    transport.stderr?.on("data", (chunk: Buffer | string) => ctx.stderr.append(String(chunk)));
-    return transport;
   }
   let url: URL;
   try {
@@ -156,15 +160,16 @@ function createTransport(
     : new StreamableHTTPClientTransport(url, { requestInit });
 }
 
+/** Every page of `tools/list`, up to `MCP_TEST_MAX_PAGES`; `morePages` when it stopped early. */
 async function listTools(
   client: Client,
   timeoutMs: number,
-): Promise<{ toolCount: number; tools: McpTestTool[] }> {
-  if (!client.getServerCapabilities()?.tools) return { toolCount: 0, tools: [] };
+): Promise<{ toolCount: number; morePages: boolean; tools: McpTestTool[] }> {
+  if (!client.getServerCapabilities()?.tools) return { toolCount: 0, morePages: false, tools: [] };
   const tools: McpTestTool[] = [];
   let toolCount = 0;
   let cursor: string | undefined;
-  for (let page = 0; page < MAX_TOOL_PAGES; page++) {
+  for (let page = 0; page < MCP_TEST_MAX_PAGES; page++) {
     const result = await client.listTools(cursor ? { cursor } : undefined, { timeout: timeoutMs });
     toolCount += result.tools.length;
     for (const tool of result.tools) {
@@ -180,7 +185,7 @@ async function listTools(
     cursor = result.nextCursor;
     if (!cursor) break;
   }
-  return { toolCount, tools };
+  return { toolCount, morePages: cursor !== undefined, tools };
 }
 
 function withTimeout<T>(work: Promise<T>, ms: number, onTimeout: () => void): Promise<T> {
@@ -196,10 +201,13 @@ function withTimeout<T>(work: Promise<T>, ms: number, onTimeout: () => void): Pr
   return Promise.race([work, timeout]).finally(() => clearTimeout(timer));
 }
 
-/** Stop the server: the whole process tree first (wrappers such as `npx`), then the client. */
-async function stop(client: Client, stdio: StdioClientTransport | null): Promise<void> {
-  const pid = stdio?.pid ?? null;
-  if (pid !== null) await killTree(pid, 1_000).catch(() => undefined);
+/**
+ * Stop the server on every path (success, failed handshake, timeout): the whole process tree
+ * of the pid kept from spawn, including what it started and left behind (wrappers such as
+ * `npx`, detached helpers), then the client.
+ */
+async function stop(client: Client, pid: number | null): Promise<void> {
+  if (pid !== null) await killTreeAndOrphans(pid, 1_000).catch(() => undefined);
   await client.close().catch(() => undefined);
 }
 

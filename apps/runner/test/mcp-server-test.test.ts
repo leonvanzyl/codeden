@@ -1,20 +1,48 @@
+import { readFileSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingHttpHeaders, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { McpServerTestResult } from "@codeden/contracts";
+import { join } from "node:path";
+import { MCP_TEST_MAX_PAGES, McpServerTestResult } from "@codeden/contracts";
+import { Server as LowLevelServer } from "@modelcontextprotocol/sdk/server/index.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { startRunner } from "../src";
 import { expandEnvVars, MissingEnvError, resolveMcpSpec } from "../src/mcp/resolve-spec";
 import { testMcpServer } from "../src/mcp/server-test";
+import { isAlive } from "../src/process/tree";
+import { removeDir, TestServer, tempDir, waitUntil } from "./helpers";
+
+/** A server whose `tools/list` comes in pages of two tools: `pages` of them, or endless. */
+function pagedServer(pages: number | "endless"): LowLevelServer {
+  const server = new LowLevelServer(
+    { name: "paged", version: "1" },
+    { capabilities: { tools: {} } },
+  );
+  server.setRequestHandler(ListToolsRequestSchema, async (req) => {
+    const page = Number(req.params?.cursor ?? 0);
+    const last = pages !== "endless" && page === pages - 1;
+    return {
+      tools: [0, 1].map((i) => ({
+        name: `t${page}_${i}`,
+        inputSchema: { type: "object" as const },
+      })),
+      ...(last ? {} : { nextCursor: String(page + 1) }),
+    };
+  });
+  return server;
+}
 
 /**
  * An MCP server on a local port (Streamable HTTP, stateless): `/mcp` answers anyone,
- * `/private` wants `Authorization: Bearer t1`. Every request's headers are recorded.
+ * `/private` wants `Authorization: Bearer t1`, `/paged` lists 3 pages of tools and
+ * `/endless` never stops paging. Every request's headers are recorded.
  */
 async function fixtureServer(seen: IncomingHttpHeaders[]) {
   const http: Server = createServer(async (req, res) => {
     seen.push(req.headers);
-    if (req.url !== "/mcp" && req.url !== "/private") {
+    if (!["/mcp", "/private", "/paged", "/endless"].includes(req.url ?? "")) {
       res.writeHead(404).end("not here");
       return;
     }
@@ -22,9 +50,17 @@ async function fixtureServer(seen: IncomingHttpHeaders[]) {
       res.writeHead(401, { "www-authenticate": "Bearer" }).end();
       return;
     }
-    const mcp = new McpServer({ name: "fixture", version: "1.2.3" });
-    mcp.registerTool("read_file", { description: "Reads a file" }, async () => ({ content: [] }));
-    mcp.registerTool("write_file", { title: "Write" }, async () => ({ content: [] }));
+    let mcp: McpServer | LowLevelServer;
+    if (req.url === "/paged" || req.url === "/endless") {
+      mcp = pagedServer(req.url === "/paged" ? 3 : "endless");
+    } else {
+      const named = new McpServer({ name: "fixture", version: "1.2.3" });
+      named.registerTool("read_file", { description: "Reads a file" }, async () => ({
+        content: [],
+      }));
+      named.registerTool("write_file", { title: "Write" }, async () => ({ content: [] }));
+      mcp = named;
+    }
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
     res.on("close", () => {
       void transport.close();
@@ -98,6 +134,30 @@ describe("MCP spec resolution", () => {
       ),
     ).toThrow(new MissingEnvError(["NOPE", "ALSO_NOPE"]));
   });
+
+  it("keeps one value per header whatever its casing, with the bearer variable winning", () => {
+    const env = { TOKEN: "t1", ORG: "acme" };
+    const headers = (spec: Record<string, unknown>) => {
+      const resolved = resolveMcpSpec(
+        { type: "http", url: "https://x/mcp", ...spec },
+        { expandEnv: false, env },
+      );
+      return resolved.type === "stdio" ? null : resolved.headers;
+    };
+    // Two spellings in the file: the last one wins.
+    expect(headers({ headers: { "X-A": "1", "x-a": "2" } })).toEqual({ "x-a": "2" });
+    // The bearer variable replaces a static Authorization header of any casing.
+    expect(
+      headers({
+        headers: { authorization: "Bearer stale", Accept: "x" },
+        bearerTokenEnvVar: "TOKEN",
+      }),
+    ).toEqual({ Accept: "x", Authorization: "Bearer t1" });
+    // env_http_headers replaces a static header of any casing.
+    expect(
+      headers({ headers: { "x-org": "static" }, extra: { env_http_headers: { "X-Org": "ORG" } } }),
+    ).toEqual({ "X-Org": "acme" });
+  });
 });
 
 describe("MCP connection test", () => {
@@ -138,11 +198,24 @@ describe("MCP connection test", () => {
   });
 
   it("sends a Codex bearer token, and reports a 401 as a sign-in problem", async () => {
+    // A stale `authorization` header in another casing is replaced, not joined to the token
+    // (`Bearer stale, Bearer t1` would be refused).
     const codex = await run(
-      { type: "http", url: `${fixture.base}/private`, bearerTokenEnvVar: "FIXTURE_TOKEN" },
+      {
+        type: "http",
+        url: `${fixture.base}/private`,
+        headers: { authorization: "Bearer stale" },
+        bearerTokenEnvVar: "FIXTURE_TOKEN",
+      },
       false,
     );
     expect(codex.ok).toBe(true);
+    const claude = await run({
+      type: "http",
+      url: `${fixture.base}/private`,
+      headers: { Authorization: "Bearer stale", authorization: "Bearer ${FIXTURE_TOKEN}" },
+    });
+    expect(claude.ok).toBe(true);
 
     const denied = await run({ type: "http", url: `${fixture.base}/private` }, false);
     expect(denied).toMatchObject({ ok: false, stage: "connect", timedOut: false });
@@ -166,6 +239,40 @@ describe("MCP connection test", () => {
     expect(McpServerTestResult.parse(notFound)).toEqual(notFound);
   });
 
+  it("follows every page of tools, and says so when it stops at the page cap", async () => {
+    const paged = await run({ type: "http", url: `${fixture.base}/paged` });
+    expect(paged).toMatchObject({ ok: true, toolCount: 6, morePages: false });
+    expect(paged.ok && paged.tools.map((t) => t.name)).toEqual([
+      "t0_0",
+      "t0_1",
+      "t1_0",
+      "t1_1",
+      "t2_0",
+      "t2_1",
+    ]);
+    const endless = await run({ type: "http", url: `${fixture.base}/endless` });
+    expect(endless).toMatchObject({ ok: true, toolCount: MCP_TEST_MAX_PAGES * 2, morePages: true });
+  });
+
+  it("answers the mcp.test runner command", async () => {
+    const home = tempDir("codeden-mcp-cmd-");
+    const runner = await startRunner({ home });
+    const server = await TestServer.attach(runner);
+    try {
+      const result = await server.request({
+        name: "mcp.test",
+        spec: { type: "http", url: `${fixture.base}/mcp` },
+        expandEnv: false,
+        timeoutMs: 10_000,
+      });
+      expect(result).toMatchObject({ ok: true, server: { name: "fixture" }, toolCount: 2 });
+    } finally {
+      await server.close();
+      await runner.close();
+      removeDir(home);
+    }
+  });
+
   it("fails at the start when a stdio server's working folder is missing", async () => {
     const result = await testMcpServer({
       spec: { type: "stdio", command: "node" },
@@ -177,4 +284,78 @@ describe("MCP connection test", () => {
     expect(result).toMatchObject({ ok: false, stage: "start" });
     expect(!result.ok && result.error).toContain("Working folder not found");
   });
+});
+
+/**
+ * A stdio "server" that starts a long-lived helper (`detached` or not), writes the helper's
+ * pid to `helper.pid`, then either refuses the handshake and stays up (`refuse`), or exits
+ * (`exit`), leaving the helper behind as an orphan.
+ */
+const LEAKY_SERVER = `
+const { spawn } = require("node:child_process");
+const { writeFileSync } = require("node:fs");
+const [detached, mode] = process.argv.slice(2);
+const helper = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
+  detached: detached === "detached", stdio: "ignore", windowsHide: true,
+});
+helper.unref();
+writeFileSync("helper.pid", String(helper.pid));
+if (mode === "exit") { process.stderr.write("giving up\\n"); process.exit(1); }
+let buffer = "";
+process.stdin.on("data", (data) => {
+  buffer += data;
+  for (let i = buffer.indexOf("\\n"); i >= 0; i = buffer.indexOf("\\n")) {
+    const message = JSON.parse(buffer.slice(0, i));
+    buffer = buffer.slice(i + 1);
+    if (message.method === "initialize") {
+      const error = { code: -32603, message: "not today" };
+      process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: message.id, error }) + "\\n");
+    }
+  }
+});
+setInterval(() => {}, 1000);
+`;
+
+describe("stopping a stdio server", () => {
+  let dir: string;
+  beforeAll(() => {
+    dir = tempDir("codeden-mcp-leak-");
+    writeFileSync(join(dir, "server.cjs"), LEAKY_SERVER);
+  });
+  afterAll(() => removeDir(dir));
+
+  const runLeaky = async (detached: "detached" | "attached", mode: "refuse" | "exit") => {
+    const tracked: number[] = [];
+    const released: number[] = [];
+    const result = await testMcpServer({
+      spec: { type: "stdio", command: process.execPath, args: ["server.cjs", detached, mode] },
+      cwd: dir,
+      expandEnv: false,
+      clientVersion: "0.0.0-test",
+      timeoutMs: 15_000,
+      supervisor: { adopt: (p) => tracked.push(p.pid), release: (pid) => released.push(pid) },
+    });
+    const helper = Number(readFileSync(join(dir, "helper.pid"), "utf8"));
+    try {
+      await waitUntil(() => !isAlive(helper), 5_000);
+    } finally {
+      if (isAlive(helper)) process.kill(helper);
+    }
+    return { result, tracked, released };
+  };
+
+  it("ends a helper the server detached when the handshake fails", async () => {
+    const { result, tracked, released } = await runLeaky("detached", "refuse");
+    expect(result).toMatchObject({ ok: false, stage: "connect", timedOut: false });
+    expect(!result.ok && result.error).toContain("not today");
+    expect(tracked).toHaveLength(1);
+    expect(released).toEqual(tracked);
+  }, 30_000);
+
+  // On POSIX the orphan is only reachable through the server's process group. (On Windows
+  // Node already ends a non-detached child with its parent.)
+  it("ends what a server left behind when it exited during the handshake", async () => {
+    const { result } = await runLeaky("attached", "exit");
+    expect(result).toMatchObject({ ok: false, stage: "connect", stderrTail: "giving up" });
+  }, 30_000);
 });

@@ -45,6 +45,27 @@ export async function killTree(pid: number, graceMs = 2_000): Promise<void> {
   signalPosix(pid, descendants, "SIGKILL");
 }
 
+/**
+ * Kill a process and everything it started, also when it has already exited. Its
+ * descendants are listed first and killed as trees of their own: on Windows the children of
+ * an exited process keep its pid as their parent id, so they are still found. On POSIX, where
+ * such children are adopted by init, the process must have been spawned as a process-group
+ * leader (`detached`): its group is signalled, which outlives the leader. (A descendant that
+ * started a session of its own after its parent exited can't be found there.)
+ */
+export async function killTreeAndOrphans(pid: number, graceMs = 2_000): Promise<void> {
+  const descendants = await listDescendants(pid).catch(() => [] as number[]);
+  await killTree(pid, graceMs);
+  await Promise.all(descendants.map((child) => killTree(child, graceMs)));
+  if (!isWindows) {
+    try {
+      process.kill(-pid, "SIGKILL");
+    } catch {
+      // the group is gone
+    }
+  }
+}
+
 function signalPosix(pid: number, descendants: number[], signal: NodeJS.Signals): void {
   for (const target of [-pid, pid, ...descendants]) {
     try {

@@ -1,4 +1,9 @@
-import type { McpServerTestRequest, McpServerTestResult, McpTestStage } from "@codeden/contracts";
+import {
+  MCP_TEST_MAX_PAGES,
+  type McpServerTestRequest,
+  type McpServerTestResult,
+  type McpTestStage,
+} from "@codeden/contracts";
 import { CheckCircle2, Loader2, X, XCircle } from "lucide-react";
 import { useCallback, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -84,15 +89,24 @@ export function McpTestResultView({
         <span className="font-medium">{r.server.title || r.server.name || "server"}</span>
         {r.server.version && <span className="text-muted-foreground"> {r.server.version}</span>}
         {" · "}
-        {r.toolCount === 1 ? "1 tool" : `${r.toolCount} tools`}
+        {r.morePages
+          ? `more than ${r.toolCount} tools`
+          : r.toolCount === 1
+            ? "1 tool"
+            : `${r.toolCount} tools`}
         <span className="text-muted-foreground"> · {duration(r.durationMs)}</span>
       </span>
     );
     body =
-      r.toolCount === 0 ? (
+      r.toolCount === 0 && !r.morePages ? (
         <p className="text-2xs text-muted-foreground">The server offers no tools.</p>
       ) : (
         <div className="flex flex-wrap gap-1">
+          {r.morePages && (
+            <p className="w-full text-2xs text-muted-foreground">
+              The test read the first {MCP_TEST_MAX_PAGES} pages of tools; the server has more.
+            </p>
+          )}
           {tools.map((t) => (
             <span
               key={t.name}
@@ -113,7 +127,8 @@ export function McpTestResultView({
           )}
           {showAll && r.toolCount > r.tools.length && (
             <span className="px-1 text-3xs text-muted-foreground">
-              and {r.toolCount - r.tools.length} not listed
+              and {r.toolCount - r.tools.length}
+              {r.morePages ? "+" : ""} not listed
             </span>
           )}
         </div>

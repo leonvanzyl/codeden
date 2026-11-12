@@ -8,6 +8,8 @@ import { McpServerSpec, McpServerTarget } from "./agent-config";
 
 /** Most tools listed in a test result (`toolCount` is the full number). */
 export const MCP_TEST_MAX_TOOLS = 500;
+/** Most `tools/list` pages a test follows; beyond them `morePages` is set. */
+export const MCP_TEST_MAX_PAGES = 100;
 /** Most characters of a tool description kept in a test result. */
 export const MCP_TEST_DESCRIPTION_LIMIT = 300;
 /** Most characters of the error message of a failed test. */
@@ -52,8 +54,16 @@ export const McpServerTestResult = z.discriminatedUnion("ok", [
     server: z.object({ name: z.string(), version: z.string(), title: z.string().optional() }),
     /** The protocol version both sides agreed on, when known. */
     protocolVersion: z.string().nullable(),
-    /** Every tool the server offers (0 when it has no tools capability). */
+    /**
+     * The tools on the pages read: every tool the server offers (0 when it has no tools
+     * capability), unless `morePages` is set.
+     */
     toolCount: z.int().nonnegative(),
+    /**
+     * The server still had pages after `MCP_TEST_MAX_PAGES`, which the test didn't read:
+     * `toolCount` is then a lower bound ("more than N tools").
+     */
+    morePages: z.boolean(),
     /** The first `MCP_TEST_MAX_TOOLS` of them. */
     tools: z.array(McpTestTool).max(MCP_TEST_MAX_TOOLS),
   }),

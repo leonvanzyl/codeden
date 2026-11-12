@@ -10,7 +10,6 @@ import {
 } from "./git/checkpoints";
 import * as gitOps from "./git/ops";
 import type { Journal } from "./journal";
-import { testMcpServer } from "./mcp/server-test";
 import { listPorts } from "./ports";
 import type { ProcessSupervisor } from "./process/supervisor";
 import { endProcessesInside } from "./process/worktree-processes";
@@ -203,14 +202,18 @@ export async function executeCommand(core: RunnerCore, command: RunnerCommand): 
     case "ports.list":
       return { ports: await listPorts(command.probe) };
 
-    case "mcp.test":
+    case "mcp.test": {
+      // Loaded on first use: the MCP client adds about 300 ms to every runner start otherwise.
+      const { testMcpServer } = await import("./mcp/server-test");
       return testMcpServer({
         spec: command.spec,
         cwd: command.cwd,
         expandEnv: command.expandEnv,
         timeoutMs: command.timeoutMs,
         clientVersion: core.version,
+        supervisor: core.supervisor,
       });
+    }
 
     default: {
       // Only `browser.*` commands reach here (checked by the type below).
