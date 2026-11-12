@@ -55,6 +55,8 @@ const BUSY = new Set(["running", "waiting"]);
 const NOT_STARTED = new Set(["created", "queued", "starting"]);
 /** Statuses in which the next queued message is delivered. */
 const FLUSHABLE = new Set(["idle", "interrupted", "failed"]);
+/** Final outcomes a stop never rewrites: the session's status keeps saying what happened. */
+const FINISHED = new Set(["completed", "failed", "stopped"]);
 
 /**
  * Agent sessions: start (with the §8.4 conflict check), messages, steering, interrupts,
@@ -284,6 +286,10 @@ export class SessionService {
     this.deps.inbox.closeForRequest(id, req.requestId, resolution);
   }
 
+  /**
+   * Stop a session: drop its queued messages, end its provider process and dismiss its open
+   * questions. A session that already finished (completed, failed) keeps its status.
+   */
   async stop(id: string): Promise<Session> {
     const session = this.deps.repo.get(id);
     this.deps.outbox.clear(id);
@@ -299,7 +305,7 @@ export class SessionService {
     }
     this.deps.inbox.dismissRequestsForSession(id, "session stopped");
     return this.deps.repo.update(id, (s) =>
-      s.status === "stopped" ? s : { ...s, status: "stopped", endedAt: new Date().toISOString() },
+      FINISHED.has(s.status) ? s : { ...s, status: "stopped", endedAt: new Date().toISOString() },
     );
   }
 

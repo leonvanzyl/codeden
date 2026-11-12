@@ -174,6 +174,9 @@ export function createMockClient(opts: MockClientOptions = {}): CodeDenClient {
     async stopSession(sessionId) {
       queue.clear(sessionId);
       running.get(sessionId)?.cancel();
+      // Like the server: a session that already finished keeps its status.
+      const status = world.snapshot.sessions.find((s) => s.id === sessionId)?.status;
+      if (status === "completed" || status === "failed" || status === "stopped") return;
       world.updateSession(sessionId, { status: "stopped", endedAt: new Date().toISOString() });
     },
     async forkSession(sessionId, req) {
