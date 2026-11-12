@@ -83,7 +83,10 @@ export class CodexSession implements ProviderSession {
       }
       this.events.push(event);
     };
-    this.mapper = new CodexEventMapper(opts.sessionId, emit);
+    this.mapper = new CodexEventMapper(opts.sessionId, emit, {
+      // An agent Stop cancelled before it ran started a turn after all: stop that too.
+      stopTurn: (codexThreadId, turnId) => void this.stopSubagentTurn(codexThreadId, turnId),
+    });
     this.mapper.codexThreadId = opts.resumeToken;
     this.broker = new ApprovalBroker(emit);
     this.autonomy = opts.autonomy;
@@ -156,22 +159,49 @@ export class CodexSession implements ProviderSession {
   }
 
   /**
-   * Stop the running turn. If app-server doesn't end it in time (or never answers
-   * `turn/interrupt` at all), the turn is closed as interrupted anyway.
+   * Stop the running turn and every sub-agent: Stop means the whole session, so the agents it
+   * spawned stop too, also once the session's own turn has ended. Running sub-agent turns are
+   * interrupted; agents with no turn yet (a pending spawn) are cancelled, and a turn one of
+   * them starts before the session's next turn is interrupted when it starts. Each turn that
+   * app-server doesn't end in time (or never answers `turn/interrupt` for) is closed as
+   * interrupted anyway; a deadline only closes that same turn, never later work.
    */
   async interrupt(): Promise<void> {
-    const turnId = this.mapper.currentTurnId;
     const rpc = this.rpc;
-    if (!turnId || !rpc) return;
+    if (!rpc) return;
+    const turnId = this.mapper.currentTurnId;
+    const children = this.mapper.stopSubagents();
+    if (!turnId && children.length === 0) return;
     this.broker.cancelAll();
-    await interruptWithDeadline(
-      () => rpc.request("turn/interrupt", { threadId: this.threadId(), turnId }),
-      this.config.interruptTimeoutMs ?? 10_000,
-      () => {
-        if (this.mapper.currentTurnId === turnId)
-          this.mapper.endTurn({ type: "interrupted" }, turnId);
-      },
+    const stops = children.map((c) => this.stopSubagentTurn(c.codexThreadId, c.turnId));
+    if (turnId) {
+      stops.push(
+        interruptWithDeadline(
+          () => rpc.request("turn/interrupt", { threadId: this.threadId(), turnId }),
+          this.interruptTimeoutMs(),
+          () => {
+            if (this.mapper.currentTurnId === turnId)
+              this.mapper.endTurn({ type: "interrupted" }, turnId);
+          },
+        ),
+      );
+    }
+    await Promise.all(stops);
+  }
+
+  /** Interrupt one sub-agent turn, closing it at the deadline if it is still that turn. */
+  private stopSubagentTurn(codexThreadId: string, turnId: string): Promise<void> {
+    const rpc = this.rpc;
+    if (!rpc) return Promise.resolve();
+    return interruptWithDeadline(
+      () => rpc.request("turn/interrupt", { threadId: codexThreadId, turnId }),
+      this.interruptTimeoutMs(),
+      () => this.mapper.endSubagentTurn(codexThreadId, turnId, { type: "interrupted" }),
     );
+  }
+
+  private interruptTimeoutMs(): number {
+    return this.config.interruptTimeoutMs ?? 10_000;
   }
 
   async respond(requestId: string, response: RuntimeResponse): Promise<void> {
@@ -182,7 +212,7 @@ export class CodexSession implements ProviderSession {
     if (this.closed) return;
     this.closed = true;
     this.broker.cancelAll();
-    this.mapper.endTurn({ type: "interrupted" });
+    this.mapper.endAll({ type: "interrupted" });
     this.events.close();
     await this.rpc?.close();
   }
@@ -231,7 +261,7 @@ export class CodexSession implements ProviderSession {
               ...(this.opts.ownBranch ? { ownBranch: this.opts.ownBranch } : {}),
             },
             autonomy: () => (this.opts.readOnly ? "read_only" : this.autonomy),
-            ctx: (turnId) => ({ threadId: this.mapper.rootThreadId, turnId }),
+            ctx: (threadId, turnId) => this.mapper.requestCtx(threadId, turnId),
             filePaths: (itemId) => this.filePaths.get(itemId),
           }),
         onExit: (code, stderr) => this.onExit(code, stderr),
@@ -350,7 +380,8 @@ export class CodexSession implements ProviderSession {
   private onExit(code: number | null, stderr: string): void {
     if (this.closed) return;
     this.broker.cancelAll();
-    this.mapper.endTurn({
+    // Sub-agents ran in the same process: their turns end with it.
+    this.mapper.endAll({
       type: "failed",
       code: "provider_exited",
       // The next message starts app-server again and resumes the thread.

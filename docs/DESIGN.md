@@ -186,6 +186,7 @@ interface ProviderSession {
   - **Methods:** threads, turns, items, approvals and steering.
   - **Types:** protocol types are generated from the installed Codex version.
   - **Permissions:** sandbox and approval policies map onto CodeDen's autonomy levels (§11.2).
+  - **Subagents:** an agent Codex spawns (a `collabAgentToolCall` spawn, or a `subAgentActivity` start) becomes a subagent card, and the spawned agent's thread, whose notifications arrive under its own thread id, becomes the card's child thread. The card follows the agent's turns, its approvals go to the child thread, and its calls to other agents (message, wait, close) show as tool calls named after their targets. Threads no spawn claims are not shown.
   - **CodeDen tools:** the MCP server is injected through config overrides.
 - **Fake and Replay** (development and tests only):
   - **Fake** is a scripted provider for demos and deterministic tests.

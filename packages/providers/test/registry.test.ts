@@ -8,7 +8,7 @@ describe("provider registry", () => {
     const claude = getProvider("claude");
     const codex = getProvider("codex");
     expect(claude?.capabilities()).toMatchObject({ subagents: true, planMode: true, steer: true });
-    expect(codex?.capabilities()).toMatchObject({ subagents: false, planMode: false, steer: true });
+    expect(codex?.capabilities()).toMatchObject({ subagents: true, planMode: false, steer: true });
     for (const p of listProviders()) {
       ProviderInfo.parse(providerInfo(p));
       expect(p.utilityModel?.().providerId).toBe(p.id);
