@@ -40,7 +40,7 @@ describe("agent configuration contracts", () => {
       enabled: false,
       extra: { startup_timeout_sec: 20 },
     });
-    roundTrip(LoadedAgentConfig, {
+    const loaded: LoadedAgentConfig = {
       sessionId: "s1",
       provider: "claude",
       cwd: "C:/repo",
@@ -59,7 +59,39 @@ describe("agent configuration contracts", () => {
           projectId: null,
         },
       ],
-    });
+      hooks: {
+        sources: [
+          {
+            provider: "claude",
+            scope: "local",
+            projectId: "p1",
+            file: "C:/repo/.claude/settings.local.json",
+            exists: true,
+            disableAllHooks: true,
+          },
+        ],
+        hooks: [
+          {
+            provider: "claude",
+            scope: "local",
+            projectId: "p1",
+            file: "C:/repo/.claude/settings.local.json",
+            event: "PreToolUse",
+            matcher: "Bash",
+            handler: { type: "command", command: "./guard.sh", timeout: 5 },
+            enabled: true,
+            groupIndex: 0,
+            handlerIndex: 0,
+          },
+        ],
+        disabledBy: "C:/repo/.claude/settings.local.json",
+      },
+    };
+    roundTrip(LoadedAgentConfig, loaded);
+    // Providers without native hooks report null, which is kept (not dropped).
+    roundTrip(LoadedAgentConfig, { ...loaded, provider: "codex", hooks: null });
+    const { hooks: _, ...withoutHooks } = loaded;
+    expect(LoadedAgentConfig.safeParse(withoutHooks).success).toBe(false);
   });
 
   it("round-trips hooks and keeps unknown handler fields", () => {

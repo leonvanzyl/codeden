@@ -56,6 +56,7 @@ const key = (l: AgentConfigLocator) => `cfg:${l.root}:${l.projectId ?? ""}:${l.p
 
 function mockAgentConfig(world: MockWorld): AgentConfigApi {
   let servers: McpServerEntry[] = structuredClone(mcpServers);
+  const hooksApi = mockHooksApi(naiveDiff);
   const content = (l: AgentConfigLocator) =>
     world.files.get(key(l)) ?? configContents[l.path] ?? "";
   const read = (l: AgentConfigLocator): AgentConfigFileContent => {
@@ -114,9 +115,11 @@ function mockAgentConfig(world: MockWorld): AgentConfigApi {
       const show = (v: unknown) => (v ? JSON.stringify({ [req.name]: v }, null, 2) : "");
       return delay(naiveDiff("mcp", show(before?.spec), show(req.spec)));
     },
-    ...mockHooksApi(naiveDiff),
-    loaded: (sessionId) => {
+    ...hooksApi,
+    loaded: async (sessionId) => {
       const files = configFiles.filter((f) => f.exists);
+      // The storefront project's hooks; the disabled ones (on the shelf) don't run.
+      const hooks = await hooksApi.listHooks("p-storefront");
       return delay({
         sessionId,
         provider: "claude",
@@ -133,6 +136,11 @@ function mockAgentConfig(world: MockWorld): AgentConfigApi {
           })),
         subagents: files.filter((f) => f.kind === "subagent"),
         mcpServers: servers.filter((s) => s.provider !== "codex"),
+        hooks: {
+          sources: hooks.sources,
+          hooks: hooks.hooks.filter((h) => h.enabled),
+          disabledBy: null,
+        },
       });
     },
   };

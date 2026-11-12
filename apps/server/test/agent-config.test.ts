@@ -385,6 +385,8 @@ describe("agent configuration API", () => {
       (await h.api("GET", `/sessions/${sessionId}/agent-config/loaded`)).body,
     );
     expect(loaded.mcpServers.map((s) => s.name)).toContain("codeden");
+    // The Fake provider has no native hooks.
+    expect(loaded.hooks).toBeNull();
   });
 
   it("applies Claude's and Codex's discovery rules from a working directory", () => {

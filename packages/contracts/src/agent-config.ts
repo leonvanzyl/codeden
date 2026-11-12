@@ -225,32 +225,4 @@ export const McpServerWriteResponse = z.object({
 });
 export type McpServerWriteResponse = z.infer<typeof McpServerWriteResponse>;
 
-// ------------------------------------------------------------------------- what's loaded
-
-/** A skill folder (its `SKILL.md`). */
-export const AgentSkill = z.object({
-  provider: AgentConfigProvider,
-  scope: AgentConfigScope,
-  name: z.string(),
-  description: z.string().optional(),
-  file: AgentConfigFile,
-});
-export type AgentSkill = z.infer<typeof AgentSkill>;
-
-/**
- * `GET /api/sessions/:id/agent-config/loaded`: what the session's provider loads into its
- * context from its working directory, in load order. Computed from each provider's discovery
- * rules (not reported by the provider).
- */
-export const LoadedAgentConfig = z.object({
-  sessionId: Id,
-  provider: z.string(),
-  cwd: z.string(),
-  /** Memory, rule and auto-memory files that exist, broadest scope first. */
-  memory: z.array(AgentConfigFile),
-  skills: z.array(AgentSkill),
-  subagents: z.array(AgentConfigFile),
-  /** Enabled MCP servers, including CodeDen's own. */
-  mcpServers: z.array(McpServerEntry),
-});
-export type LoadedAgentConfig = z.infer<typeof LoadedAgentConfig>;
+// The "what's loaded" view of a session is in `agent-config-loaded.ts`.

@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { formToHandler } from "@/components/agents/hook-form";
 import { HooksList } from "@/components/agents/hooks-list";
@@ -139,6 +139,36 @@ describe("LoadedConfig", () => {
     expect(screen.getByText("code-reviewer")).toBeTruthy();
     expect(screen.getByText("CLAUDE.md")).toBeTruthy();
     expect(screen.getAllByText("built in").length).toBeGreaterThan(0);
+    // Hooks that apply: event and matcher, what runs, and a link to the Hooks tab.
+    const hooks = within(screen.getByTestId("loaded-hooks"));
+    expect(hooks.getByText("PreToolUse · Bash")).toBeTruthy();
+    expect(hooks.getByText("~/.claude/hooks/block-rm-rf.sh")).toBeTruthy();
+    expect(hooks.getByText("prompt: Did the agent run the tests?")).toBeTruthy();
+    const edit = hooks.getByRole("link", { name: "Edit hooks" }) as HTMLAnchorElement;
+    expect(edit.getAttribute("href")).toContain("tab=hooks");
+    expect(edit.getAttribute("href")).toContain("project=p-storefront");
+  });
+
+  it("says when disableAllHooks turns hooks off, and hides hooks for providers without them", async () => {
+    const client = createMockClient();
+    const base = await client.agentConfig.loaded("s1");
+    if (!base.hooks) throw new Error("The mock session has hooks");
+    const user = "C:\\Users\\you\\.claude\\settings.json";
+    const loaded = vi.spyOn(client.agentConfig, "loaded");
+    loaded.mockResolvedValueOnce({ ...base, hooks: { ...base.hooks, disabledBy: user } });
+    const first = renderWithClient(<LoadedConfig sessionId="s1" projectId={null} />, client, {
+      withRouter: true,
+    });
+    expect(await screen.findByText(/Hooks are off for this session/)).toBeTruthy();
+    expect(screen.getAllByText(user).length).toBeGreaterThan(0);
+    first.unmount();
+
+    loaded.mockResolvedValueOnce({ ...base, provider: "codex", hooks: null });
+    renderWithClient(<LoadedConfig sessionId="s2" projectId={null} />, client, {
+      withRouter: true,
+    });
+    expect(await screen.findByText("frontend-design")).toBeTruthy();
+    expect(screen.queryByTestId("loaded-hooks")).toBeNull();
   });
 });
 

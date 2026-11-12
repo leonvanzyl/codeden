@@ -9,6 +9,7 @@ import {
   type HookEntry,
   type HookListResponse,
   type HookWriteResponse,
+  type LoadedHooks,
   providersWith,
   type ShelvedHook,
 } from "@codeden/contracts";
@@ -19,7 +20,9 @@ import type { HookShelf } from "./hook-shelf";
 import {
   addHook,
   claudeHookFile,
+  claudeSessionHookFiles,
   type HookFile,
+  type ReadHooks,
   readHookFile,
   removeHook,
   renderHookChange,
@@ -61,15 +64,7 @@ export class AgentConfigHooks {
     const project = projectId ? this.deps.project(projectId) : null;
     const scopes: AgentConfigScope[] = project ? ["user", "project", "local"] : ["user"];
     const read = providersWith("hooks").flatMap((provider) =>
-      scopes.map((scope) => {
-        const file = this.fileFor(provider, scope, project);
-        try {
-          guard(file);
-        } catch (error) {
-          return { source: unusableSource(file, errorMessage(error)), hooks: [] };
-        }
-        return readHookFile(file);
-      }),
+      scopes.map((scope) => readGuarded(this.fileFor(provider, scope, project))),
     );
     const shelved = this.deps.shelf
       .list()
@@ -79,6 +74,26 @@ export class AgentConfigHooks {
     return {
       sources: read.map((r) => r.source),
       hooks: [...read.flatMap((r) => r.hooks), ...shelved],
+    };
+  }
+
+  /**
+   * The hooks that apply to a session in `cwd` (What's loaded): the settings files for that
+   * folder, read like `list` (a file whose link leads outside its folder is reported, not read),
+   * and the file whose `disableAllHooks: true` wins after precedence. Claude Code is the only
+   * provider with hooks today (`agentConfigFeatures`), so these are its files.
+   */
+  forSession(cwd: string, gitRoot: string | null, projectId: string | null): LoadedHooks {
+    const read = claudeSessionHookFiles(this.deps.home, cwd, gitRoot, projectId).map(readGuarded);
+    // Highest precedence first: local, then project, then user. Both local files come last in
+    // `read` with the repository-root one first, and it wins over the older one in `cwd`.
+    const local = read.filter((r) => r.source.scope === "local");
+    const byPrecedence = [...local, ...read.filter((r) => r.source.scope !== "local").reverse()];
+    const decides = byPrecedence.find((r) => r.disableAllHooks !== undefined);
+    return {
+      sources: read.map((r) => r.source),
+      hooks: read.flatMap((r) => r.hooks),
+      disabledBy: decides?.disableAllHooks ? decides.source.file : null,
     };
   }
 
@@ -231,6 +246,16 @@ function guard(f: HookFile): void {
       "path_outside_root",
     );
   }
+}
+
+/** Read a settings file for hooks, or report it as unusable when `guard` refuses it. */
+function readGuarded(file: HookFile): ReadHooks {
+  try {
+    guard(file);
+  } catch (error) {
+    return { source: unusableSource(file, errorMessage(error)), hooks: [] };
+  }
+  return readHookFile(file);
 }
 
 function shelvedEntry(s: ShelvedHook): HookEntry {

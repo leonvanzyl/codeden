@@ -1,16 +1,18 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import type {
-  AgentConfigDiff,
-  AgentConfigListQuery,
-  AgentConfigListResponse,
-  AgentConfigLocator,
-  LoadedAgentConfig,
-  McpServerDiffRequest,
-  McpServerEntry,
-  McpServerTarget,
-  McpServerUpsertRequest,
-  McpServerWriteResponse,
+import {
+  type AgentConfigDiff,
+  type AgentConfigListQuery,
+  type AgentConfigListResponse,
+  type AgentConfigLocator,
+  AgentConfigProvider,
+  agentConfigFeatures,
+  type LoadedAgentConfig,
+  type McpServerDiffRequest,
+  type McpServerEntry,
+  type McpServerTarget,
+  type McpServerUpsertRequest,
+  type McpServerWriteResponse,
 } from "@codeden/contracts";
 import { badRequest } from "../errors";
 import type { ProjectService } from "../projects/project-service";
@@ -136,7 +138,12 @@ export class AgentConfigService {
       const user = readServers(sourceFor({ provider: "codex", scope: "user" }, home, null));
       mcpServers.push(...user.filter((s) => s.spec.enabled !== false));
     }
-    return { sessionId, provider: session.provider, cwd, ...files, mcpServers };
+    const provider = AgentConfigProvider.safeParse(session.provider);
+    const hooks =
+      provider.success && agentConfigFeatures[provider.data].hooks
+        ? this.hooks.forSession(cwd, gitRoot, session.projectId)
+        : null;
+    return { sessionId, provider: session.provider, cwd, ...files, mcpServers, hooks };
   }
 
   // ------------------------------------------------------------------- helpers

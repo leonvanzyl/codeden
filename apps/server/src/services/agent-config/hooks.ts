@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import {
   type AgentConfigProvider,
@@ -11,6 +11,7 @@ import {
 } from "@codeden/contracts";
 import { conflict, notFound, ServiceError } from "../errors";
 import { setTopLevelMember } from "./json-edit";
+import { mainRepoRoot } from "./paths";
 
 /**
  * Hooks in Claude Code's settings files (§12.4): read the `hooks` key, and render changes to it
@@ -69,6 +70,41 @@ export function claudeHookFile(
   };
 }
 
+/**
+ * The Claude Code settings files that apply to a session in `cwd`, lowest precedence first
+ * (What's loaded, §12.4):
+ * - user: `~/.claude/settings.json`;
+ * - project: `<cwd>/.claude/settings.json`, with no fallback to parent folders;
+ * - local: `.claude/settings.local.json` at the repository root (the main checkout's root for a
+ *   worktree), or beside the shared file on Windows, outside a git repository, or when the
+ *   repository root is the home folder. With the root file, a local file an older Claude Code
+ *   left in `cwd` is still read, so it is listed after the root one (which wins over it).
+ * `platform` is a parameter so both placements can be tested on any OS.
+ */
+export function claudeSessionHookFiles(
+  home: string,
+  cwd: string,
+  gitRoot: string | null,
+  projectId: string | null,
+  platform: NodeJS.Platform = process.platform,
+): HookFile[] {
+  const inFolder = (scope: AgentConfigScope, root: string, name: string): HookFile => ({
+    provider: "claude",
+    scope,
+    projectId,
+    root,
+    file: join(root, ".claude", name),
+  });
+  const files = [claudeHookFile("user", home, null), inFolder("project", cwd, "settings.json")];
+  const repoRoot = gitRoot ? mainRepoRoot(gitRoot) : null;
+  const atRoot = repoRoot !== null && platform !== "win32" && resolve(repoRoot) !== resolve(home);
+  if (!atRoot) return [...files, inFolder("local", cwd, "settings.local.json")];
+  const local = inFolder("local", repoRoot, "settings.local.json");
+  const legacy = inFolder("local", cwd, "settings.local.json");
+  const keepLegacy = resolve(legacy.file) !== resolve(local.file) && existsSync(legacy.file);
+  return [...files, local, ...(keepLegacy ? [legacy] : [])];
+}
+
 /** A source that can't be read or written, with why (unparsable, or outside its folder). */
 export function unusableSource(f: HookFile, error: string): HookSource {
   return {
@@ -103,8 +139,16 @@ function load(file: string): Loaded {
   return { text, doc };
 }
 
+/** A settings file read for hooks. */
+export interface ReadHooks {
+  source: HookSource;
+  hooks: HookEntry[];
+  /** The `disableAllHooks` value the file sets (true or false); absent when it doesn't set one. */
+  disableAllHooks?: boolean;
+}
+
 /** The file as a source, and the hooks it defines (malformed entries are skipped). */
-export function readHookFile(f: HookFile): { source: HookSource; hooks: HookEntry[] } {
+export function readHookFile(f: HookFile): ReadHooks {
   const base = { provider: f.provider, scope: f.scope, projectId: f.projectId, file: f.file };
   let loaded: Loaded;
   try {
@@ -115,6 +159,8 @@ export function readHookFile(f: HookFile): { source: HookSource; hooks: HookEntr
   }
   const { text, doc } = loaded;
   const source = { ...base, exists: text !== null, disableAllHooks: doc.disableAllHooks === true };
+  const disableAllHooks =
+    typeof doc.disableAllHooks === "boolean" ? { disableAllHooks: doc.disableAllHooks } : {};
   const hooks: HookEntry[] = [];
   for (const [event, groups] of Object.entries(isRecord(doc.hooks) ? doc.hooks : {})) {
     if (!Array.isArray(groups)) continue;
@@ -136,7 +182,7 @@ export function readHookFile(f: HookFile): { source: HookSource; hooks: HookEntr
       });
     });
   }
-  return { source, hooks };
+  return { source, hooks, ...disableAllHooks };
 }
 
 /** The file text before and after applying `mutate` to its `hooks` object. */
