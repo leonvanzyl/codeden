@@ -2,6 +2,7 @@ import { tmpdir } from "node:os";
 import type { SessionOptions } from "@codeden/contracts";
 import { FakeProvider, ProviderRegistry } from "@codeden/providers";
 import { afterEach, describe, expect, it } from "vitest";
+import { CommandError } from "../src/errors";
 import { SessionHost } from "../src/session-host";
 
 const options: SessionOptions = {
@@ -38,9 +39,9 @@ describe("session.send", () => {
       });
     // The Fake provider's turn waits on an approval, so it keeps running.
     await send("hold on [approval]");
-    await expect(send("a second message")).rejects.toMatchObject({
-      code: "turn_running",
-      message: "A turn is already running",
-    });
+    // A `CommandError`: the connection answers with its code (anything else is `command_failed`).
+    const refused = await send("a second message").catch((error: unknown) => error);
+    expect(refused).toBeInstanceOf(CommandError);
+    expect(refused).toMatchObject({ code: "turn_running", message: "A turn is already running" });
   });
 });
