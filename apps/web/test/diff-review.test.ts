@@ -4,6 +4,7 @@ import {
   diffScopeKey,
   fenceFor,
   formatReviewMessage,
+  labelCommentButtons,
   parsePatchRows,
   type ReviewEntry,
   rangeLabel,
@@ -142,6 +143,23 @@ describe("captureRange", () => {
     const { range, quote } = captureRange(patch, { start: 90, side: "additions", end: 80 });
     expect(range).toEqual({ start: 80, side: "additions", end: 90, endSide: "additions" });
     expect(quote).toEqual([]);
+  });
+});
+
+describe("labelCommentButtons", () => {
+  it("names the diff view's + button inside its shadow root", () => {
+    const card = document.createElement("div");
+    const view = document.createElement("diffs-container");
+    card.append(view);
+    const root = view.attachShadow({ mode: "open" });
+    const plus = document.createElement("button");
+    plus.setAttribute("data-utility-button", "");
+    const other = document.createElement("button");
+    root.append(plus, other);
+    labelCommentButtons(card);
+    expect(plus.getAttribute("aria-label")).toBe("Comment");
+    expect(plus.title).toBe("Comment (drag for several lines)");
+    expect(other.hasAttribute("aria-label")).toBe(false);
   });
 });
 

@@ -1,16 +1,16 @@
 import type { Session, SessionStatus } from "@codeden/contracts";
 import type { DiffLineAnnotation } from "@pierre/diffs";
-import { useMutation } from "@tanstack/react-query";
 import { MessageSquare, Pencil, SendHorizontal, Trash2 } from "lucide-react";
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useClient } from "@/lib/api";
-import { type DiffSide, formatReviewMessage, rangeLabel } from "@/lib/diff-review";
+import { type DiffSide, labelCommentButtons, rangeLabel } from "@/lib/diff-review";
 import { sendToSession } from "@/lib/send-to-session";
 import {
   hasUnsavedEdit,
+  isSending,
   type ReviewComment,
   savedComments,
   sessionComments,
@@ -47,6 +47,26 @@ export function useReviewAnnotations(
         : [],
     [spots],
   );
+}
+
+/**
+ * A ref for a file's diff card that labels the diff's "+" (see `labelCommentButtons`). The
+ * pointer and focus events come up out of the diff's shadow root, as the button appears.
+ */
+export function useCommentButtonLabels() {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const label = () => labelCommentButtons(el);
+    el.addEventListener("pointerover", label);
+    el.addEventListener("focusin", label);
+    return () => {
+      el.removeEventListener("pointerover", label);
+      el.removeEventListener("focusin", label);
+    };
+  }, []);
+  return ref;
 }
 
 /** The comments under one diff line: open editors and saved comments, in the order started. */
@@ -99,8 +119,10 @@ function focusWhenShown(el: HTMLTextAreaElement | null) {
 
 function CommentCard({ sessionId, comment }: { sessionId: string; comment: ReviewComment }) {
   const { setDraft, save, cancel, edit, remove } = useDiffReviewStore.getState();
+  // A comment on its way to the agent reads as sent: no editing until the review settles.
+  const locked = useDiffReviewStore((s) => isSending(s, sessionId, comment.id));
   const label = rangeLabel(comment.range);
-  const editing = comment.draft !== undefined;
+  const editing = comment.draft !== undefined && !locked;
   return (
     <div
       className="max-w-[46rem] rounded-lg border border-border bg-card text-xs text-foreground shadow-xs"
@@ -109,7 +131,8 @@ function CommentCard({ sessionId, comment }: { sessionId: string; comment: Revie
       <div className="flex items-center gap-1.5 px-2.5 pt-1.5 text-3xs text-muted-foreground">
         <MessageSquare className="size-3" />
         <span className="flex-1 truncate">Comment on {label}</span>
-        {!editing && (
+        {locked && <span className="py-1">Sending…</span>}
+        {!editing && !locked && (
           <>
             <Button
               size="icon-xs"
@@ -182,24 +205,23 @@ function CommentCard({ sessionId, comment }: { sessionId: string; comment: Revie
 export function ReviewBar({ session, scopeKey }: { session: Session; scopeKey: string }) {
   const client = useClient();
   const all = useDiffReviewStore((s) => sessionComments(s, session.id));
-  const { remove, clear } = useDiffReviewStore.getState();
+  // In the store, not this component: leaving the panel mid-send keeps Send disabled.
+  const sending = useDiffReviewStore((s) => s.sending[session.id] !== undefined);
   const saved = savedComments(all);
   const unsaved = hasUnsavedEdit(all);
   const elsewhere = saved.filter((c) => c.scopeKey !== scopeKey).length;
-  const send = useMutation({
-    mutationFn: (comments: ReviewComment[]) =>
-      sendToSession(client, session, { text: formatReviewMessage(comments) }, "queue"),
-    onSuccess: (_d, comments) => {
-      remove(
-        session.id,
-        comments.map((c) => c.id),
-      );
-      if (busyStatuses.includes(session.status))
-        toast("Review queued", { description: "It's sent when the current turn ends." });
-      else toast("Review sent to the agent");
-    },
-    onError: (e) => toast.error("Review not sent", { description: e.message }),
-  });
+  const send = () => {
+    const busy = busyStatuses.includes(session.status);
+    useDiffReviewStore
+      .getState()
+      .sendReview(session.id, (text) => sendToSession(client, session, { text }, "queue"))
+      .then((result) => {
+        if (result !== "sent") return;
+        if (busy) toast("Review queued", { description: "It's sent when the current turn ends." });
+        else toast("Review sent to the agent");
+      })
+      .catch((e: Error) => toast.error("Review not sent", { description: e.message }));
+  };
   if (saved.length === 0) return null;
   return (
     <div
@@ -220,10 +242,10 @@ export function ReviewBar({ session, scopeKey }: { session: Session; scopeKey: s
           variant="ghost"
           size="sm"
           className="text-xs text-muted-foreground"
-          disabled={send.isPending}
+          disabled={sending}
           onClick={() => {
             if (window.confirm(`Discard ${plural(all.length, "draft comment")}?`))
-              clear(session.id);
+              useDiffReviewStore.getState().clear(session.id);
           }}
         >
           Discard
@@ -231,15 +253,15 @@ export function ReviewBar({ session, scopeKey }: { session: Session; scopeKey: s
         <Button
           size="sm"
           className="text-xs"
-          disabled={send.isPending || unsaved}
+          disabled={sending || unsaved}
           title={
             unsaved
               ? "Save or cancel the comment you're editing first"
               : "Send every comment to the agent as one message"
           }
-          onClick={() => send.mutate(saved)}
+          onClick={send}
         >
-          <SendHorizontal /> Send to agent
+          <SendHorizontal /> {sending ? "Sending…" : "Send to agent"}
         </Button>
       </div>
     </div>

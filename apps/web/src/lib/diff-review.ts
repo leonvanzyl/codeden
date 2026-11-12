@@ -5,6 +5,21 @@ import type { DiffScope } from "@codeden/contracts";
  * rows of a unified patch, quoting the rows a comment covers, and writing the message.
  */
 
+/**
+ * Give the diff view's own "+" (its gutter button, drawn inside each `diffs-container`'s
+ * shadow root) the Comment label and tooltip it lacks. The view creates the button when a
+ * line is first hovered and reuses it, so call this on pointer and focus events.
+ */
+export function labelCommentButtons(host: ParentNode): void {
+  for (const view of host.querySelectorAll("diffs-container")) {
+    const buttons = view.shadowRoot?.querySelectorAll("[data-utility-button]:not([aria-label])");
+    for (const button of buttons ?? []) {
+      button.setAttribute("aria-label", "Comment");
+      button.setAttribute("title", "Comment (drag for several lines)");
+    }
+  }
+}
+
 /** Which diff view a comment belongs to: the whole session, uncommitted work or one turn. */
 export function diffScopeKey(scope: DiffScope): string {
   return scope.kind === "turn" ? `turn:${scope.turnId}` : scope.kind;

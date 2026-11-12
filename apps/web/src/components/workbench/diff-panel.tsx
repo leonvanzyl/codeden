@@ -31,7 +31,12 @@ import { useSession } from "@/lib/queries";
 import { cn } from "@/lib/utils";
 import { sessionComments, useDiffReviewStore } from "@/stores/diff-review";
 import { useResolvedTheme } from "@/stores/theme";
-import { LineComments, ReviewBar, useReviewAnnotations } from "./diff-review";
+import {
+  LineComments,
+  ReviewBar,
+  useCommentButtonLabels,
+  useReviewAnnotations,
+} from "./diff-review";
 import { GitBar } from "./git-bar";
 
 function scopeLabel(scope: DiffScope, turns: { id: string; label: string }[]): string {
@@ -225,6 +230,7 @@ function FilePatch({
   onRestore?: () => void;
 }) {
   const annotations = useReviewAnnotations(sessionId, file.path, scopeKey);
+  const card = useCommentButtonLabels();
   // Lines picked with the line numbers; otherwise the open comment's lines stay highlighted.
   const [picked, setPicked] = useState<SelectedLineRange | null>(null);
   // The range object is kept while its comment is typed, so typing doesn't re-render the diff.
@@ -247,6 +253,7 @@ function FilePatch({
     <div
       className="group relative overflow-hidden rounded-lg border border-border"
       data-file={file.path}
+      ref={card}
     >
       {onRestore && (
         <Button
