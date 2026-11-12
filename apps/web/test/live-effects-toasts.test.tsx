@@ -1,10 +1,24 @@
-import type { EventEnvelope, InboxItem, Session, Snapshot } from "@codeden/contracts";
+import type {
+  CodedenDesktopApi,
+  EventEnvelope,
+  InboxItem,
+  Session,
+  Settings,
+  Snapshot,
+} from "@codeden/contracts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { Toaster, toast } from "sonner";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { LiveEffects } from "@/components/shell/live-effects";
 import { makeSession } from "@/lib/api/mock/fixtures/helpers";
+import type { PlatformBridge } from "@/lib/platform";
+import { createDesktopPlatform } from "@/lib/platform-desktop";
+import {
+  createNotifier,
+  type NativeNotification,
+  type NativeNotificationOptions,
+} from "../../desktop/src/main/notifications";
 import { created, inboxItem, snapshot } from "./attention-fixtures";
 
 /**
@@ -15,6 +29,8 @@ import { created, inboxItem, snapshot } from "./attention-fixtures";
 const live = vi.hoisted(() => ({
   listener: null as ((env: EventEnvelope) => void) | null,
   snap: null as Snapshot | null,
+  /** The platform under test; null is an in-app, focused window. */
+  platform: null as Pick<PlatformBridge, "isFocused" | "notify"> | null,
 }));
 const navigate = vi.hoisted(() => vi.fn());
 
@@ -35,7 +51,11 @@ vi.mock("@/lib/queries", () => ({
   useSnapshot: () => ({ data: live.snap }),
 }));
 vi.mock("@/lib/platform", () => ({
-  platform: { setBadge: () => {}, isFocused: () => true, notify: () => {} },
+  platform: {
+    setBadge: () => {},
+    isFocused: () => live.platform?.isFocused() ?? true,
+    notify: (...args: Parameters<PlatformBridge["notify"]>) => live.platform?.notify(...args),
+  },
 }));
 
 const ts = "2026-11-12T10:00:00.000Z";
@@ -73,8 +93,8 @@ const runFailed = (session: Session): InboxItem =>
     body: "The agent stopped after a failed command.",
   });
 
-function setup() {
-  live.snap = snapshot(1, []);
+function setup(notifications: Partial<Settings["notifications"]> = {}) {
+  live.snap = snapshot(1, [], notifications);
   const queryClient = new QueryClient();
   queryClient.setQueryData(["snapshot"], live.snap);
   render(
@@ -102,7 +122,56 @@ async function toastCount(): Promise<number> {
 afterEach(() => {
   act(() => toast.dismiss());
   navigate.mockReset();
+  live.platform = null;
 });
+
+/**
+ * The desktop app in the background, end to end below the UI: the real desktop platform
+ * bridge, the preload's click channel, and the main process's notifier over fake native
+ * notifications.
+ */
+function backgroundDesktop() {
+  const shown: Array<{ opts: NativeNotificationOptions; onScreen: boolean; click(): void }> = [];
+  const clickListeners: Array<(tag: string) => void> = [];
+  const notifier = createNotifier(
+    (opts): NativeNotification => {
+      const clicks: Array<() => void> = [];
+      const entry = {
+        opts,
+        onScreen: false,
+        click: () => {
+          for (const l of clicks) l();
+        },
+      };
+      shown.push(entry);
+      return {
+        on: (event, listener) => {
+          if (event === "click") clicks.push(listener);
+        },
+        show: () => {
+          entry.onScreen = true;
+        },
+        close: () => {
+          entry.onScreen = false;
+        },
+      };
+    },
+    (tag) => {
+      if (tag) for (const l of clickListeners) l(tag);
+    },
+  );
+  const api = {
+    notify: (n: { title: string; body?: string; tag?: string }) =>
+      notifier.show({ title: n.title, body: n.body ?? "", tag: n.tag }),
+    onNotificationClick: (l: (tag: string) => void) => {
+      clickListeners.push(l);
+      return () => {};
+    },
+  } as unknown as CodedenDesktopApi;
+  const web = { isFocused: () => false, capabilities: {} } as unknown as PlatformBridge;
+  live.platform = createDesktopPlatform(api, web);
+  return { shown, onScreen: () => shown.filter((n) => n.onScreen) };
+}
 
 describe("toasts while a dark factory runs (#97)", () => {
   it("does not toast a factory decision that needed nothing from the owner", async () => {
@@ -198,6 +267,33 @@ describe("toasts while a dark factory runs (#97)", () => {
     expect(navigate).toHaveBeenCalledWith({
       to: "/inbox",
       search: { item: "inbox:factory-ready:f1" },
+    });
+  });
+
+  it("keeps a burst as one system notification in the background desktop app, and opens it once", async () => {
+    const desktop = backgroundDesktop();
+    const { emit } = setup({ browser: true });
+    for (let i = 1; i <= 5; i++) emit(created(i + 1, runFailed(agent(`s-b${i}`, "failed"))));
+    expect(desktop.shown).toHaveLength(5);
+    expect(desktop.onScreen().map((n) => n.opts.title)).toEqual(["5 failures need a look"]);
+    // A replaced notification does nothing; the one on screen opens the inbox, once.
+    desktop.shown[0]?.click();
+    expect(navigate).not.toHaveBeenCalled();
+    desktop.shown[4]?.click();
+    desktop.shown[4]?.click();
+    expect(navigate).toHaveBeenCalledTimes(1);
+    expect(navigate).toHaveBeenCalledWith({ to: "/inbox", search: {} });
+  });
+
+  it("sends a single failure's system notification to its session", async () => {
+    const desktop = backgroundDesktop();
+    const { emit } = setup({ browser: true });
+    emit(created(2, runFailed(agent("s-b1", "failed"))));
+    expect(desktop.onScreen().map((n) => n.opts.title)).toEqual(["Run failed: Fix bug in s-b1"]);
+    desktop.shown[0]?.click();
+    expect(navigate).toHaveBeenCalledWith({
+      to: "/sessions/$sessionId",
+      params: { sessionId: "s-b1" },
     });
   });
 });

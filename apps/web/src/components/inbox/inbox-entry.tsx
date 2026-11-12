@@ -48,10 +48,14 @@ function MirroredRequest({ item }: { item: InboxItem }) {
   );
 }
 
-/** DOM id of an inbox entry, for scrolling it into view. */
+/** DOM id of an inbox entry (a conflict card too), for scrolling it into view. */
 export function inboxEntryId(itemId: string): string {
   return `inbox-item-${itemId}`;
 }
+
+/** The ring around the entry a toast's Open went to. */
+export const FOCUSED_ENTRY =
+  "rounded-xl ring-2 ring-primary/50 ring-offset-4 ring-offset-background";
 
 /**
  * One inbox item: context line, title, body, links, and the in-place answer (§11.1). `focused`
@@ -64,10 +68,7 @@ export function InboxEntry({ item, focused = false }: { item: InboxItem; focused
   return (
     <article
       id={inboxEntryId(item.id)}
-      className={cn(
-        resolved ? "opacity-60" : "animate-rise",
-        focused && "rounded-xl ring-2 ring-primary/50 ring-offset-4 ring-offset-background",
-      )}
+      className={cn(resolved ? "opacity-60" : "animate-rise", focused && FOCUSED_ENTRY)}
       data-kind={item.kind}
       data-focused={focused || undefined}
     >

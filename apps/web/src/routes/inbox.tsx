@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { CheckCheck, Inbox } from "lucide-react";
 import { useEffect, useState } from "react";
 import { EmptyState, SectionLabel } from "@/components/common/bits";
-import { InboxEntry, inboxEntryId } from "@/components/inbox/inbox-entry";
+import { FOCUSED_ENTRY, InboxEntry, inboxEntryId } from "@/components/inbox/inbox-entry";
 import { ConflictCard } from "@/components/project/conflict-card";
 import { useClient } from "@/lib/api";
 import { groupInbox, type InboxFilter, inboxCounts } from "@/lib/inbox";
@@ -25,25 +25,34 @@ export function InboxPage({ focusItemId }: { focusItemId?: string }) {
   const client = useClient();
   const items = useSnapshotData((s) => s.inbox, []);
   const [filter, setFilter] = useState<InboxFilter>("all");
-  const focusLoaded = focusItemId !== undefined && items.some((i) => i.id === focusItemId);
-
-  useEffect(() => {
-    if (!focusItemId || !focusLoaded) return;
-    setFilter("all");
-    // After the filter change has rendered the item.
-    const frame = requestAnimationFrame(() =>
-      document
-        .getElementById(inboxEntryId(focusItemId))
-        ?.scrollIntoView({ block: "center", behavior: "smooth" }),
-    );
-    return () => cancelAnimationFrame(frame);
-  }, [focusItemId, focusLoaded]);
   const conflicts = useQuery({ queryKey: ["conflicts"], queryFn: () => client.listConflicts() });
   const conflictList = conflicts.data ?? [];
   const groups = groupInbox(items, filter);
   const counts = inboxCounts(items, conflictList.length);
   const resolved = items.filter((i) => i.status !== "open").slice(0, 5);
   const showConflicts = (filter === "all" || filter === "asks") && conflictList.length > 0;
+
+  // A toast's Open: show every item, then scroll once the target has actually rendered, from
+  // the snapshot or (a conflict, whose record id is its inbox item id) the conflicts query.
+  useEffect(() => {
+    if (focusItemId) setFilter("all");
+  }, [focusItemId]);
+  const focusRendered =
+    focusItemId !== undefined &&
+    [
+      ...(showConflicts ? conflictList.map((c) => c.id) : []),
+      ...groups.flatMap((g) => g.items.map((i) => i.id)),
+      ...resolved.map((i) => i.id),
+    ].includes(focusItemId);
+  useEffect(() => {
+    if (!focusItemId || !focusRendered) return;
+    const frame = requestAnimationFrame(() =>
+      document
+        .getElementById(inboxEntryId(focusItemId))
+        ?.scrollIntoView({ block: "center", behavior: "smooth" }),
+    );
+    return () => cancelAnimationFrame(frame);
+  }, [focusItemId, focusRendered]);
 
   return (
     <>
@@ -78,7 +87,14 @@ export function InboxPage({ focusItemId }: { focusItemId?: string }) {
                   <SectionLabel className="mb-3">Conflicts · {conflictList.length}</SectionLabel>
                   <div className="space-y-4">
                     {conflictList.map((c) => (
-                      <ConflictCard key={c.id} conflict={c} />
+                      <div
+                        key={c.id}
+                        id={inboxEntryId(c.id)}
+                        className={cn(c.id === focusItemId && FOCUSED_ENTRY)}
+                        data-focused={c.id === focusItemId || undefined}
+                      >
+                        <ConflictCard conflict={c} />
+                      </div>
                     ))}
                   </div>
                 </section>
