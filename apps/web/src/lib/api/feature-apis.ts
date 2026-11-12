@@ -25,6 +25,9 @@ import type {
   GithubPrDetails,
   GithubPrsResponse,
   GithubSyncStatus,
+  HookChangeRequest,
+  HookListResponse,
+  HookWriteResponse,
   ImageEnginesResponse,
   ImageTestRequest,
   ImageTestResponse,
@@ -135,6 +138,11 @@ export interface AgentConfigApi {
   removeMcp(target: McpServerTarget): Promise<McpServerWriteResponse>;
   /** Preview an upsert (with `spec`) or a removal (without). */
   diffMcp(req: McpServerDiffRequest): Promise<AgentConfigDiff>;
+  /** Hooks in the settings files of providers that have them (user, plus the project's). */
+  listHooks(projectId: string | null): Promise<HookListResponse>;
+  /** Preview a hook change as a diff of its settings file. */
+  diffHook(req: HookChangeRequest): Promise<AgentConfigDiff>;
+  changeHook(req: HookChangeRequest): Promise<HookWriteResponse>;
   /** What a session's provider loads from its working directory. */
   loaded(sessionId: string): Promise<LoadedAgentConfig>;
 }

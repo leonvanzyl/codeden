@@ -424,6 +424,7 @@ export function createServices(opts: ServicesOptions): AppServices {
       projects,
       repo: sessionRepo,
       backupDir: join(opts.paths.backups, "agent-config"),
+      disabledHooksFile: opts.paths.disabledHooks,
       mcpProxyUrl: () => opts.runner.mcpProxyUrl(),
     }),
     github,

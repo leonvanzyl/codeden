@@ -20,7 +20,8 @@
     "desktop:build": "pnpm build && pnpm --filter @codeden/desktop package --dir",
     "desktop:dist": "pnpm build && pnpm --filter @codeden/desktop package",
     "e2e:desktop": "pnpm desktop:build && pnpm --filter @codeden/desktop e2e",
-    "db:generate": "pnpm --filter @codeden/server run db:generate"
+    "db:generate": "pnpm --filter @codeden/server run db:generate",
+    "changelog:preview": "node scripts/release/bump-version.mjs patch --dry-run"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.6",

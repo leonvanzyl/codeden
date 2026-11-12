@@ -12,6 +12,7 @@ import {
   PanelRight,
   Square,
   SquareTerminal,
+  Workflow,
   X,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -220,6 +221,11 @@ export function ThreadHeader({ session, running }: { session: Session; running: 
             <DropdownMenuItem onSelect={() => layout.openRightTab("details")}>
               <Bot /> Session details
             </DropdownMenuItem>
+            {actions.canMakeAutomation && (
+              <DropdownMenuItem onSelect={actions.makeAutomation}>
+                <Workflow /> Make an automation…
+              </DropdownMenuItem>
+            )}
             {session.role === "agent" && (
               <>
                 <DropdownMenuSeparator />

@@ -2,13 +2,33 @@ import { z } from "zod";
 import { Id, Timestamp } from "./common";
 
 /**
- * Agent configuration screens (§12.4): each provider's own memory files, skills, subagents
- * and MCP servers, edited in place in their native files with a diff preview and a backup
- * before every overwrite or delete. Routes live under `/api/agent-config`.
+ * Agent configuration screens (§12.4): each provider's own memory files, skills, subagents,
+ * MCP servers and hooks (`agent-config-hooks.ts`), edited in place in their native files with
+ * a diff preview and a backup before every overwrite or delete. Routes live under
+ * `/api/agent-config`.
  */
 
 export const AgentConfigProvider = z.enum(["claude", "codex"]);
 export type AgentConfigProvider = z.infer<typeof AgentConfigProvider>;
+
+/** Agent-config screens that exist only for some providers. */
+export interface AgentConfigFeatures {
+  /** CodeDen lists and edits this provider's hooks (`/api/agent-config/hooks`). */
+  hooks: boolean;
+}
+
+/**
+ * Which optional agent-config screens each provider has. The UI reads this to decide which
+ * tabs and choices to offer, and never branches on a provider id (Principle 5).
+ */
+export const agentConfigFeatures: Record<AgentConfigProvider, AgentConfigFeatures> = {
+  claude: { hooks: true },
+  codex: { hooks: false },
+};
+
+/** The providers that have a given agent-config feature. */
+export const providersWith = (feature: keyof AgentConfigFeatures): AgentConfigProvider[] =>
+  AgentConfigProvider.options.filter((p) => agentConfigFeatures[p][feature]);
 
 /**
  * - `memory`: CLAUDE.md / CLAUDE.local.md / AGENTS.md files.

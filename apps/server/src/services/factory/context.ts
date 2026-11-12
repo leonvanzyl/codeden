@@ -46,7 +46,10 @@ export interface FactoryContext {
    */
   archiveSessions: (sessionIds: string[]) => void;
   now: () => Date;
-  /** How long a PR may report no CI before "no checks" fails (default 3 minutes). */
+  /**
+   * How long CI may take to start on a commit (a PR's new head, a merge on the default branch)
+   * before "no checks" counts as never started (default 10 minutes).
+   */
   ciGraceMs: number;
   log?: (message: string) => void;
 }

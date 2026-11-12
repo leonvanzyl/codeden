@@ -41,6 +41,78 @@ function scoutRound(
   return { loop, projectId: session.projectId };
 }
 
+/** Why a review area the scout asked for got no area reviewer this round. */
+type DropReason = "not_allowed" | "duplicate" | "round_limit" | "no_slot" | "failed";
+type Dropped = Record<DropReason, DiscoveryArea[]>;
+
+/**
+ * The review areas that get an area reviewer, in the scout's order: allowed areas, each once, at
+ * most `perRound` of them and no more than there are free `slots`. The rest are dropped with
+ * their reason.
+ */
+export function pickLenses(
+  requests: FactoryPlanRoundRequest["lenses"],
+  limits: { areas: readonly DiscoveryArea[]; perRound: number; slots: number },
+): { picked: FactoryPlanRoundRequest["lenses"]; dropped: Dropped } {
+  const allowed = new Set(limits.areas);
+  const seen = new Set<DiscoveryArea>();
+  const picked: FactoryPlanRoundRequest["lenses"] = [];
+  const dropped: Dropped = {
+    not_allowed: [],
+    duplicate: [],
+    round_limit: [],
+    no_slot: [],
+    failed: [],
+  };
+  for (const lens of requests) {
+    if (!allowed.has(lens.area)) {
+      dropped.not_allowed.push(lens.area);
+      continue;
+    }
+    if (seen.has(lens.area)) {
+      dropped.duplicate.push(lens.area);
+      continue;
+    }
+    const position = seen.size;
+    seen.add(lens.area);
+    if (position >= limits.perRound) dropped.round_limit.push(lens.area);
+    else if (position >= limits.slots) dropped.no_slot.push(lens.area);
+    else picked.push(lens);
+  }
+  return { picked, dropped };
+}
+
+/** What the scout is told about the review areas that got no area reviewer, and why. */
+function dropNote(
+  dropped: Dropped,
+  opts: { perRound: number; busy: number; slots: number; maxConcurrent: number },
+): string {
+  const list = (areas: DiscoveryArea[]) => areas.map((a) => `\`${a}\``).join(", ");
+  const parts: string[] = [];
+  if (dropped.not_allowed.length > 0) {
+    parts.push(`${list(dropped.not_allowed)}: not one of this project's review areas.`);
+  }
+  if (dropped.duplicate.length > 0) {
+    parts.push(`${list(dropped.duplicate)}: asked for more than once.`);
+  }
+  if (dropped.round_limit.length > 0) {
+    parts.push(
+      `${list(dropped.round_limit)}: over this round's limit of ${opts.perRound} review area${opts.perRound === 1 ? "" : "s"}.`,
+    );
+  }
+  if (dropped.no_slot.length > 0) {
+    const given =
+      opts.slots > 0 ? ` and this round's area reviewers get the other ${opts.slots}` : "";
+    parts.push(
+      `${list(dropped.no_slot)}: no free agent slot (Agents at once is ${opts.maxConcurrent}; other factory sessions hold ${opts.busy}${given}). Raising Agents at once in the factory limits allows more area reviewers.`,
+    );
+  }
+  if (dropped.failed.length > 0) {
+    parts.push(`${list(dropped.failed)}: the area reviewer couldn't start.`);
+  }
+  return parts.length > 0 ? ` Not started: ${parts.join(" ")}` : "";
+}
+
 /** `factory_plan_round`: start (or wake) the area reviewers the scout asked for, within the limits. */
 export async function planRound(
   ctx: FactoryContext,
@@ -53,21 +125,19 @@ export async function planRound(
     throw conflict("This round is already planned", "already_planned");
   }
   const project = ctx.projects.get(projectId);
-  const allowed = new Set(loop.tuning.areas);
-  const seen = new Set<DiscoveryArea>();
-  const wanted = req.lenses.filter((l) => {
-    if (!allowed.has(l.area) || seen.has(l.area)) return false;
-    seen.add(l.area);
-    return true;
+  // The scout ends its turn right after planning, so the slot it holds now goes to a reviewer;
+  // builders, reviewers and every other factory session keep theirs (§10.1).
+  const busy = ctx.sessions.activeCount(projectId, session.id);
+  const slots = freeSlots(busy, project.factoryLimits);
+  const { picked, dropped } = pickLenses(req.lenses, {
+    areas: loop.tuning.areas,
+    perRound: loop.tuning.discoveryPerRound,
+    slots,
   });
-  const cap = Math.min(
-    loop.tuning.discoveryPerRound,
-    freeSlots(ctx.sessions.activeCount(projectId), project.factoryLimits),
-  );
   const at = ctx.now().toISOString();
   const lensSessions = { ...loop.scout.lensSessions };
   const started: ScoutLensRun[] = [];
-  for (const lens of wanted.slice(0, cap)) {
+  for (const lens of picked) {
     const reuse = ctx.sessions.reusable(lensSessions[lens.area]);
     const text = lensPrompt({
       area: lens.area,
@@ -84,7 +154,10 @@ export async function planRound(
         sessionId = reuse.id;
       } else {
         const res = await ctx.sessions.startLens(projectId, lens.area, text);
-        if (res.status !== "started" && res.status !== "queued") continue;
+        if (res.status !== "started" && res.status !== "queued") {
+          dropped.failed.push(lens.area);
+          continue;
+        }
         sessionId = res.sessionId;
       }
       lensSessions[lens.area] = sessionId;
@@ -98,6 +171,7 @@ export async function planRound(
       });
     } catch (error) {
       ctx.log?.(`factory: area reviewer ${lens.area}: ${errorMessage(error)}`);
+      dropped.failed.push(lens.area);
     }
   }
   ctx.store.saveLoop({
@@ -113,9 +187,12 @@ export async function planRound(
       },
     },
   });
-  const skipped = wanted.length - started.length + (req.lenses.length - wanted.length);
-  const note =
-    skipped > 0 ? ` ${skipped} review area request(s) were over the limit or not allowed.` : "";
+  const note = dropNote(dropped, {
+    perRound: loop.tuning.discoveryPerRound,
+    busy,
+    slots,
+    maxConcurrent: project.factoryLimits.maxConcurrentSessions,
+  });
   return {
     lenses: started.map((l) => ({ area: l.area, sessionId: l.sessionId })),
     next:

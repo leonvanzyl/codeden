@@ -2,9 +2,13 @@ import { describe, expect, it } from "vitest";
 import {
   AgentConfigFile,
   AgentConfigLocator,
+  HookChangeRequest,
+  HookListResponse,
+  HookWriteResponse,
   LoadedAgentConfig,
   McpServerSpec,
   McpServerUpsertRequest,
+  providersWith,
 } from "../src";
 
 const roundTrip = <T>(schema: { parse: (v: unknown) => T }, value: T) =>
@@ -56,6 +60,100 @@ describe("agent configuration contracts", () => {
         },
       ],
     });
+  });
+
+  it("round-trips hooks and keeps unknown handler fields", () => {
+    const handler = {
+      type: "command",
+      command: "npx prettier --write",
+      timeout: 30,
+      if: "Edit(*.ts)",
+      statusMessage: "Formatting",
+    };
+    const list: HookListResponse = {
+      sources: [
+        {
+          provider: "claude",
+          scope: "project",
+          projectId: "p1",
+          file: "C:/repo/.claude/settings.json",
+          exists: true,
+          disableAllHooks: false,
+        },
+        {
+          provider: "claude",
+          scope: "user",
+          projectId: null,
+          file: "C:/Users/me/.claude/settings.json",
+          exists: true,
+          disableAllHooks: false,
+          error: "Unexpected token",
+        },
+      ],
+      hooks: [
+        {
+          provider: "claude",
+          scope: "project",
+          projectId: "p1",
+          file: "C:/repo/.claude/settings.json",
+          event: "PostToolUse",
+          matcher: "Edit|Write",
+          handler,
+          enabled: true,
+          groupIndex: 0,
+          handlerIndex: 1,
+        },
+        {
+          provider: "claude",
+          scope: "user",
+          projectId: null,
+          file: "C:/Users/me/.claude/settings.json",
+          event: "Stop",
+          matcher: null,
+          handler: { type: "mcp_tool", server: "x", tool: "y" },
+          enabled: false,
+          shelfId: "h1",
+        },
+      ],
+    };
+    roundTrip(HookListResponse, list);
+    const target = {
+      provider: "claude",
+      scope: "project",
+      projectId: "p1",
+      event: "PostToolUse",
+      groupIndex: 0,
+      handlerIndex: 1,
+      expected: handler,
+    } as const;
+    roundTrip(HookChangeRequest, {
+      action: "update",
+      target,
+      event: "PreToolUse",
+      matcher: " Bash ",
+      handler,
+      listProjectId: "p1",
+    });
+    roundTrip(HookChangeRequest, { action: "remove", target });
+    roundTrip(HookChangeRequest, { action: "remove", target: { shelfId: "h1" } });
+    roundTrip(HookChangeRequest, { action: "enable", target: { shelfId: "h1" } });
+    roundTrip(HookWriteResponse, { file: null, backupPath: null, hooks: list });
+    // The refreshed list is part of the contract, not stripped.
+    expect(HookWriteResponse.safeParse({ file: null, backupPath: null }).success).toBe(false);
+    expect(providersWith("hooks")).toEqual(["claude"]);
+  });
+
+  it("validates hooks to write", () => {
+    const add = { action: "add", provider: "claude", scope: "user", event: "Stop" };
+    const ok = (handler: unknown, event = "Stop") =>
+      HookChangeRequest.safeParse({ ...add, event, handler }).success;
+    expect(ok({ type: "command", command: "echo done" })).toBe(true);
+    expect(ok({ type: "mcp_tool", server: "x", tool: "y" })).toBe(true);
+    expect(ok({ type: "command", command: "  " })).toBe(false);
+    expect(ok({ type: "http" })).toBe(false);
+    expect(ok({ type: "agent", prompt: "Check it", timeout: 0 })).toBe(false);
+    expect(ok({ type: "command", command: "x" }, "Pre Tool")).toBe(false);
+    expect(ok({ type: "command", command: "x" }, "Stop2")).toBe(false);
   });
 
   it("validates locators and server names", () => {
