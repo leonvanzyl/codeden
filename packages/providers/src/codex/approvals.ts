@@ -19,8 +19,11 @@ export interface ApprovalContext {
    * approved by policy instead of reaching the user (§11.2). Default `supervised`: ask for all.
    */
   autonomy?: () => AutonomyLevel;
-  /** Context for an item: the thread/turn the request belongs to. */
-  ctx: (turnId: string) => ItemCtx;
+  /**
+   * Where a request's item goes, from the Codex thread and turn that raised it (a sub-agent's
+   * requests go to its child thread).
+   */
+  ctx: (codexThreadId: string, turnId: string) => ItemCtx;
   /** Paths touched by a pending file change item, if known. */
   filePaths: (itemId: string) => string[] | undefined;
 }
@@ -36,13 +39,13 @@ const decisionOf = (r: RuntimeResponse) => (r.kind === "approval" ? r.decision :
  */
 function approvedByPolicy(
   ac: ApprovalContext,
-  turnId: string,
+  p: { threadId: string; turnId: string },
   item: ApprovalItem,
   risk: RiskAssessment,
 ): boolean {
   const autonomy = ac.autonomy?.() ?? "supervised";
   if (!levelAllows(autonomy, risk)) return false;
-  ac.broker.record(ac.ctx(turnId), {
+  ac.broker.record(ac.ctx(p.threadId, p.turnId), {
     ...item,
     status: "completed",
     reason: `Allowed by the ${autonomy === "full" ? "Full" : "Auto"} permission level`,
@@ -91,8 +94,8 @@ export async function handleServerRequest(
         toolCallItemId: p.itemId,
         options: ["allow_once", "allow_session", "deny"],
       };
-      if (approvedByPolicy(ac, p.turnId, item, risk)) return { decision: "accept" };
-      const response = await ac.broker.request(ac.ctx(p.turnId), withRisk(item, risk));
+      if (approvedByPolicy(ac, p, item, risk)) return { decision: "accept" };
+      const response = await ac.broker.request(ac.ctx(p.threadId, p.turnId), withRisk(item, risk));
       const map: Record<string, CommandExecutionApprovalDecision> = {
         allow_once: "accept",
         allow_session: "acceptForSession",
@@ -123,8 +126,8 @@ export async function handleServerRequest(
         options: ["allow_once", "allow_session", "deny"],
       };
       const risk = patchRisk(paths, p.grantRoot, ac.risk);
-      if (approvedByPolicy(ac, p.turnId, item, risk)) return { decision: "accept" };
-      const response = await ac.broker.request(ac.ctx(p.turnId), item);
+      if (approvedByPolicy(ac, p, item, risk)) return { decision: "accept" };
+      const response = await ac.broker.request(ac.ctx(p.threadId, p.turnId), item);
       const map: Record<string, FileChangeApprovalDecision> = {
         allow_once: "accept",
         allow_session: "acceptForSession",
@@ -153,9 +156,8 @@ export async function handleServerRequest(
       };
       // Granted for this turn only, so the next request is judged again.
       const risk = permissionsRisk(p.permissions, ac.risk);
-      if (approvedByPolicy(ac, p.turnId, item, risk))
-        return { permissions: granted, scope: "turn" };
-      const response = await ac.broker.request(ac.ctx(p.turnId), withRisk(item, risk));
+      if (approvedByPolicy(ac, p, item, risk)) return { permissions: granted, scope: "turn" };
+      const response = await ac.broker.request(ac.ctx(p.threadId, p.turnId), withRisk(item, risk));
       const decision = decisionOf(response);
       if (decision === "allow_once" || decision === "allow_session") {
         return { permissions: granted, scope: decision === "allow_session" ? "session" : "turn" };
@@ -172,7 +174,7 @@ export async function handleServerRequest(
         multiSelect: false,
         allowFreeText: q.isOther || !q.options?.length,
       }));
-      const response = await ac.broker.request(ac.ctx(p.turnId), {
+      const response = await ac.broker.request(ac.ctx(p.threadId, p.turnId), {
         id: `question-${p.itemId}`,
         kind: "user_question",
         status: "in_progress",
