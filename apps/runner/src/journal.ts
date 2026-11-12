@@ -29,8 +29,8 @@ export interface JournalOptions {
   compactEntries?: number;
   /** ...or once they take this many bytes. Default 1 MiB. */
   compactBytes?: number;
-  /** While acks flow, write the acked position to `state.json` at most this often. Default 250 ms. */
-  stateWriteMs?: number;
+  /** While acks flow, persist (state, then compaction when due) at most this often. Default 250 ms. */
+  persistMs?: number;
 }
 
 /**
@@ -38,25 +38,27 @@ export interface JournalOptions {
  * monotonically increasing seq and kept until the server acks them, so nothing is lost
  * while the server is away. `state.json` holds the stable runner id and seq counters.
  *
- * An ack only moves the acked position in memory. Acked events leave the file in one rewrite
- * (compaction) once enough have piled up and they outweigh what is left, so each ack costs
- * no more than its append did. The acked position reaches `state.json` at most every
- * `stateWriteMs`, at compaction and on `close`. After a crash the journal may still hold events
- * the server already acked; the server's `resume` acks them again and they are not replayed.
+ * An ack only moves the acked position in memory. While acks flow, the journal persists at
+ * most every `persistMs`: it writes `state.json`, then, when enough acked events have piled
+ * up and they outweigh what is left, rewrites the file without them (compaction), so each
+ * ack costs no more than its append did. State always goes first, so `lastSeq` outlives the
+ * events a compaction drops. `close` persists and compacts at once. After a crash the journal
+ * may still hold events the server already acked; the server's `resume` acks them again and
+ * they are not replayed.
  */
 export class Journal {
   private readonly file: string;
   private readonly stateFile: string;
   private readonly compactEntries: number;
   private readonly compactBytes: number;
-  private readonly stateWriteMs: number;
+  private readonly persistMs: number;
   private state: JournalState;
   /** Every event in `journal.jsonl`, oldest first; those before `head` are acked. */
   private entries: Entry[] = [];
   private head = 0;
   private fileBytes = 0;
   private ackedBytes = 0;
-  private stateTimer: ReturnType<typeof setTimeout> | undefined;
+  private persistTimer: ReturnType<typeof setTimeout> | undefined;
 
   constructor(dir: string, opts: JournalOptions = {}) {
     mkdirSync(dir, { recursive: true });
@@ -64,7 +66,7 @@ export class Journal {
     this.stateFile = join(dir, "state.json");
     this.compactEntries = opts.compactEntries ?? 1000;
     this.compactBytes = opts.compactBytes ?? 1024 * 1024;
-    this.stateWriteMs = opts.stateWriteMs ?? 250;
+    this.persistMs = opts.persistMs ?? 250;
     this.state = this.loadState();
     const { entries, torn } = this.loadEntries();
     this.entries = entries;
@@ -72,7 +74,10 @@ export class Journal {
     this.state.lastSeq = Math.max(this.state.lastSeq, entries.at(-1)?.msg.seq ?? 0);
     this.advanceHead(this.state.ackedSeq);
     // A crash mid-append leaves a torn last line: rewrite, so the next append gets its own line.
-    if (torn) this.compact();
+    if (torn) {
+      this.writeState(this.state);
+      this.compact();
+    }
   }
 
   get runnerId(): string {
@@ -110,8 +115,7 @@ export class Journal {
     if (upTo <= this.state.ackedSeq) return;
     this.state.ackedSeq = upTo;
     this.advanceHead(upTo);
-    if (this.compactDue()) this.compact();
-    else this.scheduleStateWrite();
+    this.schedulePersist();
   }
 
   /** Unacked events after `seq`, oldest first (for replay on resume). */
@@ -124,10 +128,9 @@ export class Journal {
     return out;
   }
 
-  /** Persist the acked position and drop acked events from the file (runner shutdown). */
+  /** Persist the acked position and drop every acked event from the file (runner shutdown). */
   close(): void {
-    if (this.head > 0) this.compact();
-    else this.writeState();
+    this.persist(true);
   }
 
   private advanceHead(ackedSeq: number): void {
@@ -145,9 +148,32 @@ export class Journal {
     return piledUp && this.ackedBytes >= this.fileBytes - this.ackedBytes;
   }
 
-  /** Rewrite the file without its acked events. State first, so `lastSeq` outlives them. */
+  private schedulePersist(): void {
+    if (this.persistTimer) return;
+    this.persistTimer = setTimeout(() => {
+      this.persistTimer = undefined;
+      try {
+        this.persist(false);
+      } catch {
+        // Only the acked position is late on disk; the next ack or `close` tries again.
+      }
+    }, this.persistMs);
+    this.persistTimer.unref();
+  }
+
+  /**
+   * Write the acked position, then compact when it is due (`all`: whenever anything is acked).
+   * State first, so `lastSeq` outlives the events the compaction drops.
+   */
+  private persist(all: boolean): void {
+    if (this.persistTimer) clearTimeout(this.persistTimer);
+    this.persistTimer = undefined;
+    this.writeState(this.state);
+    if (all ? this.head > 0 : this.compactDue()) this.compact();
+  }
+
+  /** Rewrite the file without its acked events. Callers write the state first. */
   private compact(): void {
-    this.writeState();
     const live = this.entries.slice(this.head);
     const tmp = `${this.file}.tmp`;
     writeFileSync(tmp, live.map((e) => `${JSON.stringify(e.msg)}\n`).join(""));
@@ -158,26 +184,7 @@ export class Journal {
     this.ackedBytes = 0;
   }
 
-  private scheduleStateWrite(): void {
-    if (this.stateTimer) return;
-    this.stateTimer = setTimeout(() => {
-      this.stateTimer = undefined;
-      try {
-        this.writeState();
-      } catch {
-        // Only the acked position is late; the next write or `close` catches up.
-      }
-    }, this.stateWriteMs);
-    this.stateTimer.unref();
-  }
-
-  private writeState(): void {
-    if (this.stateTimer) clearTimeout(this.stateTimer);
-    this.stateTimer = undefined;
-    this.persistState(this.state);
-  }
-
-  private persistState(state: JournalState): void {
+  private writeState(state: JournalState): void {
     const tmp = `${this.stateFile}.tmp`;
     writeFileSync(tmp, `${JSON.stringify(state, null, 2)}\n`);
     renameSync(tmp, this.stateFile);
@@ -193,7 +200,7 @@ export class Journal {
       // first run
     }
     const fresh = { runnerId: randomUUID(), lastSeq: 0, ackedSeq: 0 };
-    this.persistState(fresh);
+    this.writeState(fresh);
     return fresh;
   }
 

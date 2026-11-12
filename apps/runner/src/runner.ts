@@ -27,6 +27,7 @@ import { WebSocketServer } from "ws";
 import { BrowserManager, createBrowserCommandHandlers } from "./browser";
 import type { RunnerCore } from "./commands";
 import { connectionHandlers, type ServerConnection } from "./connection";
+import { DeltaBatcher, type DeltaBatcherOptions } from "./delta-batcher";
 import { Journal } from "./journal";
 import { assertSingleInstance, removeOwnLock } from "./lock";
 import { HttpMcpUpstream, handleMcpRequest, type McpUpstream } from "./mcp/proxy";
@@ -63,6 +64,8 @@ export interface StartRunnerOptions {
   browser?: BrowserManager;
   /** Called after `runner.shutdown` or a drain-and-exit closed everything (the CLI exits). */
   onShutdown?: () => void;
+  /** How streamed deltas are batched before they are journaled (tests lengthen the window). */
+  deltaBatching?: DeltaBatcherOptions;
   log?: (message: string) => void;
 }
 
@@ -141,10 +144,16 @@ export async function startRunner(opts: StartRunnerOptions): Promise<RunningRunn
   let port = 0;
 
   let stopped = false;
-  const emit = (event: RunnerEvent) => {
+  const journalEvent = (event: RunnerEvent) => {
     if (stopped) return; // late callbacks after close (killed processes)
     const msg = journal.append(event);
     attached?.deliver(msg);
+  };
+  // Every durable event goes through the batcher: streamed deltas wait briefly to be merged,
+  // and any other event journals the batches it follows first, so order is kept.
+  const deltas = new DeltaBatcher(journalEvent, opts.deltaBatching);
+  const emit = (event: RunnerEvent) => {
+    if (!stopped) deltas.push(event);
   };
   const stream = (data: RunnerStream) => {
     attached?.deliver({ type: "stream", ts: new Date().toISOString(), stream: data });
@@ -284,6 +293,7 @@ export async function startRunner(opts: StartRunnerOptions): Promise<RunningRunn
         if ("closeAllConnections" in server) server.closeAllConnections();
       });
       process.off("exit", removeLock);
+      deltas.flush();
       stopped = true;
       try {
         journal.close();
