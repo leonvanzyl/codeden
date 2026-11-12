@@ -1,5 +1,10 @@
-import type { AgentEvent, ItemOf } from "@codeden/contracts";
+import type { AgentEvent, ItemOf, SubagentStats } from "@codeden/contracts";
 import { str } from "../util/text";
+import {
+  statsFromTaskNotification,
+  statsFromToolUseResult,
+  statsFromUsageTrailer,
+} from "./subagent-stats";
 import { toolResultText } from "./tools";
 
 /** A thread plus the turn currently running in it. */
@@ -94,8 +99,9 @@ export class SubagentTracker {
       run.background = true;
       return;
     }
-    const summary = cleanSummary(toolResultText(content));
-    this.finish(toolUseId, isError ? "failed" : "completed", summary);
+    const text = toolResultText(content);
+    const stats = statsFromToolUseResult(toolUseResult) ?? statsFromUsageTrailer(text);
+    this.finish(toolUseId, isError ? "failed" : "completed", cleanSummary(text), stats);
   }
 
   onTaskNotification(msg: Raw): void {
@@ -107,6 +113,7 @@ export class SubagentTracker {
       toolUseId,
       status === "completed" ? "completed" : status === "failed" ? "failed" : "interrupted",
       summary,
+      statsFromTaskNotification(msg),
     );
   }
 
@@ -126,6 +133,7 @@ export class SubagentTracker {
     toolUseId: string,
     outcome: "completed" | "failed" | "interrupted",
     summary?: string,
+    stats?: SubagentStats,
   ): void {
     const run = this.runs.get(toolUseId);
     if (!run || run.done) return;
@@ -147,7 +155,7 @@ export class SubagentTracker {
     this.emit({
       type: "item.completed",
       ...run.parent,
-      item: { ...run.item, status, ...(summary ? { summary } : {}) },
+      item: { ...run.item, status, ...(summary ? { summary } : {}), ...(stats ? { stats } : {}) },
     });
   }
 }

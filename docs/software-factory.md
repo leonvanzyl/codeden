@@ -47,6 +47,12 @@ The project page shows the factory panel with the pipelines drawn as a live diag
 
 Under the diagram: spend against the daily budget, agents working out of the limit, pull requests ready for you (or merges today with auto-merge), the failure streak, merge checks per PR, recent results, and the issues ignored because of their author.
 
+### Finished work cleans up after itself
+
+Once a work item is finished (merged, reverted, rejected or failed), the factory [archives](workbench.md#archiving-and-worktree-cleanup) its sessions: the builder and its reviewers leave the sidebar and their worktrees are removed, so a busy factory fills neither your session list nor your disk. Nothing is lost. The branch, the checkpoints and the transcript stay, archived sessions are under the project's **Archived** filter, clicking the item on the panel still opens its session, and messaging an archived session brings it back with its worktree. A worktree with uncommitted changes is kept, as with any archive.
+
+Work that isn't finished keeps its sessions: a pull request escalated to you, a merge whose CI on the default branch is still being watched, and an item that failed only on the size limit while its pull request is open (the PM may still allow it). A session still finishing a turn is never cut off; it is archived once the turn ends. After a **Retry**, the earlier attempt's sessions are archived the same way, unless they were archived already. The factory archives an item's sessions only once, so a session you unarchive stays, even through a retry. The scout and its area reviewers are long-lived and never archived this way.
+
 ## Who the factory works for
 
 On a public repository anyone can open an issue, and an issue is a prompt for a coding agent. So the factory only takes on issues by **trusted authors**:
@@ -70,20 +76,20 @@ A dark factory adds a **scout**: a long-lived agent that finds the work itself, 
 
 When fewer than `minBacklog` items (default 2) wait for an agent and `discoveryIntervalMin` (default 6 hours) has passed since its last round, the scout runs a **review round**:
 
-1. **Plan.** The scout looks at the app against the vision (what changed since its last round, what is open) and asks for at most **Lenses per round** (`discoveryPerRound`, default 2) lenses with `factory_plan_round`, each with a focus specific to this app.
-2. **Review.** A **lens** is a long-lived reviewer session for one area: UI and UX, performance, security, features, bugs, code quality, test gaps or docs. Each reports findings with `factory_report_findings`.
+1. **Plan.** The scout looks at the app against the vision (what changed since its last round, what is open) and asks for at most **Review areas per round** (`discoveryPerRound`, default 2) review areas with `factory_plan_round`, each with a focus specific to this app.
+2. **Review.** Each review area gets an **area reviewer**: a long-lived reviewer agent focused on one area of the app (UI and UX, performance, security, features, bugs, code quality, test gaps or docs). Each reports findings with `factory_report_findings`.
 3. **File.** The scout decides against the vision what is worth doing, merges duplicates, and files at most **Issues per round** (`maxIssuesPerRound`, default 3) as GitHub issues with `factory_file_issue`, already typed. They enter the pipelines like any trusted issue.
 
 The rules that keep it cheap are enforced by the server, not left to the agents:
 
-- **One scout and at most one lens per area, ever.** They are long-lived: the next round sends them a message instead of starting new sessions, so they keep what they learned and don't re-read the codebase.
-- **At most `discoveryPerRound` lenses per round**, however many the scout asks for, and only as many as there are free agent slots: builders and reviewers come first.
+- **One scout and at most one area reviewer per review area, ever.** They are long-lived: the next round sends them a message instead of starting new sessions, so they keep what they learned and don't re-read the codebase.
+- **At most `discoveryPerRound` review areas per round**, however many the scout asks for, and only as many as there are free agent slots: builders and reviewers come first.
 - **A round only starts when the queue runs low** and the interval has passed; at most `maxIssuesPerRound` issues come out of it; a round that runs over three hours is closed.
-- The scout and its lenses hold agent slots and count against the daily budget like every other factory session.
+- The scout and its area reviewers hold agent slots and count against the daily budget like every other factory session.
 
 ### Nobody waits on you in a dark factory
 
-In a dark factory, the project's PM and the factory's own sessions (the scout, lenses, builders, reviewers) never stop to ask you something. A question, through CodeDen's `ask_user` or the agent's own question tool, gets an immediate answer instead: decide from the vision and carry on. An **approval** (a risky action under its permission level) is **denied** at once, never approved, with the same guidance.
+In a dark factory, the project's PM and the factory's own sessions (the scout, its area reviewers, builders, reviewers) never stop to ask you something. A question, through CodeDen's `ask_user` or the agent's own question tool, gets an immediate answer instead: decide from the vision and carry on. An **approval** (a risky action under its permission level) is **denied** at once, never approved, with the same guidance.
 
 - **The vision wins over the current code.** Work that brings the code in line with the vision comes first.
 - **Decisions are recorded.** Each judgement call goes through `factory_record_decision` to your inbox as a low-priority **Factory decided** message and into the daily digest.
@@ -193,7 +199,7 @@ Settings are **enforced by the server**, never left to agent judgement. Open the
 | Merge automatically (`autoMerge`) | off | Off: every PR waits for you. On: trusted work merges once every check passes. Work let in from an untrusted author always waits |
 | Trusted authors (`trustedAuthors`) | none | GitHub logins whose issues are taken on, besides the account CodeDen uses |
 | Daily budget (USD and/or tokens) | required | The loop pauses until the next day when today's spend reaches it |
-| Agents at once (`maxConcurrentSessions`) | 2 | The swarm: builders, reviewers, the scout and its lenses share it |
+| Agents at once (`maxConcurrentSessions`) | 2 | The swarm: builders, reviewers, the scout and its area reviewers share it |
 | Auto-merges per day (`maxMergesPerDay`) | 5 | With auto-merge on, also caps the builds in flight |
 | Pause after failures (`pauseAfterConsecutiveFailures`) | 3 | Failed merge checks or reverts in a row pause the loop |
 | Protected paths | none | Added to the vision's protected areas |
@@ -209,9 +215,9 @@ Settings are **enforced by the server**, never left to agent judgement. Open the
 | `maxFixAttempts` (revise rounds) | `2` |
 | `minBacklog` (dark factory: scout when fewer items wait) | `2` |
 | `discoveryIntervalMin` (dark factory: minutes between rounds) | `360` |
-| `discoveryPerRound` (dark factory: lenses per round) | `2` |
+| `discoveryPerRound` (dark factory: review areas per round) | `2` |
 | `maxIssuesPerRound` (dark factory: issues per round) | `3` |
-| `areas` (dark factory: what lenses may review) | all eight |
+| `areas` (dark factory: the review areas the scout may use) | all eight |
 | `builderProvider` | `auto` (the agent role default) |
 | `watchTimeoutMin` (wait for CI on main after an automatic merge) | `120` |
 
@@ -222,7 +228,7 @@ Spend comes from the same ledger as the [usage reports](usage-and-costs.md).
 - **Per project:** **Kill switch** on the factory panel.
 - **Global:** **Settings → General → Global factory kill switch** stops every project's loop.
 
-One click stops the loop and **every factory session** (builders, reviewers, the scout, lenses); items that were building go back to the queue. The loop stays stopped until you turn the switch off. A kill switch never hands work back to automations.
+One click stops the loop and **every factory session** (builders, reviewers, the scout, its area reviewers); items that were building go back to the queue. The loop stays stopped until you turn the switch off. A kill switch never hands work back to automations.
 
 When the loop **pauses** by itself (budget, repeated failures, a revert), resume it from the panel once you've looked at the reason; that also clears the failure count.
 

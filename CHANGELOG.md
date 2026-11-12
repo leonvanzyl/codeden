@@ -4,6 +4,17 @@ All notable changes to CodeDen are documented here. The format follows [Keep a C
 
 ## [Unreleased]
 
+### Added
+
+- **See what each subagent used.** When a subagent finishes, its card in the transcript shows the tokens it used, how many tool calls it made and how long it ran, e.g. `48.2k tokens · 23 tool calls · 1m 12s` (hover the figures for the exact numbers). A turn that cost a lot now shows which subagent spent it. Claude reports these figures for both foreground and background subagents; providers that don't report them show no figures.
+
+### Changed
+
+- **The factory cleans up finished work.** When a work item is merged, reverted, rejected or failed, the factory archives its builder and reviewer sessions. They leave the sidebar and their worktrees are removed right away, instead of staying until the 7-day cleanup. The branch, checkpoints and transcript stay, and messaging a session brings it back. A session is never cut off mid-turn, and one you unarchive stays. After a **Retry**, the earlier attempt's sessions are cleaned up too. Escalated work, merges whose CI is still being watched, and the scout and its area reviewers are left alone.
+- **Plainer words in the factory.** The dark factory's scout no longer talks about "lenses": it uses **review areas** (security, UI & UX, performance, docs and so on), each with an **area reviewer**, a long-lived reviewer agent focused on that one area. The setting is now **Review areas per round**, and the scout's prompts and docs use the same words. Existing dark factories keep their reviewer sessions; nothing to migrate.
+- **Briefs read as briefs.** A session's opening brief from a PM (`start_session`), the factory (builders, reviewers, reverts, the scout and its area reviewers), an automation or triage now shows as rendered Markdown in a card headed by its sender (**Project manager**, **Factory**, **Automation**), instead of raw `**`, `##` and `<issue>` tags in a plain bubble. The factory's fix rounds and nudges, CodeDen's retry and pull request feedback, and the orchestrator's questions to a PM get the same card. Briefs longer than about 12 lines are collapsed with **Show more**, so the transcript leads with the agent's work. This works with Codex sessions too. What you type yourself still shows exactly as typed. Older sessions keep showing their first message as before.
+- **The factory explains itself.** On the pipeline diagram, each step's name (Identify type, Reproduce, Analyze, Implement, Review, Checks, Merge) is underlined and opens a short explanation of what happens there and what moves the work on. A "?" explains each lane (Bug, Feature, Documentation) and the revise loop. The scout, its rounds and review areas, and the factory settings that aren't self-explanatory (auto-merges per day, pause after failures, the scout's schedule and limits) have the same hints. They open on hover, on keyboard focus, or with a tap on a phone.
+
 ### Fixed
 
 - **Copy buttons work on phones and tablets over the local network.** Copying code, commands, messages, links and passwords now works on plain `http://` addresses, where browsers don't offer the usual clipboard access. If a copy still fails, CodeDen tells you so you can select the text and copy it yourself.

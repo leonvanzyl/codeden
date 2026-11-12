@@ -8,7 +8,7 @@ import {
   LEGACY_SIZE_LIMITS,
   ScoutState,
 } from "@codeden/contracts";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, or, sql } from "drizzle-orm";
 import type { Db } from "../../db/client";
 import { factoryDigests, factoryItems, factoryLoops } from "../../db/schema-factory";
 import type { EventStore } from "../../events/store";
@@ -25,6 +25,8 @@ export type NewFactoryItem = Pick<
 export const ACTIVE_STAGES: FactoryItemStage[] = ["building", "verifying", "watching"];
 /** Stages of items waiting to be classified or for a free agent. */
 export const WAITING_STAGES: FactoryItemStage[] = ["candidate", "backlog"];
+/** Stages after which an item's sessions have nothing left to do (see `cleanup.ts`). */
+export const FINISHED_STAGES: FactoryItemStage[] = ["merged", "reverted", "rejected", "failed"];
 /** Final stages. */
 export const DONE_STAGES: FactoryItemStage[] = [
   "merged",
@@ -104,6 +106,29 @@ export class FactoryStore {
       .map((r) => withItemDefaults(r.item));
   }
 
+  /**
+   * Items with sessions still to archive (`cleanup.ts`): finished ones not cleaned up yet, and
+   * any holding an earlier attempt's sessions. Not capped like `items` (the newest only), so an
+   * old item is reached however much work came after it.
+   */
+  itemsToClean(projectId: string): FactoryItem[] {
+    const field = (path: string) => sql`json_extract(${factoryItems.item}, ${path})`;
+    const pending = or(
+      and(
+        inArray(factoryItems.stage, FINISHED_STAGES),
+        sql`${field("$.sessionsArchivedAt")} is null`,
+      ),
+      sql`json_array_length(${field("$.earlierSessionIds")}) > 0`,
+    );
+    return this.db
+      .select()
+      .from(factoryItems)
+      .where(and(eq(factoryItems.projectId, projectId), pending))
+      .orderBy(asc(factoryItems.updatedAt))
+      .all()
+      .map((r) => withItemDefaults(r.item));
+  }
+
   /** The item a builder, reviewer or revert session works on. */
   itemForSession(projectId: string, sessionId: string): FactoryItem | undefined {
     return this.items(projectId, [...ACTIVE_STAGES, ...WAITING_STAGES]).find(
@@ -147,13 +172,21 @@ export class FactoryStore {
     return item;
   }
 
-  /** Apply a change to an item; writes only when something changed. */
-  updateItem(id: string, change: (item: FactoryItem) => FactoryItem): FactoryItem {
+  /**
+   * Apply a change to an item; writes only when something changed. `touch: false` keeps
+   * `updatedAt`, for bookkeeping that isn't progress (the digest and the recent list go by it).
+   */
+  updateItem(
+    id: string,
+    change: (item: FactoryItem) => FactoryItem,
+    opts: { touch?: boolean } = {},
+  ): FactoryItem {
     const current = this.item(id);
     if (!current) throw new Error(`No factory item ${id}`);
     const changed = change(current);
     if (JSON.stringify(changed) === JSON.stringify(current)) return current;
-    const next = { ...changed, updatedAt: new Date().toISOString() };
+    const next =
+      opts.touch === false ? changed : { ...changed, updatedAt: new Date().toISOString() };
     this.events.append([
       { type: "factory.item.updated", sessionId: null, payload: { item: next } },
     ]);
@@ -186,6 +219,8 @@ const ITEM_DEFAULTS = {
   investigation: null,
   nudges: {},
   largeChange: null,
+  sessionsArchivedAt: null,
+  earlierSessionIds: [],
 } satisfies Partial<FactoryItem>;
 
 /** An item as read from the projection, with the fields newer versions added. */

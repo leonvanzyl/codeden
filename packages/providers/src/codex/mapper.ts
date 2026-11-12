@@ -1,4 +1,13 @@
-import type { AgentEvent, ErrorKind, Item, ItemOf, Usage } from "@codeden/contracts";
+import { randomUUID } from "node:crypto";
+import type {
+  AgentEvent,
+  ErrorKind,
+  Item,
+  ItemOf,
+  MessageSender,
+  Usage,
+  UserInput,
+} from "@codeden/contracts";
 import { count, unixToIso } from "../util/text";
 import { classifyCodexError, codexErrorCode, usageLimitResetsAt } from "./errors";
 import { mapThreadItem, startedItem } from "./items";
@@ -21,6 +30,12 @@ export class CodexEventMapper {
   private readonly turnUsage = new CodexTurnUsage();
   /** The latest rate-limit snapshot, for when a reached usage limit lifts. */
   private limits: RateLimitSnapshot | undefined;
+  /**
+   * Who sent each input that went out with a `clientUserMessageId`, until Codex echoes it back
+   * as a user message (with that id as `clientId`). Codex keeps only the text, so the sender
+   * would otherwise be lost.
+   */
+  private readonly senders = new Map<string, MessageSender>();
 
   constructor(
     sessionId: string,
@@ -45,6 +60,27 @@ export class CodexEventMapper {
     return { threadId: this.rootThreadId, turnId };
   }
 
+  /**
+   * The `clientUserMessageId` to send with `input`, so its echo keeps the sender. Undefined for
+   * the user's own messages (no sender recorded).
+   */
+  clientMessageId(input: UserInput): string | undefined {
+    if (!input.from) return undefined;
+    const id = randomUUID();
+    // Bounded: an id whose echo never came (a failed turn/start) is dropped after a while.
+    if (this.senders.size >= 50) this.senders.delete(this.senders.keys().next().value as string);
+    this.senders.set(id, input.from);
+    return id;
+  }
+
+  /** A user message with the sender recorded for its `clientId`. */
+  private withSender(item: Item, clientId: string | null): Item {
+    const from = clientId ? this.senders.get(clientId) : undefined;
+    if (item.kind !== "user_message" || !clientId || !from) return item;
+    this.senders.delete(clientId);
+    return { ...item, input: { ...item.input, from } };
+  }
+
   handle(n: ServerNotification): void {
     const params = n.params as { threadId?: string | null; turnId?: string };
     if (params.threadId && this.codexThreadId && params.threadId !== this.codexThreadId) return;
@@ -61,8 +97,10 @@ export class CodexEventMapper {
         return;
       }
       case "item/completed": {
-        const item = mapThreadItem(n.params.item);
-        if (!item) return;
+        const mapped = mapThreadItem(n.params.item);
+        if (!mapped) return;
+        const raw = n.params.item;
+        const item = raw.type === "userMessage" ? this.withSender(mapped, raw.clientId) : mapped;
         this.beginTurn(n.params.turnId);
         this.open.delete(item.id);
         this.emit({ type: "item.completed", ...this.ctx(n.params.turnId), item });

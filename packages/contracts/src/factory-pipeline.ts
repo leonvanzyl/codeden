@@ -12,7 +12,7 @@ import { Id, Timestamp } from "./common";
  * ```
  *
  * A failed review sends the work back to the builder (the revise loop). Merging is yours unless
- * auto-merge is on. Also the dark factory's scout: its review rounds, lenses and findings.
+ * auto-merge is on. Also the dark factory's scout: its review rounds, area reviewers and findings.
  */
 
 /** The three pipelines. */
@@ -187,7 +187,10 @@ export function pipelineStep(item: PipelineStepInput): PipelineStep {
 
 // ---------------------------------------------------------------- the dark factory's scout
 
-/** What the scout's lenses review (one long-lived lens session per area). */
+/**
+ * The scout's review areas: what its area reviewers look at, one long-lived reviewer session per
+ * area. The code calls those sessions lenses; the UI, docs and prompts say "area reviewer".
+ */
 export const DiscoveryArea = z.enum([
   "features",
   "ux",
@@ -200,7 +203,7 @@ export const DiscoveryArea = z.enum([
 ]);
 export type DiscoveryArea = z.infer<typeof DiscoveryArea>;
 
-/** One lens the scout asks for this round (`factory_plan_round`). */
+/** One review area the scout asks for this round (`factory_plan_round`). */
 export const ScoutLensRequest = z.object({
   area: DiscoveryArea,
   focus: z
@@ -208,17 +211,22 @@ export const ScoutLensRequest = z.object({
     .trim()
     .min(1)
     .max(1_000)
-    .describe("What this lens should look at this round, specific to this app"),
+    .describe("What this area's reviewer should look at this round, specific to this app"),
 });
 export type ScoutLensRequest = z.infer<typeof ScoutLensRequest>;
 
-/** `factory_plan_round`: the lenses for this round (none: the scout reviews by itself). */
+/** `factory_plan_round`: the review areas for this round (none: the scout reviews by itself). */
 export const FactoryPlanRoundRequest = z.object({
-  lenses: z.array(ScoutLensRequest).max(8),
+  lenses: z
+    .array(ScoutLensRequest)
+    .max(8)
+    .describe(
+      "The review areas for this round, one area reviewer each; empty to review by yourself",
+    ),
 });
 export type FactoryPlanRoundRequest = z.infer<typeof FactoryPlanRoundRequest>;
 
-/** One improvement a lens found (`factory_report_findings`). */
+/** One improvement an area reviewer found (`factory_report_findings`). */
 export const FactoryFinding = z.object({
   title: z.string().trim().min(3).max(200),
   summary: z
@@ -261,7 +269,7 @@ export const FactoryFileIssueRequest = z.object({
 export type FactoryFileIssueRequest = z.infer<typeof FactoryFileIssueRequest>;
 export type FactoryFileIssueRequestInit = z.input<typeof FactoryFileIssueRequest>;
 
-/** One lens of the current round. */
+/** One area reviewer of the current round. */
 export const ScoutLensRun = z.object({
   area: DiscoveryArea,
   focus: z.string(),
@@ -274,8 +282,8 @@ export const ScoutLensRun = z.object({
 export type ScoutLensRun = z.infer<typeof ScoutLensRun>;
 
 /**
- * One review round of the scout: `planning` (the scout picks lenses), `reviewing` (the lenses
- * work), `filing` (the scout files the issues worth doing).
+ * One review round of the scout: `planning` (the scout picks review areas), `reviewing` (the
+ * area reviewers work), `filing` (the scout files the issues worth doing).
  */
 export const ScoutRound = z.object({
   id: z.string().min(1),
@@ -293,7 +301,7 @@ export type ScoutRound = z.infer<typeof ScoutRound>;
 /** The scout of a dark factory: its long-lived sessions and the round in progress. */
 export const ScoutState = z.object({
   sessionId: Id.nullable().default(null),
-  /** One long-lived lens session per area, reused round after round. */
+  /** One long-lived area reviewer session per area, reused round after round. */
   lensSessions: z.partialRecord(DiscoveryArea, Id).default({}),
   round: ScoutRound.nullable().default(null),
   lastRoundAt: Timestamp.nullable().default(null),
@@ -305,6 +313,7 @@ export type ScoutState = z.infer<typeof ScoutState>;
 export const ScoutStatus = z.object({
   phase: z.enum(["idle", "planning", "reviewing", "filing"]),
   sessionId: Id.nullable(),
+  /** The area reviewers of the current round, one per review area. */
   lenses: z.array(
     z.object({ area: DiscoveryArea, sessionId: Id, reported: z.boolean(), active: z.boolean() }),
   ),

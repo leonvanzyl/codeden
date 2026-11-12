@@ -6,7 +6,7 @@ import { countLines, normalizePatch } from "@/lib/api/mock/fixtures/patches";
 import { inboxItems } from "@/lib/api/mock/fixtures/sessions";
 import { MockWorld } from "@/lib/api/mock/world";
 import { cronError, describeCron, nextRuns } from "@/lib/cron";
-import { ageShort, duration, until } from "@/lib/format";
+import { ageShort, duration, subagentStatsParts, subagentStatsTitle, until } from "@/lib/format";
 import { groupInbox, inboxCounts } from "@/lib/inbox";
 import { matchesCombo } from "@/lib/shortcuts";
 import { applyDomainEvent } from "@/lib/snapshot-reducer";
@@ -136,6 +136,32 @@ describe("formatting", () => {
     expect(duration(96_000)).toBe("1m 36s");
     expect(duration(4200)).toBe("4.2s");
     expect(until("2026-11-07T12:38:00.000Z", now)).toBe("in 38 min");
+  });
+  it("formats a subagent's reported figures, only those present", () => {
+    expect(subagentStatsParts({ totalTokens: 48_213, toolUses: 23, durationMs: 72_000 })).toEqual([
+      "48.2k tokens",
+      "23 tool calls",
+      "1m 12s",
+    ]);
+    expect(subagentStatsParts({ totalTokens: 1_250_000, toolUses: 1 })).toEqual([
+      "1.3M tokens",
+      "1 tool call",
+    ]);
+    expect(subagentStatsParts({ totalTokens: 640, durationMs: 4200 })).toEqual([
+      "640 tokens",
+      "4.2s",
+    ]);
+    expect(subagentStatsParts({ totalTokens: 1 })).toEqual(["1 token"]);
+    expect(subagentStatsParts({})).toEqual([]);
+    expect(subagentStatsParts(undefined)).toEqual([]);
+  });
+  it("gives every reported subagent figure exactly in the tooltip", () => {
+    expect(subagentStatsTitle({ totalTokens: 48_213, toolUses: 23, durationMs: 72_000 })).toBe(
+      "48,213 tokens · 23 tool calls · 1m 12s (72,000 ms)",
+    );
+    expect(subagentStatsTitle({ totalTokens: 1, toolUses: 1 })).toBe("1 token · 1 tool call");
+    expect(subagentStatsTitle({ durationMs: 4210 })).toBe("4.2s (4,210 ms)");
+    expect(subagentStatsTitle(undefined)).toBe("");
   });
   it("describes automation triggers", () => {
     expect(describeTrigger({ type: "cron", expression: "0 9 * * 1" })).toBe(

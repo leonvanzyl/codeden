@@ -191,6 +191,8 @@ export const sessions: Session[] = [
     model: "gpt-6.1-sol",
     purpose: "Export notes to Markdown",
     workKey: "request:export-markdown",
+    startedBy: { kind: "pm", id: "s-pm-notes" },
+    parentSessionId: "s-pm-notes",
     cwd: wt("notes-cli", "export-md"),
     worktreePath: wt("notes-cli", "export-md"),
     branch: "codeden/export-markdown",

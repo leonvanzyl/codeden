@@ -28,6 +28,31 @@ const turn = (status: string, error: object | null = null) => ({
 });
 
 describe("CodexEventMapper", () => {
+  it("keeps the sender of an input on its echoed user message", () => {
+    const { mapper, events, feed } = setup();
+    const userMessage = (id: string, clientId: string | null) =>
+      feed("item/completed", {
+        turnId: TURN,
+        item: {
+          type: "userMessage",
+          id,
+          clientId,
+          content: [{ type: "text", text: "## Brief", text_elements: [] }],
+        },
+      });
+    expect(mapper.clientMessageId({ text: "typed", attachments: [] })).toBeUndefined();
+    const clientId = mapper.clientMessageId({ text: "## Brief", attachments: [], from: "factory" });
+    expect(clientId).toBeTruthy();
+    userMessage("u1", clientId ?? null);
+    userMessage("u2", null);
+    // An id is used once: a second echo with it is the user's.
+    userMessage("u3", clientId ?? null);
+    const inputs = events.flatMap((e) =>
+      e.type === "item.completed" && e.item.kind === "user_message" ? [e.item.input] : [],
+    );
+    expect(inputs.map((i) => i.from)).toEqual(["factory", undefined, undefined]);
+  });
+
   it("maps a turn with streamed text, a patch and a command", () => {
     const { events, feed } = setup();
     feed("turn/started", { turn: turn("inProgress") });

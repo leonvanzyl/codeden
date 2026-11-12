@@ -1,26 +1,39 @@
 import type { ReactNode } from "react";
+import { InfoHint } from "@/components/common/info-hint";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 
-/** A labelled form field with optional help text. */
+/** A labelled form field with optional help text, and an optional "?" hint by the label. */
 export function Field({
   label,
   htmlFor,
   help,
+  hint,
   children,
   className,
 }: {
   label: string;
   htmlFor?: string;
   help?: ReactNode;
+  /** A sentence or two explaining the field, shown from a "?" next to the label. */
+  hint?: ReactNode;
   children: ReactNode;
   className?: string;
 }) {
   return (
     <div className={cn("space-y-1.5", className)}>
-      <Label htmlFor={htmlFor} className="text-xs">
-        {label}
-      </Label>
+      {hint ? (
+        <div className="flex items-center gap-1">
+          <Label htmlFor={htmlFor} className="text-xs">
+            {label}
+          </Label>
+          <InfoHint label={label}>{hint}</InfoHint>
+        </div>
+      ) : (
+        <Label htmlFor={htmlFor} className="text-xs">
+          {label}
+        </Label>
+      )}
       {children}
       {help && <p className="text-3xs leading-relaxed text-muted-foreground">{help}</p>}
     </div>

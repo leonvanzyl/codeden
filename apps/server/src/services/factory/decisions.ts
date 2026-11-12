@@ -7,6 +7,7 @@ import type {
   Session,
 } from "@codeden/contracts";
 import { badRequest, conflict, notFound } from "../errors";
+import { sessionsToArchive } from "./cleanup";
 import type { FactoryContext } from "./context";
 import { announceType } from "./intake";
 
@@ -97,12 +98,18 @@ export async function setType(
   return updated;
 }
 
-/** Run an item that stopped (not reproduced, declined, failed checks, closed) again. */
+/**
+ * Run an item that stopped (not reproduced, declined, failed checks, closed) again, with fresh
+ * sessions. The earlier attempt's sessions go to `earlierSessionIds`, which the loop archives
+ * once none of them is busy, so none is left behind. If they were archived already, nothing
+ * is: a session someone restored since stays.
+ */
 export function retry(ctx: FactoryContext, projectId: string, itemId: string): FactoryItem {
   const item = projectItem(ctx, projectId, itemId);
   if (item.stage !== "rejected" && item.stage !== "failed") {
     throw conflict(`Only stopped items can be retried (this one is ${item.stage})`, "not_stopped");
   }
+  const earlier = item.sessionsArchivedAt ? [] : sessionsToArchive(ctx, item).map((s) => s.id);
   return ctx.store.updateItem(item.id, (i) => ({
     ...i,
     stage: i.type ? "backlog" : "candidate",
@@ -119,6 +126,8 @@ export function retry(ctx: FactoryContext, projectId: string, itemId: string): F
     nudges: {},
     reason: null,
     note: "Retried",
+    sessionsArchivedAt: null,
+    earlierSessionIds: [...new Set([...i.earlierSessionIds, ...earlier])],
     finishedAt: null,
   }));
 }

@@ -157,6 +157,17 @@ export const FactoryItem = z.object({
    * work that can't be split). The size check then passes; every other check still applies.
    */
   largeChange: z.string().nullable().default(null),
+  /**
+   * When the factory archived the item's builder and reviewer sessions after it finished, which
+   * removes their worktrees (the branch and transcript stay); null until then. Set once, so a
+   * session someone unarchives stays unarchived. Retry clears it.
+   */
+  sessionsArchivedAt: Timestamp.nullable().default(null),
+  /**
+   * Sessions of attempts before a retry that weren't archived yet. The factory archives them
+   * once none of them is busy (a turn is never cut off), then empties the list.
+   */
+  earlierSessionIds: z.array(Id).default([]),
   createdAt: Timestamp,
   updatedAt: Timestamp,
   mergedAt: Timestamp.nullable(),
@@ -186,11 +197,14 @@ export const FactoryTuning = z.object({
   minBacklog: z.int().nonnegative().default(2),
   /** Dark factory: minutes between the scout's review rounds. */
   discoveryIntervalMin: z.int().positive().default(360),
-  /** Dark factory: most lenses (long-lived reviewer sessions) the scout may use per round. */
+  /**
+   * Dark factory: most review areas the scout may use per round, each with its own long-lived
+   * area reviewer session ("Review areas per round" in the UI).
+   */
   discoveryPerRound: z.int().nonnegative().default(2),
   /** Dark factory: most issues the scout may file per round. */
   maxIssuesPerRound: z.int().positive().default(3),
-  /** Dark factory: the areas the scout's lenses may review. */
+  /** Dark factory: the review areas the scout may use. */
   areas: z.array(DiscoveryArea).default(DiscoveryArea.options),
   /** Provider for builders (`auto`: the project/role default). */
   builderProvider: z.union([z.literal("auto"), ProviderId]).default("auto"),

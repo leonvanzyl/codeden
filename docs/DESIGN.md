@@ -209,7 +209,7 @@ A conversation is a **thread** made of **turns**, and each turn holds **items**.
 
 **Automatic retry** (`settings.sessions.autoRetry`, default on). When an agent session's root turn fails as `transient` or `usage_limit`, the session goes idle with no inbox item, and the server continues it with a `codeden` message ("Previous turn stopped (<reason>); continue where you left off."): after 20 s, 90 s and 5 min for transient failures (at most three in a row), or a minute after a usage limit resets. A notice in the failed turn says when. A user message or Stop cancels a pending retry; pending retries are derived from the turns table, so a restart keeps them. When the retries run out, there is no reset time, or the setting is off, the session fails as before (`failed`, a `run_failed` inbox item and the PM notices that follow). Orchestrator and PM sessions are never retried this way.
 
-**Subagents** are child threads with `parentThreadId` and `parentItemId`. The parent transcript shows a compact subagent card with live status. Clicking it opens the child thread in a side panel or as its own view, and approvals raised inside a subagent surface in the parent and in the inbox.
+**Subagents** are child threads with `parentThreadId` and `parentItemId`. The parent transcript shows a compact subagent card with live status. A finished subagent's item carries `stats` (total tokens, tool calls, duration) when the provider reports them, and the card shows them; providers that report none show none. The figures are display only and never added to usage totals, which come from the provider's own turn figures. Clicking it opens the child thread in a side panel or as its own view, and approvals raised inside a subagent surface in the parent and in the inbox.
 
 ### 7.4 Utility model
 
@@ -283,7 +283,7 @@ defineTool({
     - People: `ask_user`, `message_pm`, `report_progress`.
     - Sharing and evidence: `share_to_chat` (file or screenshot), `attach_evidence` (to an issue or PR).
     - Results: `create_pull_request`, `suggest_followups`, `finish` (with a structured result).
-    - Factory sessions (§10.1), listed only to the session in that role: builders `factory_report_reproduction`, `factory_submit_analysis`; reviewers `factory_submit_review`; the scout `factory_plan_round`, `factory_file_issue`; lenses `factory_report_findings`.
+    - Factory sessions (§10.1), listed only to the session in that role: builders `factory_report_reproduction`, `factory_submit_analysis`; reviewers `factory_submit_review`; the scout `factory_plan_round`, `factory_file_issue`; its area reviewers `factory_report_findings`.
     - Browser tools (§12.2).
   - **All roles:** `generate_image` (§12.5).
 
@@ -387,7 +387,7 @@ Issue ─► Identify type ┼─ Feature:  Analyze ───► Implement ─�
 
 **Merge checks** (all must pass): CI green; tests the change needs exist; test results reported; the independent review (skipped for docs-only changes); security and dependency scans clean; screenshots for UI changes; under the size limit (reviewable code only; work that cannot be split is allowed by the PM as a recorded decision); no protected area touched (protected changes always come to you).
 
-**The dark factory** adds a **scout**: one long-lived agent session per project that, when fewer than `minBacklog` items wait and `discoveryIntervalMin` has passed, reviews the app against the vision and files the work worth doing as GitHub issues. It may use **lenses**: long-lived reviewer sessions, one per area (UI and UX, performance, security, features, bugs, code quality, test gaps, docs), reused round after round so they keep their context. To keep token use down the server enforces: at most `discoveryPerRound` lenses per round and only on free agent slots (builders come first), at most one session per area ever, at most `maxIssuesPerRound` issues per round, and no round while the queue is full. Filed issues enter the pipelines already typed.
+**The dark factory** adds a **scout**: one long-lived agent session per project that, when fewer than `minBacklog` items wait and `discoveryIntervalMin` has passed, reviews the app against the vision and files the work worth doing as GitHub issues. It may use **review areas** (UI and UX, performance, security, features, bugs, code quality, test gaps, docs), each with an **area reviewer**: a long-lived reviewer session for that one area, reused round after round so it keeps its context. To keep token use down the server enforces: at most `discoveryPerRound` review areas per round (**Review areas per round** in the UI) and only on free agent slots (builders come first), at most one session per area ever, at most `maxIssuesPerRound` issues per round, and no round while the queue is full. Filed issues enter the pipelines already typed.
 
 **Vision.** Both factory modes require a project vision in `.codeden/VISION.md`, edited in the UI. It covers goals, target users and principles; what is out of scope; the quality bar; and **protected areas** (paths or topics that always need a human: auth, payments, data migrations, infrastructure, licensing). Agents get it in their prompts; the analyzer checks requests against it; the scout finds work with it.
 
@@ -399,9 +399,11 @@ Issue ─► Identify type ┼─ Feature:  Analyze ───► Implement ─�
 - **Pause on repeated failures:** the loop pauses after N failed merge checks or reverts in a row.
 - **Protected areas** always escalate to you.
 - **No deploys or releases** unless they're explicitly enabled as a separate automation.
-- **A kill switch** on the project and globally: one click stops the loop and all its sessions, the scout and lenses included.
+- **A kill switch** on the project and globally: one click stops the loop and all its sessions, the scout and its area reviewers included.
 
-**Visibility.** Factory work is ordinary sessions, issues and PRs, so it all stays traceable. The project page shows the **pipelines as a live diagram** (Issue, Identify type, the Bug, Feature and Docs lanes, Merge, and the scout in a dark factory) with each work item on the node of its current step; clicking an item opens the agent session working on it. Around it: spend against budget, agents working, PRs ready for you, merge-check results, recent results, ignored issues with **Let in**, and a daily digest.
+**Visibility.** Factory work is ordinary sessions, issues and PRs, so it all stays traceable. The project page shows the **pipelines as a live diagram** (Issue, Identify type, the Bug, Feature and Docs lanes, Merge, and the scout in a dark factory) with each work item on the node of its current step; clicking an item opens the agent session working on it. Every lane, step, the scout, its rounds and review areas, and the less obvious limits explain themselves in plain words: a tooltip on the underlined term or a "?" beside it, opened by hover, keyboard focus or a tap. Around it: spend against budget, agents working, PRs ready for you, merge-check results, recent results, ignored issues with **Let in**, and a daily digest.
+
+**Cleanup.** Finished work gives its space back. Once an item is merged, reverted, rejected or failed, the server archives its builder and reviewer sessions through the normal archive path (§9), which removes their worktrees and keeps the branch, checkpoints and transcript. Work that isn't finished keeps its sessions: escalated items, merges whose main CI is still watched, and an item that failed only on size while its PR is open (the PM may still allow it). A session is never cut off: the item waits while one of them is in a turn. An item's sessions are archived once (`sessionsArchivedAt`), so a session the user unarchives stays. **Retry** hands the earlier attempt's sessions to the same cleanup (`earlierSessionIds`, archived once none of them is busy), unless they were archived already. The scout and its area reviewers are never archived this way.
 
 **Delivery.** Both factory modes ship marked **experimental**. Assisted remains the default for new projects.
 
