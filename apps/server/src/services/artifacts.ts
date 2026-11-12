@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import type { Artifact, ArtifactKind, Attachment, UserInput } from "@codeden/contracts";
+import type { Artifact, ArtifactKind, Attachment, ItemOf, UserInput } from "@codeden/contracts";
 import { and, desc, eq, type SQL } from "drizzle-orm";
 import type { Db } from "../db/client";
 import { rowToArtifact } from "../db/rows";
@@ -171,6 +171,32 @@ export class ArtifactService {
     const row = this.db.select().from(artifacts).where(eq(artifacts.id, id)).get();
     return row ? rowToArtifact(row) : undefined;
   }
+}
+
+/**
+ * The transcript notice that shows a stored artifact inline (`shared_artifact`): images as a
+ * picture with the caption under it, other files as a download.
+ */
+export function sharedArtifactNotice(
+  artifact: Artifact,
+  caption?: string,
+  id = `share-${randomUUID()}`,
+): ItemOf<"notice"> {
+  return {
+    id,
+    kind: "notice",
+    status: "completed",
+    level: "info",
+    code: "shared_artifact",
+    message: caption ?? artifact.name,
+    data: {
+      artifactId: artifact.id,
+      name: artifact.name,
+      mediaType: artifact.mediaType,
+      sizeBytes: artifact.sizeBytes,
+      url: `/api/artifacts/${artifact.id}`,
+    },
+  };
 }
 
 const caseInsensitive = process.platform === "win32" || process.platform === "darwin";

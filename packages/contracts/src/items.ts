@@ -62,6 +62,19 @@ export const ToolKind = z.enum([
 ]);
 export type ToolKind = z.infer<typeof ToolKind>;
 
+/**
+ * An image file a tool call created on this machine, e.g. with a provider's built-in image
+ * generation. Items point at the file and never carry the image bytes: the server copies it
+ * into the session's artifacts and shows it inline in the transcript, once per item.
+ */
+export const GeneratedImage = z.object({
+  /** Absolute path of the image file. */
+  path: z.string().min(1),
+  /** Shown with the image, e.g. the prompt it was generated from. */
+  caption: z.string().optional(),
+});
+export type GeneratedImage = z.infer<typeof GeneratedImage>;
+
 const toolCallBase = {
   ...itemBase,
   kind: z.literal("tool_call"),
@@ -74,6 +87,8 @@ const toolCallBase = {
   output: ToolOutput.optional(),
   error: ErrorInfo.optional(),
   durationMs: z.int().nonnegative().optional(),
+  /** Images the call created, by file path (see {@link GeneratedImage}). */
+  generatedImages: z.array(GeneratedImage).optional(),
 };
 
 /** A single file change produced by a `file_edit` tool call. */

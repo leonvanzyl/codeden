@@ -32,6 +32,7 @@ import { ProjectRedetector } from "./projects/redetector";
 import { type RunnerPort, redetectProviders } from "./runner-port";
 import type { SecretStore } from "./secrets";
 import { AutoRetry, type AutoRetryDeps } from "./sessions/auto-retry";
+import { GeneratedImages } from "./sessions/generated-images";
 import { SessionLauncher } from "./sessions/launcher";
 import { SessionLifecycle } from "./sessions/lifecycle";
 import { Outbox } from "./sessions/outbox";
@@ -160,6 +161,8 @@ export interface AppServices {
   worktreeCleanup: WorktreeCleanup;
   /** Denies approvals nobody is there to answer, so unattended work never waits forever. */
   unwatchedApprovals: UnwatchedApprovals;
+  /** Images made with a provider's own tools: stored as artifacts and shown inline. */
+  generatedImages: GeneratedImages;
   /** CI failures, requested changes and conflicts sent to user-started sessions' agents (§9). */
   prFeedback: PrFeedbackService;
   /** Continues agent sessions after transient failures and usage limits. */
@@ -403,6 +406,13 @@ export function createServices(opts: ServicesOptions): AppServices {
     factory,
     worktreeCleanup,
     unwatchedApprovals,
+    generatedImages: new GeneratedImages({
+      db: opts.db,
+      store: opts.store,
+      repo: sessionRepo,
+      artifacts,
+      log: opts.log,
+    }),
     prFeedback: new PrFeedbackService({
       store: opts.store,
       repo: sessionRepo,

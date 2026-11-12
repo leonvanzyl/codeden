@@ -212,7 +212,7 @@ A conversation is a **thread** made of **turns**, and each turn holds **items**.
 - **Session and turn lifecycle:** `session.updated`, `turn.started`, `turn.completed`, `turn.failed`, `turn.interrupted`.
 - **Items:** `item.started`, `item.delta`, `item.completed`. Item kinds:
   - `user_message`, `assistant_message`, `reasoning`
-  - `tool_call`, with a `toolKind` of `command`, `file_edit`, `file_read`, `search`, `web`, `mcp`, `browser` or `other`
+  - `tool_call`, with a `toolKind` of `command`, `file_edit`, `file_read`, `search`, `web`, `mcp`, `browser` or `other`. A call that created images (a provider's built-in image generation) lists their file paths in `generatedImages`, never the bytes; the server stores each one as a session artifact and shows it inline.
   - `plan` / `todo_list`
   - `approval_request`, `user_question`
   - `subagent` (links to a child thread)

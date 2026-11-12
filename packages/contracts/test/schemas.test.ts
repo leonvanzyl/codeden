@@ -72,6 +72,23 @@ describe("agent events", () => {
     expect(item.kind === "tool_call" && item.toolKind === "command" && item.command).toBe("ls");
   });
 
+  it("round-trips the images a tool call generated, by path only", () => {
+    const item = roundTrip(Item, {
+      id: "ig_1",
+      kind: "tool_call",
+      toolKind: "other",
+      status: "completed",
+      toolName: "image_generation",
+      generatedImages: [{ path: "/home/u/.codex/generated_images/t/ig_1.png", caption: "A fox" }],
+    });
+    expect(item.kind === "tool_call" && item.generatedImages).toEqual([
+      { path: "/home/u/.codex/generated_images/t/ig_1.png", caption: "A fox" },
+    ]);
+    expect(Item.safeParse({ ...item, generatedImages: [{ path: "", caption: "x" }] }).success).toBe(
+      false,
+    );
+  });
+
   it("rejects a tool call missing its kind-specific fields", () => {
     const bad = { id: "i", kind: "tool_call", toolKind: "command", status: "completed" };
     expect(Item.safeParse({ ...bad, toolName: "Bash" }).success).toBe(false);
