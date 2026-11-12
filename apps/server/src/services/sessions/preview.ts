@@ -4,6 +4,12 @@ import type { ItemRecord } from "@codeden/contracts";
 export const OUTPUT_PREVIEW_CHARS = 16_000;
 
 /**
+ * Most tool output stored on an item while it streams. Older output is dropped past this, so
+ * every chunk rewrites a bounded row however long the command runs.
+ */
+export const STREAMED_OUTPUT_CHARS = 64_000;
+
+/**
  * Trim large tool outputs to their last `max` characters (the end of command output is the
  * useful part) and mark them truncated with the full size. Pure.
  */
