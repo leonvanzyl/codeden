@@ -178,13 +178,18 @@ describe("OpenCode model discovery", () => {
       providerID: "openai",
       id: "cheaper-elsewhere",
     });
-    // A provider that sells models and gives some away: free ones only for a free default.
+    // A free model on the default's own provider is the cheapest (prices 18, 2.5 and 0);
+    // another provider's free model never is.
     const zenPaid = { id: "zen-pro", providerID: "opencode", cost: [cost(3, 15)] };
     const zenMini = { id: "zen-mini", providerID: "opencode", cost: [cost(0.5, 2)] };
     const zenFree = { id: "zen-free", providerID: "opencode", cost: [cost(0, 0)] };
     const zen = [zenPaid, zenMini, zenFree];
-    expect(cheapUtilityModel(zen, zenPaid)).toEqual({ providerID: "opencode", id: "zen-mini" });
+    expect(cheapUtilityModel(zen, zenPaid)).toEqual({ providerID: "opencode", id: "zen-free" });
     expect(cheapUtilityModel(zen, zenFree)).toEqual({ providerID: "opencode", id: "zen-free" });
+    expect(cheapUtilityModel([opus, haiku, zenFree], opus)).toEqual({
+      providerID: "anthropic",
+      id: "haiku",
+    });
     // Priced only above a context size: unpriced, never ranked by that tier.
     const tierOnly = { id: "tier-only", providerID: "anthropic", cost: [cost(0.01, 0.01, 1)] };
     expect(cheapUtilityModel([opus, tierOnly], opus)).toEqual({
