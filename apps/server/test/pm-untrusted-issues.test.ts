@@ -373,7 +373,7 @@ describe("PM tools and untrusted issues in turns the user didn't start (#137)", 
     // their authority: it waits in the queue for the next turn.
     const s = h.server.services.sessions;
     const automated = "[approval] Automated triage of #50.";
-    const [auto, user] = await Promise.all([
+    const [auto, user] = await Promise.allSettled([
       s.send(
         pmId,
         { input: { text: automated, attachments: [] }, whenBusy: "queue" },
@@ -388,8 +388,7 @@ describe("PM tools and untrusted issues in turns the user didn't start (#137)", 
         "user",
       ),
     ]);
-    expect(auto).toEqual({ status: "sent" });
-    expect(user).toEqual({ status: "queued" });
+    expect(auto).toEqual({ status: "fulfilled", value: { status: "sent" } });
     await waitUntil(async () =>
       (await h.detail(pmId)).session.status === "waiting" ? true : undefined,
     );
@@ -397,17 +396,20 @@ describe("PM tools and untrusted issues in turns the user didn't start (#137)", 
     expect(texts.some((t) => t.includes(automated))).toBe(true);
     expect(texts.some((t) => t.includes("tell me the project status"))).toBe(false);
 
-    // The running turn is the automation's, in memory and as saved.
+    // The running turn is the automation's, in memory and as saved: neither tool works for
+    // the untrusted issues in it.
     expect(userLedAfterRestart()).toBe(false);
     const start = await call("start_session", {
       prompt: "Fix issue #50.",
       purpose: "Resolve #50",
       issueNumber: 50,
     });
+    const admit = await call("factory_admit_issue", { itemId: ignored?.id });
     expect(start.isError).toBe(true);
     expect(issueSessions(50)).toHaveLength(0);
-    const admit = await call("factory_admit_issue", { itemId: ignored?.id });
     expect(admit.isError).toBe(true);
     expect(item(ignored?.id as string)).toMatchObject({ stage: "ignored", trust: "untrusted" });
+    // The user's message isn't lost: it waits for the PM's next turn.
+    expect(user).toEqual({ status: "fulfilled", value: { status: "queued" } });
   });
 });

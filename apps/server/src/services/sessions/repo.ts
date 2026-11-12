@@ -39,9 +39,9 @@ export type StoredStartMeta = SessionStartMeta & {
   pending?: PendingStart | null;
   prFeedback?: Record<string, { rounds: number; keys: string[] }>;
   /**
-   * Whether the latest turn CodeDen started in this role session carries the user's request,
-   * written when its input is sent, so a turn that outlives a server restart keeps it. Absent:
-   * never recorded, treated as not the user's.
+   * Whether the turn this role session's last accepted delivery started carries the user's
+   * request (false while a delivery is in flight), so a turn that outlives a server restart
+   * keeps it. Absent: never recorded, treated as not the user's.
    */
   turnFromUser?: boolean;
   /** A fork's workspace plan (§9): prepared before any start until the worktree exists. */
