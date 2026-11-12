@@ -33,7 +33,8 @@ export function useFactoryStatus(projectId: string, enabled = true) {
     queryKey: factoryKeys.status(projectId),
     queryFn: () => client.factory.status(projectId),
     enabled,
-    // Spend and session counts move without loop events.
+    // Spend, session counts and the "last check" (`lastTickAt`) move without loop events:
+    // a tick that changes nothing appends none.
     refetchInterval: 30_000,
   });
 }

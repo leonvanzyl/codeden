@@ -302,6 +302,10 @@ export const FactoryLoop = z.object({
   /** Main-branch commits whose failed checks already became items. */
   seenFailedShas: z.array(z.string()).default([]),
   tuning: FactoryTuning.prefault({}),
+  /**
+   * The last tick that changed the loop. A tick that changes nothing else saves nothing, so
+   * this can be older than the last tick (`FactoryStatus.lastTickAt` has that).
+   */
   lastTickAt: Timestamp.nullable(),
   updatedAt: Timestamp,
 });
@@ -517,6 +521,10 @@ export const FactoryStatus = z.object({
   scout: ScoutStatus.nullable().default(null),
   visionExists: z.boolean(),
   lastDigest: FactoryDigest.nullable(),
+  /**
+   * When the loop last ticked (the panel's "last check"), changed or not. After a server
+   * restart, the last tick that changed the loop until the first tick runs.
+   */
   lastTickAt: Timestamp.nullable(),
 });
 export type FactoryStatus = z.infer<typeof FactoryStatus>;

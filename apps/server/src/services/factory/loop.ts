@@ -103,8 +103,9 @@ export async function runTick(
   return save(ctx, { ...loop, state: deriveState(ctx, projectId, loop) }, now);
 }
 
+/** Ticks that change nothing append nothing (the status shows the tick time from memory). */
 function save(ctx: FactoryContext, loop: FactoryLoop, now: Date): FactoryLoop {
-  return ctx.store.saveLoop({ ...loop, lastTickAt: now.toISOString() });
+  return ctx.store.saveTick(loop, now.toISOString());
 }
 
 /** The loop state the panel shows: the most advanced stage with work in it. */
