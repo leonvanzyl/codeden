@@ -225,6 +225,11 @@ export const ApprovalRequestItem = z.object({
   toolInput: JsonValue.optional(),
   /** The tool call item this approval gates, if any. */
   toolCallItemId: Id.optional(),
+  /**
+   * A link the request asks the user to open (an MCP server's URL elicitation, e.g. to sign
+   * in). The card shows it; nothing opens it on the user's behalf. Web links only.
+   */
+  url: z.url({ protocol: /^https?$/ }).optional(),
   options: z.array(ApprovalDecision).default(["allow_once", "allow_session", "deny"]),
   decision: ApprovalDecision.optional(),
   decidedBy: ApprovalDecider.optional(),
@@ -260,6 +265,12 @@ export const UserQuestionItem = z.object({
    * turn ends, and an answer that arrives after the tool returned is sent as a new message.
    */
   deferred: z.boolean().optional(),
+  /**
+   * The MCP server asking, when the questions are its form (an MCP elicitation) rather than the
+   * agent's own: the answers go to that server as data. Unattended sessions withdraw such a form
+   * instead of answering it (§10.1).
+   */
+  mcpServer: z.string().min(1).optional(),
 });
 
 /**

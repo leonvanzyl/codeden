@@ -76,7 +76,8 @@ export function unattendedAnswers(item: ItemOf<"user_question">): Record<string,
 
 /**
  * A question the provider asked through its own tool (not `ask_user`) in an unattended
- * session: answer it straight away with {@link UNATTENDED_ANSWER}, so the turn never waits.
+ * session: answer it straight away with {@link UNATTENDED_ANSWER}, so the turn never waits. An
+ * MCP server's form is withdrawn instead: its answers would go to the server as data.
  */
 export async function answerProviderQuestion(
   ctx: Pick<FactoryContext, "repo" | "projects" | "log">,
@@ -92,7 +93,9 @@ export async function answerProviderQuestion(
   try {
     await respond(e.sessionId, {
       requestId: item.requestId,
-      response: { kind: "answer", answers: unattendedAnswers(item) },
+      response: item.mcpServer
+        ? { kind: "cancel" }
+        : { kind: "answer", answers: unattendedAnswers(item) },
     });
     return true;
   } catch (error) {

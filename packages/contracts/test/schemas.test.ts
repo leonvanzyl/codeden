@@ -132,6 +132,32 @@ describe("agent events", () => {
     expect(Item.safeParse({ ...answered, decidedBy: "policy" }).success).toBe(false);
   });
 
+  it("carries MCP elicitations: a server's form and a web link to open", () => {
+    const form = {
+      id: "q",
+      kind: "user_question",
+      status: "in_progress",
+      requestId: "r",
+      questions: [{ id: "environment", question: "Deploy where?" }],
+      mcpServer: "deploy",
+    };
+    expect(roundTrip(Item, form)).toMatchObject({ mcpServer: "deploy" });
+    const link = {
+      id: "a",
+      kind: "approval_request",
+      status: "in_progress",
+      requestId: "r",
+      action: "network",
+      title: "Open a link from github",
+      url: "https://github.com/login/device",
+      options: ["allow_once", "deny"],
+    };
+    expect(roundTrip(Item, link)).toMatchObject({ url: "https://github.com/login/device" });
+    // Only web links: a card never links to a script or a local file.
+    expect(Item.safeParse({ ...link, url: "javascript:alert(1)" }).success).toBe(false);
+    expect(Item.safeParse({ ...link, url: "file:///etc/passwd" }).success).toBe(false);
+  });
+
   it("limits followups to four suggestions", () => {
     const suggestions = Array.from({ length: 5 }, (_, i) => ({ prompt: `p${i}` }));
     const result = Item.safeParse({
