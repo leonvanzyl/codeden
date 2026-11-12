@@ -95,13 +95,15 @@ export function useStartDraft(projectId: string, resolved: ResolvedDraft, workKe
     onError: (e) => toast.error("Couldn't start the session", { description: e.message }),
   });
 
-  /** After the conflict card's decision (the card shows its toast and opens the session). */
+  /**
+   * After the conflict card's decision. The card shows its toast and opens the session in place
+   * of the draft (it is rendered with `replace`), as a direct start does.
+   */
   const onConflictResolved = (outcome: ConflictOutcome) => {
     const input = conflict?.request.input;
     if (outcome.sessionId && ["started", "queued", "joined"].includes(outcome.status)) {
       const startedHere = outcome.status !== "joined";
       if (startedHere) void ensureInSnapshot(client, queryClient, outcome.sessionId);
-      // The card navigates to the session itself.
       if (startedHere && input)
         useNewSessionStore.getState().setFirstMessage(outcome.sessionId, input);
       useComposerStore.getState().clear(newSessionDraftKey(projectId));
