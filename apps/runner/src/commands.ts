@@ -12,11 +12,9 @@ import * as gitOps from "./git/ops";
 import type { Journal } from "./journal";
 import { listPorts } from "./ports";
 import type { ProcessSupervisor } from "./process/supervisor";
-import { endProcessesInside } from "./process/worktree-processes";
 import type { TerminalHost } from "./pty/terminal-host";
 import type { SessionHost } from "./session-host";
-import { stopWithLeftovers } from "./workspace/leftover-processes";
-import { assertRemovable, removeWorkspace } from "./workspace/removal";
+import { removeWithLeftovers, stopWithLeftovers } from "./workspace/leftover-processes";
 import { prepareWorkspace } from "./workspace/worktree";
 
 /** Everything command handlers need; owned by `startRunner`. */
@@ -120,17 +118,13 @@ export async function executeCommand(core: RunnerCore, command: RunnerCommand): 
         supervisor: core.supervisor,
         emit: core.emit,
       });
-    case "workspace.remove": {
-      // Refuse first, so a kept worktree's terminals and processes are left running.
-      const info = await assertRemovable(command, core.home);
-      await terminals.closeUnder(command.path);
-      await core.supervisor.killUnder(command.path);
-      // And what agents started that the runner doesn't track (it would keep the folder busy).
-      if (info.state !== "missing") {
-        await endProcessesInside(command.path, { home: core.home, log: core.log });
-      }
-      return removeWorkspace(command, core.home, core.log);
-    }
+    case "workspace.remove":
+      return removeWithLeftovers(command, {
+        home: core.home,
+        supervisor: core.supervisor,
+        terminals,
+        log: core.log,
+      });
 
     case "session.start":
       if (core.isDraining()) throw new CommandError("draining", "Runner is draining");
