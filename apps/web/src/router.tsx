@@ -9,7 +9,7 @@ import { AppShell } from "@/components/shell/app-shell";
 import { SignInScreen } from "@/components/shell/sign-in";
 import { UnauthorizedScreen } from "@/components/shell/unauthorized";
 import { Toaster } from "@/components/ui/sonner";
-import { AgentsPage, type AgentTab } from "@/routes/agents";
+import { AGENT_TABS, AgentsPage, type AgentTab } from "@/routes/agents";
 import { AutomationPage } from "@/routes/automation";
 import { NewAutomationPage } from "@/routes/automation-new";
 import { AutomationsPage, type AutomationsTab } from "@/routes/automations";
@@ -157,12 +157,11 @@ const settingsSectionRoute = createRoute({
   },
 });
 
-const AGENT_TABS: AgentTab[] = ["memory", "skills", "subagents", "mcp"];
 const agentsRoute = createRoute({
   getParentRoute: () => shell,
   path: "/agents",
   validateSearch: (s: Record<string, unknown>): { tab?: AgentTab; project?: string } => ({
-    tab: AGENT_TABS.includes(s.tab as AgentTab) ? (s.tab as AgentTab) : undefined,
+    tab: AGENT_TABS.some((t) => t.id === s.tab) ? (s.tab as AgentTab) : undefined,
     project: typeof s.project === "string" ? s.project : undefined,
   }),
   component: function Agents() {

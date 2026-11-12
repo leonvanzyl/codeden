@@ -139,6 +139,7 @@ Commands on a session without an open browser fail with `409 browser_not_open`.
 - **Auto memory.** `~/.claude/projects/<slug>/memory/` where the slug is the main repo root with every non-alphanumeric character replaced by `-` (`C:\Projects\codeden` -> `C--Projects-codeden`, checked against real folders on Windows); all worktrees share it. `autoMemoryDirectory` in `~/.claude/settings.json` wins when set.
 - **Safety.** Files are addressed by `AgentConfigLocator` (`root`: `home` | `project` | `auto_memory`, plus `path`) and must match a known agent-config location (anything else, `.git`, credentials or `..` is a 403). Writes are atomic; every overwrite or delete copies the old file (or skill folder) to `<home>/backups/agent-config/` first; `expectedSha256` gives optimistic concurrency.
 - **MCP servers.** Claude `user` (`~/.claude.json` `mcpServers`), `local` (`~/.claude.json` `projects["C:/path"].mcpServers`, forward slashes on Windows) and `project` (`.mcp.json`); Codex `user` (`~/.codex/config.toml` `[mcp_servers.<name>]`). JSON files are rewritten with their indentation. `config.toml` edits replace only the server's own `[mcp_servers.<name>]` blocks (verified by re-parsing; the TOML library's structural `patch()` is the fallback for inline or dotted definitions), so comments and other settings stay byte for byte. Unknown native fields are kept (`spec.extra`).
+- **Hooks** (`hooks.ts`, `hooks-service.ts`; shapes in `agent-config-hooks.ts`). For providers with `agentConfigFeatures[p].hooks` (Claude Code today): the `hooks` key of `~/.claude/settings.json` (`user`), `.claude/settings.json` (`project`) and `.claude/settings.local.json` (`local`). Writes replace only the text of the top-level `hooks` value (`json-edit.ts`), so every other byte of the file stays as it was. Active hooks are addressed by `event`, `groupIndex`, `handlerIndex` and the handler as listed (`expected`); a mismatch is 409 `hook_changed`, a missing hook 404 `hook_not_found`, an unparsable file 422 `config_unparsable` (listed as a source `error`). Claude has no per-hook switch, so `disable` moves the handler to `<home>/agent-config/disabled-hooks.json` (the shelf) and `enable` puts it back; `remove` on a shelved hook only drops it from the shelf.
 - **What's loaded.** Computed from each provider's rules from the session's working directory: Claude walks every ancestor for `CLAUDE.md`, `.claude/CLAUDE.md`, `CLAUDE.local.md` and `.claude/rules`, adds `MEMORY.md`, and project skills/subagents up to the repo root; Codex takes `AGENTS.override.md` or `AGENTS.md` in `~/.codex` and in each folder from the repo root down. MCP servers include CodeDen's own.
 
 | Route | Body / response |
@@ -153,6 +154,9 @@ Commands on a session without an open browser fail with `409 browser_not_open`.
 | `PUT /api/agent-config/mcp` | `McpServerUpsertRequest` -> `McpServerWriteResponse` |
 | `DELETE /api/agent-config/mcp?provider=&scope=&projectId=&name=` | -> `McpServerWriteResponse` |
 | `POST /api/agent-config/mcp/diff` | `McpServerDiffRequest` -> `AgentConfigDiff` (no `spec` = removal) |
+| `GET /api/agent-config/hooks?projectId=` | -> `HookListResponse` (sources and hooks, disabled ones included) |
+| `POST /api/agent-config/hooks/diff` | `HookChangeRequest` -> `AgentConfigDiff` (unchanged for shelf-only removals) |
+| `POST /api/agent-config/hooks` | `HookChangeRequest` (`add`, `update`, `remove`, `disable`, `enable`) -> `HookWriteResponse` |
 | `GET /api/sessions/:id/agent-config/loaded` | -> `LoadedAgentConfig` |
 
 ## Cloud voice (§11.3)

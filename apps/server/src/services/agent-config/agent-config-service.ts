@@ -25,6 +25,8 @@ import {
   type ProjectRef,
 } from "./catalog";
 import { AgentConfigFiles } from "./files";
+import { HookShelf } from "./hook-shelf";
+import { AgentConfigHooks } from "./hooks-service";
 import { applyChange, claudeProjectKey, diffChange, readServers, sourceFor } from "./mcp";
 import { claudeAutoMemoryDir, findGitRoot, mainRepoRoot, readJson } from "./paths";
 
@@ -35,20 +37,29 @@ export interface AgentConfigServiceDeps {
   repo: SessionRepo;
   /** `<codeden home>/backups/agent-config`. */
   backupDir: string;
+  /** `<codeden home>/agent-config/disabled-hooks.json`: hooks switched off in CodeDen. */
+  disabledHooksFile: string;
   /** CodeDen's own MCP endpoint as agents see it (the runner proxy). */
   mcpProxyUrl: () => string | null;
 }
 
 /**
- * Agent configuration (§12.4): discovery of each provider's memory files, skills, subagents
- * and MCP servers; edits in the native files with backups and diff previews; and the
+ * Agent configuration (§12.4): discovery of each provider's memory files, skills, subagents,
+ * MCP servers and hooks; edits in the native files with backups and diff previews; and the
  * "what's loaded" view of a session.
  */
 export class AgentConfigService {
   readonly files: AgentConfigFiles;
+  readonly hooks: AgentConfigHooks;
 
   constructor(private readonly deps: AgentConfigServiceDeps) {
     this.files = new AgentConfigFiles((l) => this.rootDir(l), deps.backupDir);
+    this.hooks = new AgentConfigHooks({
+      home: deps.home,
+      project: (id) => this.project(id),
+      backup: (file) => this.files.backup(file),
+      shelf: new HookShelf(deps.disabledHooksFile),
+    });
   }
 
   list(query: AgentConfigListQuery): AgentConfigListResponse {

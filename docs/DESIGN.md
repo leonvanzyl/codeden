@@ -139,6 +139,7 @@ The published `codeden` npm package bundles the server, runner and CLI with tsdo
   - `runner/`: the runner lock file and event journal.
   - `wt/<project>/<session>/`: git worktrees. Short paths, to stay clear of Windows path-length limits.
   - `artifacts/`: screenshots and files shared in chat.
+  - `agent-config/disabled-hooks.json`: hooks switched off on the Agents page, until they are enabled again (§12.4).
   - `logs/`
 - **Secrets** (an optional ElevenLabs key, API keys if a user chooses that mode) live in the **OS keychain** through `@napi-rs/keyring`, never in files. GitHub and provider credentials are inherited at runtime, not stored (§14).
 - **Event log.** Append-only `events` table (`seq`, `session_id`, `type`, `payload`, `ts`). **It's never pruned**: it's the audit trail and the replay source.
@@ -522,6 +523,7 @@ First-class screens for each provider's own files:
 - **Skills:** each provider's user and project skill folders, with create, edit and enable controls.
 - **Subagents:** `.claude/agents/` and `~/.claude/agents/`, plus Codex equivalents where they exist.
 - **MCP servers:** `.mcp.json`, Claude user config and `~/.codex/config.toml`. Add, edit, test the connection, and enable per provider.
+- **Hooks:** the `hooks` key of Claude's `~/.claude/settings.json`, `.claude/settings.json` and `.claude/settings.local.json`, listed by file with event, matcher, type, command and timeout. Add, edit, disable and delete; only the `hooks` value is rewritten. Claude has no per-hook switch, so disabling moves the hook to a shelf in CodeDen's data folder and enabling writes it back. The tab shows for providers whose native config has hooks (`agentConfigFeatures` in contracts).
 - **What's loaded:** for any session, a view of which memory files, skills and MCP servers are in its context.
 
 Edits are written to the native files in place (Principle 2), with a diff preview and a backup before overwriting.

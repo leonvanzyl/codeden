@@ -4,6 +4,7 @@ import {
   AgentConfigListQuery,
   AgentConfigLocator,
   AgentConfigWriteRequest,
+  HookChangeRequest,
   McpServerDiffRequest,
   McpServerTarget,
   McpServerUpsertRequest,
@@ -13,8 +14,8 @@ import type { AppServices } from "../services/container";
 import { jsonBody, queryOf } from "./validate";
 
 /**
- * `/api/agent-config` (§12.4): provider memory files, skills, subagents and MCP servers in
- * their native files. Every overwrite and delete is backed up first; `diff` routes preview.
+ * `/api/agent-config` (§12.4): provider memory files, skills, subagents, MCP servers and hooks
+ * in their native files. Every overwrite and delete is backed up first; `diff` routes preview.
  */
 export function agentConfigRoutes(s: AppServices) {
   const ac = s.agentConfig;
@@ -44,6 +45,15 @@ export function agentConfigRoutes(s: AppServices) {
     .delete("/mcp", queryOf(McpServerTarget), (c) => c.json(ac.mcpDelete(c.req.valid("query"))))
     .post("/mcp/diff", jsonBody(McpServerDiffRequest), (c) =>
       c.json(ac.mcpDiff(c.req.valid("json"))),
+    )
+    .get("/hooks", queryOf(AgentConfigListQuery.pick({ projectId: true })), (c) =>
+      c.json(ac.hooks.list(c.req.valid("query").projectId)),
+    )
+    .post("/hooks/diff", jsonBody(HookChangeRequest), (c) =>
+      c.json(ac.hooks.diff(c.req.valid("json"))),
+    )
+    .post("/hooks", jsonBody(HookChangeRequest), (c) =>
+      c.json(ac.hooks.apply(c.req.valid("json"))),
     );
 }
 
