@@ -116,6 +116,11 @@ export class CodexEventMapper {
     return this.subagents.runningTurns();
   }
 
+  /** Close a sub-agent's turn, if `turnId` is still the one it runs. */
+  endSubagentTurn(codexThreadId: string, turnId: string, outcome: TurnOutcome): void {
+    this.subagents.endTurn(codexThreadId, turnId, outcome);
+  }
+
   /** Close the session's running turn. */
   endTurn(outcome: TurnOutcome, turnId = this.root.turnId): void {
     this.root.endTurn(outcome, turnId);

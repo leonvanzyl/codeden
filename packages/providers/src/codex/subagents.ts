@@ -28,10 +28,17 @@ interface Run {
   thread?: CodexThreadMapper;
   /** Turns the agent has run (stats are reported once it ran one). */
   turns: number;
+  /** Tool calls it started or finished (a turn cut short closes started ones for it). */
   toolCalls: Set<string>;
   totalTokens?: number;
+  /** When the card last closed, for its duration. */
+  endedAt?: number;
   /** The agent's last message in its current turn: the card's summary. */
   lastMessage?: string;
+  /** A final message Codex reported for it this turn (`agentsStates`): the summary's fallback. */
+  reported?: string;
+  /** What the card was closed with (a failure's message). */
+  note?: string;
   /** True while the card shows the agent as working. */
   open: boolean;
 }
@@ -91,7 +98,9 @@ export class CodexSubagents implements ThreadLinks {
         const name = item.agentPath.split("/").filter(Boolean).pop();
         this.bind(this.claim(from, turnId, item.id, { description: name }), item.agentThreadId);
       } else if (item.kind === "completed" || item.kind === "interrupted") {
-        this.stopped(item.agentThreadId, item.kind === "completed" ? "completed" : "cancelled");
+        // Codex says the agent is done: the card closes even if its turn's end is still coming.
+        const run = this.byThread.get(item.agentThreadId);
+        if (run) this.settle(run, item.kind === "completed" ? "completed" : "cancelled");
       }
       return true;
     }
@@ -107,7 +116,7 @@ export class CodexSubagents implements ThreadLinks {
     else if (!child || item.status === "failed") {
       const message = child ? item.agentsStates[child]?.message : undefined;
       this.settle(run, "failed", message ?? "Could not start the agent");
-    }
+    } else this.noteStates(item.agentsStates);
     return true;
   }
 
@@ -129,7 +138,13 @@ export class CodexSubagents implements ThreadLinks {
     return out;
   }
 
-  /** End every running sub-agent turn and close every open card (stop, close, process exit). */
+  /** End one sub-agent turn if it is still the one running (a stop that got no answer). */
+  endTurn(codexThreadId: string, turnId: string, outcome: TurnOutcome): void {
+    const thread = this.byThread.get(codexThreadId)?.thread;
+    if (thread?.turnId === turnId) thread.endTurn(outcome, turnId);
+  }
+
+  /** End every running sub-agent turn and close every open card (close, process exit). */
   endAll(outcome: TurnOutcome): void {
     for (const run of this.runs.values()) run.thread?.endTurn(outcome);
     for (const run of this.runs.values()) {
@@ -192,12 +207,23 @@ export class CodexSubagents implements ThreadLinks {
       links: this,
       limits: this.o.limits,
       onTurnStarted: () => this.turnStarted(run),
-      onTurnEnded: (_turnId, outcome) =>
-        this.settle(
-          run,
-          statusOf(outcome),
-          outcome.type === "failed" ? outcome.message : undefined,
-        ),
+      onTurnEnded: (_turnId, outcome) => {
+        if (run.open) {
+          this.settle(
+            run,
+            statusOf(outcome),
+            outcome.type === "failed" ? outcome.message : undefined,
+          );
+        } else {
+          // Closed by Codex's report while the turn ran: its end brings the final figures (a
+          // stop or exit that closes it later doesn't stretch the agent's duration).
+          if (outcome.type === "completed") run.endedAt = this.o.now();
+          this.refresh(run);
+        }
+      },
+      onItemStarted: (item) => {
+        if (item.kind === "tool_call") run.toolCalls.add(item.id);
+      },
       onItemCompleted: (item) => {
         if (item.kind === "tool_call") run.toolCalls.add(item.id);
         else if (item.kind === "assistant_message" && item.text.trim()) run.lastMessage = item.text;
@@ -218,6 +244,8 @@ export class CodexSubagents implements ThreadLinks {
   private turnStarted(run: Run): void {
     run.turns += 1;
     run.lastMessage = undefined;
+    run.reported = undefined;
+    run.note = undefined;
     if (run.open) return;
     run.open = true;
     const { summary: _summary, stats: _stats, ...rest } = run.item;
@@ -225,37 +253,62 @@ export class CodexSubagents implements ThreadLinks {
     this.o.emit({ type: "item.updated", ...run.parent, item: run.item });
   }
 
-  /** The parent was told an agent stopped: close its card unless a turn of it still runs. */
-  private stopped(codexThreadId: string, status: ItemStatus, message?: string): void {
-    const run = this.byThread.get(codexThreadId);
-    if (run && !run.thread?.turnId) this.settle(run, status, message);
-  }
-
+  /**
+   * A call between agents reported final states (multi-agent v1). A reported message is kept as
+   * the summary's fallback. A card closes on the report only when no turn of the agent runs:
+   * a running turn's own end follows and says how it went.
+   */
   private noteStates(states: CollabItem["agentsStates"]): void {
     for (const [codexThreadId, state] of Object.entries(states)) {
-      if (state && FINAL_AGENT_STATUSES.has(state.status))
-        this.stopped(codexThreadId, agentStatusOf(state), state.message ?? undefined);
+      const run = this.byThread.get(codexThreadId);
+      if (!run || !state || !FINAL_AGENT_STATUSES.has(state.status)) continue;
+      if (state.message) run.reported = state.message;
+      if (!run.open) this.refresh(run);
+      else if (!run.thread?.turnId) this.settle(run, agentStatusOf(state));
     }
   }
 
-  /** Close the card with the agent's last message (or `note`) and what it used. */
+  /** Close the card with the agent's last message (or a note) and what it used. */
   private settle(run: Run, status: ItemStatus, note?: string): void {
     if (!run.open) return;
     run.open = false;
-    const summary = status === "completed" ? (run.lastMessage ?? note) : (note ?? run.lastMessage);
-    const stats = run.turns > 0 ? this.stats(run) : undefined;
-    const { summary: _summary, stats: _stats, ...rest } = run.item;
-    run.item = { ...rest, status, ...(summary ? { summary } : {}), ...(stats ? { stats } : {}) };
+    run.note = note;
+    run.endedAt = this.o.now();
+    run.item = this.card(run, status);
     this.o.emit({ type: "item.completed", ...run.parent, item: run.item });
   }
 
+  /** Send a closed card again when a late report or its turn's end changed what it shows. */
+  private refresh(run: Run): void {
+    const next = this.card(run, run.item.status);
+    if (
+      next.summary === run.item.summary &&
+      JSON.stringify(next.stats) === JSON.stringify(run.item.stats)
+    )
+      return;
+    run.item = next;
+    this.o.emit({ type: "item.completed", ...run.parent, item: run.item });
+  }
+
+  /** The closed card: the agent's own last words first, then what Codex reported. */
+  private card(run: Run, status: ItemStatus): ItemOf<"subagent"> {
+    const summary =
+      status === "completed"
+        ? (run.lastMessage ?? run.reported ?? run.note)
+        : (run.note ?? run.reported ?? run.lastMessage);
+    const stats = run.turns > 0 ? this.stats(run) : undefined;
+    const { summary: _summary, stats: _stats, ...rest } = run.item;
+    return { ...rest, status, ...(summary ? { summary } : {}), ...(stats ? { stats } : {}) };
+  }
+
   private stats(run: Run): SubagentStats {
+    const end = run.endedAt ?? this.o.now();
     return {
       ...(run.totalTokens !== undefined
         ? { totalTokens: Math.max(0, Math.round(run.totalTokens)) }
         : {}),
       toolUses: run.toolCalls.size,
-      durationMs: Math.max(0, Math.round(this.o.now() - run.startedAt)),
+      durationMs: Math.max(0, Math.round(end - run.startedAt)),
     };
   }
 }

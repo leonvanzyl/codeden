@@ -156,27 +156,39 @@ export class CodexSession implements ProviderSession {
   }
 
   /**
-   * Stop the running turn. If app-server doesn't end it in time (or never answers
-   * `turn/interrupt` at all), the turn is closed as interrupted anyway.
+   * Stop the running turn and every running sub-agent turn: Stop means the whole session, so
+   * the agents it spawned stop too, also once the session's own turn has ended. Each turn that
+   * app-server doesn't end in time (or never answers `turn/interrupt` for) is closed as
+   * interrupted anyway; the deadline only closes that same turn, never later work.
    */
   async interrupt(): Promise<void> {
-    const turnId = this.mapper.currentTurnId;
     const rpc = this.rpc;
-    if (!turnId || !rpc) return;
+    const turnId = this.mapper.currentTurnId;
+    const children = this.mapper.runningSubagentTurns();
+    if (!rpc || (!turnId && children.length === 0)) return;
     this.broker.cancelAll();
-    // Stop means the whole session: the agents it spawned stop with its turn.
-    for (const child of this.mapper.runningSubagentTurns()) {
-      rpc
-        .request("turn/interrupt", { threadId: child.codexThreadId, turnId: child.turnId })
-        .catch(() => {});
-    }
-    await interruptWithDeadline(
-      () => rpc.request("turn/interrupt", { threadId: this.threadId(), turnId }),
-      this.config.interruptTimeoutMs ?? 10_000,
-      () => {
-        if (this.mapper.currentTurnId === turnId) this.mapper.endAll({ type: "interrupted" });
-      },
+    const timeoutMs = this.config.interruptTimeoutMs ?? 10_000;
+    const interrupted = { type: "interrupted" } as const;
+    const stops = children.map((child) =>
+      interruptWithDeadline(
+        () =>
+          rpc.request("turn/interrupt", { threadId: child.codexThreadId, turnId: child.turnId }),
+        timeoutMs,
+        () => this.mapper.endSubagentTurn(child.codexThreadId, child.turnId, interrupted),
+      ),
     );
+    if (turnId) {
+      stops.push(
+        interruptWithDeadline(
+          () => rpc.request("turn/interrupt", { threadId: this.threadId(), turnId }),
+          timeoutMs,
+          () => {
+            if (this.mapper.currentTurnId === turnId) this.mapper.endTurn(interrupted, turnId);
+          },
+        ),
+      );
+    }
+    await Promise.all(stops);
   }
 
   async respond(requestId: string, response: RuntimeResponse): Promise<void> {

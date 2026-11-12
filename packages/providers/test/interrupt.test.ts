@@ -1,3 +1,4 @@
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Options, Query, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
@@ -56,6 +57,8 @@ const sessions: Array<{ close(): Promise<void> }> = [];
 afterEach(async () => {
   await Promise.all(sessions.splice(0).map((s) => s.close()));
   delete process.env.FAKE_CODEX_TURN;
+  delete process.env.FAKE_CODEX_REQUESTS;
+  delete process.env.FAKE_CODEX_LOG;
 });
 
 function collect(events: AsyncIterable<AgentEvent>): AgentEvent[] {
@@ -143,4 +146,120 @@ describe("Codex interrupt", () => {
     await settle();
     expect(events.filter((e) => e.type === "turn.interrupted")).toHaveLength(1);
   });
+
+  /**
+   * A turn of the fake app-server that spawns a sub-agent (`child-1`) and leaves its turn
+   * running with a command started. Returns the session, its events and the request log.
+   */
+  async function withRunningSubagent(turnMode?: "open") {
+    const dir = mkdtempSync(join(tmpdir(), "codeden-codex-stop-"));
+    const notify = (method: string, params: object) => ({ notify: true, method, params });
+    writeFileSync(
+      join(dir, "requests.json"),
+      JSON.stringify([
+        notify("item/completed", {
+          item: {
+            type: "subAgentActivity",
+            id: "call-1",
+            kind: "started",
+            agentThreadId: "child-1",
+            agentPath: "/root/auditor",
+          },
+        }),
+        notify("turn/started", {
+          threadId: "child-1",
+          turn: { id: "ct-1", status: "inProgress", items: [], error: null },
+        }),
+        notify("item/started", {
+          threadId: "child-1",
+          turnId: "ct-1",
+          item: {
+            type: "commandExecution",
+            id: "cmd-1",
+            command: "pnpm test",
+            cwd: "/w",
+            status: "inProgress",
+            commandActions: [],
+            aggregatedOutput: null,
+            exitCode: null,
+            durationMs: null,
+          },
+        }),
+      ]),
+    );
+    process.env.FAKE_CODEX_REQUESTS = join(dir, "requests.json");
+    process.env.FAKE_CODEX_LOG = join(dir, "requests.log");
+    if (turnMode) process.env.FAKE_CODEX_TURN = turnMode;
+    const session = new CodexSession(base, { executable: fakeCodex, interruptTimeoutMs: 50 });
+    sessions.push(session);
+    const events = collect(session.events);
+    await session.start();
+    await session.send({ text: "go", attachments: [] });
+    await waitFor(() => events.some((e) => e.type === "item.started" && e.item.id === "cmd-1"));
+    const interrupts = () =>
+      readFileSync(join(dir, "requests.log"), "utf8")
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line))
+        .filter((r) => r.method === "turn/interrupt")
+        .map((r) => r.params);
+    return { session, events, interrupts };
+  }
+
+  const childEnded = (events: AgentEvent[]) =>
+    events.some((e) => e.type === "turn.interrupted" && e.threadId === "s1:thread-call-1");
+
+  it("stops running sub-agents too, closing a child turn its interrupt never ends", async () => {
+    const { session, events, interrupts } = await withRunningSubagent("open");
+    await session.interrupt();
+    // The root confirms at once; the child never does, so its deadline closes it.
+    await waitFor(() => childEnded(events));
+    expect(interrupts()).toEqual(
+      expect.arrayContaining([
+        { threadId: "child-1", turnId: "ct-1" },
+        { threadId: "thread-1", turnId: "turn-1" },
+      ]),
+    );
+    expect(
+      events.filter((e) => e.type === "turn.interrupted").map((e) => [e.threadId, e.turnId]),
+    ).toEqual(
+      expect.arrayContaining([
+        ["s1:thread-root", "turn-1"],
+        ["s1:thread-call-1", "ct-1"],
+      ]),
+    );
+    const card = events.filter((e) => e.type === "item.completed" && e.item.kind === "subagent");
+    expect(card.at(-1)).toMatchObject({
+      threadId: "s1:thread-root",
+      // The command the turn's end closed still counts as a tool call.
+      item: { id: "call-1", status: "cancelled", stats: { toolUses: 1 } },
+    });
+  });
+
+  it("stops sub-agents still working after the session's own turn ended", async () => {
+    const { session, events, interrupts } = await withRunningSubagent();
+    await waitFor(() =>
+      events.some((e) => e.type === "turn.completed" && e.threadId === "s1:thread-root"),
+    );
+    await session.interrupt();
+    await waitFor(() => childEnded(events));
+    expect(interrupts()).toEqual([{ threadId: "child-1", turnId: "ct-1" }]);
+    expect(
+      events.filter((e) => e.type === "item.completed" && e.item.kind === "subagent").at(-1),
+    ).toMatchObject({ item: { status: "cancelled" } });
+  });
 });
+
+const fakeCodex = {
+  kind: "node-script" as const,
+  path: process.execPath,
+  script: join(import.meta.dirname, "fixtures", "fake-codex", "app-server.mjs"),
+};
+
+async function waitFor(check: () => boolean): Promise<void> {
+  const deadline = Date.now() + 3000;
+  while (!check()) {
+    if (Date.now() > deadline) throw new Error("timed out waiting");
+    await settle();
+  }
+}

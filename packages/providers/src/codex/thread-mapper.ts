@@ -60,6 +60,8 @@ export interface ThreadMapperOptions {
   userMessage?: (item: Item, clientId: string | null) => Item;
   onTurnStarted?: (turnId: string) => void;
   onTurnEnded?: (turnId: string, outcome: TurnOutcome) => void;
+  /** Every item this thread starts (also those a turn's end later closes for it). */
+  onItemStarted?: (item: Item) => void;
   /** Every completed item of this thread. */
   onItemCompleted?: (item: Item) => void;
   /** The thread's running token total, as Codex reports it. */
@@ -113,6 +115,7 @@ export class CodexThreadMapper {
         if (!item || item.kind === "user_message") return;
         this.beginTurn(n.params.turnId);
         this.open.set(item.id, item);
+        this.o.onItemStarted?.(item);
         this.o.emit({ type: "item.started", ...this.ctx(n.params.turnId), item });
         return;
       }

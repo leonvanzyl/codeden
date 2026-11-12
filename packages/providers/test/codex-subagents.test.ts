@@ -111,6 +111,30 @@ const usage = (total: number) => ({
   modelContextWindow: 258_400,
 });
 
+/** A v1 call from the root agent to others (message, wait, close, …). */
+const collabCall = (
+  tool: string,
+  receivers: string[],
+  states: object = {},
+  id = `call-${tool}`,
+) => ({
+  type: "collabAgentToolCall",
+  id,
+  tool,
+  status: "completed",
+  senderThreadId: ROOT,
+  receiverThreadIds: receivers,
+  prompt: tool === "sendInput" ? "Also check tests" : null,
+  model: null,
+  reasoningEffort: null,
+  agentsStates: states,
+});
+
+const subagentCards = (events: AgentEvent[]) =>
+  events.flatMap((e) =>
+    e.type === "item.completed" && e.item.kind === "subagent" ? [e.item] : [],
+  );
+
 /** A root turn that spawned the v2 way: card claimed and bound to CHILD in one step. */
 function spawnedV2() {
   const s = setup();
@@ -251,7 +275,7 @@ describe("Codex sub-agents", () => {
   });
 
   it("follows the agent's turns from v2 activity reports", () => {
-    const { events, feed, items } = spawnedV2();
+    const { events, feed, items, tick } = spawnedV2();
     expect(events.find((e) => e.type === "thread.started")).toMatchObject({
       thread: { id: CHILD_THREAD, parentItemId: "call-spawn", title: "explorer" },
     });
@@ -263,12 +287,22 @@ describe("Codex sub-agents", () => {
 
     feed(CHILD, "turn/started", { turn: turn(CT, "inProgress") });
     feed(CHILD, "item/completed", { turnId: CT, item: message("m1", "Done.") });
-    // A report that the agent finished waits for its turn to end.
+    // Codex reports the agent finished: the card closes at once, its turn still running.
     feed(ROOT, "item/completed", { turnId: RT, item: activity("completed", "act-2") });
-    expect(items("subagent", "item.completed")).toEqual([]);
-    feed(CHILD, "turn/completed", { turn: turn(CT, "completed") });
     expect(items("subagent", "item.completed").at(-1)).toMatchObject({
       item: { status: "completed", summary: "Done." },
+    });
+    // What that turn still sends lands in the child thread, and its end refreshes the card.
+    tick(2_000);
+    feed(CHILD, "item/completed", { turnId: CT, item: message("m2", "Done, with notes.") });
+    feed(CHILD, "turn/completed", { turn: turn(CT, "completed") });
+    expect(items("subagent", "item.updated")).toEqual([]);
+    expect(items("subagent", "item.completed").at(-1)).toMatchObject({
+      item: {
+        status: "completed",
+        summary: "Done, with notes.",
+        stats: { toolUses: 0, durationMs: 2_000 },
+      },
     });
 
     // The parent gives it more work: the card is working again, then fails with the turn.
@@ -296,7 +330,7 @@ describe("Codex sub-agents", () => {
     ).toBe(false);
   });
 
-  it("closes the card when an agent is reported stopped without a running turn", () => {
+  it("closes the card when an agent is reported stopped", () => {
     const { feed, items } = spawnedV2();
     feed(ROOT, "item/completed", { turnId: RT, item: activity("interrupted", "act-3") });
     expect(items("subagent", "item.completed")).toEqual([
@@ -304,22 +338,92 @@ describe("Codex sub-agents", () => {
     ]);
     // It never ran a turn, so there are no figures to show.
     expect(items("subagent", "item.completed")[0]?.item).not.toHaveProperty("stats");
+
+    // Also while a turn of it runs.
+    const running = spawnedV2();
+    running.feed(CHILD, "turn/started", { turn: turn(CT, "inProgress") });
+    running.feed(ROOT, "item/completed", { turnId: RT, item: activity("interrupted", "act-4") });
+    expect(running.items("subagent", "item.completed").at(-1)).toMatchObject({
+      item: { status: "cancelled" },
+    });
+  });
+
+  it("closes the card from the final state a v1 spawn reports", () => {
+    const { events, feed } = setup();
+    feed(ROOT, "turn/started", { turn: turn(RT, "inProgress") });
+    const states = (status: string, message: string | null) => ({ status, message });
+    const spawned = (id: string, child: string, state: object) => ({
+      ...spawn("completed", [child], { [child]: state }),
+      id,
+    });
+    feed(ROOT, "item/completed", {
+      turnId: RT,
+      item: spawned("call-a", "codex-a", states("completed", "All done")),
+    });
+    feed(ROOT, "item/completed", {
+      turnId: RT,
+      item: spawned("call-b", "codex-b", states("shutdown", null)),
+    });
+    feed(ROOT, "item/completed", {
+      turnId: RT,
+      item: { ...spawned("call-c", "codex-c", states("errored", "Crashed")), status: "failed" },
+    });
+    feed(ROOT, "item/completed", {
+      turnId: RT,
+      item: spawned("call-d", "codex-d", states("notFound", null)),
+    });
+    expect(subagentCards(events).map((c) => [c.id, c.status, c.summary])).toEqual([
+      ["call-a", "completed", "All done"],
+      ["call-b", "cancelled", undefined],
+      ["call-c", "failed", "Crashed"],
+      ["call-d", "failed", undefined],
+    ]);
+  });
+
+  it("keeps a reported final message as the summary, in either order", () => {
+    const report = collabCall("wait", [CHILD], {
+      [CHILD]: { status: "completed", message: "3 callers" },
+    });
+
+    // Reported while the agent's turn still runs, then the turn ends without a message.
+    const before = spawnedV2();
+    before.feed(CHILD, "turn/started", { turn: turn(CT, "inProgress") });
+    before.feed(ROOT, "item/completed", { turnId: RT, item: report });
+    expect(subagentCards(before.events)).toEqual([]);
+    before.feed(CHILD, "turn/completed", { turn: turn(CT, "completed") });
+    expect(subagentCards(before.events).at(-1)).toMatchObject({
+      status: "completed",
+      summary: "3 callers",
+    });
+
+    // The turn ends without a message first, then the report arrives.
+    const after = spawnedV2();
+    after.feed(CHILD, "turn/started", { turn: turn(CT, "inProgress") });
+    after.feed(CHILD, "turn/completed", { turn: turn(CT, "completed") });
+    expect(subagentCards(after.events).at(-1)).not.toHaveProperty("summary");
+    after.feed(ROOT, "item/completed", { turnId: RT, item: report });
+    expect(subagentCards(after.events).at(-1)).toMatchObject({
+      status: "completed",
+      summary: "3 callers",
+    });
+
+    // A spawn whose replayed turn still runs keeps its reported message for the turn's end.
+    const spawnedRunning = setup();
+    spawnedRunning.feed(ROOT, "turn/started", { turn: turn(RT, "inProgress") });
+    spawnedRunning.feed(CHILD, "turn/started", { turn: turn(CT, "inProgress") });
+    spawnedRunning.feed(ROOT, "item/completed", {
+      turnId: RT,
+      item: spawn("completed", [CHILD], { [CHILD]: { status: "completed", message: "Fine" } }),
+    });
+    expect(subagentCards(spawnedRunning.events)).toEqual([]);
+    spawnedRunning.feed(CHILD, "turn/completed", { turn: turn(CT, "completed") });
+    expect(subagentCards(spawnedRunning.events).at(-1)).toMatchObject({ summary: "Fine" });
   });
 
   it("titles calls between agents after the agents they target", () => {
     const { feed, items } = spawnedV2();
-    const call = (tool: string, receivers: string[], states: object = {}) => ({
-      type: "collabAgentToolCall",
-      id: `call-${tool}`,
-      tool,
-      status: "completed",
-      senderThreadId: ROOT,
-      receiverThreadIds: receivers,
-      prompt: tool === "sendInput" ? "Also check tests" : null,
-      model: null,
-      reasoningEffort: null,
-      agentsStates: states,
-    });
+    const call = (tool: string, receivers: string[], states: object = {}) =>
+      collabCall(tool, receivers, states);
     feed(ROOT, "item/completed", { turnId: RT, item: call("sendInput", [CHILD]) });
     feed(ROOT, "item/completed", { turnId: RT, item: call("wait", [CHILD, "other"]) });
     feed(ROOT, "item/completed", {
@@ -428,6 +532,7 @@ describe("Codex sub-agents", () => {
 
     const exited = spawnedV2();
     exited.feed(CHILD, "turn/started", { turn: turn(CT, "inProgress") });
+    exited.feed(CHILD, "item/started", { turnId: CT, item: command("c1", "inProgress") });
     exited.mapper.endAll({
       type: "failed",
       code: "provider_exited",
@@ -439,7 +544,12 @@ describe("Codex sub-agents", () => {
       CHILD_THREAD,
     ]);
     expect(exited.items("subagent", "item.completed").at(-1)).toMatchObject({
-      item: { status: "failed", summary: "codex app-server exited (code 1)" },
+      // The command the exit cut short still counts, once.
+      item: {
+        status: "failed",
+        summary: "codex app-server exited (code 1)",
+        stats: { toolUses: 1 },
+      },
     });
     expect(exited.mapper.runningSubagentTurns()).toEqual([]);
   });

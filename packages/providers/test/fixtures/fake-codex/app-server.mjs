@@ -9,6 +9,9 @@
 // every turn, one after the other (`notify: true` ones as notifications); each answer is logged as `{ method: "answer:<method>", params }`
 // and the turn completes once all are answered.
 // FAKE_CODEX_TURN=hang starts turns that never complete and never answers `turn/interrupt`.
+// FAKE_CODEX_TURN=open sends the scripted requests but keeps the turn open until
+// `turn/interrupt`, which ends it as interrupted; interrupts for other threads (sub-agents) are
+// answered but their turns never end.
 import { appendFileSync, readFileSync } from "node:fs";
 import { createInterface } from "node:readline";
 
@@ -115,13 +118,18 @@ createInterface({ input: process.stdin }).on("line", (line) => {
             ...r.params,
           });
         }
-        send({ method: "turn/completed", params: { threadId: "thread-1", turn } });
+        if (turnMode !== "open") send({ method: "turn/completed", params: { threadId: "thread-1", turn } });
       }, 50);
       return;
     }
     case "turn/interrupt":
       if (turnMode === "hang") return;
-      return send({ id: msg.id, result: {} });
+      send({ id: msg.id, result: {} });
+      if (turnMode === "open" && msg.params?.threadId === "thread-1") {
+        const turn = { id: msg.params.turnId, status: "interrupted", items: [], error: null };
+        send({ method: "turn/completed", params: { threadId: "thread-1", turn } });
+      }
+      return;
     default:
       return send({ id: msg.id, result: {} });
   }
