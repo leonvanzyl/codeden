@@ -41,6 +41,18 @@ The **MCP servers** tab lists every server each provider will load, by scope, in
 
 Every change shows its diff first.
 
+### Test a server
+
+**Test** (the plug icon on a server's row, or the **Test** button in the add/edit dialog) checks that a server works before an agent needs it. The dialog tests the values in the form, so you can try a server before you save it. The test runs in the runner, next to your code:
+
+- **stdio** servers are started with their command, arguments and environment, in the project folder (or your home folder for user-scope servers, or the server's own working directory when it has one), and stopped again afterwards together with anything they started (such as the process behind `npx`).
+- **HTTP and SSE** servers are reached at their URL with their headers. For Codex, a bearer-token variable and `env_http_headers` are applied too.
+- For Claude Code servers, `${VAR}` and `${VAR:-default}` placeholders are filled in from the environment, as Claude Code does. A variable without a default that isn't set fails the test and is named.
+
+CodeDen runs the MCP `initialize` handshake and `tools/list`, then shows whether it connected, the server's name and version, how many tools it offers with their names, and how long it took. If it fails, you see where it stopped (starting, the handshake or listing tools), the error, and the end of the server's error output, which usually names the real problem: a missing package, a missing API key, a typo in the command. A test gives up after 60 seconds, which leaves time for a first `npx` download.
+
+The test can't sign in to servers that need an OAuth login. A `401` says so; sign in from the agent's own CLI instead.
+
 ## Hooks
 
 Hooks are commands an agent runs on lifecycle events: before or after a tool call, when you send a prompt, when it stops, at session start and so on. Use them to guard and automate your agents, for example to block risky shell commands or to format files after every edit.

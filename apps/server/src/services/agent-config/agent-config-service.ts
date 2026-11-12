@@ -8,14 +8,18 @@ import {
   AgentConfigProvider,
   agentConfigFeatures,
   type LoadedAgentConfig,
+  MCP_TEST_DEFAULT_TIMEOUT_MS,
   type McpServerDiffRequest,
   type McpServerEntry,
   type McpServerTarget,
+  type McpServerTestRequest,
+  type McpServerTestResult,
   type McpServerUpsertRequest,
   type McpServerWriteResponse,
 } from "@codeden/contracts";
-import { badRequest } from "../errors";
+import { badRequest, ServiceError } from "../errors";
 import type { ProjectService } from "../projects/project-service";
+import { type RunnerPort, toServiceError } from "../runner-port";
 import type { SessionRepo } from "../sessions/repo";
 import {
   listClaudeProject,
@@ -43,7 +47,12 @@ export interface AgentConfigServiceDeps {
   disabledHooksFile: string;
   /** CodeDen's own MCP endpoint as agents see it (the runner proxy). */
   mcpProxyUrl: () => string | null;
+  /** The runner, which runs MCP connection tests next to the code (§4.2). */
+  runner: Pick<RunnerPort, "request">;
 }
+
+/** Extra time the server waits for the runner beyond the test's own timeout. */
+const MCP_TEST_SLACK_MS = 5_000;
 
 /**
  * Agent configuration (§12.4): discovery of each provider's memory files, skills, subagents,
@@ -104,6 +113,33 @@ export class AgentConfigService {
 
   mcpDiff(req: McpServerDiffRequest): AgentConfigDiff {
     return diffChange(this.mcpSource(req), req.name, req.spec);
+  }
+
+  /**
+   * Connection test in the runner: the request's (unsaved) spec, or the server saved at the
+   * target. stdio servers start in the project folder (`local`, `project`) or, for `user`
+   * scope, the runner's home; Claude's `${VAR}` placeholders are expanded there.
+   */
+  async mcpTest(req: McpServerTestRequest): Promise<McpServerTestResult> {
+    const source = this.mcpSource(req);
+    const spec = req.spec ?? readServers(source).find((s) => s.name === req.name)?.spec;
+    if (!spec) {
+      throw new ServiceError(
+        404,
+        "server_not_found",
+        `No MCP server named ${req.name} in ${source.file}`,
+      );
+    }
+    const cwd =
+      req.scope !== "user" && req.projectId ? this.project(req.projectId).path : undefined;
+    try {
+      return await this.deps.runner.request(
+        { name: "mcp.test", spec, expandEnv: req.provider === "claude", ...(cwd ? { cwd } : {}) },
+        MCP_TEST_DEFAULT_TIMEOUT_MS + MCP_TEST_SLACK_MS,
+      );
+    } catch (error) {
+      throw toServiceError(error);
+    }
   }
 
   // ------------------------------------------------------------------- what's loaded

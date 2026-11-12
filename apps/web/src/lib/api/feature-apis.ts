@@ -36,6 +36,8 @@ import type {
   McpServerDiffRequest,
   McpServerListResponse,
   McpServerTarget,
+  McpServerTestRequest,
+  McpServerTestResult,
   McpServerUpsertRequest,
   McpServerWriteResponse,
   MergePrRequest,
@@ -138,6 +140,8 @@ export interface AgentConfigApi {
   removeMcp(target: McpServerTarget): Promise<McpServerWriteResponse>;
   /** Preview an upsert (with `spec`) or a removal (without). */
   diffMcp(req: McpServerDiffRequest): Promise<AgentConfigDiff>;
+  /** Connect to a server (the saved one, or `spec` unsaved) and list its tools. */
+  testMcp(req: McpServerTestRequest): Promise<McpServerTestResult>;
   /** Hooks in the settings files of providers that have them (user, plus the project's). */
   listHooks(projectId: string | null): Promise<HookListResponse>;
   /** Preview a hook change as a diff of its settings file. */
