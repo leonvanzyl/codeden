@@ -104,6 +104,7 @@ export async function executeCommand(core: RunnerCore, command: RunnerCommand): 
       try {
         const resumeToken = await adapter.forkConversation(command.resumeToken, {
           cwd: command.cwd,
+          ...(command.upTo ? { upTo: command.upTo } : {}),
         });
         return { resumeToken };
       } catch (error) {

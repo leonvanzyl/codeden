@@ -51,7 +51,8 @@ export function buildTranscript(
     if (status === "completed")
       s = applyAgentEvent(
         s,
-        { type: "turn.completed", threadId: t.threadId, turnId: t.id },
+        // Fixture providers can fork, so a finished turn records its fork point.
+        { type: "turn.completed", threadId: t.threadId, turnId: t.id, forkPoint: t.id },
         { ts },
       );
     if (status === "failed")

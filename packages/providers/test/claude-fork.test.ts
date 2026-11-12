@@ -1,5 +1,5 @@
 import { tmpdir } from "node:os";
-import type { Options, Query } from "@anthropic-ai/claude-agent-sdk";
+import type { ForkSessionOptions, Options, Query } from "@anthropic-ai/claude-agent-sdk";
 import type { SessionOptions } from "@codeden/contracts";
 import { describe, expect, it } from "vitest";
 import { type ProviderAdapter, withFork } from "../src/adapter";
@@ -11,8 +11,9 @@ import type { ResolvedCommand } from "../src/util/exec";
 const exe: ResolvedCommand = { kind: "native", path: "/opt/claude/claude" };
 
 /** An SDK stand-in: records `query()` options (an idle session) and `forkSession()` calls. */
-function stubSdk(fork: (id: string) => Promise<{ sessionId: string }>) {
+function stubSdk(fork: (id: string, opts?: ForkSessionOptions) => Promise<{ sessionId: string }>) {
   const forks: string[] = [];
+  const forkOptions: (ForkSessionOptions | undefined)[] = [];
   const launches: Options[] = [];
   const query = ((params: { options: Options }) => {
     launches.push(params.options);
@@ -26,11 +27,12 @@ function stubSdk(fork: (id: string) => Promise<{ sessionId: string }>) {
     };
     return q as unknown as Query;
   }) as unknown as ClaudeSdkModule["query"];
-  const forkSession = (async (id: string) => {
+  const forkSession = (async (id: string, opts?: ForkSessionOptions) => {
     forks.push(id);
-    return fork(id);
+    forkOptions.push(opts);
+    return fork(id, opts);
   }) as ClaudeSdkModule["forkSession"];
-  return { forks, launches, load: async () => ({ query, forkSession }) };
+  return { forks, forkOptions, launches, load: async () => ({ query, forkSession }) };
 }
 
 function options(extra: Partial<SessionOptions> = {}): SessionOptions {
@@ -60,6 +62,27 @@ describe("ClaudeAdapter fork", () => {
     expect(sdk.forks).toEqual(["claude-source"]);
     // No CLI is started: the copy is written to disk, nothing runs a turn.
     expect(sdk.launches).toHaveLength(0);
+  });
+
+  it("ends the copy at a turn's fork point, and never copies everything when it's gone", async () => {
+    // Like the SDK: a message the transcript doesn't hold is refused.
+    const sdk = stubSdk(async (_id, opts) => {
+      if (opts?.upToMessageId === "gone") throw new Error("Message gone not found in session");
+      return { sessionId: "claude-fork-2" };
+    });
+    const adapter = new ClaudeAdapter({ executable: exe, loadSdk: sdk.load });
+    await expect(
+      adapter.forkConversation("claude-source", { cwd: tmpdir(), upTo: "msg-7" }),
+    ).resolves.toBe("claude-fork-2");
+    expect(sdk.forkOptions[0]).toEqual({ upToMessageId: "msg-7" });
+    await expect(
+      adapter.forkConversation("claude-source", { cwd: tmpdir(), upTo: "gone" }),
+    ).rejects.toThrow(
+      /Could not fork the Claude conversation claude-source: Message gone not found/,
+    );
+    // Without a fork point, the whole conversation.
+    await adapter.forkConversation("claude-source", { cwd: tmpdir() });
+    expect(sdk.forkOptions[2]).toBeUndefined();
   });
 
   it("says which conversation could not be copied", async () => {
@@ -111,6 +134,9 @@ describe("FakeProvider fork", () => {
     expect(fake.capabilities().fork).toBe(true);
     const first = await fake.forkConversation("fake-s1");
     const second = await fake.forkConversation("fake-s1");
+    await expect(fake.forkConversation("fake-s1", { cwd: tmpdir(), upTo: "t2" })).resolves.toMatch(
+      /^fake-s1:fork-\d+@t2$/,
+    );
     expect(first).not.toBe("fake-s1");
     expect(second).not.toBe(first);
     const resumed = await fake.openSession(options({ resumeToken: first, forkFrom: "fake-s1" }));

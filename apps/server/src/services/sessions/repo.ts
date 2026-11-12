@@ -9,6 +9,7 @@ import {
   SessionStartMeta,
   type ThreadItemsPage,
   type ThreadItemsQuery,
+  type Turn,
   type Usage,
   type UserInput,
   type WorkSummary,
@@ -16,8 +17,8 @@ import {
 } from "@codeden/contracts";
 import { and, asc, type Column, desc, eq, gt, inArray, lt, or, type SQL, sql } from "drizzle-orm";
 import type { Db } from "../../db/client";
-import { rowToItemRecord, rowToSession } from "../../db/rows";
-import { automationRuns, items, sessions, turns } from "../../db/schema";
+import { rowToItemRecord, rowToSession, rowToTurn } from "../../db/rows";
+import { automationRuns, checkpoints, items, sessions, turns } from "../../db/schema";
 import type { EventStore } from "../../events/store";
 import { notFound } from "../errors";
 import { ACTIVE_RUN_STATUSES, ACTIVE_SESSION_STATUSES } from "./conflicts";
@@ -324,6 +325,41 @@ export class SessionRepo {
       .where(eq(turns.sessionId, sessionId))
       .get();
     return row?.n ?? 0;
+  }
+
+  /** One of the session's turns, or null when it has none with that id. */
+  turn(sessionId: string, turnId: string): Turn | null {
+    const row = this.db
+      .select()
+      .from(turns)
+      .where(and(eq(turns.sessionId, sessionId), eq(turns.id, turnId)))
+      .get();
+    return row ? rowToTurn(row) : null;
+  }
+
+  /** The index of the checkpoint written when a turn ended (§9), or null when there is none. */
+  turnCheckpoint(sessionId: string, turnId: string): number | null {
+    const row = this.db
+      .select({ index: checkpoints.index })
+      .from(checkpoints)
+      .where(and(eq(checkpoints.sessionId, sessionId), eq(checkpoints.turnId, turnId)))
+      .orderBy(desc(checkpoints.index))
+      .limit(1)
+      .get();
+    return row?.index ?? null;
+  }
+
+  /** The id of the session's latest root-thread turn (by start), or null before its first. */
+  latestRootTurnId(session: Session): string | null {
+    if (!session.rootThreadId) return null;
+    const row = this.db
+      .select({ id: turns.id })
+      .from(turns)
+      .where(and(eq(turns.sessionId, session.id), eq(turns.threadId, session.rootThreadId)))
+      .orderBy(desc(turns.startedAt), desc(sql`rowid`))
+      .limit(1)
+      .get();
+    return row?.id ?? null;
   }
 
   /** Follow-ups of the latest root-thread turn that produced some (§7.5). */

@@ -83,6 +83,43 @@ export function announceArchive(
 }
 
 /**
+ * Fork a session (§9): at its latest moment, or from a finished turn of its own ("Fork from
+ * here"), then open the fork. `canFork` says whether the provider can fork at all, `blocked`
+ * why it can't right now (null when it can).
+ */
+export function useForkSession(session: Session) {
+  const client = useClient();
+  const navigate = useNavigate();
+  // Copying the conversation can take a moment (a provider may start a process for it).
+  const fork = useMutation({
+    mutationFn: (turnId: string | undefined) =>
+      turnId ? client.forkSession(session.id, { turnId }) : client.forkSession(session.id),
+    onMutate: () => ({ toastId: toast.loading("Forking the session…") }),
+    onSuccess: ({ sessionId }, turnId, context) => {
+      toast.success("Forked into a new session", {
+        id: context?.toastId,
+        description: turnId
+          ? "It has the conversation and the code as they were after that turn. The original is unchanged."
+          : "It has the conversation and the code so far. The original is unchanged.",
+      });
+      void navigate({ to: "/sessions/$sessionId", params: { sessionId } });
+    },
+    onError: (error, _vars, context) => toast.error(message(error), { id: context?.toastId }),
+  });
+  const provider = useSnapshotData(
+    (s) => s.runner.providers.find((p) => p.id === session.provider),
+    undefined,
+  );
+  const canFork = forkSupported(session, provider);
+  return {
+    canFork,
+    blocked: canFork ? (fork.isPending ? "Forking…" : forkBlocked(session)) : null,
+    /** Fork at the latest moment, or through the end of `turnId`. */
+    fork: (turnId?: string) => fork.mutate(turnId),
+  };
+}
+
+/**
  * What you can do to a session from its row menu, the thread header's ⋯ menu or the command
  * palette: open, rename, copy its link, make an automation from it, stop, fork, archive (with
  * Undo) and unarchive. They all use this, so they show the same toasts.
@@ -116,24 +153,7 @@ export function useSessionActions(session: Session) {
     mutationFn: (title: string) => client.updateSession(session.id, { title }),
     onError,
   });
-  // Copying the conversation can take a moment (a provider may start a process for it).
-  const fork = useMutation({
-    mutationFn: () => client.forkSession(session.id),
-    onMutate: () => ({ toastId: toast.loading("Forking the session…") }),
-    onSuccess: ({ sessionId }, _vars, context) => {
-      toast.success("Forked into a new session", {
-        id: context?.toastId,
-        description: "It has the conversation and the code so far. The original is unchanged.",
-      });
-      void navigate({ to: "/sessions/$sessionId", params: { sessionId } });
-    },
-    onError: (error, _vars, context) => toast.error(message(error), { id: context?.toastId }),
-  });
-  const provider = useSnapshotData(
-    (s) => s.runner.providers.find((p) => p.id === session.provider),
-    undefined,
-  );
-  const forkable = forkSupported(session, provider);
+  const fork = useForkSession(session);
 
   return {
     open: () => void navigate({ to: "/sessions/$sessionId", params: { sessionId: session.id } }),
@@ -161,10 +181,10 @@ export function useSessionActions(session: Session) {
     archive: () => archive.mutate(false),
     unarchive: () => unarchive.mutate(),
     /** The provider can fork this session's conversation: show the Fork action. */
-    canFork: forkable,
+    canFork: fork.canFork,
     /** Why Fork is disabled right now (null when it can run). */
-    forkBlocked: forkable ? (fork.isPending ? "Forking…" : forkBlocked(session)) : null,
-    fork: () => fork.mutate(),
+    forkBlocked: fork.blocked,
+    fork: () => fork.fork(),
   };
 }
 

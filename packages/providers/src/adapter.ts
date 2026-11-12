@@ -44,9 +44,21 @@ export interface ProviderAdapter {
    * token; the original is never written to. Present exactly when `capabilities().fork`.
    * `cwd` is an existing folder of the project (the copy is resumed from its own worktree).
    */
-  forkConversation?(resumeToken: string, opts: { cwd: string }): Promise<string>;
+  forkConversation?(resumeToken: string, opts: ForkConversationOptions): Promise<string>;
   /** One-shot, tool-less model calls for side jobs (§7.4), when the provider supports them. */
   utilityModel?(): UtilityModel;
+}
+
+/** Options for `ProviderAdapter.forkConversation`. */
+export interface ForkConversationOptions {
+  /** An existing folder of the project, for providers that run a process to fork. */
+  cwd: string;
+  /**
+   * Copy only through the turn that reported this fork point (`forkPoint` on a root turn's
+   * end event); later turns are left out. Throws when the conversation doesn't hold that
+   * point, never falling back to a whole copy. Only adapters that report fork points get one.
+   */
+  upTo?: string;
 }
 
 /** Options for `ProviderAdapter.refreshModels`. */

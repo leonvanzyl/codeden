@@ -418,4 +418,31 @@ describe("ClaudeEventMapper", () => {
       },
     });
   });
+
+  it("reports the root turn's last main-chain message as its fork point", () => {
+    const { mapper, events } = setup();
+    mapper.beginTurn();
+    mapper.handle({ ...assistant("m1", [{ type: "text", text: "Let me look" }]), uuid: "a1" });
+    mapper.handle({
+      ...assistant("m2", [{ type: "tool_use", id: "toolu_1", name: "Read", input: {} }]),
+      uuid: "a2",
+    });
+    mapper.handle({ ...toolResult("toolu_1", "file contents"), uuid: "u1" });
+    // A subagent's messages live in its own transcript: never a fork point of the session.
+    mapper.handle({ ...assistant("m3", [{ type: "text", text: "sub" }], "toolu_1"), uuid: "s1" });
+    mapper.handle(result({ uuid: "r1" }));
+    expect(events.at(-1)).toMatchObject({ type: "turn.completed", forkPoint: "u1" });
+
+    // A turn that streamed no transcript message has none; the next turn starts afresh.
+    mapper.beginTurn();
+    mapper.handle(result({ subtype: "error_during_execution", is_error: true }));
+    expect(events.at(-1)?.type).toBe("turn.failed");
+    expect(events.at(-1)).not.toHaveProperty("forkPoint");
+
+    mapper.beginTurn();
+    mapper.handle({ ...assistant("m4", [{ type: "text", text: "Stopping" }]), uuid: "a4" });
+    mapper.requestInterrupt();
+    mapper.handle(result());
+    expect(events.at(-1)).toMatchObject({ type: "turn.interrupted", forkPoint: "a4" });
+  });
 });

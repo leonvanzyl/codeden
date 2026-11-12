@@ -189,8 +189,8 @@ export class SessionService {
 
   /**
    * Fork an agent session (§9): a new session with a copy of its conversation, in a new
-   * worktree started from its latest checkpoint (`fork.ts`). The worktree is made in the
-   * background.
+   * worktree started from its latest checkpoint, or from a named turn's ("Fork from here",
+   * `fork.ts`). The worktree is made in the background.
    */
   async fork(id: string, req: ForkSessionRequest): Promise<ForkSessionResponse> {
     const { repo, projects, runner } = this.deps;

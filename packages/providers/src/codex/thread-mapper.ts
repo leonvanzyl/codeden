@@ -254,10 +254,17 @@ export class CodexThreadMapper {
     }
   }
 
+  /**
+   * Codex ended a turn. On the session's own thread the turn's id is its fork point:
+   * `thread/fork { lastTurnId }` keeps it and drops later turns. Turns CodeDen closes itself
+   * (the process died, the session closed) report none, as Codex may not have finished them.
+   */
   private completeTurn(turn: Turn): void {
     this.beginTurn(turn.id);
-    if (turn.status === "completed") this.endTurn({ type: "completed" }, turn.id);
-    else if (turn.status === "interrupted") this.endTurn({ type: "interrupted" }, turn.id);
+    const forkPoint = this.o.root ? turn.id : undefined;
+    if (turn.status === "completed") this.endTurn({ type: "completed" }, turn.id, forkPoint);
+    else if (turn.status === "interrupted")
+      this.endTurn({ type: "interrupted" }, turn.id, forkPoint);
     else {
       const info = turn.error?.codexErrorInfo;
       const kind = classifyCodexError(info);
@@ -272,14 +279,16 @@ export class CodexThreadMapper {
           retryAt,
         },
         turn.id,
+        forkPoint,
       );
     }
   }
 
   /** Close the running turn (also used when the process dies or the session closes). */
-  endTurn(outcome: TurnOutcome, turnId = this.current): void {
+  endTurn(outcome: TurnOutcome, turnId = this.current, forkPoint?: string): void {
     if (!turnId || turnId !== this.current) return;
     const ctx = this.ctx(turnId);
+    const end = { ...ctx, ...(forkPoint ? { forkPoint } : {}) };
     const ok = outcome.type === "completed";
     for (const item of this.open.values()) {
       this.o.emit({
@@ -304,13 +313,13 @@ export class CodexThreadMapper {
     }
     this.current = undefined;
     if (outcome.type === "completed")
-      this.o.emit({ type: "turn.completed", ...ctx, stopReason: "end_turn" });
+      this.o.emit({ type: "turn.completed", ...end, stopReason: "end_turn" });
     else if (outcome.type === "interrupted")
-      this.o.emit({ type: "turn.interrupted", ...ctx, reason: "user" });
+      this.o.emit({ type: "turn.interrupted", ...end, reason: "user" });
     else {
       this.o.emit({
         type: "turn.failed",
-        ...ctx,
+        ...end,
         error: {
           code: outcome.code ?? "turn_failed",
           message: outcome.message,

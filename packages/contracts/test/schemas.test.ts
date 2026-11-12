@@ -26,6 +26,7 @@ import {
   Snapshot,
   SOURCE_VERSION,
   sortProjects,
+  Turn,
 } from "../src";
 import {
   sampleAgentEvents,
@@ -232,10 +233,26 @@ describe("entities", () => {
     roundTrip(Session, sampleSession);
     roundTrip(Session, { ...sampleSession, forkedFrom: { sessionId: "s0", checkpoint: 2 } });
     roundTrip(Session, { ...sampleSession, forkedFrom: { sessionId: "s0", checkpoint: null } });
+    roundTrip(Session, {
+      ...sampleSession,
+      forkedFrom: { sessionId: "s0", checkpoint: 1, turnId: "turn-1" },
+    });
     expect(
       Session.safeParse({ ...sampleSession, forkedFrom: { sessionId: "s0", checkpoint: -1 } })
         .success,
     ).toBe(false);
+    const turn = {
+      id: "u1",
+      threadId: "t1",
+      sessionId: "s1",
+      status: "completed",
+      startedAt: ts,
+      completedAt: ts,
+      error: null,
+    };
+    roundTrip(Turn, turn);
+    roundTrip(Turn, { ...turn, forkPoint: "msg-uuid-1" });
+    roundTrip(Turn, { ...turn, forkPoint: null });
     roundTrip(InboxItem, sampleInboxItem);
     roundTrip(InboxItem, {
       ...sampleInboxItem,

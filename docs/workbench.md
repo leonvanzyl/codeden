@@ -70,6 +70,15 @@ Want to try a second approach without losing the first? Open the session's **⋯
 
 The fork's header shows **Fork of …** with a link back, and **Details** shows where it was forked from. Fork is offered when the provider supports it (Claude and Codex do). It's available once the session has had a turn and while no turn is running; while a turn runs, the menu says why it's disabled.
 
+### Fork from an earlier turn
+
+Did the agent go the wrong way a few turns ago? Hover the line under that turn's last message (where it says how long the turn took) and choose **Fork from here**. On a touch screen it's always shown. The new session is like any fork, except that:
+
+- **The conversation ends with that turn.** The agent remembers everything up to and including it, and none of the turns after it.
+- **The code is as it was right after that turn**, uncommitted changes included, in a new worktree and branch.
+
+The original session is unchanged. The fork's empty transcript and **Details** say which turn it was forked from. You can fork from turns that ran in this version of CodeDen or later; for older turns, only the latest one offers it, and forking from it is the same as **Fork session**.
+
 ## Files
 
 A tree of the worktree with a syntax-highlighted viewer. Binary files are detected and skipped.

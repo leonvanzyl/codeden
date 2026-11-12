@@ -199,7 +199,11 @@ export function createMockClient(opts: MockClientOptions = {}): CodeDenClient {
         worktreeRemovedAt: null,
         branch: `codeden/${id.slice(2, 10)}`,
         worktreePath: `~/.codeden/wt/${project?.slug ?? "project"}/${id.slice(2, 10)}`,
-        forkedFrom: { sessionId, checkpoint: null },
+        forkedFrom: {
+          sessionId,
+          checkpoint: null,
+          ...(req?.turnId ? { turnId: req.turnId } : {}),
+        },
         rootThreadId: `t-${id.slice(2)}`,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),

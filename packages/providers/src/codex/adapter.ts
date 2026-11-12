@@ -5,6 +5,7 @@ import type {
   SessionOptions,
 } from "@codeden/contracts";
 import {
+  type ForkConversationOptions,
   type ProviderAdapter,
   type ProviderSession,
   type RefreshModelsOptions,
@@ -148,8 +149,11 @@ export class CodexAdapter implements ProviderAdapter {
     return session;
   }
 
-  /** Copy a thread with `thread/fork` (see `forkCodexThread`); returns the new thread's id. */
-  async forkConversation(resumeToken: string, opts: { cwd: string }): Promise<string> {
+  /**
+   * Copy a thread with `thread/fork` (see `forkCodexThread`); returns the new thread's id. With
+   * `upTo` (a turn id), the copy ends with that turn.
+   */
+  async forkConversation(resumeToken: string, opts: ForkConversationOptions): Promise<string> {
     const executable = this.executable();
     if (!executable) throw new Error("Codex is not installed (no `codex` on PATH)");
     return forkCodexThread(executable, resumeToken, opts);

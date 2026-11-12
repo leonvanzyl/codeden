@@ -15,6 +15,8 @@ export interface TurnState {
   startedAt: string;
   completedAt: string | null;
   error: ErrorInfo | null;
+  /** Set when the conversation can be forked through this turn ("Fork from here", §9). */
+  forkPoint?: string | null;
 }
 
 export interface ThreadState {
@@ -227,6 +229,7 @@ export function applyAgentEvent(
         status,
         completedAt: ts,
         error: event.type === "turn.failed" ? event.error : (turn?.error ?? null),
+        forkPoint: event.forkPoint ?? null,
       };
       break;
     }

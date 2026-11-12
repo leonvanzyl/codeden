@@ -217,6 +217,13 @@ describe("runner protocol", () => {
       { name: "checkpoint.list", cwd: "/repo", sessionId: "s1" },
       { name: "checkpoint.list", cwd: "/repo", sessionId: "s1", settled: true },
       { name: "provider.fork", providerId: "claude", resumeToken: "claude-1", cwd: "/repo" },
+      {
+        name: "provider.fork",
+        providerId: "codex",
+        resumeToken: "thread-1",
+        cwd: "/repo",
+        upTo: "turn-3",
+      },
       { name: "checkpoint.diff", cwd: "/repo", sessionId: "s1", from: 0, to: 2 },
       { name: "checkpoint.restoreFiles", cwd: "/repo", sessionId: "s1", index: 1 },
       { name: "pty.attach", ptyId: "p1" },
@@ -277,6 +284,15 @@ describe("runner protocol", () => {
     expect(
       RunnerCommand.safeParse({ name: "provider.fork", providerId: "claude", cwd: "/repo" })
         .success,
+    ).toBe(false);
+    expect(
+      RunnerCommand.safeParse({
+        name: "provider.fork",
+        providerId: "claude",
+        resumeToken: "c",
+        cwd: "/repo",
+        upTo: "",
+      }).success,
     ).toBe(false);
     roundTrip(RunnerCommandResults["workspace.remove"], { removed: true, discardedChanges: true });
     roundTrip(RunnerCommandResults["workspace.remove"], { removed: true });

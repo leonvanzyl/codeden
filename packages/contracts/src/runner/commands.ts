@@ -87,6 +87,11 @@ export const RunnerCommand = z.discriminatedUnion("name", [
     resumeToken: z.string().min(1),
     /** An existing folder of the project, for providers that run a process to fork. */
     cwd: z.string().min(1),
+    /**
+     * Copy only through the turn that reported this fork point (`forkPoint` on a turn's end
+     * event); later turns are left out. Omitted: the whole conversation.
+     */
+    upTo: z.string().min(1).optional(),
   }),
   /** Create or reuse the working directory for a session (worktree + setup commands). */
   z.object({

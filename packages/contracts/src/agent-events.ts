@@ -71,17 +71,27 @@ export const ThreadStartedEvent = z.object({
 
 export const TurnStartedEvent = z.object({ type: z.literal("turn.started"), ...turnScoped });
 
+/**
+ * Where the provider's conversation stands at the end of a root turn, as an opaque position:
+ * `forkConversation(token, { upTo })` copies the conversation through this turn and no
+ * further (§9). Reported only by adapters whose `forkConversation` accepts it, and only when
+ * the adapter knows the position. Absent: the conversation can't be forked at this turn.
+ */
+const forkPoint = { forkPoint: z.string().min(1).optional() };
+
 export const TurnCompletedEvent = z.object({
   type: z.literal("turn.completed"),
   ...turnScoped,
   /** Provider stop reason, e.g. `end_turn`, `max_tokens`. */
   stopReason: z.string().optional(),
+  ...forkPoint,
 });
 
 export const TurnFailedEvent = z.object({
   type: z.literal("turn.failed"),
   ...turnScoped,
   error: ErrorInfo,
+  ...forkPoint,
 });
 
 export const TurnInterruptedEvent = z.object({
@@ -89,6 +99,7 @@ export const TurnInterruptedEvent = z.object({
   ...turnScoped,
   /** `user`: interrupt button; `runner_restart`: cut off by a runner drain/crash; `provider`: provider-side. */
   reason: z.enum(["user", "runner_restart", "provider"]),
+  ...forkPoint,
 });
 
 /** A new item appeared in a turn (possibly still in progress). */

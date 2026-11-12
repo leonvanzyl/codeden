@@ -6,6 +6,7 @@ import type {
   SessionOptions,
 } from "@codeden/contracts";
 import {
+  type ForkConversationOptions,
   type ProviderAdapter,
   type ProviderSession,
   type RefreshModelsOptions,
@@ -149,12 +150,16 @@ export class ClaudeAdapter implements ProviderAdapter {
   /**
    * Copy a conversation with the SDK's `forkSession()`: the transcript is written to a new
    * session file at once (fresh message ids, the original untouched) and the new session id is
-   * returned for resuming. The copy is found from any worktree of the project.
+   * returned for resuming. The copy is found from any worktree of the project. With `upTo` (a
+   * turn's fork point: its last transcript message), the copy ends with that message; the SDK
+   * refuses a message the transcript doesn't hold, so it never copies the whole conversation
+   * instead.
    */
-  async forkConversation(resumeToken: string): Promise<string> {
+  async forkConversation(resumeToken: string, opts?: ForkConversationOptions): Promise<string> {
     const { forkSession } = await (this.options.loadSdk ?? loadClaudeSdk)();
     try {
-      return (await forkSession(resumeToken)).sessionId;
+      const upTo = opts?.upTo;
+      return (await forkSession(resumeToken, upTo ? { upToMessageId: upTo } : undefined)).sessionId;
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       throw new Error(`Could not fork the Claude conversation ${resumeToken}: ${reason}`);

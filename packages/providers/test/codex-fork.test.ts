@@ -52,6 +52,21 @@ describe("Codex fork", () => {
     });
   });
 
+  it("ends the copy with a turn when given one (lastTurnId)", async () => {
+    const log = logFile();
+    const cwd = tmpdir();
+    const adapter = new CodexAdapter({ executable: fakeCodex });
+    await expect(adapter.forkConversation("thread-source", { cwd, upTo: "turn-2" })).resolves.toBe(
+      "thread-fork-1",
+    );
+    expect(requests(log).find((r) => r.method === "thread/fork")?.params).toEqual({
+      threadId: "thread-source",
+      cwd,
+      excludeTurns: true,
+      lastTurnId: "turn-2",
+    });
+  });
+
   it("forks forkFrom as a session opens, then resumes the copy (never the original)", async () => {
     const log = logFile();
     const adapter = new CodexAdapter({ executable: fakeCodex });

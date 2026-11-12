@@ -27,7 +27,10 @@ const startedByLabel = {
   automation: "Automation",
 };
 
-/** The session a fork came from, and the checkpoint its worktree started at (§9). */
+/**
+ * The session a fork came from, the checkpoint its worktree started at and, for a fork from a
+ * turn ("Fork from here"), where its conversation ends (§9).
+ */
 function ForkedFromRow({ origin }: { origin: ForkOrigin }) {
   const source = useSession(origin.sessionId);
   return (
@@ -46,6 +49,13 @@ function ForkedFromRow({ origin }: { origin: ForkOrigin }) {
             ? "Code: its files when it started"
             : `Code: its files after turn ${origin.checkpoint}`}
       </span>
+      {origin.turnId && (
+        <span className="block text-2xs text-muted-foreground">
+          {origin.checkpoint
+            ? `Conversation: up to the end of turn ${origin.checkpoint}`
+            : "Conversation: up to the end of the turn it was forked from"}
+        </span>
+      )}
     </Row>
   );
 }

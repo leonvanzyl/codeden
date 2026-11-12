@@ -57,6 +57,12 @@ export class ClaudeEventMapper {
   private retryNoticeId: string | undefined;
   /** What the current turn said about a failure, for classifying it (`errors.ts`). */
   private signals: TurnErrorSignals = {};
+  /**
+   * The `uuid` of the current root turn's last main-chain transcript message (an `assistant`
+   * or `user` message without `parent_tool_use_id`): the turn's fork point, where
+   * `forkSession({ upToMessageId })` ends a copy that keeps this turn and no later one.
+   */
+  private lastChainUuid: string | undefined;
   /** The `/` command list last reported, so an unchanged list isn't sent again. */
   private commandsKey: string | undefined;
 
@@ -118,6 +124,7 @@ export class ClaudeEventMapper {
     this.rootTurnId = turnId;
     this.turnBaseline = this.queryTotal;
     this.signals = {};
+    this.lastChainUuid = undefined;
     this.emit({ type: "turn.started", threadId: this.rootThreadId, turnId });
     return turnId;
   }
@@ -159,9 +166,11 @@ export class ClaudeEventMapper {
         return;
       case "assistant":
         this.onAssistant(msg);
+        this.noteChainMessage(msg);
         return;
       case "user":
         this.onUser(msg);
+        this.noteChainMessage(msg);
         return;
       case "system":
         this.onSystem(msg);
@@ -189,6 +198,13 @@ export class ClaudeEventMapper {
   }
 
   // ------------------------------------------------------------ full messages
+
+  /** Keep a root turn's latest main-chain message as its fork point (subagents' don't count). */
+  private noteChainMessage(msg: Raw): void {
+    if (msg.parent_tool_use_id || !this.rootTurnId) return;
+    const uuid = str(msg, "uuid");
+    if (uuid) this.lastChainUuid = uuid;
+  }
 
   private onAssistant(msg: Raw): void {
     const message = (msg.message ?? {}) as Raw;
@@ -365,12 +381,14 @@ export class ClaudeEventMapper {
     this.tools.finishTurn(ctx, outcome.type === "completed");
     this.rootTurnId = undefined;
     this.interruptRequested = false;
+    const end = { ...ctx, ...(this.lastChainUuid ? { forkPoint: this.lastChainUuid } : {}) };
+    this.lastChainUuid = undefined;
     if (outcome.type === "completed") {
-      this.emit({ type: "turn.completed", ...ctx, stopReason: outcome.stopReason });
+      this.emit({ type: "turn.completed", ...end, stopReason: outcome.stopReason });
     } else if (outcome.type === "failed") {
-      this.emit({ type: "turn.failed", ...ctx, error: outcome.error });
+      this.emit({ type: "turn.failed", ...end, error: outcome.error });
     } else {
-      this.emit({ type: "turn.interrupted", ...ctx, reason: outcome.reason });
+      this.emit({ type: "turn.interrupted", ...end, reason: outcome.reason });
     }
   }
 

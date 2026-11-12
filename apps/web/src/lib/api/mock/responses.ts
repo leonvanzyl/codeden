@@ -122,7 +122,12 @@ export function respond(
             { label: "Watch CI", prompt: "Watch CI on the PR and fix anything that fails." },
           ],
         });
-        world.emitAgent(sessionId, { type: "turn.completed", ...ids, stopReason: "end_turn" });
+        world.emitAgent(sessionId, {
+          type: "turn.completed",
+          ...ids,
+          forkPoint: ids.turnId,
+          stopReason: "end_turn",
+        });
         world.updateSession(sessionId, { status: "idle" });
       },
     },

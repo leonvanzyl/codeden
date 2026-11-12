@@ -9,6 +9,7 @@ import type {
 import { badRequest, conflict, type ServiceError } from "../errors";
 import type { ProjectService } from "../projects/project-service";
 import { type RunnerPort, toServiceError } from "../runner-port";
+import { confirmedCheckpoint, forkTurn } from "./fork-turn";
 import type { LaunchFork } from "./launcher";
 import type { SessionRepo, StoredStartMeta } from "./repo";
 
@@ -88,7 +89,11 @@ export function forkTitle(source: Session): string {
  * 2. a copy of its conversation, made now by the provider (`provider.fork`).
  * The source is only read. A turn that started meanwhile, even one that has already finished,
  * would make the two disagree, so that fails the fork (`sourceMoved`; the unused copy is left
- * behind, never resumed). Throws `ServiceError`s.
+ * behind, never resumed).
+ *
+ * With `req.turnId` of an earlier turn ("Fork from here"), the code is that turn's checkpoint
+ * and the copy ends with that turn (`upTo`, its fork point). Neither changes once the turn has
+ * ended, so later turns don't affect it. The latest turn forks as above. Throws `ServiceError`s.
  */
 export async function planFork(
   deps: { repo: SessionRepo; projects: ProjectService; runner: RunnerPort },
@@ -99,6 +104,8 @@ export async function planFork(
   const source = repo.get(sourceId);
   const provider = runner.providers().find((p) => p.id === source.provider);
   const project = forkProject(deps.projects, source, provider);
+  const at = req.turnId ? forkTurn(repo, source, req.turnId) : null;
+  const earlier = at && !at.latest ? at : null;
   const turns = repo.turnCount(source.id);
   const { checkpoints } = await runner
     .request(
@@ -106,7 +113,12 @@ export async function planFork(
       SETTLE_TIMEOUT_MS,
     )
     .catch(rethrow);
-  const checkpoint = checkpoints.at(-1)?.index ?? null;
+  const checkpoint = earlier
+    ? confirmedCheckpoint(
+        earlier,
+        checkpoints.map((c) => c.index),
+      )
+    : (checkpoints.at(-1)?.index ?? null);
   const { resumeToken } = await runner
     .request(
       {
@@ -114,13 +126,16 @@ export async function planFork(
         providerId: source.provider,
         resumeToken: source.resumeToken as string,
         cwd: project.path,
+        ...(earlier ? { upTo: earlier.upTo } : {}),
       },
       FORK_TIMEOUT_MS,
     )
     .catch(rethrow);
-  const late = sourceMoved(repo, source, turns, provider);
-  if (late) throw late;
-  return forkPlan(source, project, { checkpoint, resumeToken }, req);
+  if (!earlier) {
+    const late = sourceMoved(repo, source, turns, provider);
+    if (late) throw late;
+  }
+  return forkPlan(source, project, { checkpoint, resumeToken, turnId: at?.turnId }, req);
 }
 
 /**
@@ -165,15 +180,16 @@ function forkProject(
  * effort, permissions, plan mode, work and issue, started by the user, with its own copy of the
  * conversation (`resumeToken`). Its worktree branches from the source's branch and starts from
  * `checkpoint`; its pull request targets the source's base branch. There is no §8.4 conflict
- * check: the fork is a deliberate, visible duplicate (`forkedFrom`).
+ * check: the fork is a deliberate, visible duplicate (`forkedFrom`, with the turn it was taken
+ * at when one was named).
  */
 export function forkPlan(
   source: Session,
   project: Project,
-  origin: { checkpoint: number | null; resumeToken: string },
+  origin: { checkpoint: number | null; resumeToken: string; turnId?: string },
   req: ForkSessionRequest,
 ): ForkPlan {
-  const { checkpoint } = origin;
+  const { checkpoint, turnId } = origin;
   const now = new Date().toISOString();
   const session: Session = {
     id: randomUUID(),
@@ -204,7 +220,7 @@ export function forkPlan(
     runnerId: null,
     automationRunId: null,
     rootThreadId: null,
-    forkedFrom: { sessionId: source.id, checkpoint },
+    forkedFrom: { sessionId: source.id, checkpoint, ...(turnId ? { turnId } : {}) },
     createdAt: now,
     updatedAt: now,
     endedAt: null,

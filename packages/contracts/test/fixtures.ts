@@ -146,7 +146,9 @@ export const sampleAgentEvents: AgentEvent[] = [
     },
   },
   { type: "turn.completed", threadId: "t1", turnId: "u1", stopReason: "end_turn" },
+  { type: "turn.completed", threadId: "t1", turnId: "u5", forkPoint: "msg-uuid-5" },
   { type: "turn.failed", threadId: "t1", turnId: "u2", error: { message: "boom" } },
+  { type: "turn.interrupted", threadId: "t1", turnId: "u6", reason: "user", forkPoint: "u6" },
   {
     type: "turn.failed",
     threadId: "t1",

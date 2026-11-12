@@ -154,6 +154,8 @@ export const turns = sqliteTable(
     error: json<ErrorInfo>("error"),
     /** Usage reported for this turn (latest `usage.updated` with this turnId). */
     usage: json<Usage>("usage"),
+    /** The provider's fork point at the end of the turn (`forkPoint` on its end event, §9). */
+    forkPoint: text("fork_point"),
   },
   (t) => [primaryKey({ columns: [t.sessionId, t.id] })],
 );

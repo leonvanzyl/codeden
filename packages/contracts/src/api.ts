@@ -190,6 +190,11 @@ export type StartSessionResponse = z.infer<typeof StartSessionResponse>;
 export const ForkSessionRequest = z.object({
   /** Defaults to the source's title followed by "(fork)". */
   title: z.string().trim().min(1).max(200).optional(),
+  /**
+   * Fork from this finished turn of the source's root thread ("Fork from here"): the
+   * conversation ends with it and the code is its checkpoint. Omitted: the latest moment.
+   */
+  turnId: Id.optional(),
 });
 export type ForkSessionRequest = z.infer<typeof ForkSessionRequest>;
 
