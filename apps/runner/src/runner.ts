@@ -1,5 +1,5 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
-import { mkdirSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import {
@@ -14,9 +14,12 @@ import {
   configureClaudeSdk,
   FakeProvider,
   loadFixture,
+  OpenCodeAdapter,
   type ProviderAdapter,
   ProviderRegistry,
   ReplayProvider,
+  type ResolvedCommand,
+  resolveExecutable,
 } from "@codeden/providers";
 import { serve, upgradeWebSocket } from "@hono/node-server";
 import { Hono } from "hono";
@@ -41,6 +44,11 @@ export interface StartRunnerOptions {
   adapters?: ProviderAdapter[];
   /** Load the real Claude Code, Codex and OpenCode adapters (the runner process does; tests opt in). */
   builtinProviders?: boolean;
+  /**
+   * Run OpenCode from this executable instead of looking for `opencode` (an install outside
+   * PATH, or the fake OpenCode in tests). Loads OpenCode even without the built-ins.
+   */
+  openCodeExecutable?: string;
   /** Recorded fixtures to serve as Replay providers (tests), registered as `replay-<n>`. */
   replayFixtures?: string[];
   /** Port to listen on (127.0.0.1); 0 = random. */
@@ -76,6 +84,14 @@ const DEFAULT_DRAIN_TIMEOUT = 5 * 60_000;
  */
 export const MODEL_LIST_MAX_AGE_MS = 10 * 60_000;
 
+/** An `opencode` given by path: a JavaScript file runs with Node.js (a test stand-in). */
+function openCodeCommand(file: string): ResolvedCommand | undefined {
+  if (/\.[cm]?js$/i.test(file)) {
+    return existsSync(file) ? { kind: "node-script", path: file, script: file } : undefined;
+  }
+  return resolveExecutable(file);
+}
+
 /**
  * Start the runner (§4.2): WebSocket server on 127.0.0.1, lock file with port/token/pid,
  * provider sessions, terminals, git/worktree operations, the local MCP proxy and a durable
@@ -99,6 +115,11 @@ export async function startRunner(opts: StartRunnerOptions): Promise<RunningRunn
   const registry = new ProviderRegistry(opts.adapters ?? []);
   if (opts.enableFakeProvider && !registry.get("fake"))
     registry.register(new FakeProvider({ delayMs: 15 }));
+  if (opts.openCodeExecutable && !registry.get("opencode")) {
+    const executable = openCodeCommand(opts.openCodeExecutable);
+    if (executable) registry.register(new OpenCodeAdapter({ executable }));
+    else log(`opencode: ${opts.openCodeExecutable} not found; looking for it on PATH`);
+  }
   if (opts.builtinProviders) {
     for (const adapter of builtinProviders())
       if (!registry.get(adapter.id)) registry.register(adapter);

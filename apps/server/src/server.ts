@@ -63,6 +63,11 @@ export interface StartServerOptions {
    * Default true, unless `CODEDEN_BUILTIN_PROVIDERS=0` (the server test suite sets it).
    */
   builtinProviders?: boolean;
+  /**
+   * Run OpenCode from this executable in a runner this server starts (`--opencode`): an
+   * install outside PATH, or the fake OpenCode in tests.
+   */
+  openCodeExecutable?: string;
   /** Built web assets to serve; auto-detected when omitted. */
   webDir?: string;
   /** Extra allowed origins, e.g. the Vite dev server. */
@@ -336,6 +341,7 @@ export async function startServer(opts: StartServerOptions): Promise<RunningServ
     const args = [
       ...(opts.enableFakeProvider ? ["--fake"] : []),
       ...(builtin ? [] : ["--no-builtin"]),
+      ...(opts.openCodeExecutable ? ["--opencode", opts.openCodeExecutable] : []),
     ];
     const launch = opts.runner ?? defaultRunnerLaunch(args) ?? null;
     runner = new RunnerClient({
