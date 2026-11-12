@@ -189,6 +189,32 @@ describe("skill switches", () => {
       expect(find("deploy", "claude", "p1").enabled).toBe(true);
     });
 
+    it("ignores a skillOverrides that isn't an object, in a file that still applies", () => {
+      for (const ignored of [null, [], false, "off"]) {
+        const user = `${JSON.stringify({ model: "opus", skillOverrides: ignored }, null, 2)}\n`;
+        put(userSettings(), user);
+        put(localSettings(), JSON.stringify({ skillOverrides: { deploy: "off" } }));
+        expect(find("deploy", "claude", "p1")).toMatchObject({
+          enabled: false,
+          setIn: localSettings(),
+        });
+
+        // On edits the local file that decides it; the user's file isn't touched.
+        const res = service.skills.apply(request("deploy", true, "claude", "p1"));
+        expect(res.file).toBe(localSettings());
+        expect(JSON.parse(readFileSync(localSettings(), "utf8")).skillOverrides).toEqual({});
+        expect(readFileSync(userSettings(), "utf8")).toBe(user);
+        expect(find("deploy", "claude", "p1")).toMatchObject({ enabled: true, setIn: null });
+
+        // Off, with nothing deciding it, writes the user's file, replacing the ignored value.
+        service.skills.apply(request("deploy", false, "claude", "p1"));
+        expect(JSON.parse(readFileSync(userSettings(), "utf8"))).toEqual({
+          model: "opus",
+          skillOverrides: { deploy: "off" },
+        });
+      }
+    });
+
     it("keeps skill names that look like object keys as plain entries", () => {
       put(join(home, ".claude", "skills", "ctor", "SKILL.md"), skillMd("constructor"));
       expect(find("constructor")).toMatchObject({ enabled: true, setIn: null });
@@ -303,6 +329,60 @@ describe("skill switches", () => {
       service.skills.apply(request("review", true, "codex"));
       expect(readFileSync(codexConfig(), "utf8")).toBe("# top\n# tail\n");
       expect(find("review", "codex")).toMatchObject({ enabled: true, setIn: null });
+    });
+
+    it("keeps comments at the end of the lines it removes, on lines of their own", () => {
+      put(
+        codexConfig(),
+        '[[skills.config]] # skill defaults\nname = "review"\n  enabled = false # review rationale\n',
+      );
+      service.skills.apply(request("review", true, "codex"));
+      expect(readFileSync(codexConfig(), "utf8")).toBe("# skill defaults\n  # review rationale\n");
+
+      // A `#` inside a string is not a comment, and other rules' comments stay where they are.
+      const start = [
+        "[mcp_servers.docs]",
+        'command = "npx#1" # the docs tool',
+        "",
+        "[[skills.config]]",
+        'name = "x#y" # not ours',
+        "enabled = false",
+        "",
+        "[[skills.config]]",
+        'name = "release" # off: too noisy',
+        "enabled = false",
+        "",
+      ].join("\n");
+      put(codexConfig(), start);
+      service.skills.apply(request("release", true, "codex", "p1"));
+      expect(readFileSync(codexConfig(), "utf8")).toBe(
+        [
+          "[mcp_servers.docs]",
+          'command = "npx#1" # the docs tool',
+          "",
+          "[[skills.config]]",
+          'name = "x#y" # not ours',
+          "enabled = false",
+          "",
+          "# off: too noisy",
+          "",
+        ].join("\n"),
+      );
+      expect(parseToml(readFileSync(codexConfig(), "utf8"))).toMatchObject({
+        mcp_servers: { docs: { command: "npx#1" } },
+        skills: { config: [{ name: "x#y", enabled: false }] },
+      });
+    });
+
+    it("refuses to remove an inline rule when its line's comment would go with it", () => {
+      const inline =
+        'skills = { config = [{ name = "release", enabled = false }] } # global settings note\n';
+      put(codexConfig(), inline);
+      expect(errorCode(() => service.skills.apply(request("release", true, "codex", "p1")))).toBe(
+        "422 config_edit_unsafe",
+      );
+      expect(readFileSync(codexConfig(), "utf8")).toBe(inline);
+      expect(existsSync(backups) ? readdirSync(backups) : []).toEqual([]);
     });
 
     it("keeps header, rule and footer comments when it removes one of several rules", () => {

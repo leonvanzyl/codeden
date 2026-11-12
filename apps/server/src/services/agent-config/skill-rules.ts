@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { parse, patch, stringify } from "@decimalturn/toml-patch";
 import { errorMessage, ServiceError } from "../errors";
+import { lineComment, sameComments } from "./toml-comments";
 
 /**
  * Codex's skill switch (§12.4): `[[skills.config]]` entries in `~/.codex/config.toml`, each
@@ -130,13 +131,14 @@ function block(entry: Table): string[] {
 
 const TABLE_HEADER = /^\s*\[/;
 const RULE_HEADER = /^\s*\[\[\s*skills\s*\.\s*config\s*\]\]\s*(#.*)?$/;
-/** Comment and blank lines: never removed by a text edit. */
+/** Whole-line comment and blank lines: never removed by a text edit. */
 const KEPT = /^\s*(#.*)?$/;
 const isBlank = (line: string | undefined) => line !== undefined && line.trim() === "";
 
 /**
  * Edit the `[[skills.config]]` blocks as text: a dropped entry loses its header and setting
- * lines, while every comment and blank line stays (blank lines left doubled by the removal are
+ * lines, while every comment and blank line stays. A comment at the end of a dropped line stays
+ * on a line of its own, indented like it (blank lines left doubled by the removal are
  * collapsed). An appended entry goes after the last remaining block, or at the end of the file.
  * Returns null when the entries aren't all written as such blocks (an inline array, say).
  */
@@ -145,19 +147,27 @@ function textEdit(text: string, rules: unknown[], change: RuleChange): string | 
   const lines = text === "" ? [] : text.split(/\r?\n/);
   const starts = lines.flatMap((line, i) => (RULE_HEADER.test(line) ? [i] : []));
   if (starts.length !== rules.length) return null;
-  const dropped = new Set<number>();
+  /** Dropped lines, each with what replaces it: its own comment, or nothing. */
+  const dropped = new Map<number, string | null>();
+  const drop = (i: number) => {
+    const line = lines[i] ?? "";
+    const comment = lineComment(line);
+    dropped.set(i, comment === null ? null : `${/^\s*/.exec(line)?.[0] ?? ""}${comment}`);
+  };
   starts.forEach((start, k) => {
     if (!change.drop.has(k)) return;
-    dropped.add(start);
+    drop(start);
     for (let i = start + 1; i < lines.length && !TABLE_HEADER.test(lines[i] ?? ""); i++) {
-      if (!KEPT.test(lines[i] ?? "")) dropped.add(i);
+      if (!KEPT.test(lines[i] ?? "")) drop(i);
     }
   });
   const out: string[] = [];
   let removedSinceText = false;
   lines.forEach((line, i) => {
-    if (dropped.has(i)) {
-      removedSinceText = true;
+    const replacement = dropped.get(i);
+    if (replacement !== undefined) {
+      removedSinceText = replacement === null;
+      if (replacement !== null) out.push(replacement);
       return;
     }
     if (isBlank(line) && removedSinceText && (out.length === 0 || isBlank(out.at(-1)))) return;
@@ -192,31 +202,12 @@ function normalize(value: Table): Table {
   return doc;
 }
 
-/** The whole-line comments of a TOML text, each as often as it appears. */
-function comments(text: string): string[] {
-  return text
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => line.startsWith("#"))
-    .sort();
-}
-
-/** True when every whole-line comment of `before` is still in `after`. */
-function keepsComments(before: string, after: string): boolean {
-  const left = comments(after);
-  return comments(before).every((c) => {
-    const i = left.indexOf(c);
-    if (i < 0) return false;
-    left.splice(i, 1);
-    return true;
-  });
-}
-
 /**
  * The file text before and after a switch. The `[[skills.config]]` blocks are edited as text
  * (`textEdit`); when the entries are written some other way, the TOML library patches the
- * document. Either way the result must parse to the expected document and keep every comment,
- * or the switch is refused (422 `config_edit_unsafe`) rather than lose part of the file.
+ * document. Either way the result must parse to the expected document and hold exactly the
+ * same comments, whole-line and after values alike (`sameComments`), or the switch is refused
+ * (422 `config_edit_unsafe`) rather than lose part of the file.
  */
 export function renderRuleSwitch(file: string, skill: RuleSkill, byPath: boolean, on: boolean) {
   const { text, doc, rules } = load(file);
@@ -233,7 +224,7 @@ export function renderRuleSwitch(file: string, skill: RuleSkill, byPath: boolean
   const expected = normalize({ ...doc, skills });
 
   const safe = (candidate: string | null): candidate is string => {
-    if (candidate === null || !keepsComments(before, candidate)) return false;
+    if (candidate === null || !sameComments(before, candidate)) return false;
     try {
       return isDeepStrictEqual(normalize(parse(candidate) as Table), expected);
     } catch {

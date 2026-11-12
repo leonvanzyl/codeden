@@ -49,11 +49,10 @@ function load(file: string): Loaded {
     throw unparsable(file, errorMessage(error));
   }
   if (!isRecord(doc)) throw unparsable(file, "not a JSON object");
-  const overrides = doc.skillOverrides;
-  if (overrides !== undefined && !isRecord(overrides)) {
-    throw unparsable(file, "`skillOverrides` is not an object");
-  }
-  return { text, doc, overrides: overrides ?? {} };
+  // A `skillOverrides` that isn't an object (null, a list, a string…) sets nothing: it is
+  // ignored, like an unknown value, not an error. Writing to this file replaces it.
+  const overrides = isRecord(doc.skillOverrides) ? doc.skillOverrides : {};
+  return { text, doc, overrides };
 }
 
 /**
