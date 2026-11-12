@@ -94,18 +94,16 @@ describe("answerProviderQuestion", () => {
     });
   });
 
-  it("withdraws an MCP server's form instead of sending it the guidance as data", async () => {
+  it("never sends the guidance to an MCP server as form data", async () => {
+    // UnwatchedApprovals withdraws the form instead (./unwatched-approvals.test.ts).
     const respond = vi.fn(async () => undefined);
     const answered = await answerProviderQuestion(
       ctx(factoryAgent, "dark_factory") as never,
       respond,
       question({ mcpServer: "deploy" }),
     );
-    expect(answered).toBe(true);
-    expect(respond).toHaveBeenCalledWith("s1", {
-      requestId: "req-1",
-      response: { kind: "cancel" },
-    });
+    expect(answered).toBe(false);
+    expect(respond).not.toHaveBeenCalled();
   });
 
   it("leaves attended sessions, ask_user questions and other items alone", async () => {

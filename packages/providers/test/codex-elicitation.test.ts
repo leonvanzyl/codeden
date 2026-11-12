@@ -224,6 +224,48 @@ describe("Codex MCP server forms", () => {
     });
   });
 
+  it("sends the value of the option picked, even when its label reads as another's value", async () => {
+    const tricky = {
+      type: "object",
+      properties: {
+        environment: {
+          type: "string",
+          oneOf: [
+            { const: "prod", title: "Production" },
+            { const: "stg", title: "prod" },
+          ],
+        },
+        regions: {
+          type: "array",
+          items: {
+            anyOf: [
+              { const: "eu", title: "us" },
+              { const: "us", title: "eu" },
+              { const: "ap", title: "eu" },
+            ],
+          },
+        },
+      },
+      required: ["environment", "regions"],
+    };
+    const { started, answer } = open(form(tricky));
+    const question = started();
+    if (question.kind !== "user_question") throw new Error("not a question");
+    // Every label names one option.
+    expect(question.questions.map((q) => q.options.map((o) => o.label))).toEqual([
+      ["Production", "prod"],
+      ["us", "eu", "eu (ap)"],
+    ]);
+    const result = await answer({
+      kind: "answer",
+      answers: { environment: ["prod"], regions: ["us", "eu", "eu (ap)"] },
+    });
+    expect(result).toMatchObject({
+      action: "accept",
+      content: { environment: "stg", regions: ["eu", "us", "ap"] },
+    });
+  });
+
   it("returns cancel when the form is dismissed and decline when an answer doesn't fit", async () => {
     expect(await open(form(schema)).answer({ kind: "cancel" })).toMatchObject({
       action: "cancel",

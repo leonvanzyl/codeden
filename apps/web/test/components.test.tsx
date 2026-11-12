@@ -138,6 +138,8 @@ describe("QuestionCard", () => {
     renderWithClient(<QuestionCard item={item} sessionId="s1" />, client);
     const send = screen.getByRole("button", { name: "Send answer" });
     expect((send as HTMLButtonElement).disabled).toBe(true);
+    // The agent's own questions are answered, not dismissed.
+    expect(screen.queryByRole("button", { name: "Dismiss" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /Backoff/ }));
     fireEvent.change(screen.getByPlaceholderText(/your own answer/), {
       target: { value: "Dead-letter it" },
@@ -149,6 +151,43 @@ describe("QuestionCard", () => {
         answers: { a: ["Backoff"], b: ["Dead-letter it"] },
       }),
     );
+  });
+
+  it("lets the user dismiss an MCP server's form without filling it in", async () => {
+    const client = createMockClient();
+    const respond = vi.spyOn(client, "respond").mockResolvedValue();
+    const item: ItemOf<"user_question"> = {
+      id: "q",
+      kind: "user_question",
+      status: "in_progress",
+      requestId: "req-form",
+      mcpServer: "deploy",
+      questions: [
+        {
+          id: "environment",
+          header: "Environment",
+          question: "deploy asks: Where should I deploy?",
+          options: [{ label: "Staging" }, { label: "Production" }],
+          multiSelect: false,
+          allowFreeText: false,
+        },
+        {
+          id: "token",
+          question: "Deploy token",
+          options: [],
+          multiSelect: false,
+          allowFreeText: true,
+        },
+      ],
+    };
+    renderWithClient(<QuestionCard item={item} sessionId="s1" />, client);
+    expect(screen.getByText(/Your answers go to deploy/)).toBeTruthy();
+    // Nothing is filled in, so the only way on is to dismiss it.
+    const send = screen.getByRole("button", { name: "Send answer" }) as HTMLButtonElement;
+    expect(send.disabled).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    await waitFor(() => expect(respond).toHaveBeenCalledWith("s1", "req-form", { kind: "cancel" }));
+    expect(respond).toHaveBeenCalledTimes(1);
   });
 
   const LONG_ANSWER =

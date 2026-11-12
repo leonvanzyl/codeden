@@ -1,4 +1,4 @@
-import type { InboxItem, Project, RawEventEnvelope, Session } from "@codeden/contracts";
+import type { InboxItem, Item, Project, RawEventEnvelope, Session } from "@codeden/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FACTORY_STARTER } from "../src/services/factory/sessions";
 import { UNATTENDED_APPROVAL } from "../src/services/factory/unattended";
@@ -37,8 +37,44 @@ function approval(id: string, sessionId: string, over: Partial<InboxItem> = {}):
   };
 }
 
+/** The inbox question for an MCP server's form, with its transcript item in `transcript`. */
+function mcpForm(
+  id: string,
+  sessionId: string,
+  transcript: Map<string, Item>,
+  over: Partial<InboxItem> = {},
+): InboxItem {
+  const item = approval(id, sessionId, {
+    kind: "question",
+    priority: "normal",
+    title: "deploy asks: Where should I deploy?",
+    ...over,
+  });
+  transcript.set(item.itemId as string, {
+    id: item.itemId as string,
+    kind: "user_question",
+    status: "in_progress",
+    requestId: item.requestId as string,
+    mcpServer: "deploy",
+    questions: [
+      {
+        id: "environment",
+        question: "Where?",
+        options: [],
+        multiSelect: false,
+        allowFreeText: true,
+      },
+    ],
+  });
+  return item;
+}
+
 /** A tiny event store, session repo, project list and inbox around the service. */
-function harness(sessions: Session[], mode: Project["autonomyMode"] = "assisted") {
+function harness(
+  sessions: Session[],
+  mode: Project["autonomyMode"] = "assisted",
+  transcript = new Map<string, Item>(),
+) {
   const listeners: Array<(events: RawEventEnvelope[]) => void> = [];
   const items = new Map<string, InboxItem>();
   const respond = vi.fn(async (_sessionId: string, req: { requestId: string }) => {
@@ -57,6 +93,10 @@ function harness(sessions: Session[], mode: Project["autonomyMode"] = "assisted"
       find: (id: string) => {
         const session = sessions.find((s) => s.id === id);
         return session ? { session } : undefined;
+      },
+      item: (_sessionId: string, itemId: string) => {
+        const item = transcript.get(itemId);
+        return item ? { item } : undefined;
       },
     } as never,
     projects: { get: () => ({ id: "p1", autonomyMode: mode }) as Project } as never,
@@ -170,5 +210,63 @@ describe("approvals nobody is watching (§10.1, §11.2)", () => {
     await vi.advanceTimersByTimeAsync(1_000);
     expect(h.respond).toHaveBeenCalledTimes(1);
     h.service.stop();
+  });
+});
+
+describe("MCP server forms nobody is watching (§10.1)", () => {
+  const cancel = (requestId: string) => ({ requestId, response: { kind: "cancel" } });
+
+  it("withdraws an automation's form after the wait, sending no data", async () => {
+    const transcript = new Map<string, Item>();
+    const h = harness([automation], "assisted", transcript);
+    h.service.start();
+    h.raise(mcpForm("f1", automation.id, transcript));
+    await vi.advanceTimersByTimeAsync(WAIT - 1_000);
+    expect(h.respond).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(h.respond).toHaveBeenCalledTimes(1);
+    expect(h.respond).toHaveBeenCalledWith(automation.id, cancel("req-f1"));
+  });
+
+  it("keeps a form the user answered in time, and the user's own sessions' forms", async () => {
+    const transcript = new Map<string, Item>();
+    const h = harness([automation, user], "assisted", transcript);
+    h.service.start();
+    h.raise(mcpForm("f1", automation.id, transcript));
+    h.raise(mcpForm("f2", user.id, transcript));
+    await vi.advanceTimersByTimeAsync(WAIT - 1_000);
+    h.items.set("f1", { ...(h.items.get("f1") as InboxItem), status: "resolved" });
+    await vi.advanceTimersByTimeAsync(WAIT * 10);
+    expect(h.respond).not.toHaveBeenCalled();
+  });
+
+  it("withdraws a form that was already overdue when the server restarted", async () => {
+    const transcript = new Map<string, Item>();
+    const h = harness([automation], "assisted", transcript);
+    const old = mcpForm("old", automation.id, transcript, {
+      createdAt: new Date(T0 - 2 * WAIT).toISOString(),
+    });
+    h.items.set(old.id, old);
+    h.service.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(h.respond).toHaveBeenCalledWith(automation.id, cancel("req-old"));
+    h.service.stop();
+  });
+
+  it("withdraws a dark factory's form at once", async () => {
+    const transcript = new Map<string, Item>();
+    const h = harness([factory], "dark_factory", transcript);
+    h.service.start();
+    h.raise(mcpForm("f1", factory.id, transcript));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(h.respond).toHaveBeenCalledWith(factory.id, cancel("req-f1"));
+  });
+
+  it("leaves the agent's own questions to the factory's rules", async () => {
+    const h = harness([automation]);
+    h.service.start();
+    h.raise(approval("q1", automation.id, { kind: "question" }));
+    await vi.advanceTimersByTimeAsync(WAIT * 2);
+    expect(h.respond).not.toHaveBeenCalled();
   });
 });

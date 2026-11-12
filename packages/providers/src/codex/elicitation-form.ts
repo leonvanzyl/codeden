@@ -76,12 +76,16 @@ function field(
   return { ...base, type: "text" };
 }
 
-/** Labels are how answers come back, so each must name one value. */
+/**
+ * Labels are how answers come back, so each must name exactly one value: a repeated label (or
+ * one that reads as {@link LEAVE_EMPTY}) gets its value added, then a number, until it is free.
+ */
 function unique(choices: { value: string; label: string }[]): { value: string; label: string }[] {
-  const seen = new Set<string>();
+  const seen = new Set<string>([LEAVE_EMPTY]);
   return choices.map((c) => {
     const label = c.label.trim() || c.value;
-    const free = seen.has(label) || label === LEAVE_EMPTY ? `${label} (${c.value})` : label;
+    let free = seen.has(label) ? `${label} (${c.value})` : label;
+    for (let n = 2; seen.has(free); n++) free = `${label} (${c.value}) ${n}`;
     seen.add(free);
     return { value: c.value, label: free };
   });
@@ -177,5 +181,9 @@ function parse(f: FormField, values: string[]): JsonValue | undefined {
   }
 }
 
+/**
+ * The value of the option the user picked. The card sends labels, so labels are matched first,
+ * across every option; a raw value (a PM may answer with one) only when no label matches.
+ */
 const choice = (f: FormField, answer: string): string | undefined =>
-  f.choices.find((c) => c.label === answer || c.value === answer)?.value;
+  (f.choices.find((c) => c.label === answer) ?? f.choices.find((c) => c.value === answer))?.value;
