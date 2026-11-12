@@ -26,6 +26,7 @@ import { inboxRoutes } from "./inbox";
 import { authRoutes, type NetworkRouteContext, networkRoutes } from "./network";
 import { conflictRoutes, orchestrationRoutes } from "./orchestration";
 import { projectRoutes } from "./projects";
+import { searchRoutes } from "./search";
 import { sessionFileRoutes } from "./session-files";
 import { sessionRoutes } from "./sessions";
 import { artifactRoutes, fileRoutes, providerRoutes, secretRoutes, setupRoutes } from "./system";
@@ -91,6 +92,7 @@ export function createApi(ctx: ApiContext) {
     .route("/automations", automationRoutes(s))
     .route("/projects", projectAutomationRoutes(s))
     .route("/usage", usageRoutes(s))
+    .route("/search", searchRoutes(s))
     .route("/setup", setupRoutes(s))
     .route("/providers", providerRoutes(s))
     .route("/updates", updateRoutes(s))

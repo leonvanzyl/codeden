@@ -10,6 +10,7 @@ import {
   SessionDetail,
   SetupStatus,
   StartSessionResponse,
+  TranscriptSearchResponse,
 } from "@codeden/contracts";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { type RunningServer, startServer } from "../src";
@@ -226,5 +227,19 @@ describe("api routes", () => {
     expect(
       SecretsStatus.parse((await call("GET", "/secrets")).json()).keys.every((k) => !k.set),
     ).toBe(true);
+  });
+
+  it("searches transcripts behind the install token and validates the query", async () => {
+    const path = `/search/transcripts?q=${encodeURIComponent('"prisma migrate" OR NEAR(')}`;
+    expect((await fetch(`${server.url}/api${path}`)).status).toBe(401);
+    const res = await call("GET", path);
+    expect(res.status).toBe(200);
+    expect(TranscriptSearchResponse.parse(res.json())).toEqual({
+      query: '"prisma migrate" OR NEAR(',
+      hits: [],
+      truncated: false,
+    });
+    expect((await call("GET", "/search/transcripts?q=")).status).toBe(400);
+    expect((await call("GET", "/search/transcripts?q=cart&limit=500")).status).toBe(400);
   });
 });

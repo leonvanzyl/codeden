@@ -3,6 +3,7 @@ import { and, eq, inArray, max } from "drizzle-orm";
 import type { Db } from "../db/client";
 import { rowToInbox, rowToItemRecord, rowToSession, rowToTurnRecord } from "../db/rows";
 import { inboxItems, items, sessions, threads, turns } from "../db/schema";
+import { indexItem } from "../services/search/index-writer";
 import type { Mutation, ProjectionReader, SessionRecord, TurnRecord } from "./reducer/types";
 
 /** A transaction handle from `db.transaction`. */
@@ -88,8 +89,16 @@ export class DbProjectionReader implements ProjectionReader {
  * Write transcript mutations (threads, turns, items) and session usage. Session and inbox rows
  * are written by the domain events derived from the same mutations (`derivedEvents`), so
  * the global event stream carries every entity change.
+ *
+ * Items are also written to the transcript search index unless `index` is false: streaming
+ * deltas skip it, so a growing message is indexed when it starts, updates and completes rather
+ * than on every token.
  */
-export function applyMutations(tx: Tx, mutations: Mutation[]): void {
+export function applyMutations(
+  tx: Tx,
+  mutations: Mutation[],
+  { index = true }: { index?: boolean } = {},
+): void {
   for (const m of mutations) {
     switch (m.type) {
       case "thread":
@@ -122,6 +131,7 @@ export function applyMutations(tx: Tx, mutations: Mutation[]): void {
           .values(row)
           .onConflictDoUpdate({ target: [items.sessionId, items.id], set: row })
           .run();
+        if (index) indexItem(tx, record);
         break;
       }
       case "session":

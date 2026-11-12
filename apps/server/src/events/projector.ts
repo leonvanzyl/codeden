@@ -16,6 +16,7 @@ import {
   resetGithubProjection,
 } from "../services/github/projection";
 import { applyOrchestrationProjection } from "../services/orchestration/projection";
+import { indexUnfinishedItems } from "../services/search/index-writer";
 import { applyUsageReport } from "../services/usage/ledger";
 import { applyMutations, DbProjectionReader, derivedEvents, type Tx } from "./projection-db";
 import { reduceAgentEvent } from "./reducer/agent";
@@ -138,7 +139,14 @@ export function applyProjection(tx: Tx, e: EventEnvelope): NewEvent[] {
       return [];
     default: {
       const mutations = reduceAgentEvent(new DbProjectionReader(tx), e.sessionId, e.payload, e.ts);
-      applyMutations(tx, mutations);
+      applyMutations(tx, mutations, { index: e.payload.type !== "item.delta" });
+      if (
+        e.payload.type === "turn.completed" ||
+        e.payload.type === "turn.failed" ||
+        e.payload.type === "turn.interrupted"
+      ) {
+        indexUnfinishedItems(tx, e.sessionId, e.payload.turnId);
+      }
       if (e.payload.type === "usage.updated") {
         const { threadId, turnId, usage } = e.payload;
         applyUsageReport(tx, { sessionId: e.sessionId, threadId, turnId, usage, ts: e.ts });

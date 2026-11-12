@@ -64,6 +64,7 @@ function expectFullSchema(file: string): void {
       expect.arrayContaining(["review_decision", "linked_issues", "merged_at"]),
     );
     expect(columns(database.client, "notices")).toContain("not_before");
+    expect(tables).toEqual(expect.arrayContaining(["item_search", "item_search_fts"]));
     const applied = (
       database.client.prepare("SELECT name FROM __drizzle_migrations").all() as { name: string }[]
     ).map((m) => m.name);
@@ -151,6 +152,62 @@ describe("migrations", { timeout: 30_000 }, () => {
       ]);
     } finally {
       database.close();
+    }
+  });
+
+  it("add the transcript search index and backfill it once from the stored items", () => {
+    const file = join(tempDir(), "before-search.db");
+    const old = openDatabase(
+      file,
+      partialMigrations((n) => !n.endsWith("_transcript_search")),
+    );
+    const insert = old.client.prepare(
+      "INSERT INTO items (session_id, id, thread_id, turn_id, position, kind, status, data, created_at, updated_at) VALUES ('s1', ?, 't1', 'u1', ?, ?, 'completed', ?, 'x', 'x')",
+    );
+    const stored = [
+      { id: "m1", kind: "user_message", input: { text: "Where is the webhook retry?" } },
+      { id: "a1", kind: "assistant_message", text: "In src/webhooks/retry.ts" },
+      { id: "r1", kind: "reasoning", text: "webhook thoughts are not indexed" },
+      // An old row this build can't read: skipped, not fatal.
+      { id: "x1", kind: "user_message" },
+    ];
+    stored.forEach((item, i) => {
+      insert.run(item.id, i, item.kind, JSON.stringify({ status: "completed", ...item }));
+    });
+    old.close();
+
+    const database = openDatabase(file, all);
+    try {
+      const search = (q: string) =>
+        database.client
+          .prepare(
+            "SELECT s.item_id FROM item_search_fts f JOIN item_search s ON s.id = f.rowid WHERE item_search_fts MATCH ? ORDER BY s.item_id",
+          )
+          .all(q);
+      expect(search('"webhook"')).toEqual([{ item_id: "a1" }, { item_id: "m1" }]);
+      expect(search('"retry.ts"')).toEqual([{ item_id: "a1" }]);
+      const triggers = database.client
+        .prepare("SELECT name FROM sqlite_master WHERE type = 'trigger' ORDER BY name")
+        .all();
+      expect(triggers).toEqual([
+        { name: "item_search_ad" },
+        { name: "item_search_ai" },
+        { name: "item_search_au" },
+      ]);
+    } finally {
+      database.close();
+    }
+    // Reopening doesn't index again.
+    const reopened = openDatabase(file, all);
+    try {
+      expect(reopened.client.prepare("SELECT count(*) AS n FROM item_search").get()).toEqual({
+        n: 2,
+      });
+      reopened.client.exec(
+        "INSERT INTO item_search_fts(item_search_fts) VALUES ('integrity-check')",
+      );
+    } finally {
+      reopened.close();
     }
   });
 
