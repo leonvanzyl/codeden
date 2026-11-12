@@ -1,7 +1,10 @@
 import { randomUUID } from "node:crypto";
 import type { FactoryItem, Session, UserInput } from "@codeden/contracts";
 import { afterEach, describe, expect, it } from "vitest";
+import { ToolRegistry } from "../src/mcp/registry";
+import { factoryReportReproduction, factorySubmitAnalysis } from "../src/mcp/tools/factory/builder";
 import { RunnerCommandError } from "../src/runner/client";
+import type { AppServices } from "../src/services/container";
 import { BUILDER_RESUME } from "../src/services/factory/prompts";
 import { FACTORY_STARTER } from "../src/services/factory/sessions";
 import { BUILDER_FAILED_REASON } from "../src/services/factory/turn-race";
@@ -131,6 +134,11 @@ function realDelivery() {
     turns: [] as string[],
     /** An error code the runner answers every send with (a session it can't start). */
     refuse: null as string | null,
+    /**
+     * Runs inside `session.start` / `session.send`, before the runner answers: where the
+     * provider opens, lists CodeDen's MCP tools and the agent's turn begins.
+     */
+    opening: async (_sessionId: string): Promise<void> => {},
   };
   const away = () => new RunnerCommandError("runner_unavailable", "Runner is not connected");
   const port = {
@@ -142,6 +150,7 @@ function realDelivery() {
       if (runner.refuse) throw new RunnerCommandError(runner.refuse, "The provider refused");
       const id = command.sessionId as string;
       if (!runner.hosted.has(id)) throw new RunnerCommandError("unknown_session", "Not hosted");
+      await runner.opening(id);
       runner.turns.push(id);
       return {};
     },
@@ -149,6 +158,7 @@ function realDelivery() {
   const launcher = {
     resume: async (session: Session) => {
       if (!runner.up) throw away();
+      await runner.opening(session.id);
       runner.hosted.add(session.id);
       runner.turns.push(session.id);
     },
@@ -360,5 +370,124 @@ describe("telling a builder to carry on, through the real session service (#96)"
     await tick();
     expect(item(id).stage).toBe("failed");
     expect(runner.turns).toEqual([]);
+  });
+});
+
+describe("a recovered builder's factory tools (#96)", () => {
+  /** CodeDen's builder tools behind the real availability checks, as the MCP server lists them. */
+  function builderTools() {
+    const registry = new ToolRegistry([factoryReportReproduction, factorySubmitAnalysis], {
+      factory: env.factory,
+      sessionRepo: env.repo,
+    } as unknown as AppServices);
+    const caller = (sessionId: string) => ({ projectId: env.project.id, sessionId });
+    return {
+      list: (sessionId: string) => registry.list("agent", caller(sessionId)).map((t) => t.name),
+      call: (sessionId: string, name: string, args: unknown) =>
+        registry.call(name, args, {
+          ...caller(sessionId),
+          role: "agent",
+          caller: "mcp",
+          signal: new AbortController().signal,
+        }),
+    };
+  }
+  const ANALYSIS = {
+    decision: "implement",
+    summary: "Search the transcript",
+    spec: "A search box over the session's items",
+    acceptanceCriteria: ["Search finds a message"],
+  };
+
+  it("offers them while the builder starts, before the runner answers, for its first report", async () => {
+    factory(1);
+    const { runner } = realDelivery();
+    runner.up = true;
+    // Recovered before it reported its first step (the analysis).
+    const recovered = await failedBeforeTheFix(91, "stopped");
+    env.factory.data.updateItem(recovered.id, (i) => ({ ...i, investigation: null }));
+    // A failed builder that isn't being recovered gets none.
+    const other = await failedBeforeTheFix(89, "stopped");
+    env.inbox.raiseRunFailed(env.repo.get(other.builderId), "start", "Could not open");
+    const tools = builderTools();
+    const listed: Record<string, string[]> = {};
+    let report: Awaited<ReturnType<typeof tools.call>> | undefined;
+    runner.opening = async (sessionId) => {
+      listed[sessionId] = tools.list(sessionId);
+      listed[other.builderId] = tools.list(other.builderId);
+      report = await tools.call(sessionId, "factory_submit_analysis", ANALYSIS);
+    };
+
+    await tick();
+    expect(runner.turns).toEqual([recovered.builderId]);
+    expect(listed).toEqual({
+      [recovered.builderId]: ["factory_report_reproduction", "factory_submit_analysis"],
+      [other.builderId]: [],
+    });
+    expect(report).toMatchObject({ isError: false });
+    expect(item(recovered.id)).toMatchObject({
+      stage: "building",
+      investigation: { kind: "analysis", outcome: "implement" },
+    });
+    expect(item(other.id).stage).toBe("failed");
+  });
+
+  it("puts the item back exactly as it was, without the tools, when the builder doesn't start", async () => {
+    factory(1);
+    const { runner } = realDelivery();
+    runner.up = true;
+    const recovered = await failedBeforeTheFix(91, "stopped");
+    const before = item(recovered.id);
+    const tools = builderTools();
+    let listedWhileStarting: string[] = [];
+    runner.opening = async (sessionId) => {
+      listedWhileStarting = tools.list(sessionId);
+      throw new RunnerCommandError("timeout", "The runner did not answer in time");
+    };
+
+    await tick();
+    expect(listedWhileStarting).toEqual(["factory_report_reproduction", "factory_submit_analysis"]);
+    expect(item(recovered.id)).toMatchObject({
+      stage: "failed",
+      reason: before.reason,
+      finishedAt: before.finishedAt,
+      sessionsArchivedAt: before.sessionsArchivedAt,
+      nudges: before.nudges,
+      updatedAt: before.updatedAt,
+    });
+    expect(tools.list(recovered.builderId)).toEqual([]);
+
+    // The next tick tries again and it starts.
+    runner.opening = async () => {};
+    await tick();
+    expect(runner.turns).toEqual([recovered.builderId]);
+    expect(item(recovered.id).stage).toBe("building");
+    expect(tools.list(recovered.builderId)).toEqual([
+      "factory_report_reproduction",
+      "factory_submit_analysis",
+    ]);
+  });
+
+  it("finishes a recovery the server stopped in the middle of, instead of failing the item", async () => {
+    factory(1);
+    const { runner } = realDelivery();
+    runner.up = true;
+    const recovered = await failedBeforeTheFix(91, "stopped");
+    const [failure] = env.inbox.list({ sessionId: recovered.builderId });
+    // What a server stopped while the builder was starting leaves: the item back in building
+    // with the recovery marked as under way, the builder still stopped.
+    env.factory.data.updateItem(recovered.id, (i) => ({
+      ...i,
+      stage: "building",
+      reason: null,
+      finishedAt: null,
+      sessionsArchivedAt: null,
+      nudges: { ...i.nudges, [`turn_race_recovering:${failure?.id}`]: new Date().toISOString() },
+    }));
+
+    await tick();
+    expect(runner.turns).toEqual([recovered.builderId]);
+    expect(item(recovered.id).stage).toBe("building");
+    expect(env.repo.get(recovered.builderId).status).toBe("running");
   });
 });
