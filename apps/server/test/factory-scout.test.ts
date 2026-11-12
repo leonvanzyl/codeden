@@ -1,7 +1,10 @@
-import type { FactoryLoop, Session } from "@codeden/contracts";
+import type { DiscoveryArea, FactoryLoop, Session } from "@codeden/contracts";
 import { afterEach, describe, expect, it } from "vitest";
 import type { ServiceError } from "../src/services/errors";
 import { scoutDue } from "../src/services/factory/scout";
+import { pickLenses } from "../src/services/factory/scout-reports";
+import { FACTORY_STARTER } from "../src/services/factory/sessions";
+import { sampleSession } from "./helpers";
 import { createFactoryEnv, type FactoryEnv } from "./support/factory-env";
 
 let env: FactoryEnv;
@@ -23,13 +26,28 @@ const code = async (run: () => Promise<unknown>) =>
     (error: ServiceError) => error.code,
   );
 
-function darkFactory() {
-  env = createFactoryEnv({ limits: { maxConcurrentSessions: 3 } });
+function darkFactory(maxConcurrentSessions = 3) {
+  env = createFactoryEnv({ limits: { maxConcurrentSessions } });
   env.factory.setMode(env.project.id, {
     mode: "dark_factory",
-    limits: { ...env.project.factoryLimits, maxConcurrentSessions: 3 },
+    limits: { ...env.project.factoryLimits, maxConcurrentSessions },
     tuning: { discoveryPerRound: 2, maxIssuesPerRound: 1 },
   });
+}
+
+/** A factory builder at work on issue #n: it holds an agent slot. */
+function runningBuilder(n: number) {
+  env.repo.create(
+    {
+      ...sampleSession,
+      id: `builder-${n}`,
+      projectId: env.project.id,
+      startedBy: FACTORY_STARTER,
+      workKey: `issue:${n}`,
+      status: "running",
+    },
+    { workspaceMode: "worktree", workspaceFallback: null, forced: null, queuedBehind: [] },
+  );
 }
 
 describe("the dark factory's scout (§10.1)", () => {
@@ -132,6 +150,61 @@ describe("the dark factory's scout (§10.1)", () => {
     expect(second.lenses[0]?.sessionId).toBe(lens.id);
     expect(env.starts).toHaveLength(starts);
     expect(env.messages.at(-1)?.text).toMatch(/New round[\s\S]*tables/);
+  });
+
+  it("doesn't count the planning scout's own slot against its area reviewers", async () => {
+    // Two agent slots, one builder at work: the round starts on the other slot.
+    darkFactory(2);
+    runningBuilder(1);
+    await tick();
+    expect(loop().scout.round?.phase).toBe("planning");
+    const scout = session(loop().scout.sessionId);
+    expect(scout.status).toBe("running");
+
+    // The scout ends its turn right after planning, so its slot goes to a reviewer.
+    const plan = await env.factory.planRound(scout, {
+      lenses: [
+        { area: "ux", focus: "the task editor" },
+        { area: "security", focus: "the import endpoint" },
+      ],
+    });
+    expect(plan.lenses.map((l) => l.area)).toEqual(["ux"]);
+    expect(loop().scout.round?.phase).toBe("reviewing");
+    expect(plan.next).toContain("`security`: no free agent slot (Agents at once is 2;");
+    expect(plan.next).toContain("Raising Agents at once");
+  });
+
+  it("lets the scout review by itself when no agent slot is free", async () => {
+    darkFactory(2);
+    runningBuilder(1);
+    await tick();
+    const scout = session(loop().scout.sessionId);
+    // Another factory session took the last slot while the scout was planning.
+    runningBuilder(2);
+    const plan = await env.factory.planRound(scout, {
+      lenses: [{ area: "ux", focus: "forms" }],
+    });
+    expect(plan.lenses).toEqual([]);
+    expect(loop().scout.round?.phase).toBe("filing");
+    expect(plan.next).toMatch(/^No area reviewers this round\./);
+    expect(plan.next).toContain("other factory sessions hold 2)");
+    expect(plan.next).toContain("Review by yourself now");
+  });
+
+  it("says why each review area the scout asked for got no area reviewer", () => {
+    const ask = (...areas: DiscoveryArea[]) => areas.map((area) => ({ area, focus: "x" }));
+    const { picked, dropped } = pickLenses(
+      ask("ux", "docs", "ux", "security", "performance", "bugs"),
+      { areas: ["ux", "security", "performance", "bugs"], perRound: 3, slots: 1 },
+    );
+    expect(picked.map((l) => l.area)).toEqual(["ux"]);
+    expect(dropped).toEqual({
+      not_allowed: ["docs"],
+      duplicate: ["ux"],
+      no_slot: ["security", "performance"],
+      round_limit: ["bugs"],
+      failed: [],
+    });
   });
 
   it("starts a round only when the queue runs low and the interval has passed", () => {
