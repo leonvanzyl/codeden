@@ -86,7 +86,7 @@ export async function buildStatus(ctx: FactoryContext, projectId: string): Promi
     recent: done.map(workItem),
     ignored: ignored.map(workItem),
     githubLogin,
-    scout: project.autonomyMode === "dark_factory" ? scoutStatus(ctx, loop) : null,
+    scout: project.autonomyMode === "dark_factory" ? scoutStatus(ctx, project, loop, spend) : null,
     visionExists: visionOf(project).exists,
     lastDigest: ctx.store.digests(projectId, 1)[0] ?? null,
     lastTickAt: loop.lastTickAt,

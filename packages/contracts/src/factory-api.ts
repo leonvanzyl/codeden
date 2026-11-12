@@ -226,7 +226,10 @@ export const FactoryTuning = z.object({
   auditCommand: z.string().min(1).nullable().default(null),
   /** Revise rounds (failed review or merge checks) before an item fails. */
   maxFixAttempts: z.int().nonnegative().default(2),
-  /** Dark factory: the scout starts a round when fewer items than this wait for an agent. */
+  /**
+   * Dark factory: the scout starts a scheduled round only when fewer items than this wait to be
+   * classified or for an agent. 0 turns scheduled rounds off: only "Run scout now" starts one.
+   */
   minBacklog: z.int().nonnegative().default(2),
   /** Dark factory: minutes between the scout's review rounds. */
   discoveryIntervalMin: z.int().positive().default(360),
@@ -417,6 +420,14 @@ export const SetAutonomyModeResponse = z.object({
   experimental: z.boolean(),
 });
 export type SetAutonomyModeResponse = z.infer<typeof SetAutonomyModeResponse>;
+
+/**
+ * Error code of `POST /api/projects/:id/factory/scout` ("Run scout now", → `FactoryStatus`)
+ * when no round can start right now (409): not a dark factory, a kill switch is on, the loop is
+ * paused, a round is running or no agent slot is free. The message says which, as
+ * `ScoutStatus.runNowBlockedBy` does.
+ */
+export const SCOUT_UNAVAILABLE = "scout_unavailable";
 
 /** `POST /api/projects/:id/kill-switch` and `POST /api/factory/kill-switch`. */
 export const KillSwitchRequest = z.object({ on: z.boolean() });

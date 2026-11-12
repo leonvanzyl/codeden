@@ -43,6 +43,7 @@ import { allowLargeChange } from "./large-change";
 import { runTick } from "./loop";
 import { reportReproduction, submitAnalysis } from "./pipeline";
 import { localDay } from "./policy";
+import { runScoutNow } from "./scout";
 import { fileIssue, planRound, reportFindings } from "./scout-reports";
 import {
   FactorySessions,
@@ -244,9 +245,10 @@ export class FactoryService {
   /**
    * Change the autonomy mode. The software and dark factory need a GitHub project, a vision
    * file and limits with a daily budget (in the request, or saved while already in a factory
-   * mode).
+   * mode); a request without them throws at once. The tuning in the request is merged into the
+   * saved one after the ticks already queued, so a tick in flight never overwrites it.
    */
-  setMode(projectId: string, req: SetAutonomyModeRequest): SetAutonomyModeResponse {
+  setMode(projectId: string, req: SetAutonomyModeRequest): Promise<SetAutonomyModeResponse> {
     const project = this.deps.projects.get(projectId);
     const entering = isFactoryMode(req.mode);
     const wasFactory = isFactoryMode(project.autonomyMode);
@@ -262,22 +264,38 @@ export class FactoryService {
     this.deps.store.append([
       { type: "project.updated", sessionId: null, payload: { project: next } },
     ]);
-    const loop = this.data.loopOrNew(projectId, this.ctx.now());
-    this.data.saveLoop({
-      ...loop,
-      tuning: { ...loop.tuning, ...req.tuning },
-      ...(entering && !wasFactory
-        ? {
-            enabledAt: this.ctx.now().toISOString(),
-            consecutiveFailures: 0,
-            pausedReason: null,
-            state: "idle" as const,
-          }
-        : {}),
-      ...(!entering ? { state: "idle" as const, scout: { ...loop.scout, round: null } } : {}),
+    const saved = this.serialize(projectId, "set mode", () => {
+      const loop = this.data.loopOrNew(projectId, this.ctx.now());
+      this.data.saveLoop({
+        ...loop,
+        tuning: { ...loop.tuning, ...req.tuning },
+        ...(entering && !wasFactory
+          ? {
+              enabledAt: this.ctx.now().toISOString(),
+              consecutiveFailures: 0,
+              pausedReason: null,
+              state: "idle" as const,
+            }
+          : {}),
+        ...(!entering ? { state: "idle" as const, scout: { ...loop.scout, round: null } } : {}),
+      });
     });
     this.soon(projectId);
-    return { projectId, mode: req.mode, limits, experimental: entering };
+    return saved.then(() => ({ projectId, mode: req.mode, limits, experimental: entering }));
+  }
+
+  /**
+   * "Run scout now" (dark factory): start a scout round right away, skipping the interval and
+   * the backlog threshold. Throws `scout_unavailable` (409) with the reason when it can't.
+   */
+  async runScout(projectId: string): Promise<FactoryLoop> {
+    const loop = await this.serialize(projectId, "run scout", async () => {
+      const project = this.deps.projects.get(projectId);
+      const current = this.data.loopOrNew(projectId, this.ctx.now());
+      return this.data.saveLoop(await runScoutNow(this.ctx, project, current));
+    });
+    this.soon(projectId);
+    return loop;
   }
 
   /** The project kill switch: on stops the loop and every factory session at once. */

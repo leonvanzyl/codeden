@@ -320,9 +320,17 @@ export const ScoutStatus = z.object({
   findings: z.int().nonnegative(),
   filed: z.int().nonnegative(),
   lastRoundAt: Timestamp.nullable(),
-  /** When the next round may start (it also waits for the queue to run low). */
+  /**
+   * When the next round may start (it also waits for the queue to run low); null while a round
+   * runs, before the first one, and when scheduled rounds are off (`minBacklog` 0).
+   */
   nextRoundAt: Timestamp.nullable(),
   rounds: z.int().nonnegative(),
+  /**
+   * Why "Run scout now" (`POST /api/projects/:id/factory/scout`) can't start a round right now,
+   * in plain words; null when it can.
+   */
+  runNowBlockedBy: z.string().nullable().default(null),
 });
 export type ScoutStatus = z.infer<typeof ScoutStatus>;
 

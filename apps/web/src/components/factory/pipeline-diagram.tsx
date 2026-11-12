@@ -268,7 +268,7 @@ export function PipelineDiagram({ f }: { f: FactoryStatus }) {
       <div className="flex min-w-[880px] items-stretch gap-1 py-2">
         {dark && f.scout && (
           <div className="flex items-center gap-1">
-            <ScoutNode scout={f.scout} />
+            <ScoutNode scout={f.scout} scheduled={f.tuning.minBacklog > 0} />
             <Arrow dashed />
           </div>
         )}

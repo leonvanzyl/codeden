@@ -47,6 +47,8 @@ The project page shows the factory panel with the pipelines drawn as a live diag
 
 Under the diagram: spend against the daily budget, agents working out of the limit, pull requests ready for you (or merges today with auto-merge), the failure streak, merge checks per PR, recent results, and the issues ignored because of their author.
 
+The loop runs its regular check every 30 seconds: it moves work in progress, picks up new issues, starts free agents and, in a dark factory, starts the scout if it's due. **Check now** on the panel runs that check immediately. In a dark factory, **Run scout now** starts a [scout round](#the-dark-factory) right away.
+
 ### Finished work cleans up after itself
 
 Once a work item is finished (merged, reverted, rejected or failed), the factory [archives](workbench.md#archiving-and-worktree-cleanup) its sessions: the builder and its reviewers leave the sidebar and their worktrees are removed, so a busy factory fills neither your session list nor your disk. Nothing is lost. The branch, the checkpoints and the transcript stay, archived sessions are under the project's **Archived** filter, clicking the item on the panel still opens its session, and messaging an archived session brings it back with its worktree. A worktree with uncommitted changes is kept, as with any archive.
@@ -74,7 +76,7 @@ Other guards:
 
 A dark factory adds a **scout**: a long-lived agent that finds the work itself, so you can step back.
 
-When fewer than `minBacklog` items (default 2) wait for an agent and `discoveryIntervalMin` (default 6 hours) has passed since its last round, the scout runs a **review round**:
+When fewer than **Review when fewer than** (`minBacklog`, default 2) items wait to be classified or for an agent, and **Every (hours)** (`discoveryIntervalMin`, default 6 hours) has passed since its last round, the scout runs a **review round**. A threshold of 0 turns scheduled rounds off. **Run scout now** on the factory panel starts a round at any time, skipping the interval and the threshold:
 
 1. **Plan.** The scout looks at the app against the vision (what changed since its last round, what is open) and asks for at most **Review areas per round** (`discoveryPerRound`, default 2) review areas with `factory_plan_round`, each with a focus specific to this app.
 2. **Review.** Each review area gets an **area reviewer**: a long-lived reviewer agent focused on one area of the app (UI and UX, performance, security, features, bugs, code quality, test gaps or docs). Each reports findings with `factory_report_findings`.
@@ -84,7 +86,8 @@ The rules that keep it cheap are enforced by the server, not left to the agents:
 
 - **One scout and at most one area reviewer per review area, ever.** They are long-lived: the next round sends them a message instead of starting new sessions, so they keep what they learned and don't re-read the codebase.
 - **At most `discoveryPerRound` review areas per round**, however many the scout asks for, and only as many as there are free agent slots: builders and reviewers come first. The scout ends its turn once it has planned, so its own slot goes to an area reviewer. When an area gets no reviewer, `factory_plan_round` tells the scout why (not an allowed area, asked for twice, over the round's limit, or no free slot under **Agents at once**).
-- **A round only starts when the queue runs low** and the interval has passed; at most `maxIssuesPerRound` issues come out of it; a round that runs over three hours is closed.
+- **A scheduled round only starts when the queue runs low** and the interval has passed; at most `maxIssuesPerRound` issues come out of it; a round that runs over three hours is closed.
+- **Run scout now** skips the interval and the threshold, nothing else. It's disabled, with the reason in its tooltip, while a round is running, when no agent slot is free, while the loop is paused or over today's budget, or while a kill switch is on. The next scheduled round counts its interval from the end of the manual one.
 - The scout and its area reviewers hold agent slots and count against the daily budget like every other factory session.
 
 ### Nobody waits on you in a dark factory
@@ -207,21 +210,21 @@ Settings are **enforced by the server**, never left to agent judgement. Open the
 | Protected paths | none | Added to the vision's protected areas |
 | Allow deploy and release changes (`allowDeploys`) | off | While off, deploy files (`.github/workflows/*deploy*`, `*release*`, `*publish*`, `Dockerfile`, `fly.toml`, `vercel.json`, `netlify.toml`) are protected |
 
-**Tuning** (the merge-check and scout sections of the settings cover the common ones; the rest is set through the API's `tuning` field):
+**Tuning.** The **Merge checks** and (in a dark factory) **The scout** sections of the settings cover every knob below except `areas` and `builderProvider`, which are set through the API's `tuning` field. Saving changes only the knobs you send; the rest keep their saved values.
 
-| Setting | Default |
-|---|---|
-| `requireCi` | `true` |
-| `maxChangedLines` / `maxChangedFiles` | `5000` / no limit (`null` turns either off) |
-| `auditCommand` | none |
-| `maxFixAttempts` (revise rounds) | `2` |
-| `minBacklog` (dark factory: scout when fewer items wait) | `2` |
-| `discoveryIntervalMin` (dark factory: minutes between rounds) | `360` |
-| `discoveryPerRound` (dark factory: review areas per round) | `2` |
-| `maxIssuesPerRound` (dark factory: issues per round) | `3` |
-| `areas` (dark factory: the review areas the scout may use) | all eight |
-| `builderProvider` | `auto` (the agent role default) |
-| `watchTimeoutMin` (wait for CI on main after an automatic merge) | `120` |
+| Setting | In the settings | Default |
+|---|---|---|
+| `maxChangedLines` / `maxChangedFiles` | Merge checks: Largest change (lines) / Most files changed | `5000` / no limit (`null` turns either off) |
+| `maxFixAttempts` | Merge checks: Revise rounds (after a review asking for changes or a failed check; then the item fails) | `2` |
+| `watchTimeoutMin` | Merge checks: Watch main CI (minutes) (after an automatic merge; a failure while watched reverts it) | `120` |
+| `requireCi` | Merge checks: Require CI | `true` |
+| `auditCommand` | Merge checks: Audit command | none |
+| `minBacklog` | The scout: Review when fewer than (issues waiting; `0` turns scheduled rounds off) | `2` |
+| `discoveryIntervalMin` | The scout: Every (hours) | `360` (minutes) |
+| `discoveryPerRound` | The scout: Review areas per round | `2` |
+| `maxIssuesPerRound` | The scout: Issues per round | `3` |
+| `areas` (dark factory: the review areas the scout may use) | API only | all eight |
+| `builderProvider` | API only | `auto` (the agent role default) |
 
 Spend comes from the same ledger as the [usage reports](usage-and-costs.md).
 
@@ -260,7 +263,8 @@ Everything in the UI is also available over the local API (with the install toke
 | `POST /api/projects/:id/factory/items/:itemId/retry` | Run a stopped item again |
 | `POST /api/projects/:id/kill-switch`, `POST /api/factory/kill-switch` | `{ on: true }` |
 | `POST /api/projects/:id/factory/resume` | Clear a pause |
-| `POST /api/projects/:id/factory/tick` | Run one step now |
+| `POST /api/projects/:id/factory/tick` | Run the regular check now (**Check now**) |
+| `POST /api/projects/:id/factory/scout` | Dark factory: start a scout round now (**Run scout now**); `409 scout_unavailable` with the reason when it can't |
 | `POST /api/projects/:id/factory/digest` | Today's digest now |
 
 For example, to switch a project to the software factory with auto-merge on and one teammate trusted:

@@ -7,13 +7,19 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { REVIEW_AREAS_HELP, SCOUT_HELP } from "./meta";
 
-/** The tuning knobs the editor exposes (the rest keep their defaults). */
+/**
+ * The tuning knobs the editor exposes. It saves them as a patch, so the rest (review areas, the
+ * builder provider) keep their saved values.
+ */
 export type TuningDraft = Pick<
   FactoryTuning,
   | "requireCi"
   | "maxChangedLines"
   | "maxChangedFiles"
   | "auditCommand"
+  | "maxFixAttempts"
+  | "watchTimeoutMin"
+  | "minBacklog"
   | "discoveryIntervalMin"
   | "discoveryPerRound"
   | "maxIssuesPerRound"
@@ -26,10 +32,25 @@ export function tuningDraft(t: FactoryTuning): TuningDraft {
     maxChangedLines: t.maxChangedLines,
     maxChangedFiles: t.maxChangedFiles,
     auditCommand: t.auditCommand,
+    maxFixAttempts: t.maxFixAttempts,
+    watchTimeoutMin: t.watchTimeoutMin,
+    minBacklog: t.minBacklog,
     discoveryIntervalMin: t.discoveryIntervalMin,
     discoveryPerRound: t.discoveryPerRound,
     maxIssuesPerRound: t.maxIssuesPerRound,
   };
+}
+
+/** What the backlog threshold means, for its hint and the scout's description. */
+export function backlogHelp(minBacklog: number): string {
+  return minBacklog === 0
+    ? "0: scheduled rounds are off. The scout only runs when you click Run scout now on the factory panel."
+    : `The scout starts a scheduled round only when ${queueLow(minBacklog)} to be classified or for a free agent, and the interval has passed. 0 turns scheduled rounds off: then only Run scout now starts one.`;
+}
+
+/** "fewer than 3 issues wait", or "no issue waits" for a threshold of 1. */
+function queueLow(minBacklog: number): string {
+  return minBacklog === 1 ? "no issue waits" : `fewer than ${minBacklog} issues wait`;
 }
 
 /** One GitHub login per line (a leading @ is fine), as the limits store them. */
@@ -258,16 +279,41 @@ export function LimitsEditor({
               <InfoHint label="the scout">{SCOUT_HELP}</InfoHint>
             </p>
             <p className="text-3xs text-muted-foreground">
-              It reviews the app against the vision when fewer than two issues wait, using a few
-              long-lived area reviewers (one reviewer agent per review area, such as security or
-              UX), and files the work worth doing.
+              It reviews the app against the vision{" "}
+              {tuning.minBacklog === 0
+                ? "when you click Run scout now"
+                : `on a schedule, when ${queueLow(tuning.minBacklog)}`}
+              , using a few long-lived area reviewers (one reviewer agent per review area, such as
+              security or UX), and files the work worth doing.
             </p>
           </div>
-          <div className="grid gap-3 sm:grid-cols-3">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field
+              label="Review when fewer than"
+              htmlFor={`${id}-backlog`}
+              hint={backlogHelp(tuning.minBacklog)}
+              help={
+                tuning.minBacklog === 0
+                  ? "Off: only Run scout now starts a round."
+                  : `issue${tuning.minBacklog === 1 ? "" : "s"} wait for an agent.`
+              }
+            >
+              <Input
+                id={`${id}-backlog`}
+                type="number"
+                min={0}
+                step={1}
+                value={tuning.minBacklog}
+                onChange={(e) =>
+                  onTuningChange({ ...tuning, minBacklog: int(e.target.value) ?? 0 })
+                }
+                className="text-[13px]"
+              />
+            </Field>
             <Field
               label="Every (hours)"
               htmlFor={`${id}-every`}
-              hint="How often the scout runs a review round: it plans what to look at, its area reviewers review, and it files issues. It also waits until fewer than two issues are queued."
+              hint={`How often the scout runs a review round: it plans what to look at, its area reviewers review, and it files issues. ${tuning.minBacklog === 0 ? "Scheduled rounds are off while the threshold is 0." : `It also waits until ${queueLow(tuning.minBacklog)}.`}`}
             >
               <Input
                 id={`${id}-every`}
@@ -363,6 +409,42 @@ export function LimitsEditor({
             Over the limit, the project manager splits the work or allows it as one change (an
             initial scaffold, say). Nothing waits on you.
           </p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field
+              label="Revise rounds"
+              htmlFor={`${id}-fixes`}
+              hint="How many times the builder may revise a pull request after the reviewer asks for changes or a merge check fails. After that the item fails, and you can run it again from its page."
+            >
+              <Input
+                id={`${id}-fixes`}
+                type="number"
+                min={0}
+                step={1}
+                value={tuning.maxFixAttempts}
+                onChange={(e) =>
+                  onTuningChange({ ...tuning, maxFixAttempts: int(e.target.value) ?? 0 })
+                }
+                className="text-[13px]"
+              />
+            </Field>
+            <Field
+              label="Watch main CI (minutes)"
+              htmlFor={`${id}-watch`}
+              hint="After an automatic merge, how long the factory watches CI on the default branch. A failure while it watches reverts the merge; CI still running after this long counts as done."
+            >
+              <Input
+                id={`${id}-watch`}
+                type="number"
+                min={1}
+                step={1}
+                value={tuning.watchTimeoutMin}
+                onChange={(e) =>
+                  onTuningChange({ ...tuning, watchTimeoutMin: int(e.target.value, 1) ?? 1 })
+                }
+                className="text-[13px]"
+              />
+            </Field>
+          </div>
           <div className="flex items-start gap-2.5 text-xs">
             <Switch
               checked={tuning.requireCi}
