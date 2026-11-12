@@ -6,6 +6,7 @@ import {
   type AgentConfigListResponse,
   type AgentConfigLocator,
   AgentConfigProvider,
+  type AgentSkill,
   agentConfigFeatures,
   type LoadedAgentConfig,
   MCP_TEST_DEFAULT_TIMEOUT_MS,
@@ -205,19 +206,39 @@ export class AgentConfigService {
    */
   slashCommands(sessionId: string): SlashCommand[] {
     const { session, gitRoot, files } = this.discover(sessionId);
-    const custom =
-      session.provider === "claude"
-        ? loadedClaudeCommands(this.deps.home, session.cwd, gitRoot)
-        : [];
-    const skills = files.skills.filter((s) => s.enabled).map(skillCommand);
     return mergeSlashCommands(
-      [...skills, ...custom],
+      this.discoveredCommands(session.provider, session.cwd, gitRoot, files.skills),
       this.deps.reportedCommands(sessionId),
       session.provider,
     );
   }
 
+  /**
+   * The `/` menu of a session that does not exist yet (the New session draft): what `provider`
+   * would load in the project folder. No provider has reported a list, so the files are the list.
+   */
+  projectSlashCommands(projectId: string, provider: string): SlashCommand[] {
+    const project = this.project(projectId);
+    const { gitRoot, files } = this.discoverIn(provider, project.path, project);
+    return mergeSlashCommands(
+      this.discoveredCommands(provider, project.path, gitRoot, files.skills),
+      null,
+      provider,
+    );
+  }
+
   // ------------------------------------------------------------------- helpers
+
+  /** Skills that are switched on, then the provider's custom command files, in precedence order. */
+  private discoveredCommands(
+    provider: string,
+    cwd: string,
+    gitRoot: string | null,
+    skills: AgentSkill[],
+  ): SlashCommand[] {
+    const custom = provider === "claude" ? loadedClaudeCommands(this.deps.home, cwd, gitRoot) : [];
+    return [...skills.filter((s) => s.enabled).map(skillCommand), ...custom];
+  }
 
   /**
    * A session's working folder, project and the native files its provider loads there, with
@@ -226,16 +247,21 @@ export class AgentConfigService {
   private discover(sessionId: string) {
     const session = this.deps.repo.get(sessionId);
     const project = session.projectId ? this.project(session.projectId) : null;
-    const gitRoot = findGitRoot(session.cwd);
+    return { session, project, ...this.discoverIn(session.provider, session.cwd, project) };
+  }
+
+  /** The native files `provider` loads in `cwd` (skills with their switch state), and the git root. */
+  private discoverIn(provider: string, cwd: string, project: ProjectRef | null) {
+    const gitRoot = findGitRoot(cwd);
     const home = this.deps.home;
     const found: LoadedFiles =
-      session.provider === "codex"
-        ? loadedCodex(home, session.cwd, gitRoot, project)
-        : session.provider === "claude"
-          ? loadedClaude(home, session.cwd, gitRoot, project)
+      provider === "codex"
+        ? loadedCodex(home, cwd, gitRoot, project)
+        : provider === "claude"
+          ? loadedClaude(home, cwd, gitRoot, project)
           : { memory: [], skills: [], subagents: [] };
-    const skills = this.skills.forSession(found.skills, session.cwd, gitRoot, session.projectId);
-    return { session, project, gitRoot, files: { ...found, skills } };
+    const skills = this.skills.forSession(found.skills, cwd, gitRoot, project?.id ?? null);
+    return { gitRoot, files: { ...found, skills } };
   }
 
   /** A project with its Claude auto-memory folder (keyed by the main repo root). */

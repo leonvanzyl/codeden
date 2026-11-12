@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { type ProviderCommand, SlashCommandList } from "@codeden/contracts";
+import { type ProviderCommand, SessionFileList, SlashCommandList } from "@codeden/contracts";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { AgentConfigService } from "../src/services/agent-config/agent-config-service";
 import type { ProjectService } from "../src/services/projects/project-service";
@@ -47,6 +47,35 @@ describe("GET /api/sessions/:id/commands", () => {
     const res = await get("/sessions/no-such-session/commands");
     expect(res.status).toBe(404);
     expect(await res.json()).toMatchObject({ error: { code: "session_not_found" } });
+  });
+
+  it("serves a project's commands and files for the New session draft, with the token", async () => {
+    put(
+      join(h.repo, ".claude", "commands", "release.md"),
+      "---\ndescription: Cut a release\n---\n",
+    );
+    const res = await get(`/projects/${h.projectId}/commands?provider=claude`);
+    expect(res.status).toBe(200);
+    expect(SlashCommandList.parse(await res.json())).toContainEqual({
+      name: "release",
+      description: "Cut a release",
+      kind: "command",
+      provider: "claude",
+    });
+    // The provider is required: it decides which files apply.
+    expect((await get(`/projects/${h.projectId}/commands`)).status).toBe(400);
+
+    const files = await get(`/projects/${h.projectId}/files`);
+    expect(files.status).toBe(200);
+    const list = SessionFileList.parse(await files.json());
+    expect(list.entries).toContainEqual({
+      path: ".claude/commands/release.md",
+      kind: "file",
+      sizeBytes: expect.any(Number),
+    });
+
+    const anonymous = await fetch(`${h.server.url}/api/projects/${h.projectId}/files`);
+    expect(anonymous.status).toBe(401);
   });
 });
 
@@ -198,5 +227,23 @@ describe("a session's `/` commands and skills", () => {
     put(join(repo, ".agents", "skills", "lint", "SKILL.md"), "---\nname: lint\n---\n");
     put(join(repo, ".claude", "commands", "release.md"), "Cut a release\n");
     expect(list()).toEqual([{ name: "lint", description: "", kind: "skill", provider: "codex" }]);
+  });
+
+  it("lists what a provider would load in the project folder before a session exists", () => {
+    put(join(repo, ".claude", "skills", "lint", "SKILL.md"), "---\nname: lint\n---\n");
+    put(join(repo, ".claude", "commands", "release.md"), "Cut a release\n");
+    put(join(repo, ".agents", "skills", "deploy", "SKILL.md"), "---\nname: deploy\n---\n");
+    // Nothing is reported for a draft, even when sessions of the project have reports.
+    reported = [{ name: "compact", description: "Free up context", builtin: true }];
+    const draft = (provider: string) =>
+      SlashCommandList.parse(service.projectSlashCommands("p1", provider));
+    expect(draft("claude")).toEqual([
+      { name: "lint", description: "", kind: "skill", provider: "claude" },
+      { name: "release", description: "Cut a release", kind: "command", provider: "claude" },
+    ]);
+    expect(draft("codex")).toEqual([
+      { name: "deploy", description: "", kind: "skill", provider: "codex" },
+    ]);
+    expect(draft("fake")).toEqual([]);
   });
 });

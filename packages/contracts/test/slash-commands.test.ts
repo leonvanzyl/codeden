@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { AgentEvent, EventEnvelope, SlashCommandList, winningCommands } from "../src";
+import {
+  AgentEvent,
+  EventEnvelope,
+  ProjectCommandsQuery,
+  SlashCommandList,
+  winningCommands,
+} from "../src";
 
 const roundTrip = <T>(schema: { parse: (v: unknown) => T }, value: T) =>
   expect(schema.parse(JSON.parse(JSON.stringify(value)))).toEqual(value);
@@ -19,6 +25,12 @@ describe("slash commands", () => {
     ]);
     expect(() => SlashCommandList.parse([{ name: "", description: "", kind: "skill" }])).toThrow();
     expect(() => SlashCommandList.parse([{ name: "x", description: "", kind: "macro" }])).toThrow();
+  });
+
+  it("round-trips the query for a project's commands (the New session draft)", () => {
+    roundTrip(ProjectCommandsQuery, { provider: "claude" });
+    expect(() => ProjectCommandsQuery.parse({})).toThrow();
+    expect(() => ProjectCommandsQuery.parse({ provider: "" })).toThrow();
   });
 
   it("keeps one command per name, a built-in one over the others", () => {

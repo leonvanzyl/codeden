@@ -65,6 +65,20 @@ export const SlashCommand = z.object({
 });
 export type SlashCommand = z.infer<typeof SlashCommand>;
 
-/** `GET /api/sessions/:id/commands`: the session's commands and skills, sorted by name. */
+/**
+ * `GET /api/sessions/:id/commands` and `GET /api/projects/:id/commands`: the commands and skills,
+ * sorted by name.
+ */
 export const SlashCommandList = z.array(SlashCommand);
 export type SlashCommandList = z.infer<typeof SlashCommandList>;
+
+/**
+ * `GET /api/projects/:id/commands?provider=`: the `/` menu of a session that does not exist yet
+ * (the New session draft), from the skills and custom command files that `provider` would load
+ * in the project folder. Nothing is reported by a provider until the session runs.
+ */
+export const ProjectCommandsQuery = z.object({
+  /** The provider the draft would start with. */
+  provider: ProviderId,
+});
+export type ProjectCommandsQuery = z.infer<typeof ProjectCommandsQuery>;
