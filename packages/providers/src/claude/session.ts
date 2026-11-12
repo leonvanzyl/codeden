@@ -103,6 +103,7 @@ export class ClaudeSession implements ProviderSession {
         cwd: opts.cwd,
         extraRoots: opts.additionalDirectories,
         ...(opts.ownBranch ? { ownBranch: opts.ownBranch } : {}),
+        ...(opts.codedenHome ? { codedenHome: opts.codedenHome } : {}),
         notesRoots:
           config.notesRoots ?? claudeNotesDirs({ cwd: opts.cwd, ...claudeHomes(opts.env) }),
       },
@@ -360,7 +361,7 @@ export class ClaudeSession implements ProviderSession {
       return askQuestion(deps, input, options.toolUseID, options.signal);
     }
     if (toolName === PLAN_TOOL) return this.reviewPlan(input, options);
-    const denied = this.policy.denial(toolName, input);
+    const denied = this.policy.denial(toolName, input, this.shell.dir);
     if (denied) return { behavior: "deny", message: denied };
     const gate = this.policy.needsUser(toolName, input, this.shell.dir);
     if (!gate.ask) return { behavior: "allow", updatedInput: input };

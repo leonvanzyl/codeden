@@ -152,6 +152,18 @@ export const McpServerConfig = z.discriminatedUnion("transport", [
 ]);
 export type McpServerConfig = z.infer<typeof McpServerConfig>;
 
+/**
+ * CodeDen's own credential files, relative to its data directory (§15): the install token the
+ * local API accepts, the runner lock holding the runner's bearer token, and the remote access
+ * store (password hash and device sessions). An agent that read the tokens could drive CodeDen
+ * itself, so agents never read or write these without the user, at any level (§11.2).
+ */
+export const CODEDEN_CREDENTIAL_FILES = [
+  "install-token",
+  "runner/runner.json",
+  "remote-access.json",
+] as const;
+
 /** Options for `ProviderAdapter.openSession`. */
 export const SessionOptions = z.object({
   /** CodeDen session id. */
@@ -192,6 +204,12 @@ export const SessionOptions = z.object({
    * are denied natively (Claude permission policy, Codex read-only sandbox).
    */
   readOnly: z.boolean().optional(),
+  /**
+   * CodeDen's data directory (§6). Touching its credential files (`CODEDEN_CREDENTIAL_FILES`)
+   * asks at every level and is refused for read-only sessions (§11.2, §15); `$CODEDEN_HOME` in
+   * the agent's commands resolves to it.
+   */
+  codedenHome: z.string().min(1).optional(),
 });
 export type SessionOptions = z.infer<typeof SessionOptions>;
 export type SessionOptionsInit = z.input<typeof SessionOptions>;

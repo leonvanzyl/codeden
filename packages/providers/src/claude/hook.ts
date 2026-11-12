@@ -22,7 +22,7 @@ export function policyHook(policy: ClaudePolicy, shell: ShellState): HookCallbac
     >;
     const cwd = str(hookInput, "cwd");
     if (cwd && (path.isAbsolute(cwd) || path.win32.isAbsolute(cwd))) shell.dir = cwd;
-    const denied = policy.denial(name, toolInput);
+    const denied = policy.denial(name, toolInput, shell.dir);
     if (denied) {
       return {
         hookSpecificOutput: {

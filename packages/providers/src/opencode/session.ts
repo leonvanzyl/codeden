@@ -105,7 +105,11 @@ export class OpenCodeSession implements ProviderSession {
     this.broker = new ApprovalBroker(emit);
     this.policy = new OpenCodePolicy(
       opts.autonomy,
-      { cwd: opts.cwd, extraRoots: opts.additionalDirectories },
+      {
+        cwd: opts.cwd,
+        extraRoots: opts.additionalDirectories,
+        ...(opts.codedenHome ? { codedenHome: opts.codedenHome } : {}),
+      },
       opts.readOnly ?? false,
     );
     this.model = explicitModel(opts.model);

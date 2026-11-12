@@ -16,10 +16,16 @@ import type { RequestPermissionProfile } from "./protocol/v2";
  * (recorded with `decidedBy: "policy"`), and only the rest reaches the user.
  */
 
-/** True when the permission level allows an action the classifier assessed as `risk`. */
+/**
+ * True when the permission level allows an action the classifier assessed as `risk`. CodeDen's
+ * own credential files are never allowed by policy. Commands Codex runs inside its sandbox
+ * without asking (reads included) never reach this policy.
+ */
 export function levelAllows(autonomy: AutonomyLevel, risk: RiskAssessment): boolean {
   if (autonomy === "auto") return !risk.risky;
-  if (autonomy === "full") return !risk.risky || risk.action !== "outside_worktree";
+  if (autonomy === "full") {
+    return !risk.risky || (risk.action !== "outside_worktree" && !risk.codeden);
+  }
   return false;
 }
 

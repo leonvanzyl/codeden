@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  CODEDEN_CREDENTIAL_FILES,
   InboxItem,
   type ProviderInfo,
   type RunnerCommand,
@@ -14,6 +15,7 @@ import {
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { openDatabase } from "../src/db/client";
 import { EventStore } from "../src/events/store";
+import { homePaths } from "../src/paths";
 import type { RunnerPort } from "../src/services/runner-port";
 import { type LauncherDeps, SessionLauncher } from "../src/services/sessions/launcher";
 import { planModeUnsupported } from "../src/services/sessions/permissions";
@@ -259,7 +261,26 @@ describe("SessionLauncher.sessionOptions", () => {
     expect(launcher.sessionOptions({ ...sampleSession, planMode: false }).planMode).toBe(false);
     expect(launcher.sessionOptions({ ...sampleSession }).planMode).toBe(false);
   });
+
+  it("sends CodeDen's home, whose credential files are the ones the agent's policy guards", () => {
+    const home = join(tmpdir(), "codeden-home");
+    const launcher = new SessionLauncher({
+      runner: { mcpProxyUrl: () => null },
+      projects: { get: () => sampleProjectGone() },
+      home,
+    } as unknown as LauncherDeps);
+    expect(launcher.sessionOptions({ ...sampleSession }).codedenHome).toBe(home);
+    // The files the policy guards are the ones the server keeps its credentials in.
+    const paths = homePaths(home);
+    expect([paths.token, paths.runnerLock, paths.remoteAccess]).toEqual(
+      CODEDEN_CREDENTIAL_FILES.map((file) => join(home, file)),
+    );
+  });
 });
+
+function sampleProjectGone(): never {
+  throw new Error("gone");
+}
 
 describe("planModeUnsupported", () => {
   const provider = (planMode: boolean): ProviderInfo => ({

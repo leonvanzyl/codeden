@@ -24,11 +24,18 @@ export interface PathContext {
   platform?: NodeJS.Platform;
   /** Home directory used to expand `~`. Defaults to `process.env.HOME ?? USERPROFILE`. */
   home?: string;
+  /**
+   * CodeDen's data directory (`SessionOptions.codedenHome`): its credential files are guarded
+   * (`./codeden-home`), and `$CODEDEN_HOME` resolves to it.
+   */
+  codedenHome?: string;
 }
 
-const isWin = (ctx: PathContext) => (ctx.platform ?? process.platform) === "win32";
+/** True when the context's paths are Windows paths. */
+export const isWin = (ctx: PathContext) => (ctx.platform ?? process.platform) === "win32";
 
-function pathApi(ctx: PathContext): path.PlatformPath {
+/** The path functions for the context's platform. */
+export function pathApi(ctx: PathContext): path.PlatformPath {
   return isWin(ctx) ? path.win32 : path.posix;
 }
 
@@ -50,6 +57,11 @@ const TEMP_VARS = [
   /^(\$TMPDIR|\$\{TMPDIR\}|\$TEMP|\$\{TEMP\}|\$TMP|\$\{TMP\})(?=$|[\\/])/,
   /^(\$env:TEMP|\$env:TMP|%TEMP%|%TMP%)(?=$|[\\/])/i,
 ];
+/** CodeDen's home variable, which agents inherit: case-sensitive in POSIX shells only. */
+const CODEDEN_HOME_VARS = [
+  /^(\$CODEDEN_HOME|\$\{CODEDEN_HOME\})(?=$|[\\/])/,
+  /^(\$env:CODEDEN_HOME|%CODEDEN_HOME%)(?=$|[\\/])/i,
+];
 
 /**
  * Git Bash paths on Windows: `/c/Users/x` is `C:\Users\x`, and `/tmp` is the user's temp
@@ -63,9 +75,9 @@ function fromGitBash(value: string, temp: string | undefined): string {
 }
 
 /**
- * Resolve `target` (absolute, relative to `dir`, `~`-prefixed, or starting with a home or
- * temp variable) to an absolute path. On Windows the directory it resolves from may be in Git
- * Bash form too: the shell reports `/c/Users/x/repo` once a command has run in it.
+ * Resolve `target` (absolute, relative to `dir`, `~`-prefixed, or starting with a home, temp or
+ * CodeDen home variable) to an absolute path. On Windows the directory it resolves from may be
+ * in Git Bash form too: the shell reports `/c/Users/x/repo` once a command has run in it.
  */
 export function resolveAgainst(target: string, ctx: PathContext): string {
   const p = pathApi(ctx);
@@ -75,6 +87,8 @@ export function resolveAgainst(target: string, ctx: PathContext): string {
     value = home + value.slice(1);
   }
   value = value.replace(HOME_VARS, home);
+  const codeden = ctx.codedenHome;
+  if (codeden) for (const vars of CODEDEN_HOME_VARS) value = value.replace(vars, codeden);
   const temp = tempRootsOf(ctx)[0];
   if (temp) for (const vars of TEMP_VARS) value = value.replace(vars, temp);
   let base = ctx.dir ?? ctx.cwd;
@@ -95,6 +109,11 @@ function relative(root: string, target: string, ctx: PathContext): string {
   const p = pathApi(ctx);
   const norm = (s: string) => (isWin(ctx) ? p.resolve(s).toLowerCase() : p.resolve(s));
   return p.relative(norm(root), norm(target));
+}
+
+/** True when two absolute paths name the same file. Case-insensitive on Windows. */
+export function samePath(a: string, b: string, ctx: PathContext): boolean {
+  return relative(a, b, ctx) === "";
 }
 
 /** True when `target` is inside the worktree or one of the extra roots. */
@@ -199,6 +218,9 @@ const SECRET_BASENAMES = new Set([
   "secrets.yaml",
   "secrets.yml",
   "service-account.json",
+  // CodeDen's own, wherever a copy of one lands (its home is guarded by `./codeden-home`).
+  "install-token",
+  "remote-access.json",
 ]);
 const SAFE_ENV_SUFFIXES = [".example", ".sample", ".template", ".dist", ".defaults"];
 const SECRET_EXTENSIONS = [".pem", ".key", ".p12", ".pfx", ".keystore", ".jks"];

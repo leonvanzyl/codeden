@@ -209,6 +209,7 @@ export function createServices(opts: ServicesOptions): AppServices {
     projects,
     runner: opts.runner,
     inbox,
+    home: opts.paths.home,
     worktreesDir: opts.paths.worktrees,
     orchestratorDir: opts.paths.orchestrator,
     tokens: mcpTokens,

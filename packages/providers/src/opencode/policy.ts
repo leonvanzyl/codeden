@@ -1,5 +1,6 @@
 import path from "node:path";
 import type { ApprovalAction, AutonomyLevel } from "@codeden/contracts";
+import { touchesCodeden } from "../policy/assessment";
 import { readOnlyCommandDenial } from "../policy/read-only";
 import {
   classifyCommand,
@@ -100,14 +101,26 @@ export class OpenCodePolicy {
 
   private shell(call: PermissionCall): PolicyDecision {
     const command = commandOf(call);
+    const workdir = str(call.toolInput, "workdir");
+    const dir = workdir ? path.resolve(this.ctx.cwd, workdir) : undefined;
+    const risk = classifyCommand(command, dir ? { ...this.ctx, dir } : this.ctx);
     if (this.isReadOnly) {
+      if (touchesCodeden(risk)) return this.credentialsDenial();
       // Agent sessions at `read_only` may run the project's checks; read-only roles may not.
       const reason = readOnlyCommandDenial(command, { allowChecks: !this.readOnly });
       return reason ? { kind: "deny", message: `This session is read-only: ${reason}.` } : ALLOW;
     }
-    const workdir = str(call.toolInput, "workdir");
-    const dir = workdir ? path.resolve(this.ctx.cwd, workdir) : undefined;
-    return this.gate(classifyCommand(command, dir ? { ...this.ctx, dir } : this.ctx), "command");
+    return this.gate(risk, "command");
+  }
+
+  /** Read-only sessions never touch CodeDen's own credential files. */
+  private credentialsDenial(): PolicyDecision {
+    return {
+      kind: "deny",
+      message: this.readOnly
+        ? "This session is read-only: CodeDen's own credential files are off limits. Act through CodeDen tools instead."
+        : "This session has read-only permissions: CodeDen's own credential files are off limits. Report what you found instead.",
+    };
   }
 
   private edit(paths: readonly string[]): PolicyDecision {
@@ -136,13 +149,16 @@ export class OpenCodePolicy {
   /**
    * The level's gate (the same as Claude's): edits and commands (`supervisedAction`) always
    * ask in supervised mode; `alwaysRisky` asks for flagged calls even at full autonomy
-   * (secrets reads).
+   * (secrets reads). CodeDen's own credential files ask at every level and are refused for
+   * read-only sessions.
    */
   private gate(
     risk: RiskAssessment,
     supervisedAction?: ApprovalAction,
     alwaysRisky = false,
   ): PolicyDecision {
+    const codeden = touchesCodeden(risk);
+    if (codeden && this.isReadOnly) return this.credentialsDenial();
     if (this.autonomy === "supervised") {
       if (risk.risky) return { kind: "ask", action: risk.action, reason: risk.reason };
       if (supervisedAction) {
@@ -155,9 +171,8 @@ export class OpenCodePolicy {
       return ALLOW;
     }
     if (!risk.risky) return ALLOW;
-    if (this.autonomy === "full" && risk.action !== "outside_worktree" && !alwaysRisky) {
-      return ALLOW;
-    }
+    const always = alwaysRisky || codeden;
+    if (this.autonomy === "full" && risk.action !== "outside_worktree" && !always) return ALLOW;
     return { kind: "ask", action: risk.action, reason: risk.reason };
   }
 

@@ -117,6 +117,7 @@ function services() {
     projects,
     runner,
     inbox: env.inbox,
+    home: env.dir,
     worktreesDir: join(env.dir, "wt"),
     orchestratorDir: join(env.dir, "orchestrator"),
     tokens: { mint: () => "token" } as unknown as McpTokenStore,

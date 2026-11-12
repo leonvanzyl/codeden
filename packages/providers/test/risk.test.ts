@@ -221,6 +221,10 @@ describe("classifyCommand", () => {
     expect(action("Get-Content .\\config\\.env.production", win)).toBe("secrets");
     expect(action("cat ~/.ssh/id_rsa")).toBe("secrets");
     expect(action("cat ~/.aws/credentials")).toBe("secrets");
+    // Brace expansion and `${VAR}` paths are still paths.
+    expect(action("cat {README.md,.env}")).toBe("secrets");
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: a shell variable, not a template
+    expect(action("cat ${HOME}/.npmrc")).toBe("secrets");
     expect(action("printenv")).toBe("secrets");
     expect(action("Get-ChildItem env:", win)).toBe("secrets");
   });

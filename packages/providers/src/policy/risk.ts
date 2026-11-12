@@ -1,5 +1,6 @@
 import { currentGitBranch } from "../util/git-head";
 import { type RiskAssessment, risky, SAFE } from "./assessment";
+import { credentialsRisk, touchesCodedenCredentials } from "./codeden-home";
 import { binName, unwrap } from "./command-words";
 import { classifyGit } from "./git";
 import { classifyInstall } from "./installs";
@@ -144,6 +145,17 @@ function classifySimple(cmd: SimpleCommand, ctx: RiskContext, depth: number): Ri
     if (write.risky) return write;
   }
 
+  const dest = copyDestination(bin, args);
+  const outputs = toolOutputs(bin, args);
+  const written = dest ? [dest, ...outputs] : outputs;
+
+  // CodeDen's own credentials, before anything a level may allow (git included). Moving into
+  // CodeDen's home reads nothing; reading from there is caught by the command that reads.
+  if (!CD.has(bin)) {
+    const touched = secretArgument(bin, args, written, (a) => touchesCodedenCredentials(a, ctx));
+    if (touched) return credentialsRisk(`Accesses CodeDen's own credentials: ${touched}`);
+  }
+
   if (bin === "git") {
     return classifyGit(args, {
       ownBranch: ctx.ownBranch,
@@ -168,9 +180,6 @@ function classifySimple(cmd: SimpleCommand, ctx: RiskContext, depth: number): Ri
     }
   }
 
-  const dest = copyDestination(bin, args);
-  const outputs = toolOutputs(bin, args);
-  const written = dest ? [dest, ...outputs] : outputs;
   for (const target of [...(dest ? copyTargets(bin, args, dest, ctx) : []), ...outputs]) {
     const write = classifyWrite(target, ctx);
     if (write.risky) return write;
@@ -230,9 +239,12 @@ function copyTargets(bin: string, args: string[], dest: string, ctx: RiskContext
  * Classify a file write/edit. The worktree, extra roots and OS temp are fine, secrets files in
  * the worktree included: writing one (`cp .env.example .env`) reads nothing. A secrets file in
  * temp counts as outside the worktree, so Full autonomy (which only asks for writes outside the
- * worktree) still asks for it.
+ * worktree) still asks for it. CodeDen's own credential files ask at every level.
  */
 export function classifyWrite(target: string, ctx: RiskContext): RiskAssessment {
+  if (touchesCodedenCredentials(target, ctx)) {
+    return credentialsRisk(`Writes CodeDen's own credentials: ${target}`);
+  }
   if (!isWritable(target, ctx))
     return risky("outside_worktree", `Writes ${target}, outside the worktree`);
   if (isSecretPath(target) && !isInWorkspace(target, ctx)) {
@@ -241,8 +253,14 @@ export function classifyWrite(target: string, ctx: RiskContext): RiskAssessment 
   return SAFE;
 }
 
-/** Classify a file read or search. Reads anywhere are fine except credential files. */
-export function classifyRead(target: string, _ctx: RiskContext): RiskAssessment {
+/**
+ * Classify a file read or search. Reads anywhere are fine except credential files; CodeDen's own
+ * (or a folder holding them) ask at every level.
+ */
+export function classifyRead(target: string, ctx: RiskContext): RiskAssessment {
+  if (touchesCodedenCredentials(target, ctx)) {
+    return credentialsRisk(`Reads CodeDen's own credentials: ${target}`);
+  }
   if (isSecretPath(target)) return risky("secrets", `Reads the secrets file ${target}`);
   return SAFE;
 }

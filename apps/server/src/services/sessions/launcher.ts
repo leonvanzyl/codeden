@@ -25,6 +25,11 @@ export interface LauncherDeps {
   projects: ProjectService;
   runner: RunnerPort;
   inbox: InboxService;
+  /**
+   * CodeDen's data directory (§6), sent with every session so the agent's policy guards the
+   * credential files in it (`SessionOptions.codedenHome`, §15).
+   */
+  home: string;
   /** `<home>/wt`: worktrees live in `wt/<project>/<session>` (§6). */
   worktreesDir: string;
   /** `<home>/orchestrator`: the orchestrator's working directory (§8.1). */
@@ -248,6 +253,7 @@ export class SessionLauncher {
       // The orchestrator and PMs never write project code (§11.2). Agent sessions at the
       // `read_only` level carry it in `autonomy`, so it can change live.
       readOnly: session.role !== "agent",
+      codedenHome: this.deps.home,
       mcpServers,
       ...(ownBranch(session) ? { ownBranch: ownBranch(session) } : {}),
     });

@@ -8,11 +8,12 @@ import { isSecretPath } from "./paths";
 
 /**
  * The argument as a path, or undefined when it can't be one: inline code, multi-line text
- * or anything with shell or code punctuation (`selected={row.key`) is not a file name.
+ * or anything with shell or code punctuation (`selected={row.key`) is not a file name. A
+ * variable in braces (`${HOME}/.env`) is a path.
  */
 function asPath(arg: string): string | undefined {
   const value = arg.replace(/^-+[a-z-]*=/i, "");
-  if (!value || /[\n\r{}()<>|;=`]/.test(value)) return undefined;
+  if (!value || /[\n\r{}()<>|;=`]/.test(value.replace(/\$\{\w+\}/g, ""))) return undefined;
   return value;
 }
 
@@ -137,12 +138,14 @@ function searchPatterns(bin: string, args: string[]): Set<string> {
 
 /**
  * The first argument that reads a credentials file, if any. `written` are the paths the command
- * writes (a copy's destination), which classifyWrite judges instead.
+ * writes (a copy's destination), which classifyWrite judges instead. `isSecret` decides which
+ * paths count (default: secrets files by name).
  */
 export function secretArgument(
   bin: string,
   args: string[],
   written: readonly string[] = [],
+  isSecret: (path: string) => boolean = isSecretPath,
 ): string | undefined {
   if (DATA.has(bin)) return undefined;
   // `find -exec cat {}` and `fd -x cat` read what they find.
@@ -153,9 +156,33 @@ export function secretArgument(
   const patterns = SEARCHES.has(bin) ? searchPatterns(bin, args) : new Set<string>();
   return args.find((a) => {
     if (patterns.has(a) || written.includes(a)) return false;
-    const value = asPath(a);
-    return value !== undefined && isSecretPath(value);
+    return braceAlternatives(a).some((alt) => {
+      const value = asPath(alt);
+      return value !== undefined && isSecret(value);
+    });
   });
+}
+
+/** The most words one argument's brace expansion is followed to. */
+const MAX_ALTERNATIVES = 64;
+
+/**
+ * The words a shell's brace expansion makes of `word` (`~/.ssh/{id_rsa,x}` -> `~/.ssh/id_rsa`,
+ * `~/.ssh/x`), capped; just `word` when it has no `{a,b}` group.
+ */
+function braceAlternatives(word: string): string[] {
+  const group = /\{([^{}]*,[^{}]*)\}/.exec(word);
+  if (!group?.[1]) return [word];
+  const before = word.slice(0, group.index);
+  const after = word.slice(group.index + group[0].length);
+  const out: string[] = [];
+  for (const part of group[1].split(",")) {
+    for (const alt of braceAlternatives(before + part + after)) {
+      if (out.length >= MAX_ALTERNATIVES) return out;
+      out.push(alt);
+    }
+  }
+  return out;
 }
 
 /** Files a tool writes through its own options (`openssl req -keyout key.pem -out cert.pem`). */
