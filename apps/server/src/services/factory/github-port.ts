@@ -43,6 +43,13 @@ export interface PrEvidence {
   testOutput: boolean;
 }
 
+/** Who opened an issue, fresh from GitHub. */
+export interface IssueAuthor {
+  login: string | null;
+  /** GitHub's `author_association`: `OWNER`, `MEMBER`, `COLLABORATOR`, `CONTRIBUTOR`, `NONE`... */
+  association: string | null;
+}
+
 /**
  * What the factory needs from GitHub (§9), as a port so tests can run the loop against a
  * scripted GitHub. `GithubFactoryPort` implements it over `GithubService`.
@@ -51,6 +58,8 @@ export interface FactoryGithub {
   isGithubProject(projectId: string): boolean;
   /** The login of the account CodeDen uses on GitHub (always trusted); null when unknown. */
   viewerLogin(): Promise<string | null>;
+  /** An issue's author and their association with the repository (one API call). */
+  issueAuthor(projectId: string, number: number): Promise<IssueAuthor>;
   createIssue(
     projectId: string,
     req: { title: string; body: string; labels: string[] },
@@ -113,6 +122,16 @@ export class GithubFactoryPort implements FactoryGithub {
     // Remember a failure only briefly, so trust comes back as soon as GitHub does.
     this.login = { value, at: value ? Date.now() : Date.now() - LOGIN_TTL_MS + 30_000 };
     return value;
+  }
+
+  async issueAuthor(projectId: string, number: number): Promise<IssueAuthor> {
+    const repo = this.github.githubRepo(projectId);
+    const data = await this.github.client.run(
+      async (o) =>
+        (await o.rest.issues.get({ owner: repo.owner, repo: repo.repo, issue_number: number }))
+          .data,
+    );
+    return { login: data.user?.login ?? null, association: data.author_association ?? null };
   }
 
   isGithubProject(projectId: string): boolean {

@@ -250,6 +250,8 @@ export function createServices(opts: ServicesOptions): AppServices {
     ...opts.github,
     log: opts.log,
   });
+  // The factory and issue triage share it, so both trust the same issue authors.
+  const factoryGithub = opts.factory?.github ?? new GithubFactoryPort(github);
   const redetector = new ProjectRedetector({
     projects,
     store: opts.store,
@@ -284,6 +286,7 @@ export function createServices(opts: ServicesOptions): AppServices {
     repo: sessionRepo,
     inbox,
     orchestration: () => services.orchestration,
+    github: factoryGithub,
     home: opts.paths.home,
     ...opts.automations,
     log: opts.log,
@@ -330,7 +333,7 @@ export function createServices(opts: ServicesOptions): AppServices {
     notify: (draft, wake) => orchestration.notify(draft, wake),
     settings: opts.settings,
     exec,
-    github: opts.factory?.github ?? new GithubFactoryPort(github),
+    github: factoryGithub,
     complete: (job, system, prompt) => utility.complete(job, system, prompt),
     archiveSession: (id) => worktreeCleanup.archive(id),
     options: opts.factory,

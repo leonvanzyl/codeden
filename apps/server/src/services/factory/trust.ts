@@ -22,6 +22,17 @@ export function isTrustedAuthor(author: string | null, trusted: ReadonlySet<stri
 }
 
 /**
+ * GitHub's `author_association` values for the repository's owner, members of the organization
+ * that owns it, and collaborators: the people with write access.
+ */
+const WRITE_ASSOCIATIONS = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
+
+/** Whether an issue author's association with the repository gives them write access. */
+export function hasWriteAssociation(association: string | null): boolean {
+  return association !== null && WRITE_ASSOCIATIONS.has(association.toUpperCase());
+}
+
+/**
  * Whether the factory may merge an item by itself: auto-merge is on and the work is trusted.
  * Work from an untrusted author that a person (or the PM) let in always waits for a human.
  */

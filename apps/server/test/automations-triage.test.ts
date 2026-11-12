@@ -9,12 +9,13 @@ import {
   TriageReportResult,
 } from "@codeden/contracts";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { FakeFactoryGithub } from "./support/fake-factory-github";
 import { type Harness, startHarness, waitUntil } from "./support/harness";
 
 const ts = "2026-11-07T10:00:00.000Z";
 const GH = "p-gh";
 
-function issue(number: number): GithubIssue {
+function issue(number: number, author = "octocat"): GithubIssue {
   return {
     projectId: GH,
     number,
@@ -22,7 +23,7 @@ function issue(number: number): GithubIssue {
     state: "open",
     url: `https://github.com/acme/widgets/issues/${number}`,
     labels: [],
-    author: "octocat",
+    author,
     body: "Something is broken",
     comments: 0,
     createdAt: ts,
@@ -35,7 +36,14 @@ function issue(number: number): GithubIssue {
 describe("issue triage (§10)", () => {
   let h: Harness;
   let project: Project;
+  // Its viewer, "codeden", is the account CodeDen uses on GitHub.
+  const github = new FakeFactoryGithub();
   const triageId = `starter:${GH}:issue-triage`;
+  /** An issue the sync already knows (imported: no triage run, no PM notice). */
+  const synced = (i: GithubIssue) =>
+    h.server.services.store.append([
+      { type: "issue.updated", sessionId: null, payload: { issue: i, changes: ["imported"] } },
+    ]);
   const report = async (args: Record<string, unknown>) => {
     const res = await h.server.services.tools.call("report_triage", args, {
       role: "pm" as Role,
@@ -53,7 +61,7 @@ describe("issue triage (§10)", () => {
       orchestration: { wake: { debounceMs: 50, maxWaitMs: 300 } },
       github: { sync: false },
       automations: { rescanMs: 0 },
-      factory: { autoTick: false },
+      factory: { autoTick: false, github },
     });
     project = {
       id: GH,
@@ -167,6 +175,7 @@ describe("issue triage (§10)", () => {
     await h.api("PATCH", `/automations/${triageId}`, {
       action: { type: "triage", policy: { autoStart: true } },
     });
+    synced(issue(45, "codeden"));
     const auto = await report({ issueNumber: 45, decision: "ready", summary: "Typo." });
     expect(auto).toMatchObject({ status: "started", start: { status: "started" } });
   });
@@ -196,6 +205,54 @@ describe("issue triage (§10)", () => {
     }
     // Skipped before the executor runs: the PM is never handed these issues by the automation.
     expect((await runsOf()).length).toBe(before + 2);
+    h.server.services.store.append([
+      { type: "project.updated", sessionId: null, payload: { project: Project.parse(project) } },
+    ]);
+  });
+
+  it("never auto-starts a session for an issue by an untrusted author (#86)", async () => {
+    await h.api("PATCH", `/automations/${triageId}`, {
+      action: { type: "triage", policy: { autoStart: true } },
+    });
+    // On a public repository anyone can open an issue; "stranger" is not a trusted author.
+    h.server.services.store.append([
+      {
+        type: "issue.opened",
+        sessionId: null,
+        payload: { issue: { ...issue(46), author: "stranger" } },
+      },
+    ]);
+    const result = await report({ issueNumber: 46, decision: "ready", summary: "Looks easy." });
+    // A person decides whether a stranger's issue becomes an agent session.
+    expect(result).toEqual({ status: "inbox", inboxItemId: `triage:${GH}:46` });
+    expect(h.server.services.inbox.get(`triage:${GH}:46`)).toMatchObject({
+      kind: "triage",
+      status: "open",
+      body: expect.stringContaining("@stranger, who has no write access to the repository"),
+    });
+  });
+
+  it("auto-starts for people with write access and the project's trusted authors (#86)", async () => {
+    github.associations.set(47, "COLLABORATOR");
+    synced(issue(47, "maintainer"));
+    const collaborator = await report({ issueNumber: 47, decision: "ready", summary: "Small." });
+    expect(collaborator).toMatchObject({ status: "started", start: { status: "started" } });
+
+    h.server.services.store.append([
+      {
+        type: "project.updated",
+        sessionId: null,
+        payload: {
+          project: Project.parse({
+            ...project,
+            factoryLimits: FactoryLimits.parse({ trustedAuthors: ["Alice"] }),
+          }),
+        },
+      },
+    ]);
+    synced(issue(48, "alice"));
+    const listed = await report({ issueNumber: 48, decision: "ready", summary: "Small." });
+    expect(listed).toMatchObject({ status: "started", start: { status: "started" } });
     h.server.services.store.append([
       { type: "project.updated", sessionId: null, payload: { project: Project.parse(project) } },
     ]);
