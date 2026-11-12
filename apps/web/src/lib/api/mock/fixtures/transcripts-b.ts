@@ -2,6 +2,7 @@ import type { TranscriptState } from "@/lib/transcript/reducer";
 import { buildTranscript } from "./helpers";
 import {
   assistant,
+  brief,
   cmd,
   edit,
   fromRole,
@@ -220,9 +221,29 @@ export const exportTranscript = buildTranscript(
       start: 60 * 26,
       end: 60 * 25 + 20,
       items: [
-        user(
+        brief(
           "ex-u1",
-          "Add `notes export --format md` that writes one Markdown file per note with front matter.",
+          "pm",
+          [
+            "## Goal",
+            "Add `notes export --format md` that writes **one Markdown file per note** with front matter.",
+            "",
+            "<context>",
+            "Users asked for a way to move their notes into a static site.",
+            "</context>",
+            "",
+            "## Acceptance criteria",
+            "- Each note becomes `<slug>.md` in the target folder",
+            "- Front matter holds the title, tags and dates",
+            "- `cargo test` passes",
+            "",
+            "## Decisions",
+            "1. Overwrite existing files only with `--force`.",
+            "2. Keep the change in `src/commands/export.rs`.",
+            "3. Open a pull request when done; don't ask me first.",
+            "",
+            "Report back with `finish` and the test results.",
+          ].join("\n"),
         ),
         read("ex-t1", "src/commands/export.ts"),
         cmd("ex-t2", "cargo test export", "test result: ok. 14 passed; 0 failed", 0, 21_000),

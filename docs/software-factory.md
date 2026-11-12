@@ -27,7 +27,7 @@ Issue ─► Identify type ┼─ Feature:  Analyze ───► Implement ─�
 
 1. **Issue.** A new issue on GitHub (opened after you switched the mode on, or labelled `codeden-factory`) becomes a work item. Only issues by [trusted authors](#who-the-factory-works-for) are taken on.
 2. **Identify type.** One call to the [utility model](usage-and-costs.md) classifies it as a **bug**, a **feature** or a **docs** change. A GitHub label settles it without a model call (`bug`, `enhancement`/`feature`, `documentation`/`docs`); with no model available, keywords decide. The factory labels the issue (`factory:bug`, `factory:feature`, `factory:docs`) and comments which pipeline it goes down.
-3. **A free agent takes it.** The server is the orchestrator of the swarm: it hands queued items to agents as slots free up, within **Agents at once** (`maxConcurrentSessions`). Each item gets its own agent session in its own worktree.
+3. **A free agent takes it.** The server is the orchestrator of the swarm: it hands queued items to agents as slots free up, within **Agents at once** (`maxConcurrentSessions`). A fix for a failing check on the default branch goes first, then the issues you and trusted authors filed, oldest first, then the issues the [scout](#the-dark-factory) filed, by the priority it gave them. Each item gets its own agent session in its own worktree.
 4. **The pipeline runs.**
    - **Bug: Reproduce.** The agent writes a failing test (or a probe) that shows the bug and reports it with `factory_report_reproduction`. A bug that doesn't reproduce stops here, with a comment on the issue asking for what's missing.
    - **Bug: Create fix.** The same agent makes the failing test pass and keeps it as a regression test.
@@ -83,7 +83,7 @@ When fewer than `minBacklog` items (default 2) wait for an agent and `discoveryI
 The rules that keep it cheap are enforced by the server, not left to the agents:
 
 - **One scout and at most one area reviewer per review area, ever.** They are long-lived: the next round sends them a message instead of starting new sessions, so they keep what they learned and don't re-read the codebase.
-- **At most `discoveryPerRound` review areas per round**, however many the scout asks for, and only as many as there are free agent slots: builders and reviewers come first.
+- **At most `discoveryPerRound` review areas per round**, however many the scout asks for, and only as many as there are free agent slots: builders and reviewers come first. The scout ends its turn once it has planned, so its own slot goes to an area reviewer. When an area gets no reviewer, `factory_plan_round` tells the scout why (not an allowed area, asked for twice, over the round's limit, or no free slot under **Agents at once**).
 - **A round only starts when the queue runs low** and the interval has passed; at most `maxIssuesPerRound` issues come out of it; a round that runs over three hours is closed.
 - The scout and its area reviewers hold agent slots and count against the daily budget like every other factory session.
 
@@ -179,14 +179,16 @@ Every check must pass before a pull request is ready to merge. Results are recor
 |---|---|
 | **Protected areas** | No changed path matches a protected glob, the vision file or a deploy file, and no protected topic is mentioned. A failure escalates the PR to you |
 | **Size** | The change is within **Largest change** (`maxChangedLines`, default 5,000 added + deleted lines) and **Most files changed** (`maxChangedFiles`, no limit by default). Lockfiles and generated or vendored files don't count. The PM can allow a bigger change that can't be split |
-| **CI** | The PR's checks are green. Missing CI fails after a grace period unless `requireCi` is off |
+| **CI** | The PR's checks are green. While the PR has merge conflicts it waits for the builder to rebase (GitHub runs no CI on a conflicting PR). No checks on the head commit wait 10 minutes from when that head appeared, then fail with "CI never started", unless `requireCi` is off |
 | **Review** | The independent reviewer approves against the issue, the spec and the vision. Skipped for docs-only changes in the docs pipeline |
 | **Tests** | Test files changed (or the change is only docs or config), and the reviewer agrees the tests the change needs exist |
 | **Test results** | The PR description has a `## Test results` section, or test output was attached with `attach_evidence`. Skipped when no code changed |
 | **Security** | Your `auditCommand`, run in the builder's worktree, passes, and the reviewer raised no security concerns |
 | **Screenshots** | If UI files changed, screenshots were attached with `attach_evidence` |
 
-A failed check (other than size) starts a **revise round**: the builder gets the failures and fixes them in the same branch, up to `maxFixAttempts` rounds; after that the item fails and counts towards the pause limit.
+A failed check (other than size) starts a **revise round**: the builder gets the failures and fixes them in the same branch, up to `maxFixAttempts` rounds; after that the item fails and counts towards the pause limit. CI that never started is no code problem, so on its own it fails the item without a revise round. A review verdict that arrives after a revise round started goes to the builder as part of that round; one that arrives after the item failed is kept on the item.
+
+**Merge conflicts are the factory's own job.** When another merge leaves a PR conflicting with the default branch, the builder is asked to rebase onto it and resolve the conflicts. That isn't a revise round. It is asked again while the conflicts remain, up to three times, and only then does the item fail. CI is then awaited on the rebased head, and a review already given still counts. If cleanup archived the builder in the meantime, the request brings it and its worktree back. The audit (`auditCommand`) only runs in the builder's worktree once it is there again and the builder is between turns. Until then the audit is pending, and it is still required before a merge.
 
 **Too large is different.** A revise round can't make work smaller without cutting scope, so a size failure skips it and doesn't count towards the pause limit. Instead the PM is woken to split the work into smaller issues, or, when it can't be split (an initial scaffold, a stack migration), allow it with `factory_allow_large_change`.
 

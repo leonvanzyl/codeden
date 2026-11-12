@@ -8,6 +8,7 @@ import {
   type Role,
   RunAutomationResponse,
   ScheduledRun,
+  ThreadItemsPage,
 } from "@codeden/contracts";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type Harness, startHarness, waitUntil } from "./support/harness";
@@ -234,6 +235,14 @@ describe("automations (§10): scheduler, guards, runs, PM tools, files", () => {
     await waitUntil(async () =>
       (await runs(helloId))[0]?.status === "completed" ? true : undefined,
     );
+    // The session's opening brief is recorded as the automation's (issue #53).
+    const helloSession = (started.status === "started" && started.sessionId) || "";
+    const root = (await h.detail(helloSession)).session.rootThreadId ?? "";
+    const page = ThreadItemsPage.parse(
+      (await h.api("GET", `/sessions/${helloSession}/threads/${root}/items?limit=50`)).body,
+    );
+    const brief = page.items.find((r) => r.item.kind === "user_message")?.item;
+    expect(brief?.kind === "user_message" && brief.input.from).toBe("automation");
 
     const fileId = `project:${h.projectId}:notes-reminder`;
     const sent = RunAutomationResponse.parse(

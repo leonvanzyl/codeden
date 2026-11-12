@@ -10,8 +10,9 @@ import { archiveFinished } from "./cleanup";
 import { budgetSpend, type FactoryContext, visionOf } from "./context";
 import { classifyPending, intakeFailedChecks, intakeIssues } from "./intake";
 import { advanceEscalated } from "./merge";
-import { budgetExceeded, freeSlots, localDay, mayBuild } from "./policy";
+import { budgetExceeded, freeSlots, localDay, mayBuild, queueOrder } from "./policy";
 import { advanceBuilding, advanceWatching } from "./progress";
+import { recoverNoCiFailures } from "./rebase";
 import { advanceScout } from "./scout";
 import { mayAutoMerge } from "./trust";
 import { advanceVerifying } from "./verify";
@@ -62,6 +63,8 @@ export async function runTick(
     }
   }
 
+  // Items that failed only because their conflicting PR got no CI go back to verification.
+  await recoverNoCiFailures(ctx, project);
   // Items already in flight move on even while paused (merges stay blocked, reverts excepted).
   // Watch merges first, then builds, then verification, so a PR found while building is
   // verified in the same step and a fresh merge is watched from the next one.
@@ -111,11 +114,6 @@ function deriveState(ctx: FactoryContext, projectId: string, loop: FactoryLoop):
   if (active.some((i) => i.stage === "building")) return "building";
   if (loop.scout.round) return "discovering";
   return "idle";
-}
-
-/** Queue order: priority (the scout's, failed checks), then arrival. */
-function queueOrder(a: FactoryItem, b: FactoryItem): number {
-  return (b.score ?? 0.5) - (a.score ?? 0.5) || a.createdAt.localeCompare(b.createdAt);
 }
 
 /**

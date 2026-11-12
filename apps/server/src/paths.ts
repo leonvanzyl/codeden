@@ -34,6 +34,8 @@ export function homePaths(home: string) {
     orchestrator: join(home, "orchestrator"),
     /** Copies of config files taken before the editors overwrite them (§12.4). */
     backups: join(home, "backups"),
+    /** Hooks switched off on the Agents page, until they are enabled again (§12.4). */
+    disabledHooks: join(home, "agent-config", "disabled-hooks.json"),
     /** Dependencies installed on demand, e.g. Claude Code support (§14). */
     deps: join(home, "deps"),
     /** Models downloaded on demand, e.g. local Whisper for dictation (§11.3). */

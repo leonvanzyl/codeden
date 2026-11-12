@@ -10,6 +10,7 @@ import { badRequest, conflict, notFound } from "../errors";
 import { sessionsToArchive } from "./cleanup";
 import type { FactoryContext } from "./context";
 import { announceType } from "./intake";
+import { lateReviewPrompt } from "./prompts";
 
 /**
  * Decisions on work items (§10.1): letting an untrusted issue in, correcting a type, retrying
@@ -132,16 +133,35 @@ export function retry(ctx: FactoryContext, projectId: string, itemId: string): F
   }));
 }
 
-/** `factory_submit_review`: the independent reviewer's structured verdict. */
+/**
+ * `factory_submit_review`: the independent reviewer's structured verdict. A verdict that comes
+ * late is kept too: while a revise round runs, its findings are `forward`ed to the author (the
+ * caller sends them); on a failed item it is recorded for whoever picks the work up.
+ */
 export function submitReview(
   ctx: FactoryContext,
   session: Session,
   verdict: ReviewVerdict,
-): { recorded: boolean; message: string } {
+): { recorded: boolean; message: string; forward?: { sessionId: string; text: string } } {
   const item = session.projectId
     ? ctx.store.items(session.projectId).find((i) => i.reviewerSessionId === session.id)
     : undefined;
   if (!item) throw badRequest("You are not reviewing a factory pull request", "not_a_reviewer");
+  if (item.stage === "building" && item.builderSessionId && verdict.verdict !== "approve") {
+    return {
+      recorded: true,
+      message:
+        "Passed to the author, who is already revising the pull request; you will be asked to review it again.",
+      forward: { sessionId: item.builderSessionId, text: lateReviewPrompt(item, verdict) },
+    };
+  }
+  if (item.stage === "failed") {
+    ctx.store.updateItem(item.id, (i) => ({ ...i, review: verdict }));
+    return {
+      recorded: true,
+      message: `Verdict recorded on the failed item (${verdict.verdict}); it stays with the pull request for whoever picks it up.`,
+    };
+  }
   if (item.stage !== "verifying") {
     return {
       recorded: false,

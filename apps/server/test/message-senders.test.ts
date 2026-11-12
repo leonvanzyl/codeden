@@ -52,6 +52,31 @@ describe("messages from a PM or the orchestrator record their sender", () => {
     expect((await userInputs(agentId))[0]).toEqual({ text: "start", attachments: [] });
   });
 
+  it("persists the opening brief of a PM's start_session as from the PM", async () => {
+    // Issue #53: the brief a PM starts a session with was recorded without a sender, so the
+    // transcript showed it as the user's plain text (raw Markdown).
+    const res = await call(
+      "pm",
+      "start_session",
+      {
+        prompt: "## Goal\n\nAdd a **counter**. Run `pnpm test`.",
+        purpose: "Add a counter",
+        workKey: "request:opening-brief",
+        provider: "fake",
+      },
+      h.projectId,
+    );
+    expect(res.isError).toBe(false);
+    const sessionId = await waitUntil(
+      () =>
+        h.server.services.sessionRepo
+          .list({ projectId: h.projectId, role: "agent", workKey: "request:opening-brief" })
+          .at(0)?.id,
+    );
+    const input = await waitUntil(async () => (await userInputs(sessionId)).at(0));
+    expect(input.from).toBe("pm");
+  });
+
   it("persists the orchestrator's message_pm as from the orchestrator", {
     timeout: 40_000,
   }, async () => {

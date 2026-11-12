@@ -278,7 +278,7 @@ export class OrchestrationService {
     );
     await this.deps.sessions.send(
       pm.id,
-      { input: { text, attachments: [] }, whenBusy: "queue" },
+      { input: { text, attachments: [], from: "orchestrator" }, whenBusy: "queue" },
       "orchestrator",
     );
     return { ...(await answer), pmSessionId: pm.id };

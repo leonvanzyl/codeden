@@ -3,6 +3,7 @@ import {
   type FileChange,
   type Item,
   type ItemOf,
+  type MessageSender,
   messageFrom,
   type RoleSender,
   type ToolCallItem,
@@ -23,6 +24,14 @@ export const fromRole = (id: string, from: RoleSender, text: string): Item => ({
   kind: "user_message",
   status: "completed",
   input: messageFrom(from, text),
+});
+
+/** A session's opening brief from a PM, the factory or an automation (no sender line). */
+export const brief = (id: string, from: MessageSender, text: string): Item => ({
+  id,
+  kind: "user_message",
+  status: "completed",
+  input: { text, attachments: [], from },
 });
 
 export const assistant = (id: string, text: string, streaming = false): Item => ({

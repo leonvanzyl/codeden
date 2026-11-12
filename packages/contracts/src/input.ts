@@ -36,9 +36,17 @@ export type Attachment = z.infer<typeof Attachment>;
 
 /**
  * Who sent a message to a session: the user, the orchestrator (to a PM), a PM (to its
- * sessions), an automation, or CodeDen itself (automatic wake-ups, the factory loop).
+ * sessions), the software factory's loop (its briefs, fix rounds and nudges), an automation,
+ * or CodeDen itself (automatic wake-ups, retries, pull request feedback).
  */
-export const MessageSender = z.enum(["user", "orchestrator", "pm", "automation", "codeden"]);
+export const MessageSender = z.enum([
+  "user",
+  "orchestrator",
+  "pm",
+  "factory",
+  "automation",
+  "codeden",
+]);
 export type MessageSender = z.infer<typeof MessageSender>;
 
 /** Input that starts or steers a turn: text plus optional image/file attachments. */
@@ -47,8 +55,8 @@ export const UserInput = z.object({
   attachments: z.array(Attachment).default([]),
   /**
    * Who wrote the message, when it was not the user: recorded so the transcript can show the
-   * sender without reading the text. Absent on the user's own messages and on every message
-   * stored before senders were recorded.
+   * sender without reading the text, a session's opening brief included. Absent on the user's
+   * own messages and on every message stored before senders were recorded.
    */
   from: MessageSender.optional(),
 });

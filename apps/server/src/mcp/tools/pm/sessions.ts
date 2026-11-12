@@ -95,7 +95,9 @@ export const startSession = defineTool({
       issue,
       startedBy: { kind: "pm", id: sessionId ?? undefined, reportTo: input.reportTo },
       parentSessionId: sessionId ?? undefined,
-      input: { text: input.prompt },
+      // The brief is the session's first message: no sender line, but the transcript shows
+      // it as the PM's.
+      input: { text: input.prompt, from: "pm" },
       conflict: input.conflict,
     });
     const result = await services.sessions.start(req);

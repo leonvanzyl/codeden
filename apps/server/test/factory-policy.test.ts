@@ -1,11 +1,12 @@
 import {
   FactoryLimits,
   FactoryTuning,
+  type MergeCheck,
   type ReviewVerdict,
   SetAutonomyModeRequest,
 } from "@codeden/contracts";
 import { describe, expect, it } from "vitest";
-import { evaluateChecks } from "../src/services/factory/checks";
+import { CONFLICTS_DETAIL, evaluateChecks, notAuthorFixable } from "../src/services/factory/checks";
 import type { FactoryPr } from "../src/services/factory/github-port";
 import { matchesGlob } from "../src/services/factory/globs";
 import {
@@ -15,6 +16,7 @@ import {
   mayMerge,
   pickReviewer,
   protectedHits,
+  queueOrder,
   shouldPause,
 } from "../src/services/factory/policy";
 import { parseVision, VISION_TEMPLATE } from "../src/services/factory/vision";
@@ -45,6 +47,7 @@ function pr(patch: Partial<FactoryPr> = {}): FactoryPr {
     headBranch: "codeden/counter",
     checks: "success",
     failedChecks: [],
+    mergeable: "mergeable",
     additions: 40,
     deletions: 3,
     files: ["src/counter.ts", "test/counter.test.ts"],
@@ -63,7 +66,7 @@ function checks(patch: Partial<Parameters<typeof evaluateChecks>[0]> = {}) {
     testOutput: null,
     audit: null,
     auditConfigured: false,
-    ciGraceOver: true,
+    ciTimedOut: true,
     limits,
     tuning: FactoryTuning.parse({}),
     largeChange: null,
@@ -86,6 +89,24 @@ describe("factory policy (§10.1)", () => {
     expect(mayMerge(3, limits)).toBe(false);
     expect(shouldPause(1, limits)).toBe(false);
     expect(shouldPause(2, limits)).toBe(true);
+  });
+
+  it("queues repairs of main, then people's issues by age, then the scout's by priority", () => {
+    const at = (min: number) => new Date(Date.UTC(2026, 10, 11, 14, min)).toISOString();
+    const queued = [
+      { id: "scout normal", source: "discovery", score: 0.6, createdAt: at(1) },
+      { id: "person later", source: "issue", score: null, createdAt: at(5) },
+      { id: "scout high", source: "discovery", score: 0.9, createdAt: at(2) },
+      { id: "failed check", source: "failed_check", score: 0.9, createdAt: at(9) },
+      { id: "person earlier", source: "issue", score: null, createdAt: at(0) },
+    ] as const;
+    expect([...queued].sort(queueOrder).map((i) => i.id)).toEqual([
+      "failed check",
+      "person earlier",
+      "person later",
+      "scout high",
+      "scout normal",
+    ]);
   });
 
   it("picks a reviewer on a different provider from the author, falling back with a note", () => {
@@ -174,7 +195,34 @@ describe("merge checks (§10.1 step 4)", () => {
   it("wait for the reviewer and for CI", () => {
     expect(checks({ review: null }).outcome).toBe("pending");
     expect(checks({ pr: pr({ checks: "pending" }) }).outcome).toBe("pending");
-    expect(checks({ pr: pr({ checks: "none" }), ciGraceOver: false }).outcome).toBe("pending");
+    expect(checks({ pr: pr({ checks: "none" }), ciTimedOut: false }).outcome).toBe("pending");
+  });
+
+  it("wait for a rebase while the PR has merge conflicts, and say when CI never started", () => {
+    const ci = (r: ReturnType<typeof checks>) => r.checks.find((c) => c.name === "ci");
+    // Conflicts: GitHub runs no CI, so "no checks" (even long after) waits for the rebase.
+    const conflicted = checks({ pr: pr({ checks: "none", mergeable: "conflicting" }) });
+    expect(conflicted.outcome).toBe("pending");
+    expect(ci(conflicted)).toMatchObject({ state: "pending", detail: CONFLICTS_DETAIL });
+    expect(checks({ pr: pr({ mergeable: "conflicting" }) }).outcome).toBe("pending");
+    // Red CI on a conflicting PR still fails: the revise round rebases as well.
+    expect(
+      checks({ pr: pr({ checks: "failure", failedChecks: ["test"], mergeable: "conflicting" }) })
+        .outcome,
+    ).toBe("fail");
+    // No checks yet on a clean PR: waiting for CI on that head, then a clear reason.
+    const waiting = ci(
+      checks({ pr: pr({ checks: "none", headSha: "e461580ab" }), ciTimedOut: false }),
+    );
+    expect(waiting).toMatchObject({
+      state: "pending",
+      detail: "Waiting for CI to start on e461580",
+    });
+    const never = ci(checks({ pr: pr({ checks: "none", headSha: "e461580ab" }) }));
+    expect(never?.state).toBe("fail");
+    expect(never?.detail).toMatch(/^CI never started on e461580: is the workflow disabled/);
+    expect(notAuthorFixable(never as MergeCheck)).toBe(true);
+    expect(notAuthorFixable({ ...(never as MergeCheck), detail: "CI failed: test" })).toBe(false);
   });
 
   it("fail on red CI, missing CI, missing tests, a rejected review, size and missing screenshots", () => {

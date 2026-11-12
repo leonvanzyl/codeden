@@ -4,6 +4,7 @@ import {
   type GitHubPrRef,
   type GithubIssue,
   githubPrId,
+  type Mergeable,
 } from "@codeden/contracts";
 import { errorMessage } from "../errors";
 import { EVIDENCE_HEADING } from "../github/evidence";
@@ -19,6 +20,11 @@ export interface FactoryPr {
   /** Combined state of CI on the head commit. */
   checks: ChecksState;
   failedChecks: string[];
+  /**
+   * Whether it merges cleanly into its base. GitHub runs no `pull_request` workflows while it
+   * is `conflicting`, so no CI reports until the author resolves the conflicts.
+   */
+  mergeable: Mergeable;
   additions: number;
   deletions: number;
   files: string[];
@@ -163,6 +169,7 @@ export class GithubFactoryPort implements FactoryGithub {
       failedChecks: pr.checks.checks
         .filter((c) => c.conclusion && !["success", "neutral", "skipped"].includes(c.conclusion))
         .map((c) => c.name),
+      mergeable: pr.mergeable,
       additions: pr.additions,
       deletions: pr.deletions,
       files: pr.files.map((f) => f.path),

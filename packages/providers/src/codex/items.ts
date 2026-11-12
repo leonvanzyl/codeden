@@ -1,5 +1,6 @@
 import type { Attachment, FileChange, Item, ItemStatus, ToolCallItem } from "@codeden/contracts";
 import { shorten, toJson, toolOutput } from "../util/text";
+import { type AgentNames, collabToolCall } from "./collab";
 import type { UserInput as CodexUserInput, FileUpdateChange, ThreadItem } from "./protocol/v2";
 
 /** Codex item status -> CodeDen item status. */
@@ -114,8 +115,13 @@ function commandItem(item: Extract<ThreadItem, { type: "commandExecution" }>): T
   };
 }
 
-/** Map a Codex `ThreadItem` to a CodeDen item. Returns `undefined` for items CodeDen doesn't show. */
-export function mapThreadItem(item: ThreadItem): Item | undefined {
+const noNames: AgentNames = () => undefined;
+
+/**
+ * Map a Codex `ThreadItem` to a CodeDen item. Returns `undefined` for items CodeDen doesn't show.
+ * `names` gives sub-agents' display names for the titles of calls between agents.
+ */
+export function mapThreadItem(item: ThreadItem, names: AgentNames = noNames): Item | undefined {
   switch (item.type) {
     case "userMessage":
       return {
@@ -188,15 +194,8 @@ export function mapThreadItem(item: ThreadItem): Item | undefined {
         input: toJson(item.arguments),
       };
     case "collabAgentToolCall":
-      return {
-        id: item.id,
-        kind: "tool_call",
-        toolKind: "other",
-        status: itemStatus(item.status),
-        toolName: `agent.${item.tool}`,
-        title: `Agent: ${item.tool}`,
-        input: toJson({ prompt: item.prompt, receiverThreadIds: item.receiverThreadIds }),
-      };
+      // Spawns never get here: the thread mapper turns them into `subagent` items.
+      return collabToolCall(item, itemStatus(item.status), names);
     case "webSearch": {
       const action = item.action;
       const url = action && "url" in action ? (action.url ?? undefined) : undefined;
@@ -267,8 +266,8 @@ function mcpResultText(content: unknown[]): string {
 }
 
 /** The in-progress shape of an item when it starts (status forced to in_progress). */
-export function startedItem(item: ThreadItem): Item | undefined {
-  const mapped = mapThreadItem(item);
+export function startedItem(item: ThreadItem, names: AgentNames = noNames): Item | undefined {
+  const mapped = mapThreadItem(item, names);
   if (!mapped || mapped.kind === "user_message" || mapped.kind === "notice") return mapped;
   return { ...mapped, status: "in_progress" } as Item;
 }

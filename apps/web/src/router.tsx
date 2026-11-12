@@ -9,7 +9,7 @@ import { AppShell } from "@/components/shell/app-shell";
 import { SignInScreen } from "@/components/shell/sign-in";
 import { UnauthorizedScreen } from "@/components/shell/unauthorized";
 import { Toaster } from "@/components/ui/sonner";
-import { AgentsPage, type AgentTab } from "@/routes/agents";
+import { AGENT_TABS, AgentsPage, type AgentTab } from "@/routes/agents";
 import { AutomationPage } from "@/routes/automation";
 import { NewAutomationPage } from "@/routes/automation-new";
 import { AutomationsPage, type AutomationsTab } from "@/routes/automations";
@@ -106,16 +106,20 @@ const automationsRoute = createRoute({
 const newAutomationRoute = createRoute({
   getParentRoute: () => shell,
   path: "/projects/$projectId/automations/new",
-  validateSearch: (s: Record<string, unknown>): { template?: string } =>
-    typeof s.template === "string" && s.template ? { template: s.template } : {},
+  // Prefilled from a template (`?template=`) or from a session (`?session=`, "Make an automation…").
+  validateSearch: (s: Record<string, unknown>): { template?: string; session?: string } => ({
+    ...(typeof s.template === "string" && s.template ? { template: s.template } : {}),
+    ...(typeof s.session === "string" && s.session ? { session: s.session } : {}),
+  }),
   component: function NewAutomation() {
     const { projectId } = newAutomationRoute.useParams();
-    const { template } = newAutomationRoute.useSearch();
+    const { template, session } = newAutomationRoute.useSearch();
     return (
       <NewAutomationPage
-        key={`${projectId}:${template ?? ""}`}
+        key={`${projectId}:${template ?? ""}:${session ?? ""}`}
         projectId={projectId}
-        templateId={template}
+        templateId={session ? undefined : template}
+        sessionId={session}
       />
     );
   },
@@ -157,12 +161,11 @@ const settingsSectionRoute = createRoute({
   },
 });
 
-const AGENT_TABS: AgentTab[] = ["memory", "skills", "subagents", "mcp"];
 const agentsRoute = createRoute({
   getParentRoute: () => shell,
   path: "/agents",
   validateSearch: (s: Record<string, unknown>): { tab?: AgentTab; project?: string } => ({
-    tab: AGENT_TABS.includes(s.tab as AgentTab) ? (s.tab as AgentTab) : undefined,
+    tab: AGENT_TABS.some((t) => t.id === s.tab) ? (s.tab as AgentTab) : undefined,
     project: typeof s.project === "string" ? s.project : undefined,
   }),
   component: function Agents() {

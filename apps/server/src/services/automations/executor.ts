@@ -296,6 +296,7 @@ export class AutomationExecutor {
       input: {
         text: `${runHeader(automation, run.id, TRIGGER_TEXT[req.triggeredBy])}\n\n${prompt}`,
         attachments: [],
+        from: "automation",
       },
       conflict: decision,
     });
