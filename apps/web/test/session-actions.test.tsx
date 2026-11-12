@@ -166,6 +166,8 @@ describe("session row menu", () => {
     open: vi.fn(),
     rename: vi.fn(),
     copyLink: vi.fn(async () => {}),
+    canMakeAutomation: true,
+    makeAutomation: vi.fn(),
     canStop: false,
     stop: vi.fn(),
     archived: false,

@@ -106,16 +106,20 @@ const automationsRoute = createRoute({
 const newAutomationRoute = createRoute({
   getParentRoute: () => shell,
   path: "/projects/$projectId/automations/new",
-  validateSearch: (s: Record<string, unknown>): { template?: string } =>
-    typeof s.template === "string" && s.template ? { template: s.template } : {},
+  // Prefilled from a template (`?template=`) or from a session (`?session=`, "Make an automation…").
+  validateSearch: (s: Record<string, unknown>): { template?: string; session?: string } => ({
+    ...(typeof s.template === "string" && s.template ? { template: s.template } : {}),
+    ...(typeof s.session === "string" && s.session ? { session: s.session } : {}),
+  }),
   component: function NewAutomation() {
     const { projectId } = newAutomationRoute.useParams();
-    const { template } = newAutomationRoute.useSearch();
+    const { template, session } = newAutomationRoute.useSearch();
     return (
       <NewAutomationPage
-        key={`${projectId}:${template ?? ""}`}
+        key={`${projectId}:${template ?? ""}:${session ?? ""}`}
         projectId={projectId}
-        templateId={template}
+        templateId={session ? undefined : template}
+        sessionId={session}
       />
     );
   },

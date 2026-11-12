@@ -1,8 +1,9 @@
 import { AgentEvent } from "@codeden/contracts";
 import { describe, expect, it } from "vitest";
 import { mapThreadItem } from "../src/codex/items";
-import { CodexEventMapper, CodexTurnUsage } from "../src/codex/mapper";
+import { CodexEventMapper } from "../src/codex/mapper";
 import type { ServerNotification } from "../src/codex/protocol";
+import { CodexTurnUsage } from "../src/codex/usage";
 
 const T = "thread-x";
 const TURN = "turn-1";
@@ -244,7 +245,7 @@ describe("CodexEventMapper", () => {
     expect(events.at(-1)).toMatchObject({ type: "turn.interrupted", reason: "user" });
   });
 
-  it("fails turns with the Codex error and ignores other threads", () => {
+  it("fails turns with the Codex error and ignores unclaimed threads", () => {
     const { events, feed, mapper } = setup();
     mapper.handle({
       method: "turn/started",
