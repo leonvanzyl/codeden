@@ -36,19 +36,36 @@ export class Outbox {
     private readonly store: EventStore,
   ) {}
 
-  push(sessionId: string, input: UserInput, from: QueueSender = "user"): QueuedMessage {
-    // `createdAt` orders the queue, so two messages in the same millisecond still get distinct
-    // times, and a message put back by `restore` returns to exactly its place.
-    this.lastAt = Math.max(Date.now(), this.lastAt + 1);
+  /**
+   * Queue a message. `at` puts it in a place taken earlier with `reserve` (a delivery that
+   * fell back to the queue), ahead of everything queued since.
+   */
+  push(
+    sessionId: string,
+    input: UserInput,
+    from: QueueSender = "user",
+    at?: string,
+  ): QueuedMessage {
     const message: QueuedMessage = {
       id: randomUUID(),
       sessionId,
       input,
       from,
-      createdAt: new Date(this.lastAt).toISOString(),
+      createdAt: at ?? this.reserve(),
     };
     this.store.append([{ type: "message.queued", sessionId, payload: { message } }]);
     return message;
+  }
+
+  /**
+   * A place in the queue, for a message sent straight to the session: if that delivery falls
+   * back to the queue, `push(…, at)` keeps the order the messages arrived in.
+   */
+  reserve(): string {
+    // `createdAt` orders the queue, so two messages in the same millisecond still get distinct
+    // times, and a message put back by `restore` returns to exactly its place.
+    this.lastAt = Math.max(Date.now(), this.lastAt + 1);
+    return new Date(this.lastAt).toISOString();
   }
 
   /** A session's queued messages, next to be delivered first. */

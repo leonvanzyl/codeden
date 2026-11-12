@@ -233,13 +233,15 @@ export class SessionService {
       }
       return this.enqueue(id, req.input, from);
     }
+    // Its place in the queue, should it end up there: ahead of messages that arrive meanwhile.
+    const place = this.deps.outbox.reserve();
     try {
       await this.sendNow(session, req.input, from);
     } catch (error) {
       // The provider is still running a turn the server had not seen: the message waits for it.
       if (isTurnRunningError(error)) {
         if (req.whenBusy === "reject") throw conflict("A turn is running", "turn_running");
-        const queued = this.enqueue(id, req.input, from);
+        const queued = this.enqueue(id, req.input, from, place);
         this.flushIfSettled(id);
         return queued;
       }
@@ -249,7 +251,7 @@ export class SessionService {
         throw error;
       }
       this.holds.hold(id, true);
-      return this.enqueue(id, req.input, from);
+      return this.enqueue(id, req.input, from, place);
     }
     this.holds.release(id);
     return { status: "sent" };
@@ -372,7 +374,10 @@ export class SessionService {
 
   // ---------------------------------------------------------------- internals
 
-  /** Start a turn. Marks the session `delivering` before anything is awaited. */
+  /**
+   * Start a turn. Marks the session `delivering` before anything is awaited; messages queued
+   * meanwhile are delivered once it is settled again (`flushIfSettled`).
+   */
   private async sendNow(session: Session, raw: UserInput, from: QueueSender): Promise<void> {
     this.delivering.add(session.id);
     try {
@@ -386,13 +391,18 @@ export class SessionService {
       decorated.delivered?.();
     } finally {
       this.delivering.delete(session.id);
+      // The turn may have ended before the runner's answer: the flush its end triggered found
+      // this delivery in flight and skipped, so nothing else would send what queued up.
+      if (this.deps.outbox.count(session.id) > 0) this.flushIfSettled(session.id);
     }
   }
 
   /**
-   * After a refusal because a turn is running: deliver the queue now if that turn has already
-   * ended (its end arrived before the refusal was handled). Otherwise the end of the turn
-   * delivers it (`SessionLifecycle`).
+   * Deliver the queue on the next tick if no turn is running: after a delivery (its turn may
+   * already be over) or a refusal because a turn was running (that turn may have ended before
+   * the refusal was handled). Otherwise the end of the turn delivers it (`SessionLifecycle`).
+   * It runs after the caller's error handling, so a delivery pause (`OutboxHolds`) set there
+   * still applies.
    */
   private flushIfSettled(id: string): void {
     const status = this.deps.repo.find(id)?.session.status;
@@ -436,9 +446,15 @@ export class SessionService {
     }
   }
 
-  private enqueue(id: string, input: UserInput, from: QueueSender): SendMessageResponse {
+  /** Queue a message; `at` is a place reserved for it earlier (`Outbox.reserve`). */
+  private enqueue(
+    id: string,
+    input: UserInput,
+    from: QueueSender,
+    at?: string,
+  ): SendMessageResponse {
     const session = this.deps.repo.get(id);
-    this.deps.outbox.push(id, this.externalize(session, input), from);
+    this.deps.outbox.push(id, this.externalize(session, input), from, at);
     return { status: "queued" };
   }
 

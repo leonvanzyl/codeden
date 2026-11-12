@@ -66,8 +66,6 @@ export async function runTick(
 
   // Items that failed only because their conflicting PR got no CI go back to verification.
   await recoverNoCiFailures(ctx, project);
-  // Items whose builder was marked failed by a message racing its turn go back to building.
-  await recoverTurnRaceFailures(ctx, project);
   // Items already in flight move on even while paused (merges stay blocked, reverts excepted).
   // Watch merges first, then builds, then verification, so a PR found while building is
   // verified in the same step and a fresh merge is watched from the next one.
@@ -101,6 +99,9 @@ export async function runTick(
   loop = await intakeIssues(ctx, project, loop);
   loop = await intakeFailedChecks(ctx, project, loop);
   await classifyPending(ctx, project);
+  // Items whose builder was marked failed by a message racing its turn go back to building,
+  // ahead of new work for the free agents.
+  await recoverTurnRaceFailures(ctx, project, loop);
   await assignAgents(ctx, project, loop);
   if (project.autonomyMode === "dark_factory") loop = await advanceScout(ctx, project, loop);
   return save(ctx, { ...loop, state: deriveState(ctx, projectId, loop) }, now);

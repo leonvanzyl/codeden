@@ -38,7 +38,7 @@ export async function advanceBuilding(
   }
   if (s.status === "failed" || s.status === "stopped") {
     // Failed only because a message raced its turn: told to carry on instead.
-    if (await awaitTurnRaceResume(ctx, item, s)) return loop;
+    if (await awaitTurnRaceResume(ctx, project, loop, item, s)) return loop;
     return failItem(ctx, loop, item, `The builder session ${s.status} without a pull request`);
   }
   const investigating = !item.investigation && (item.type === "bug" || item.type === "feature");

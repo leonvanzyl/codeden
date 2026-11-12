@@ -1,24 +1,22 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { FactoryItem, UserInput } from "@codeden/contracts";
+import type { UserInput } from "@codeden/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { type Database, openDatabase } from "../src/db/client";
 import { EventStore } from "../src/events/store";
 import { RunnerCommandError } from "../src/runner/client";
-import { BUILDER_RESUME } from "../src/services/factory/prompts";
-import { BUILDER_FAILED_REASON } from "../src/services/factory/turn-race";
 import type { RunnerPort } from "../src/services/runner-port";
 import type { SessionLauncher } from "../src/services/sessions/launcher";
 import { Outbox } from "../src/services/sessions/outbox";
 import { SessionRepo } from "../src/services/sessions/repo";
 import { SessionService, type SessionServiceDeps } from "../src/services/sessions/session-service";
 import { sampleSession } from "./helpers";
-import { createFactoryEnv, type FactoryEnv } from "./support/factory-env";
 
 /**
  * Issue #96: a message delivered while a turn runs must be queued (or steered), never sent as a
- * second turn, and the provider's "A turn is already running" must never fail the session.
+ * second turn, keep its place in arrival order, and the provider's "A turn is already running"
+ * must never fail the session. The factory side is in `factory-turn-race.test.ts`.
  */
 
 let dir: string;
@@ -42,6 +40,9 @@ afterEach(() => {
 });
 
 const input = (text: string): UserInput => ({ text, attachments: [] });
+const texts = () => outbox.list("s1").map((m) => m.input.text);
+/** Let pending `setImmediate` work (a scheduled queue flush) and its promises run. */
+const settle = () => new Promise((resolve) => setImmediate(resolve));
 
 /**
  * A session service over the real repo and outbox, with a runner that behaves like a provider
@@ -146,9 +147,64 @@ describe("deliveries racing a running turn (#96)", () => {
     await expect(
       sessions.send("s1", { input: input("late"), whenBusy: "queue" }, "pm"),
     ).resolves.toEqual({ status: "queued" });
-    await new Promise((resolve) => setImmediate(resolve));
-    await vi.waitFor(() => expect(sent).toEqual(["late"]));
+    await settle();
+    expect(sent).toEqual(["late"]);
     expect(launcher.fail).not.toHaveBeenCalled();
+  });
+
+  it("delivers what queued up when the turn ended before the runner's answer to a send", async () => {
+    const { sessions, sent, state, request } = providerLike();
+    let answer = () => {};
+    request.mockImplementationOnce(async (command) => {
+      state.turn = true;
+      sent.push(command.input?.text ?? "");
+      await new Promise<void>((resolve) => {
+        answer = resolve;
+      });
+      return {};
+    });
+    const first = sessions.send("s1", { input: input("first"), whenBusy: "queue" }, "factory");
+    await settle();
+    expect(sent).toEqual(["first"]);
+    await expect(
+      sessions.send("s1", { input: input("second"), whenBusy: "queue" }, "pm"),
+    ).resolves.toEqual({ status: "queued" });
+    // The turn ends before the runner's answer is handled: the flush its end triggers finds the
+    // delivery still in flight.
+    state.turn = false;
+    repo.update("s1", (s) => ({ ...s, status: "idle" }));
+    await sessions.flushOutbox("s1");
+    expect(texts()).toEqual(["second"]);
+
+    answer();
+    await expect(first).resolves.toEqual({ status: "sent" });
+    await settle();
+    expect(sent).toEqual(["first", "second"]);
+    expect(texts()).toEqual([]);
+  });
+
+  it("keeps arrival order when a busy runner refuses a send while another message arrives", async () => {
+    // The server still shows the session idle; the runner is in a turn.
+    const { sessions, sent, request, endTurn } = providerLike({ turnRunning: true });
+    let refuse = () => {};
+    request.mockImplementationOnce(async () => {
+      await new Promise<void>((resolve) => {
+        refuse = resolve;
+      });
+      throw new RunnerCommandError("turn_running", "A turn is already running");
+    });
+    const first = sessions.send("s1", { input: input("first"), whenBusy: "queue" }, "factory");
+    await settle();
+    await expect(
+      sessions.send("s1", { input: input("second"), whenBusy: "queue" }, "pm"),
+    ).resolves.toEqual({ status: "queued" });
+    refuse();
+    await expect(first).resolves.toEqual({ status: "queued" });
+    expect(texts()).toEqual(["first", "second"]);
+
+    await endTurn();
+    await endTurn();
+    expect(sent).toEqual(["first", "second"]);
   });
 
   it("answers a wake (`reject`) with 409 turn_running instead of failing", async () => {
@@ -158,111 +214,5 @@ describe("deliveries racing a running turn (#96)", () => {
     ).rejects.toMatchObject({ status: 409, code: "turn_running" });
     expect(launcher.fail).not.toHaveBeenCalled();
     expect(outbox.count("s1")).toBe(0);
-  });
-});
-
-describe("factory builders hit by 'turn already running' (#96)", () => {
-  let env: FactoryEnv;
-  afterEach(() => env?.close());
-
-  const tick = () => env.factory.tick(env.project.id);
-  const item = (id: string) => env.factory.data.item(id) as FactoryItem;
-  const resumes = () => env.messages.filter((m) => m.text === BUILDER_RESUME);
-  /** What a lost delivery race did to a builder: the session service failed it. */
-  const raceFails = async (sessionId: string) => {
-    await env.setStatus(sessionId, "failed");
-    env.inbox.raiseRunFailed(
-      env.repo.get(sessionId),
-      `send-${Date.now()}`,
-      "A turn is already running",
-    );
-  };
-
-  /** A software factory with one item whose builder is at work. */
-  async function building(): Promise<{ id: string; builderId: string }> {
-    env = createFactoryEnv();
-    env.factory.setMode(env.project.id, {
-      mode: "software_factory",
-      limits: { ...env.project.factoryLimits, autoMerge: true },
-    } as Parameters<FactoryEnv["factory"]["setMode"]>[1]);
-    const created = env.factory.data.createItem({
-      projectId: env.project.id,
-      workKey: "issue:91",
-      title: "Transcript search",
-      summary: "Search a session's transcript",
-      source: "discovery",
-      stage: "backlog",
-      type: "feature",
-      investigation: {
-        kind: "analysis",
-        outcome: "implement",
-        summary: "Missing",
-        details: null,
-        testPath: null,
-        at: new Date().toISOString(),
-      },
-      score: 0.5,
-      acceptanceCriteria: ["Search finds a message"],
-      issue: { number: 91, url: "https://github.com/acme/app/issues/91", title: "Search" },
-    });
-    await tick();
-    expect(item(created.id).stage).toBe("building");
-    return { id: created.id, builderId: item(created.id).builderSessionId as string };
-  }
-
-  it("does not fail the item when its builder failed with this error: the builder carries on", async () => {
-    const { id, builderId } = await building();
-    await raceFails(builderId);
-    await tick();
-
-    expect(item(id)).toMatchObject({ stage: "building", reason: null });
-    expect(resumes()).toEqual([{ sessionId: builderId, text: BUILDER_RESUME }]);
-    expect(env.repo.get(builderId).status).toBe("running");
-    await tick();
-    expect(resumes()).toHaveLength(1);
-
-    // A real failure after that still fails the item.
-    await env.setStatus(builderId, "failed");
-    env.inbox.raiseRunFailed(env.repo.get(builderId), "turn-9:failed", "The model is overloaded");
-    await tick();
-    expect(item(id)).toMatchObject({ stage: "failed", reason: BUILDER_FAILED_REASON });
-  });
-
-  it("puts items this error failed back into building, once, and brings their builder back", async () => {
-    const { id, builderId } = await building();
-    await raceFails(builderId);
-    // What the factory did before the fix: failed the item, then archived its builder.
-    const at = new Date().toISOString();
-    env.factory.data.updateItem(id, (i) => ({
-      ...i,
-      stage: "failed",
-      reason: BUILDER_FAILED_REASON,
-      finishedAt: at,
-      sessionsArchivedAt: at,
-    }));
-    env.repo.update(builderId, (s) => ({ ...s, status: "stopped", archivedAt: at }));
-
-    await tick();
-    expect(item(id)).toMatchObject({
-      stage: "building",
-      reason: null,
-      finishedAt: null,
-      sessionsArchivedAt: null,
-    });
-    expect(resumes()).toEqual([{ sessionId: builderId, text: BUILDER_RESUME }]);
-    expect(env.repo.get(builderId)).toMatchObject({ status: "running", archivedAt: null });
-    await tick();
-    expect(resumes()).toHaveLength(1);
-  });
-
-  it("leaves items that failed for other reasons alone", async () => {
-    const { id, builderId } = await building();
-    await env.setStatus(builderId, "failed");
-    env.inbox.raiseRunFailed(env.repo.get(builderId), "start", "Could not open the session");
-    await tick();
-    expect(item(id)).toMatchObject({ stage: "failed", reason: BUILDER_FAILED_REASON });
-    await tick();
-    expect(item(id).stage).toBe("failed");
-    expect(resumes()).toEqual([]);
   });
 });
