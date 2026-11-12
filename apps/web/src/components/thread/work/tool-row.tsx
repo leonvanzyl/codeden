@@ -93,16 +93,22 @@ function Details({ sessionId, entry }: { sessionId: string; entry: WorkEntry }) 
  */
 const ROW_COLUMNS = "grid-cols-[auto_minmax(0,auto)_minmax(0,auto)_minmax(0,auto)_1fr_auto]";
 
-/** One tool call or reasoning step: a 26px row that expands into details. */
-export function ToolRow({
-  sessionId,
-  entry,
-  defaultOpen = false,
-}: {
+interface ToolRowProps {
   sessionId: string;
   entry: WorkEntry;
   defaultOpen?: boolean;
-}) {
+}
+
+/**
+ * One tool call or reasoning step: a 26px row that expands into details. Its state (expanded,
+ * loaded full output) belongs to one item, so a row handed another item (the "now running" row
+ * of a collapsed work group) starts afresh.
+ */
+export function ToolRow(props: ToolRowProps) {
+  return <ToolRowView key={`${props.sessionId}:${props.entry.id}`} {...props} />;
+}
+
+function ToolRowView({ sessionId, entry, defaultOpen = false }: ToolRowProps) {
   const [open, setOpen] = useState(defaultOpen);
   const Icon = entryIcon(entry);
   const { verb, target, meta } = entryLabel(entry);

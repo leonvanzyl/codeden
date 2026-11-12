@@ -176,7 +176,12 @@ describe("project -> Fake session through a real runner", () => {
     expect(body.hasMoreBefore).toBe(true);
     const tool = [...items.values()].find((r) => r.item.kind === "tool_call");
     const output = await api("GET", `/sessions/${id}/items/${tool?.item.id}/output`);
-    expect(output.body).toMatchObject({ text: "hello\n" });
+    expect(output.body).toMatchObject({
+      text: "hello\n",
+      totalBytes: 6,
+      truncated: false,
+      outputBytes: 6,
+    });
 
     // Follow-up message in the same session.
     const sent = await api("POST", `/sessions/${id}/messages`, { input: { text: "again" } });

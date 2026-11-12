@@ -93,7 +93,10 @@ export function createMockClient(opts: MockClientOptions = {}): CodeDenClient {
       const item = world.item(sessionId, itemId);
       if (item?.kind !== "tool_call") return Promise.reject(new Error("No such tool call"));
       const text = item.output?.text ?? "";
-      return delay({ itemId, text, totalBytes: utf8ByteLength(text) }, 80);
+      const totalBytes = utf8ByteLength(text);
+      const truncated = item.output?.truncated ?? false;
+      const outputBytes = Math.max(totalBytes, item.output?.totalBytes ?? totalBytes);
+      return delay({ itemId, text, totalBytes, truncated, outputBytes }, 80);
     },
 
     async sendMessage(sessionId, input, mode) {

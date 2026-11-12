@@ -9,24 +9,30 @@ import type { WorkEntry } from "@/lib/transcript/timeline";
 import { cn } from "@/lib/utils";
 
 /**
- * What the "output was cut" bar says. `shownBytes` is the transcript's copy, `totalBytes` all
- * the output the tool produced (when known), `full` the stored output once it was loaded.
+ * What the "output was cut" bar says. `shownBytes` is the transcript's copy and `liveBytes` all
+ * the output the tool has produced so far (when known). Once `full` (the stored copy) is loaded,
+ * it is described with the server's own figures from that moment: output lost only when the
+ * server says its copy is cut, and "more has arrived since" when the tool kept writing after.
  */
 export function cutNotice(
   shownBytes: number,
-  totalBytes: number | undefined,
+  liveBytes: number | undefined,
   full: ToolOutputResponse | undefined,
   running: boolean,
 ): string {
   if (!full) {
-    return totalBytes === undefined
+    return liveBytes === undefined
       ? `Output cut · showing ${formatBytes(shownBytes)}`
-      : `Showing ${formatBytes(shownBytes)} of ${formatBytes(totalBytes)}`;
+      : `Showing ${formatBytes(shownBytes)} of ${formatBytes(liveBytes)}`;
   }
-  if (totalBytes !== undefined && full.totalBytes < totalBytes) {
-    return `${formatBytes(full.totalBytes)} of ${formatBytes(totalBytes)} was kept · the rest wasn't stored`;
-  }
-  return `${running ? "Output so far" : "Full output"} · ${formatBytes(full.totalBytes)}`;
+  const newer = liveBytes !== undefined && liveBytes > full.outputBytes;
+  const loaded = formatBytes(full.totalBytes);
+  const base = full.truncated
+    ? `${loaded} of ${formatBytes(full.outputBytes)} was kept · the rest wasn't stored`
+    : newer
+      ? `Output when loaded · ${loaded}`
+      : `${running ? "Output so far" : "Full output"} · ${loaded}`;
+  return newer ? `${base} · more has arrived since` : base;
 }
 
 export interface ShownOutput {
@@ -36,34 +42,48 @@ export interface ShownOutput {
   notice: ReactNode;
 }
 
+interface Target {
+  sessionId: string;
+  itemId: string;
+}
+
 /**
  * A tool call's output as the transcript shows it. When its copy was cut (`truncated`), the
- * notice says how much is shown and loads what the server stored on demand (§6). A load while
- * the command still runs is a snapshot until "Back to live output".
+ * notice says how much is shown and loads what the server stored on demand (§6). A load belongs
+ * to the item it was made for: a result or a request still in flight for another item is never
+ * shown. A load while the command still runs is a snapshot until "Back to live output".
  */
 export function useShownOutput(sessionId: string, entry: WorkEntry): ShownOutput {
   const client = useClient();
-  const load = useMutation({ mutationFn: () => client.getToolOutput(sessionId, entry.id) });
+  const load = useMutation({
+    mutationFn: (t: Target) => client.getToolOutput(t.sessionId, t.itemId),
+  });
   const output = entry.kind === "tool_call" ? entry.output : undefined;
   const text = output?.text ?? "";
   if (!output?.truncated) return { text, notice: null };
 
+  const mine = load.variables?.sessionId === sessionId && load.variables.itemId === entry.id;
+  const full = mine && load.data?.itemId === entry.id ? load.data : undefined;
+  const pending = mine && load.isPending;
+  const failed = mine && load.isError;
   const running = entry.status === "in_progress";
-  const full = load.data;
-  const message = load.isError
-    ? `Couldn't load the full output: ${load.error.message}`
+  const message = failed
+    ? `Couldn't load the full output: ${load.error?.message ?? "unknown error"}`
     : cutNotice(utf8ByteLength(text), output.totalBytes, full, running);
   const action = full
     ? { label: running ? "Back to live output" : "Show less", run: () => load.reset() }
-    : { label: load.isError ? "Try again" : "Show full output", run: () => load.mutate() };
+    : {
+        label: failed ? "Try again" : "Show full output",
+        run: () => load.mutate({ sessionId, itemId: entry.id }),
+      };
 
   return {
     text: full ? full.text : text,
     notice: (
       <div className="flex min-w-0 items-center gap-2 font-sans text-2xs text-muted-foreground">
         <span
-          role={load.isError ? "alert" : undefined}
-          className={cn("min-w-0 flex-1 truncate", load.isError && "text-status-failed")}
+          role={failed ? "alert" : undefined}
+          className={cn("min-w-0 flex-1 truncate", failed && "text-status-failed")}
           title={message}
         >
           {message}
@@ -72,10 +92,10 @@ export function useShownOutput(sessionId: string, entry: WorkEntry): ShownOutput
           variant="link"
           size="xs"
           className="h-5 shrink-0 px-0 text-2xs"
-          disabled={load.isPending}
+          disabled={pending}
           onClick={action.run}
         >
-          {load.isPending ? (
+          {pending ? (
             <>
               <Loader2 className="animate-spin" /> Loading…
             </>

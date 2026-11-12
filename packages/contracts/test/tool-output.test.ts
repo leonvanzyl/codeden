@@ -1,5 +1,20 @@
 import { describe, expect, it } from "vitest";
+import { ToolOutputResponse } from "../src";
 import { appendToolOutput, utf8ByteLength } from "../src/tool-output";
+
+describe("ToolOutputResponse", () => {
+  it("round-trips, and says whether the stored copy is cut", () => {
+    const value = {
+      itemId: "c1",
+      text: "tail\n",
+      totalBytes: 5,
+      truncated: true,
+      outputBytes: 2_000_000,
+    };
+    expect(ToolOutputResponse.parse(JSON.parse(JSON.stringify(value)))).toEqual(value);
+    expect(() => ToolOutputResponse.parse({ itemId: "c1", text: "", totalBytes: 0 })).toThrow();
+  });
+});
 
 describe("utf8ByteLength", () => {
   it("counts bytes as Node does, lone surrogates included", () => {
