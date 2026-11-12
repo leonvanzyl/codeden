@@ -197,11 +197,16 @@ export const REVISE_HELP =
 
 /** The dark factory's scout. */
 export const SCOUT_HELP =
-  "An agent that periodically reviews the app against your vision and files issues for the work worth doing. It only looks when fewer than two issues are waiting.";
+  "An agent that periodically reviews the app against your vision and files issues for the work worth doing. It only looks when the queue runs low (the threshold is in Settings), or when you click Run scout now.";
 
 /** One review round of the scout. */
 export const ROUND_HELP =
-  "One pass of the scout: it plans what to look at, its area reviewers review, then it files the findings most worth doing as issues. A round starts on the schedule you set, once the queue runs low.";
+  "One pass of the scout: it plans what to look at, its area reviewers review, then it files the findings most worth doing as issues. A round starts on the schedule you set once the queue runs low, or right away with Run scout now.";
+
+/** "Check now" on the factory panel: one run of the loop's regular check. */
+export function checkNowHelp(dark: boolean): string {
+  return `Runs the factory's regular check immediately (it runs every 30 seconds): moves work in progress, picks up new issues, starts free agents${dark ? ", and starts the scout if it's due" : ""}.`;
+}
 
 /** The scout's review areas (one long-lived reviewer agent per area). */
 export const REVIEW_AREAS_HELP =

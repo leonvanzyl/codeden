@@ -107,7 +107,7 @@ describe("factory modes and vision", () => {
     expect(env.gh.visionCommits).toEqual([{ path: ".codeden/VISION.md", contents: text }]);
     await env.factory.putVision(env.project.id, text);
     expect(env.gh.visionCommits).toHaveLength(1);
-    const res = enable("dark_factory");
+    const res = await enable("dark_factory");
     expect(res).toMatchObject({ mode: "dark_factory", experimental: true });
     expect(await env.factory.status(env.project.id)).toMatchObject({
       mode: "dark_factory",
@@ -116,7 +116,9 @@ describe("factory modes and vision", () => {
     });
     env.gh.githubProjects.clear();
     expect(fail(() => enable("software_factory"))).toBe("not_a_github_project");
-    expect(env.factory.setMode(env.project.id, { mode: "assisted" }).experimental).toBe(false);
+    expect((await env.factory.setMode(env.project.id, { mode: "assisted" })).experimental).toBe(
+      false,
+    );
   });
 });
 
