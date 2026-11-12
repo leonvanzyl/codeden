@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -48,6 +48,8 @@ export interface FactoryEnv {
   stopped: string[];
   /** Sessions the factory archived (through `archiveSession`), in order. */
   archived: string[];
+  /** Commands the factory ran (the audit), with their working directory. */
+  execs: Array<{ command: string; args: string[]; cwd: string | undefined }>;
   notices: NoticeDraft[];
   spend: { usd: number; tokens: number };
   /** Session filters the budget asked spend for (null: the whole project). */
@@ -75,14 +77,13 @@ export function createFactoryEnv(
   const repo = new SessionRepo(db.db, store);
   const inbox = new InboxService(db.db, store, () => async () => {});
   const settings = new SettingsStore(join(dir, "settings.json"));
-  const exec: Exec = async (): Promise<ExecResult> => ({
-    code: 0,
-    stdout: "",
-    stderr: "",
-    notFound: false,
-    timedOut: false,
-    path: null,
-  });
+  const execs: FactoryEnv["execs"] = [];
+  const exec: Exec = async (command, args, opts): Promise<ExecResult> => {
+    execs.push({ command, args, cwd: opts?.cwd });
+    // Like spawning a real process: a working directory that doesn't exist can't start.
+    if (opts?.cwd && !existsSync(opts.cwd)) throw new Error(`spawn ${command} ENOENT`);
+    return { code: 0, stdout: "", stderr: "", notFound: false, timedOut: false, path: null };
+  };
   const projects = new ProjectService({ db: db.db, store, exec, projectsDir: dir });
   const gh = new FakeFactoryGithub();
   const repoDir = join(dir, "repo");
@@ -129,6 +130,7 @@ export function createFactoryEnv(
     messages: [],
     stopped: [],
     archived: [],
+    execs,
     notices: [],
     spend: { usd: 0, tokens: 0 },
     spendFilters: [],
@@ -145,6 +147,7 @@ export function createFactoryEnv(
       // A reviewer works in the builder's worktree (`existing`): its cwd, not a worktree of its own.
       const existing = req.workspace?.mode === "existing" ? req.workspace.path : undefined;
       const worktreePath = existing ? null : join(dir, "wt", randomUUID().slice(0, 6));
+      if (worktreePath) mkdirSync(worktreePath, { recursive: true });
       const session: Session = {
         ...sampleSession,
         id: randomUUID(),
@@ -174,7 +177,15 @@ export function createFactoryEnv(
     },
     send: async (sessionId: string, req: { input: { text: string } }) => {
       env.messages.push({ sessionId, text: req.input.text });
-      repo.update(sessionId, (s) => ({ ...s, status: "running" }));
+      // Messaging an archived session brings it back, recreating a removed worktree.
+      const s = repo.get(sessionId);
+      if (s.worktreePath && s.worktreeRemovedAt) mkdirSync(s.worktreePath, { recursive: true });
+      repo.update(sessionId, (cur) => ({
+        ...cur,
+        status: "running",
+        archivedAt: null,
+        worktreeRemovedAt: null,
+      }));
       return { status: "sent" };
     },
     stop: async (sessionId: string) => {
@@ -212,6 +223,8 @@ export function createFactoryEnv(
       archiveSession: async (sessionId) => {
         env.archived.push(sessionId);
         const at = new Date().toISOString();
+        const worktree = repo.get(sessionId).worktreePath;
+        if (worktree) rmSync(worktree, { recursive: true, force: true });
         return repo.update(sessionId, (s) => ({
           ...s,
           status: s.status === "idle" ? "stopped" : s.status,

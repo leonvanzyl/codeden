@@ -60,7 +60,7 @@ export interface FactoryOptions {
   tickMs?: number;
   /** Run the loop in the background (default true; tests drive `tick` by hand). */
   autoTick?: boolean;
-  /** How long a PR may report no CI before it counts as missing (default 3 minutes). */
+  /** How long CI may take to start on a new head commit before it counts as never started (default 10 minutes). */
   ciGraceMs?: number;
   now?: () => Date;
 }
@@ -129,7 +129,7 @@ export class FactoryService {
       complete: deps.complete ?? (async () => null),
       archiveSessions: (ids) => this.archiver.push(ids),
       now: deps.options?.now ?? (() => new Date()),
-      ciGraceMs: deps.options?.ciGraceMs ?? 3 * 60_000,
+      ciGraceMs: deps.options?.ciGraceMs ?? 10 * 60_000,
       log: deps.log,
     };
   }
@@ -428,7 +428,15 @@ export class FactoryService {
   }
 
   submitReview(session: Session, verdict: ReviewVerdict) {
-    const res = decisions.submitReview(this.ctx, session, verdict);
+    const { forward, ...res } = decisions.submitReview(this.ctx, session, verdict);
+    // A verdict that came after a revise round started: its findings go to the author.
+    if (forward) {
+      this.ctx.sessions
+        .message(forward.sessionId, forward.text)
+        .catch((error: unknown) =>
+          this.deps.log?.(`factory: late review to ${forward.sessionId}: ${errorMessage(error)}`),
+        );
+    }
     if (session.projectId) this.soon(session.projectId);
     return res;
   }
