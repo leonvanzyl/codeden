@@ -15,27 +15,37 @@ export function credentialsRisk(reason: string): RiskAssessment {
   return { risky: true, action: "secrets", reason, codeden: true };
 }
 
-/** The credential files in CodeDen's home, then the folders that hold them. */
-function guardedPaths(home: string, ctx: PathContext): string[] {
+/** The credential files in the session's CodeDen home, as absolute paths (none without one). */
+export function codedenCredentialFiles(ctx: PathContext): string[] {
+  const home = ctx.codedenHome;
+  if (!home) return [];
   const p = pathApi(ctx);
-  const files = CODEDEN_CREDENTIAL_FILES.map((file) => p.join(home, file));
+  return CODEDEN_CREDENTIAL_FILES.map((file) => p.join(home, file));
+}
+
+/** The credential files, then the folders that hold them. */
+function guardedPaths(ctx: PathContext): string[] {
+  const files = codedenCredentialFiles(ctx);
+  const p = pathApi(ctx);
   return [...files, ...new Set(files.map((file) => p.dirname(file)))];
 }
 
-const WILDCARD = /[*?[]/;
+export const WILDCARD = /[*?[]/;
 
 /**
- * A shell wildcard (`*`, `**`, `?`, `[...]`) over a whole absolute path as a regular
- * expression, on `/`-separated paths. Undefined when the pattern is malformed.
+ * A shell wildcard (`*`, `?`, `[...]`, and `**`, which before a slash stands for zero or more
+ * folders) over a `/`-separated path as a regular expression. Undefined when malformed.
  */
-function wildcardPattern(pattern: string, ignoreCase: boolean): RegExp | undefined {
+export function wildcardPattern(pattern: string, ignoreCase: boolean): RegExp | undefined {
   let source = "";
   for (let i = 0; i < pattern.length; i += 1) {
     const c = pattern[i] as string;
-    if (c === "*") {
-      const deep = pattern[i + 1] === "*";
-      source += deep ? ".*" : "[^/]*";
-      if (deep) i += 1;
+    if (c === "*" && pattern[i + 1] === "*") {
+      const folders = pattern[i + 2] === "/";
+      source += folders ? "(?:.*/)?" : ".*";
+      i += folders ? 2 : 1;
+    } else if (c === "*") {
+      source += "[^/]*";
     } else if (c === "?") {
       source += "[^/]";
     } else if (c === "[" && pattern.indexOf("]", i + 2) > 0) {
@@ -57,6 +67,22 @@ function wildcardPattern(pattern: string, ignoreCase: boolean): RegExp | undefin
   }
 }
 
+/** `/`-separated, for wildcard matching; Windows paths match in any case. */
+export function slashes(value: string, ctx: PathContext): string {
+  return isWin(ctx) ? value.replace(/\\/g, "/") : value;
+}
+
+/**
+ * Variables left in a resolved path (`$f`, `${f}`, `$env:F`, `%F%`) could be any name, so they
+ * match like `*`. `$CODEDEN_HOME`, `$HOME` and the temp variables at the start resolve first.
+ */
+const PATH_VARIABLE = /\$\{\w+\}|\$env:\w+|\$\w+|%\w+%/gi;
+
+/** `target` as an absolute path, its unknown variables as wildcards. */
+export function resolvePattern(target: string, ctx: PathContext): string {
+  return resolveAgainst(target, ctx).replace(PATH_VARIABLE, "*");
+}
+
 /**
  * True when `target` reaches one of CodeDen's credential files: the file itself, a folder that
  * holds one (`<home>`, `<home>/runner`: copying or searching it reads them), or a wildcard that
@@ -64,13 +90,10 @@ function wildcardPattern(pattern: string, ignoreCase: boolean): RegExp | undefin
  * paths resolve as in the shell.
  */
 export function touchesCodedenCredentials(target: string, ctx: PathContext): boolean {
-  const home = ctx.codedenHome;
-  if (!home || !target.trim()) return false;
-  const abs = resolveAgainst(target, ctx);
-  const guarded = guardedPaths(home, ctx);
+  if (!ctx.codedenHome || !target.trim()) return false;
+  const abs = resolvePattern(target, ctx);
+  const guarded = guardedPaths(ctx);
   if (!WILDCARD.test(abs)) return guarded.some((p) => samePath(p, abs, ctx));
-  const win = isWin(ctx);
-  const slashes = (s: string) => (win ? s.replace(/\\/g, "/") : s);
-  const pattern = wildcardPattern(slashes(abs), win);
-  return pattern !== undefined && guarded.some((p) => pattern.test(slashes(p)));
+  const pattern = wildcardPattern(slashes(abs, ctx), isWin(ctx));
+  return pattern !== undefined && guarded.some((p) => pattern.test(slashes(p, ctx)));
 }

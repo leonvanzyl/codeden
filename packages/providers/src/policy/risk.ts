@@ -1,6 +1,7 @@
 import { currentGitBranch } from "../util/git-head";
 import { type RiskAssessment, risky, SAFE } from "./assessment";
 import { credentialsRisk, touchesCodedenCredentials } from "./codeden-home";
+import { reachesThroughFolder } from "./codeden-search";
 import { binName, unwrap } from "./command-words";
 import { classifyGit } from "./git";
 import { classifyInstall } from "./installs";
@@ -70,19 +71,22 @@ export function classifyCommand(command: string, ctx: RiskContext): RiskAssessme
 /**
  * The first access to CodeDen's own credential files anywhere in `list`: substitutions,
  * subshells and inline scripts (`bash -c "…"`) included, following `cd` like `classifyList`.
+ * `feeds`: the list's output is used by another command (it sits in a substitution or a pipe).
  */
 function credentialAccess(
   list: SimpleCommand[],
   ctx: RiskContext,
   depth: number,
+  feeds = false,
 ): RiskAssessment | undefined {
   let here = ctx;
-  for (const cmd of list) {
+  for (const [i, cmd] of list.entries()) {
     for (const nested of cmd.nested) {
-      const found = credentialAccess(nested, here, depth);
+      const found = credentialAccess(nested, here, depth, true);
       if (found) return found;
     }
-    const found = credentialCommand(cmd, here, depth);
+    const piped = list[i + 1]?.piped === true;
+    const found = credentialCommand(cmd, here, depth, feeds || piped);
     if (found) return found;
     here = afterCd(cmd, here);
   }
@@ -90,21 +94,23 @@ function credentialAccess(
 }
 
 /**
- * One simple command's access to CodeDen's credentials: a redirect onto one, or any argument
- * that reaches one (read, written, copied or deleted). Moving into CodeDen's home with `cd`
+ * One simple command's access to CodeDen's credentials: a redirect onto one, any argument (or
+ * here-string) that reaches one (read, written, copied or deleted), or a search or listing that
+ * reaches one from a folder above it (`./codeden-search`). Moving into CodeDen's home with `cd`
  * reads nothing; the command that then reads is caught.
  */
 function credentialCommand(
   cmd: SimpleCommand,
   ctx: RiskContext,
   depth: number,
+  feeds: boolean,
 ): RiskAssessment | undefined {
   const { tokens } = unwrap(cmd.words);
   const bin = binName(tokens[0]);
   const args = tokens.slice(1);
   const script = inlineScript(bin, args);
   if (script && depth < MAX_DEPTH) {
-    const inner = credentialAccess(parseShell(script.text, script.dialect), ctx, depth + 1);
+    const inner = credentialAccess(parseShell(script.text, script.dialect), ctx, depth + 1, feeds);
     if (inner) return inner;
   }
   for (const target of cmd.writes) {
@@ -112,9 +118,13 @@ function credentialCommand(
       return credentialsRisk(`Writes CodeDen's own credentials: ${target}`);
     }
   }
+  const given = (cmd.input ?? []).find((word) => touchesCodedenCredentials(word, ctx));
+  if (given) return credentialsRisk(`Passes CodeDen's own credentials: ${given}`);
   if (CD.has(bin)) return undefined;
   const touched = secretArgument(bin, args, [], (a) => touchesCodedenCredentials(a, ctx));
-  return touched ? credentialsRisk(`Accesses CodeDen's own credentials: ${touched}`) : undefined;
+  if (touched) return credentialsRisk(`Accesses CodeDen's own credentials: ${touched}`);
+  const through = reachesThroughFolder(bin, args, ctx, feeds);
+  return through ? credentialsRisk(`Reaches CodeDen's own credentials from ${through}`) : undefined;
 }
 
 /**

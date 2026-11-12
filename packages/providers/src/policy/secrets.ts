@@ -19,7 +19,7 @@ function asPath(arg: string): string | undefined {
 }
 
 /** Commands whose words are data or only checked for existence (`echo .env >> .gitignore`). */
-const DATA = new Set(["echo", "printf", "write-output", "write-host", "test", "[", "[["]);
+export const DATA = new Set(["echo", "printf", "write-output", "write-host", "test", "[", "[["]);
 /** Commands that list or describe files without reading them (`ls certs/*.pem`). */
 const LISTS = new Set([
   "ls",
@@ -34,7 +34,7 @@ const LISTS = new Set([
   "test-path",
 ]);
 /** Search commands, whose first operand is the pattern (`grep -rn "process.env" src`). */
-const SEARCHES = new Set([
+export const SEARCHES = new Set([
   "grep",
   "egrep",
   "fgrep",
@@ -104,24 +104,26 @@ function searchValued(bin: string, arg: string): boolean {
   return GREP_VALUED.includes(arg);
 }
 
+/** Options that give the search pattern as the next word. */
+const isPatternOption = (a: string) => a === "-e" || a === "--regexp" || /^-pattern$/i.test(a);
+
 /**
- * The search pattern words of a search command: `-e`/`--regexp`/`-Pattern` values, or the first
- * operand when the pattern isn't given by an option (or a pattern file, `-f`). `findstr`'s
- * `/c:"text"` is a pattern too.
+ * The positions of a search command's pattern words: `-e`/`--regexp`/`-Pattern` values, or the
+ * first operand when the pattern isn't given by an option (or a pattern file, `-f`). `findstr`'s
+ * `/c:"text"` is a pattern too. Positions, not text: the same words may also name a file.
  */
-function searchPatterns(bin: string, args: string[]): Set<string> {
-  const patterns = new Set<string>();
+function searchPatterns(bin: string, args: string[]): Set<number> {
+  const patterns = new Set<number>();
   let explicit = false;
   for (let i = 0; i < args.length; i += 1) {
     const a = args[i] as string;
-    if (a === "-e" || a === "--regexp" || /^-pattern$/i.test(a)) {
+    if (isPatternOption(a)) {
       explicit = true;
-      const value = args[i + 1];
-      if (value !== undefined) patterns.add(value);
+      if (i + 1 < args.length) patterns.add(i + 1);
       i += 1;
     } else if (a.startsWith("--regexp=") || /^-pattern:/i.test(a) || /^\/c:/i.test(a)) {
       explicit = true;
-      patterns.add(a);
+      patterns.add(i);
     } else if (a === "-f" || a.startsWith("--file") || /^\/g:/i.test(a)) explicit = true;
   }
   if (explicit) return patterns;
@@ -130,11 +132,27 @@ function searchPatterns(bin: string, args: string[]): Set<string> {
     if (searchValued(bin, a)) {
       i += 1;
     } else if (!a.startsWith("-") && !(bin === "findstr" && a.startsWith("/"))) {
-      patterns.add(a);
+      patterns.add(i);
       break;
     }
   }
   return patterns;
+}
+
+/**
+ * The file operands of a search command (`grep -r -e x src lib` -> `src`, `lib`): its words
+ * that are neither options, option values nor patterns.
+ */
+export function searchOperands(bin: string, args: string[]): string[] {
+  const patterns = searchPatterns(bin, args);
+  const out: string[] = [];
+  for (let i = 0; i < args.length; i += 1) {
+    const a = args[i] as string;
+    if (patterns.has(i)) continue;
+    if (isPatternOption(a) || a === "-f" || searchValued(bin, a)) i += 1;
+    else if (!a.startsWith("-") && !(bin === "findstr" && a.startsWith("/"))) out.push(a);
+  }
+  return out;
 }
 
 /**
@@ -154,9 +172,9 @@ export function secretArgument(
     (bin === "find" || bin === "fd") &&
     args.some((a) => /^-(exec|execdir|ok|okdir|x|X|-exec|-exec-batch)$/.test(a));
   if (LISTS.has(bin) && !runs) return undefined;
-  const patterns = SEARCHES.has(bin) ? searchPatterns(bin, args) : new Set<string>();
-  return args.find((a) => {
-    if (patterns.has(a) || written.includes(a)) return false;
+  const patterns = SEARCHES.has(bin) ? searchPatterns(bin, args) : new Set<number>();
+  return args.find((a, i) => {
+    if (patterns.has(i) || written.includes(a)) return false;
     return braceAlternatives(a).some((alt) => {
       const value = asPath(alt);
       return value !== undefined && isSecret(value);

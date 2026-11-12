@@ -17,6 +17,8 @@ export interface SimpleCommand {
   writes: string[];
   /** Command lists inside substitutions and subshells (`$(…)`, `(…)`, `<(…)`), in order. */
   nested: SimpleCommand[][];
+  /** Here-string words (`<<< text`), which the command reads on its input. */
+  input?: string[];
   /** True when the command reads the output of the one before it (`a | b`, `a |& b`). */
   piped?: boolean;
 }
@@ -55,6 +57,7 @@ class Builder {
       // `<<\EOF` and `<<'EOF'` both end at a line reading `EOF`.
       this.heredocs.push({ delim: this.word.replace(/\\/g, ""), strip: this.heredocStrip });
     } else if (this.target === "word") this.cmd.words.push(this.word);
+    else if (this.target === "skip") this.cmd.input = [...(this.cmd.input ?? []), this.word];
     this.target = "word";
     this.word = "";
     this.inWord = false;

@@ -84,21 +84,37 @@ describe("CodeDen's own credential files: the classifier", () => {
       { path: "~/.codeden", pattern: "runner/*.json" },
       { path: "/home/me", pattern: "**/remote-access.json" },
       { pattern: "../../../{install-token,x}" },
+      // `**/` is zero or more folders: files right in the search folder count.
+      { path: "/home/me/.codeden", pattern: "**/install-token" },
+      { path: "/home/me/.codeden", pattern: "**/remote-access.json" },
+      { path: "/home/me/.codeden/runner", pattern: "**/runner.json" },
+      { path: "/home/me/.codeden", pattern: "**/runner.json" },
+      { pattern: "/home/me/.codeden/**/install-token" },
     ]) {
       expect(assessClaudeTool("Glob", input, posix), JSON.stringify(input)).toMatchObject({
         risky: true,
         codeden: true,
       });
     }
-    expect(
-      assessClaudeTool("Glob", { path: "C:\\Users\\me\\.codeden", pattern: "*-token" }, win),
-    ).toMatchObject({ codeden: true });
+    for (const input of [
+      { path: "C:\\Users\\me\\.codeden", pattern: "*-token" },
+      { path: "C:\\Users\\me\\.codeden", pattern: "**/install-token" },
+      { path: "C:\\Users\\me\\.codeden\\runner", pattern: "**/runner.json" },
+      { path: "C:\\Users\\me\\.codeden", pattern: "**/runner.json" },
+      { path: "C:\\Users\\me", pattern: "**/REMOTE-ACCESS.json" },
+    ]) {
+      expect(assessClaudeTool("Glob", input, win), JSON.stringify(input)).toMatchObject({
+        codeden: true,
+      });
+    }
     for (const input of [
       { pattern: "**/*.ts" },
       { pattern: "**/*" },
       { pattern: "src/**/runner.json" },
       { path: "/home/me/.codeden/wt/repo/abc123", pattern: "**/install-token" },
       { path: "/home/me/.codeden", pattern: "logs/*.log" },
+      { path: "/home/me/.codeden", pattern: "**/*.log" },
+      { path: "/home/me/.codeden/runner", pattern: "**/install-token" },
     ]) {
       expect(assessClaudeTool("Glob", input, posix), JSON.stringify(input)).toEqual({
         risky: false,
@@ -205,6 +221,83 @@ describe("CodeDen's own credential files: the classifier", () => {
     ).toBe(true);
   });
 
+  it("a search pattern that repeats a file operand doesn't hide the file", () => {
+    for (const cmd of [
+      "grep -e . -e /home/me/.codeden/install-token /home/me/.codeden/install-token",
+      "rg -e . -e /home/me/.codeden/runner/runner.json /home/me/.codeden/runner/runner.json",
+      "grep /home/me/.codeden/install-token /home/me/.codeden/install-token",
+      "rg --regexp=~/.codeden/install-token ~/.codeden/install-token",
+    ]) {
+      expect(guarded(cmd, posix), cmd).toBe(true);
+    }
+    expect(
+      guarded(
+        "Select-String -Pattern $env:CODEDEN_HOME\\install-token -Path $env:CODEDEN_HOME\\install-token",
+        win,
+      ),
+    ).toBe(true);
+    // A pattern that only names the file searches other files for that text.
+    for (const cmd of [
+      "grep -e ~/.codeden/install-token README.md",
+      "rg ~/.codeden/install-token docs",
+    ]) {
+      expect(guarded(cmd, posix), cmd).toBe(false);
+    }
+  });
+
+  it("a recursive search, or a listing that feeds a command, from a folder above them", () => {
+    for (const cmd of [
+      "rg --hidden --no-ignore -g install-token . /home/me",
+      "rg -g '*.json' token ~",
+      "rg --glob=remote-access.json . /home",
+      "rg -g '**/install-token' . ~",
+      "rg token ~",
+      "grep -r token ~",
+      "grep -rn --include=install-token . /home/me",
+      "grep -R x /",
+      "grep -d recurse x ~",
+      "cd ~ && rg token",
+      "find ~ -name install-token | xargs cat",
+      "find ~ -name install-token -exec cat {} \\;",
+      "find / -iname runner.json -print0 | xargs -0 cat",
+      "cat $(find ~ -name install-token)",
+      "fd install-token ~ -x cat",
+      "ls ~/.codeden | xargs -I{} cat ~/.codeden/{}",
+      "echo ~/.codeden/install-token | xargs cat",
+      "xargs cat <<< ~/.codeden/install-token",
+      "cat $CODEDEN_HOME/$name",
+    ]) {
+      expect(guarded(cmd, posix), cmd).toBe(true);
+    }
+    for (const cmd of [
+      "findstr /s token C:\\Users\\me\\install-token",
+      "findstr /s /i x %USERPROFILE%\\*.json",
+      "Get-ChildItem -Recurse -Path ~ -Filter install-token | Get-Content",
+      "gci $env:USERPROFILE -r -Include *.json | Select-String token",
+      "Get-ChildItem $env:CODEDEN_HOME | Get-Content",
+    ]) {
+      expect(guarded(cmd, win), cmd).toBe(true);
+    }
+    // Filters that leave them out, other folders, and listings only shown to the user don't.
+    for (const cmd of [
+      "rg -g '*.ts' token ~",
+      "grep -rn --include=*.md token ~",
+      "rg -g '!*.ts' token src",
+      "rg token src",
+      "grep -r token .",
+      "grep token ~",
+      "find ~ -name '*.ts' | xargs wc -l",
+      "find . -name install-token | xargs cat",
+      "find ~ -name install-token",
+      "ls -R ~",
+      "ls ~ | head",
+      "echo hello | grep h",
+    ]) {
+      expect(guarded(cmd, posix), cmd).toBe(false);
+    }
+    expect(guarded("findstr /s token *.ts", win)).toBe(false);
+  });
+
   it("leaves same-named files elsewhere, the rest of the home and other commands alone", () => {
     for (const cmd of [
       // A project's own files with the same names, in the worktree.
@@ -250,6 +343,13 @@ describe("CodeDen's own credential files: every level", () => {
     "cat .env; echo x > ~/.codeden/install-token",
     "git push --force; cat $CODEDEN_HOME/runner/runner.json",
   ];
+  /** Searches that read them through a repeated pattern or from a folder above them. */
+  const searches = [
+    "grep -e . -e /home/me/.codeden/install-token /home/me/.codeden/install-token",
+    "rg -e . -e /home/me/.codeden/runner/runner.json /home/me/.codeden/runner/runner.json",
+    "rg --hidden --no-ignore -g install-token . /home/me",
+    "find ~ -name install-token | xargs cat",
+  ];
   const colonBound = [
     "Get-Content -LiteralPath:$env:CODEDEN_HOME\\runner\\runner.json",
     "Select-String -Pattern . -Path:$env:CODEDEN_HOME\\runner\\runner.json",
@@ -266,11 +366,14 @@ describe("CodeDen's own credential files: every level", () => {
         p.gate("Write", { file_path: "/home/me/.codeden/install-token" }),
         level,
       ).toMatchObject({ ask: true });
-      expect(
-        p.gate("Glob", { path: "/home/me/.codeden", pattern: "install-token" }),
-        level,
-      ).toMatchObject({ ask: true });
-      for (const command of masked) {
+      for (const [tool, input] of [
+        ["Glob", { path: "/home/me/.codeden", pattern: "install-token" }],
+        ["Glob", { path: "/home/me/.codeden", pattern: "**/install-token" }],
+        ["Grep", { pattern: ".", path: "/home/me", glob: "install-token" }],
+      ] as const) {
+        expect(p.gate(tool, input), `${level}: ${tool}`).toMatchObject({ ask: true });
+      }
+      for (const command of [...masked, ...searches]) {
         expect(p.gate("Bash", { command }), `${level}: ${command}`).toMatchObject({
           ask: true,
           action: "secrets",
@@ -296,7 +399,10 @@ describe("CodeDen's own credential files: every level", () => {
       expect(p.denial("Bash", cat)).toMatch(/credential files are off limits/);
       expect(p.denial("Grep", { pattern: "x", path: "~/.codeden" })).toMatch(/off limits/);
       expect(p.denial("Glob", { pattern: "/home/me/.codeden/*" })).toMatch(/off limits/);
-      for (const command of masked) {
+      expect(p.denial("Glob", { path: "/home/me/.codeden", pattern: "**/install-token" })).toMatch(
+        /off limits/,
+      );
+      for (const command of [...masked, ...searches]) {
         expect(p.denial("Bash", { command }), command).toMatch(/off limits/);
       }
       // Relative paths resolve from the shell's current directory.
@@ -358,7 +464,7 @@ describe("CodeDen's own credential files: every level", () => {
           kind: "ask",
           action: "secrets",
         });
-        for (const command of masked) {
+        for (const command of [...masked, ...searches]) {
           expect(p.decide(shell(command)), `${level}: ${command}`).toMatchObject({
             kind: "ask",
             action: "secrets",
@@ -396,7 +502,7 @@ describe("CodeDen's own credential files: every level", () => {
           kind: "deny",
           message: expect.stringMatching(/off limits/),
         });
-        for (const command of masked) {
+        for (const command of [...masked, ...searches]) {
           expect(p.decide(shell(command)), command).toMatchObject({ kind: "deny" });
         }
         expect(p.decide(outside("/home/me/.codeden/*"))).toMatchObject({ kind: "deny" });
@@ -420,7 +526,7 @@ describe("CodeDen's own credential files: every level", () => {
     for (const level of ["auto", "full"] as const) {
       for (const texts of [
         ["cat ~/.codeden/install-token"],
-        ...masked.map((command) => [command]),
+        ...[...masked, ...searches].map((command) => [command]),
         // The command line as sent, then Codex's parsed actions.
         ["cat .env", "cat ~/.codeden/install-token"],
       ]) {
