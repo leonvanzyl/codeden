@@ -6,9 +6,9 @@ import {
   redirect,
 } from "@tanstack/react-router";
 import { AppShell } from "@/components/shell/app-shell";
+import { AppToaster } from "@/components/shell/app-toaster";
 import { SignInScreen } from "@/components/shell/sign-in";
 import { UnauthorizedScreen } from "@/components/shell/unauthorized";
-import { Toaster } from "@/components/ui/sonner";
 import { AGENT_TABS, AgentsPage, type AgentTab } from "@/routes/agents";
 import { AutomationPage } from "@/routes/automation";
 import { NewAutomationPage } from "@/routes/automation-new";
@@ -24,19 +24,15 @@ import { SettingsPage } from "@/routes/settings";
 import { SetupPage } from "@/routes/setup";
 import { VisionPage } from "@/routes/vision";
 import { useConnectionStore } from "@/stores/connection";
-import { useUiStore } from "@/stores/ui";
 
 function Root() {
   const auth = useConnectionStore((s) => s.auth);
-  // A native browser view paints over the page, toasts included: keep them on the other side.
-  const nativeShown = useUiStore((s) => s.nativeBrowserShown);
   if (auth === "unauthorized") return <UnauthorizedScreen />;
   if (auth === "signin") return <SignInScreen />;
   return (
     <>
       <Outlet />
-      {/* At most three toasts on screen; bursts of updates are grouped into one before that. */}
-      <Toaster position={nativeShown ? "bottom-left" : "bottom-right"} visibleToasts={3} />
+      <AppToaster />
     </>
   );
 }

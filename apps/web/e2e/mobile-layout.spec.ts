@@ -153,6 +153,43 @@ for (const size of SIZES) {
   });
 }
 
+type Box = { x: number; y: number; width: number; height: number };
+
+/** The area two boxes share, in px² (0 when they are apart). */
+function overlapArea(a: Box, b: Box): number {
+  const w = Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x);
+  const h = Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y);
+  return w > 0 && h > 0 ? w * h : 0;
+}
+
+for (const size of SIZES) {
+  test(`toasts leave the composer clear on a ${size.name}`, async ({ browser }) => {
+    const { context, page } = await openContext(browser, size);
+    try {
+      await page.goto(`${env("CODEDEN_E2E_URL")}/sessions/${sessionId}`);
+      const message = page.getByRole("textbox", { name: "Message" });
+      // A message being written grows the box; toasts must clear its actual height.
+      await message.fill("First line\nSecond line\nThird line\nFourth line");
+      // Toggling Plan raises a toast ("Plan mode on/off") while the composer is in use.
+      await page.getByRole("button", { name: "Plan mode" }).tap();
+      const toast = page.locator("[data-sonner-toast]").first();
+      await expect(toast).toBeVisible();
+      await page.waitForTimeout(600); // the toast's enter animation
+      // The message box and its toolbar (model, permissions, Plan, Queue/Steer, Stop, Send).
+      const composer = await message.locator("xpath=..").boundingBox();
+      const toastBox = await toast.boundingBox();
+      expect(composer, "composer box").not.toBeNull();
+      expect(toastBox, "toast box").not.toBeNull();
+      expect(
+        overlapArea(composer as Box, toastBox as Box),
+        `toast ${JSON.stringify(toastBox)} covers the composer ${JSON.stringify(composer)}`,
+      ).toBe(0);
+    } finally {
+      await context.close();
+    }
+  });
+}
+
 test("the app can be added to a home screen", async ({ page }) => {
   await page.goto(env("CODEDEN_E2E_LAUNCH_URL"));
   await expect(page.locator('link[rel="manifest"]')).toHaveAttribute(
