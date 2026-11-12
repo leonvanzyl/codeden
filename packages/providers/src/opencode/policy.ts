@@ -59,14 +59,19 @@ export class OpenCodePolicy {
     return this.readOnly || this.autonomy === "read_only";
   }
 
-  /** Switch the level; it applies from the next permission request. */
+  /**
+   * Switch the level; it applies from the next permission request. Read-only forgets the
+   * session's remembered approvals, so switching back later asks again.
+   */
   setAutonomy(level: AutonomyLevel): void {
     this.autonomy = level;
+    if (level === "read_only") this.sessionAllow.clear();
   }
 
   decide(call: PermissionCall): PolicyDecision {
     const { request } = call;
-    if (this.sessionAllow.has(this.key(call))) return ALLOW;
+    // A remembered approval never overrides read-only.
+    if (!this.isReadOnly && this.sessionAllow.has(this.key(call))) return ALLOW;
     switch (request.action) {
       case "shell":
         return this.shell(call);

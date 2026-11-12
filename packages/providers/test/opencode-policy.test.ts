@@ -92,6 +92,23 @@ describe("OpenCode policy", () => {
     expect(policy("supervised").decide(shell("pnpm lint"))).toMatchObject({ kind: "ask" });
   });
 
+  it("a remembered approval never outlives a switch to read-only", () => {
+    const p = policy("supervised");
+    p.allowForSession(edit("src/a.ts"));
+    p.allowForSession(shell("git push origin main"));
+    expect(p.decide(edit("src/a.ts"))).toEqual({ kind: "allow" });
+    p.setAutonomy("read_only");
+    expect(p.decide(edit("src/a.ts"))).toMatchObject({ kind: "deny" });
+    expect(p.decide(shell("git push origin main"))).toMatchObject({ kind: "deny" });
+    // Forgotten, not just suspended: back at supervised, the user is asked again.
+    p.setAutonomy("supervised");
+    expect(p.decide(edit("src/a.ts"))).toMatchObject({ kind: "ask" });
+    // A read-only role never honours one either.
+    const role = policy("auto", true);
+    role.allowForSession(edit("src/a.ts"));
+    expect(role.decide(edit("src/a.ts"))).toMatchObject({ kind: "deny" });
+  });
+
   it("an autonomy change applies to the next decision", () => {
     const p = policy("auto");
     expect(p.decide(shell("ls"))).toEqual({ kind: "allow" });
