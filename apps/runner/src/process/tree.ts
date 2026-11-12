@@ -53,18 +53,38 @@ export async function killTree(pid: number, graceMs = 2_000): Promise<void> {
  * leader (`detached`): its group is signalled, which outlives the leader. (A descendant that
  * started a session of its own after its parent exited can't be found there.)
  */
-export async function killTreeAndOrphans(pid: number, graceMs = 2_000): Promise<void> {
-  const descendants = await listDescendants(pid).catch(() => [] as number[]);
-  await killTree(pid, graceMs);
-  await Promise.all(descendants.map((child) => killTree(child, graceMs)));
-  if (!isWindows) {
+export async function killTreeAndOrphans(
+  pid: number,
+  graceMs = 2_000,
+  ops: TreeOps = systemTreeOps,
+): Promise<void> {
+  const descendants = await ops.listDescendants(pid).catch(() => [] as number[]);
+  await ops.killTree(pid, graceMs);
+  await Promise.all(descendants.map((child) => ops.killTree(child, graceMs)));
+  if (ops.platform !== "win32") ops.killGroup(pid);
+}
+
+/** What `killTreeAndOrphans` does to processes; tests pass fakes. */
+export interface TreeOps {
+  platform: NodeJS.Platform;
+  listDescendants: (pid: number) => Promise<number[]>;
+  killTree: (pid: number, graceMs: number) => Promise<void>;
+  /** `SIGKILL` the process group led by `pid`, if it still exists. */
+  killGroup: (pid: number) => void;
+}
+
+const systemTreeOps: TreeOps = {
+  platform: process.platform,
+  listDescendants: (pid) => listDescendants(pid),
+  killTree: (pid, graceMs) => killTree(pid, graceMs),
+  killGroup: (pid) => {
     try {
       process.kill(-pid, "SIGKILL");
     } catch {
       // the group is gone
     }
-  }
-}
+  },
+};
 
 function signalPosix(pid: number, descendants: number[], signal: NodeJS.Signals): void {
   for (const target of [-pid, pid, ...descendants]) {

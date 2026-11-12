@@ -20,7 +20,7 @@ import { childEnv } from "../process/env";
 import type { ProcessSupervisor } from "../process/supervisor";
 import { killTreeAndOrphans } from "../process/tree";
 import { type ResolvedMcpServer, resolveMcpSpec } from "./resolve-spec";
-import { McpStdioTransport } from "./stdio-transport";
+import { McpStdioTransport, type SpawnServer } from "./stdio-transport";
 
 export interface McpServerTestOptions {
   spec: McpServerSpec;
@@ -35,6 +35,10 @@ export interface McpServerTestOptions {
   env?: Record<string, string>;
   /** Tracks a stdio server while it runs, so a runner shutdown stops it too. */
   supervisor?: Pick<ProcessSupervisor, "adopt" | "release">;
+  /** Starts a stdio server (`cross-spawn` by default; tests pass a fake child process). */
+  spawn?: SpawnServer;
+  /** Stops a stdio server's whole process tree (`killTreeAndOrphans` by default). */
+  stopTree?: (pid: number) => Promise<void>;
 }
 
 /** Keeps the last `limit` characters written to it. */
@@ -84,7 +88,7 @@ export async function testMcpServer(opts: McpServerTestOptions): Promise<McpServ
   try {
     const server = resolveMcpSpec(opts.spec, { expandEnv: opts.expandEnv, env });
     const cwd = (server.type === "stdio" ? server.cwd : undefined) ?? opts.cwd ?? homedir();
-    const transport: Transport = createTransport(server, { cwd, env, stderr });
+    const transport: Transport = createTransport(server, { cwd, env, stderr, spawn: opts.spawn });
     // The client starts the transport, then negotiates the protocol version; both are
     // observed here so a failure names its stage and a success reports the version.
     const start = transport.start.bind(transport);
@@ -127,14 +131,15 @@ export async function testMcpServer(opts: McpServerTestOptions): Promise<McpServ
   } catch (error) {
     return fail(error);
   } finally {
-    await stop(client, stdio?.pid ?? null);
+    const stopTree = opts.stopTree ?? ((pid: number) => killTreeAndOrphans(pid, 1_000));
+    await stop(client, stdio?.pid ?? null, stopTree);
     if (stdio?.pid) opts.supervisor?.release(stdio.pid);
   }
 }
 
 function createTransport(
   server: ResolvedMcpServer,
-  ctx: { cwd: string; env: Record<string, string>; stderr: TailBuffer },
+  ctx: { cwd: string; env: Record<string, string>; stderr: TailBuffer; spawn?: SpawnServer },
 ): Transport {
   if (server.type === "stdio") {
     if (!existsSync(ctx.cwd) || !statSync(ctx.cwd).isDirectory()) {
@@ -146,6 +151,7 @@ function createTransport(
       env: { ...ctx.env, ...server.env },
       cwd: ctx.cwd,
       onStderr: (chunk) => ctx.stderr.append(chunk),
+      spawn: ctx.spawn,
     });
   }
   let url: URL;
@@ -206,8 +212,12 @@ function withTimeout<T>(work: Promise<T>, ms: number, onTimeout: () => void): Pr
  * of the pid kept from spawn, including what it started and left behind (wrappers such as
  * `npx`, detached helpers), then the client.
  */
-async function stop(client: Client, pid: number | null): Promise<void> {
-  if (pid !== null) await killTreeAndOrphans(pid, 1_000).catch(() => undefined);
+async function stop(
+  client: Client,
+  pid: number | null,
+  stopTree: (pid: number) => Promise<void>,
+): Promise<void> {
+  if (pid !== null) await stopTree(pid).catch(() => undefined);
   await client.close().catch(() => undefined);
 }
 

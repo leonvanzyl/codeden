@@ -1,9 +1,16 @@
 /// <reference path="../types/cross-spawn.d.ts" />
-import type { ChildProcess } from "node:child_process";
+import type { ChildProcess, spawn as nodeSpawn } from "node:child_process";
 import { ReadBuffer, serializeMessage } from "@modelcontextprotocol/sdk/shared/stdio.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
-import spawn from "cross-spawn";
+import crossSpawn from "cross-spawn";
+
+/** Starts the server process: `cross-spawn` by default, a fake child in tests. */
+export type SpawnServer = (
+  command: string,
+  args: string[],
+  options: Parameters<typeof nodeSpawn>[2],
+) => ChildProcess;
 
 export interface McpStdioParams {
   command: string;
@@ -11,6 +18,7 @@ export interface McpStdioParams {
   env: Record<string, string>;
   cwd: string;
   onStderr: (chunk: string) => void;
+  spawn?: SpawnServer;
 }
 
 /**
@@ -36,6 +44,7 @@ export class McpStdioTransport implements Transport {
 
   start(): Promise<void> {
     if (this.child) throw new Error("Already started");
+    const spawn = this.params.spawn ?? crossSpawn;
     return new Promise((resolve, reject) => {
       const child = spawn(this.params.command, this.params.args, {
         cwd: this.params.cwd,

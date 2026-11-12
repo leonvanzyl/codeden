@@ -1,7 +1,9 @@
-import { readFileSync, writeFileSync } from "node:fs";
+import type { ChildProcess } from "node:child_process";
+import { EventEmitter } from "node:events";
 import { createServer, type IncomingHttpHeaders, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { PassThrough } from "node:stream";
 import { MCP_TEST_MAX_PAGES, McpServerTestResult } from "@codeden/contracts";
 import { Server as LowLevelServer } from "@modelcontextprotocol/sdk/server/index.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -11,8 +13,9 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { startRunner } from "../src";
 import { expandEnvVars, MissingEnvError, resolveMcpSpec } from "../src/mcp/resolve-spec";
 import { testMcpServer } from "../src/mcp/server-test";
-import { isAlive } from "../src/process/tree";
-import { removeDir, TestServer, tempDir, waitUntil } from "./helpers";
+import type { SpawnServer } from "../src/mcp/stdio-transport";
+import { killTreeAndOrphans } from "../src/process/tree";
+import { removeDir, TestServer, tempDir } from "./helpers";
 
 /** A server whose `tools/list` comes in pages of two tools: `pages` of them, or endless. */
 function pagedServer(pages: number | "endless"): LowLevelServer {
@@ -286,76 +289,162 @@ describe("MCP connection test", () => {
   });
 });
 
+type Rpc = { id?: number; method?: string };
+
 /**
- * A stdio "server" that starts a long-lived helper (`detached` or not), writes the helper's
- * pid to `helper.pid`, then either refuses the handshake and stays up (`refuse`), or exits
- * (`exit`), leaving the helper behind as an orphan.
+ * A stdio server process that only exists in memory: its stdin, stdout and stderr are
+ * streams, and `answer` decides what it does with each message the client writes.
  */
-const LEAKY_SERVER = `
-const { spawn } = require("node:child_process");
-const { writeFileSync } = require("node:fs");
-const [detached, mode] = process.argv.slice(2);
-const helper = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
-  detached: detached === "detached", stdio: "ignore", windowsHide: true,
-});
-helper.unref();
-writeFileSync("helper.pid", String(helper.pid));
-if (mode === "exit") { process.stderr.write("giving up\\n"); process.exit(1); }
-let buffer = "";
-process.stdin.on("data", (data) => {
-  buffer += data;
-  for (let i = buffer.indexOf("\\n"); i >= 0; i = buffer.indexOf("\\n")) {
-    const message = JSON.parse(buffer.slice(0, i));
-    buffer = buffer.slice(i + 1);
-    if (message.method === "initialize") {
-      const error = { code: -32603, message: "not today" };
-      process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: message.id, error }) + "\\n");
-    }
+class FakeServerProcess extends EventEmitter {
+  readonly pid = 4242;
+  readonly stdin = new PassThrough();
+  readonly stdout = new PassThrough();
+  readonly stderr = new PassThrough();
+
+  constructor(answer: (message: Rpc, server: FakeServerProcess) => void) {
+    super();
+    let buffer = "";
+    this.stdin.on("data", (chunk: Buffer) => {
+      buffer += chunk.toString("utf8");
+      for (let i = buffer.indexOf("\n"); i >= 0; i = buffer.indexOf("\n")) {
+        const line = buffer.slice(0, i);
+        buffer = buffer.slice(i + 1);
+        answer(JSON.parse(line) as Rpc, this);
+      }
+    });
+    process.nextTick(() => this.emit("spawn"));
   }
-});
-setInterval(() => {}, 1000);
-`;
+
+  reply(id: number | undefined, body: { result: unknown } | { error: unknown }): void {
+    this.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id, ...body })}\n`);
+  }
+
+  /** The process ends (after what it wrote has been read). */
+  exit(): void {
+    setImmediate(() => this.emit("close", 1, null));
+  }
+}
 
 describe("stopping a stdio server", () => {
-  let dir: string;
-  beforeAll(() => {
-    dir = tempDir("codeden-mcp-leak-");
-    writeFileSync(join(dir, "server.cjs"), LEAKY_SERVER);
-  });
-  afterAll(() => removeDir(dir));
-
-  const runLeaky = async (detached: "detached" | "attached", mode: "refuse" | "exit") => {
-    const tracked: number[] = [];
+  const runFake = async (answer: (message: Rpc, server: FakeServerProcess) => void) => {
+    const spawned: Array<{ command: string; options: unknown }> = [];
+    const stopped: number[] = [];
+    const adopted: number[] = [];
     const released: number[] = [];
+    const spawn: SpawnServer = (command, _args, options) => {
+      spawned.push({ command, options });
+      return new FakeServerProcess(answer) as unknown as ChildProcess;
+    };
     const result = await testMcpServer({
-      spec: { type: "stdio", command: process.execPath, args: ["server.cjs", detached, mode] },
-      cwd: dir,
+      spec: { type: "stdio", command: "fake-server", env: { A: "1" } },
+      cwd: tmpdir(),
       expandEnv: false,
       clientVersion: "0.0.0-test",
-      timeoutMs: 15_000,
-      supervisor: { adopt: (p) => tracked.push(p.pid), release: (pid) => released.push(pid) },
+      env: { PATH: "/bin" },
+      spawn,
+      stopTree: async (pid) => {
+        stopped.push(pid);
+      },
+      supervisor: { adopt: (p) => adopted.push(p.pid), release: (pid) => released.push(pid) },
     });
-    const helper = Number(readFileSync(join(dir, "helper.pid"), "utf8"));
-    try {
-      await waitUntil(() => !isAlive(helper), 5_000);
-    } finally {
-      if (isAlive(helper)) process.kill(helper);
-    }
-    return { result, tracked, released };
+    return { result, spawned, stopped, adopted, released };
   };
 
-  it("ends a helper the server detached when the handshake fails", async () => {
-    const { result, tracked, released } = await runLeaky("detached", "refuse");
+  it("starts the server as a group leader and stops its tree after a successful test", async () => {
+    const { result, spawned, stopped, adopted, released } = await runFake((message, server) => {
+      if (message.method === "initialize") {
+        server.stdout.write("starting up...\n"); // a log line on stdout is skipped
+        server.reply(message.id, {
+          result: {
+            protocolVersion: "2025-06-18",
+            capabilities: { tools: {} },
+            serverInfo: { name: "fake-stdio", version: "2.0.0" },
+          },
+        });
+      } else if (message.method === "tools/list") {
+        server.reply(message.id, {
+          result: { tools: [{ name: "echo", inputSchema: { type: "object" } }] },
+        });
+      }
+    });
+    expect(result).toMatchObject({
+      ok: true,
+      server: { name: "fake-stdio", version: "2.0.0" },
+      protocolVersion: "2025-06-18",
+      toolCount: 1,
+      tools: [{ name: "echo" }],
+    });
+    expect(spawned).toEqual([
+      {
+        command: "fake-server",
+        options: expect.objectContaining({
+          cwd: tmpdir(),
+          env: { PATH: "/bin", A: "1" },
+          windowsHide: true,
+          detached: process.platform !== "win32",
+        }),
+      },
+    ]);
+    expect(stopped).toEqual([4242]);
+    expect(adopted).toEqual([4242]);
+    expect(released).toEqual([4242]);
+  });
+
+  it("stops the tree of a server that refuses the handshake and stays up", async () => {
+    const { result, stopped, released } = await runFake((message, server) => {
+      if (message.method === "initialize") {
+        server.reply(message.id, { error: { code: -32603, message: "not today" } });
+      }
+    });
     expect(result).toMatchObject({ ok: false, stage: "connect", timedOut: false });
     expect(!result.ok && result.error).toContain("not today");
-    expect(tracked).toHaveLength(1);
-    expect(released).toEqual(tracked);
-  }, 30_000);
+    // The client has closed the transport by now; the pid from spawn is still used.
+    expect(stopped).toEqual([4242]);
+    expect(released).toEqual([4242]);
+  });
 
-  // On POSIX the orphan is only reachable through the server's process group. (On Windows
-  // Node already ends a non-detached child with its parent.)
-  it("ends what a server left behind when it exited during the handshake", async () => {
-    const { result } = await runLeaky("attached", "exit");
+  it("stops the tree of a server that exited during the handshake", async () => {
+    const { result, stopped } = await runFake((message, server) => {
+      if (message.method === "initialize") {
+        server.stderr.write("giving up\n");
+        server.exit();
+      }
+    });
     expect(result).toMatchObject({ ok: false, stage: "connect", stderrTail: "giving up" });
-  }, 30_000);
+    // What it started may outlive it, so its tree is still stopped by the pid from spawn.
+    expect(stopped).toEqual([4242]);
+  });
+
+  it("kills descendants listed before the tree, then the process group on POSIX", async () => {
+    const run = async (platform: NodeJS.Platform, descendants: Promise<number[]>) => {
+      const calls: string[] = [];
+      await killTreeAndOrphans(10, 500, {
+        platform,
+        listDescendants: async (pid) => {
+          calls.push(`list ${pid}`);
+          return descendants;
+        },
+        killTree: async (pid) => {
+          calls.push(`kill ${pid}`);
+        },
+        killGroup: (pid) => calls.push(`group ${pid}`),
+      });
+      return calls;
+    };
+    expect(await run("linux", Promise.resolve([11, 12]))).toEqual([
+      "list 10",
+      "kill 10",
+      "kill 11",
+      "kill 12",
+      "group 10",
+    ]);
+    // Windows has no process groups: children of an exited process are found by parent id.
+    expect(await run("win32", Promise.resolve([11]))).toEqual(["list 10", "kill 10", "kill 11"]);
+    // A failed listing still kills the tree.
+    expect(await run("darwin", Promise.reject(new Error("ps failed")))).toEqual([
+      "list 10",
+      "kill 10",
+      "group 10",
+    ]);
+  });
 });
