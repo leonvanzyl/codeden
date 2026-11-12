@@ -3,6 +3,9 @@ import {
   AutomationGuards,
   type AutomationTemplate,
   type AutonomyLevel,
+  type ItemRecord,
+  type Session,
+  splitSender,
   type UpdateAutomationRequest,
 } from "@codeden/contracts";
 import type { CreateAutomationInput } from "@/lib/api/automations-api";
@@ -45,6 +48,44 @@ export function draftFromTemplate(t: AutomationTemplate, autonomy: AutonomyLevel
     action,
     guards: t.guards,
     workKey: t.workKey,
+  };
+}
+
+/**
+ * The text of a session's opening message: the first user message of its root thread, without
+ * attachments and without the line naming a PM or orchestrator sender. Empty when it has none.
+ */
+export function openingPrompt(session: Session, items: readonly ItemRecord[]): string {
+  let first: ItemRecord | undefined;
+  for (const r of items) {
+    if (r.threadId !== session.rootThreadId || r.item.kind !== "user_message") continue;
+    if (!first || r.position < first.position) first = r;
+  }
+  if (first?.item.kind !== "user_message") return "";
+  return splitSender(first.item.input.text, first.item.input.from).text;
+}
+
+/**
+ * A session made repeatable: its opening message as the prompt, its agent and permissions as
+ * the session action, its title as the name, run only by hand until the user picks a schedule.
+ */
+export function draftFromSession(session: Session, items: readonly ItemRecord[]): AutomationDraft {
+  const name = (session.title ?? session.purpose).trim();
+  return {
+    name,
+    description: null,
+    target: "project",
+    trigger: { type: "manual" },
+    action: {
+      type: "start_session",
+      prompt: openingPrompt(session, items),
+      ...(name ? { title: name } : {}),
+      provider: session.provider,
+      ...(session.model ? { model: session.model } : {}),
+      ...(session.effort ? { effort: session.effort } : {}),
+      autonomy: session.autonomy,
+    },
+    guards: AutomationGuards.parse({}),
   };
 }
 

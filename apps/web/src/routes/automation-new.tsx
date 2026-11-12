@@ -1,5 +1,5 @@
 import type { AutonomyLevel } from "@codeden/contracts";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { ChevronLeft, Play, Save, Workflow } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -8,6 +8,7 @@ import { AutomationForm } from "@/components/automations/automation-form";
 import {
   type AutomationDraft,
   blankDraft,
+  draftFromSession,
   draftFromTemplate,
   draftProblems,
   toCreateRequest,
@@ -23,15 +24,18 @@ import { PageHeader } from "./page-header";
 
 /**
  * New automation (§10): one editor for name, target, schedule, prompt, agent and permissions,
- * blank or prefilled from a template. Saved off unless switched on here; "Save and run now"
- * also starts a run in this project.
+ * blank or prefilled from a template or from a session ("Make an automation…"). Saved off unless
+ * switched on here; "Save and run now" also starts a run in this project.
  */
 export function NewAutomationPage({
   projectId,
   templateId,
+  sessionId,
 }: {
   projectId: string;
   templateId?: string;
+  /** Prefill from this session: its opening message, agent and permissions. */
+  sessionId?: string;
 }) {
   const client = useClient();
   const queryClient = useQueryClient();
@@ -43,16 +47,42 @@ export function NewAutomationPage({
   );
   const templates = useAutomationTemplates();
   const template = templateId ? templates.data?.find((t) => t.id === templateId) : undefined;
+  // Read once, fresh: the draft is built from the transcript as it is now.
+  const source = useQuery({
+    queryKey: ["automation-from-session", sessionId],
+    queryFn: () => client.getSessionSnapshot(sessionId ?? ""),
+    enabled: Boolean(sessionId),
+    retry: false,
+    staleTime: 0,
+    gcTime: 0,
+  });
+  const fromSession = source.data?.session;
   const [draft, setDraft] = useState<AutomationDraft | null>(
-    templateId ? null : blankDraft(defaultAutonomy),
+    templateId || sessionId ? null : blankDraft(defaultAutonomy),
   );
   const [enabled, setEnabled] = useState(false);
   useEffect(() => {
-    if (templateId && template && !draft) setDraft(draftFromTemplate(template, defaultAutonomy));
-    if (templateId && templates.isSuccess && !template && !draft) {
-      setDraft(blankDraft(defaultAutonomy));
+    if (draft) return;
+    if (sessionId) {
+      if (source.data) setDraft(draftFromSession(source.data.session, source.data.items));
+      else if (source.error) {
+        toast.error("Couldn't read that session", { description: source.error.message });
+        setDraft(blankDraft(defaultAutonomy));
+      }
+      return;
     }
-  }, [templateId, template, templates.isSuccess, draft, defaultAutonomy]);
+    if (templateId && template) setDraft(draftFromTemplate(template, defaultAutonomy));
+    else if (templateId && templates.isSuccess) setDraft(blankDraft(defaultAutonomy));
+  }, [
+    sessionId,
+    source.data,
+    source.error,
+    templateId,
+    template,
+    templates.isSuccess,
+    draft,
+    defaultAutonomy,
+  ]);
 
   const create = useMutation({
     mutationFn: async (v: { draft: AutomationDraft; run: boolean }) => {
@@ -101,7 +131,11 @@ export function NewAutomationPage({
               <ChevronLeft className="size-4" /> {project.name}
             </Link>
             <span className="text-muted-foreground">/</span>
-            {template ? `New from ${template.name}` : "New automation"}
+            {template
+              ? `New from ${template.name}`
+              : fromSession
+                ? `New from ${fromSession.title ?? fromSession.purpose}`
+                : "New automation"}
           </span>
         }
         actions={
@@ -138,7 +172,7 @@ export function NewAutomationPage({
                 onChange={setDraft}
                 projectTimezone={tz}
                 defaultAutonomy={defaultAutonomy}
-                docKey={`new:${templateId ?? "blank"}`}
+                docKey={`new:${sessionId ? `session:${sessionId}` : (templateId ?? "blank")}`}
                 defaultWorkKey="automation:<name>"
               />
               {problems.length > 0 && (
