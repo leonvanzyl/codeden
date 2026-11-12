@@ -8,7 +8,7 @@ import { ConflictCard } from "@/components/project/conflict-card";
 import { NewSessionHeader } from "@/components/project/new-session-header";
 import { useStartDraft } from "@/components/project/use-start-draft";
 import { resolveDraftChoice } from "@/lib/new-session";
-import { useProject, useSnapshotData } from "@/lib/queries";
+import { useProject, useSnapshot, useSnapshotData } from "@/lib/queries";
 import { newSessionDraftKey, useComposerStore } from "@/stores/composer";
 import { getNewSessionDraft, useNewSessionStore } from "@/stores/new-session";
 
@@ -18,6 +18,7 @@ import { getNewSessionDraft, useNewSessionStore } from "@/stores/new-session";
  * the session; the draft (text, options, work key) is kept in the browser until then.
  */
 export function NewSessionPage({ projectId }: { projectId: string }) {
+  const loaded = useSnapshot().data !== undefined;
   const project = useProject(projectId);
   const providers = useSnapshotData((s) => s.runner.providers, []);
   const defaultAutonomy = useSnapshotData<AutonomyLevel>(
@@ -42,6 +43,8 @@ export function NewSessionPage({ projectId }: { projectId: string }) {
   // Open ready to type, like a session.
   useEffect(() => useComposerStore.getState().focus(), []);
 
+  // Nothing until the snapshot has loaded, so a cold start never flashes "not found".
+  if (!loaded) return null;
   if (!project) {
     return (
       <EmptyState icon={<FolderX />} title="Project not found" className="flex-1">
