@@ -85,78 +85,168 @@ export function ruleState(rules: unknown[], skill: RuleSkill): { enabled: boolea
   return { enabled, set };
 }
 
+/** A switch as a change to the rule list: the entries to drop (by index) and one to append. */
+export interface RuleChange {
+  drop: Set<number>;
+  append: Table | null;
+}
+
 /**
- * The rules after a switch. Off: drop this skill's own entries of the selector used and
+ * What a switch does to the rules. Off: drop this skill's own entries of the selector used and
  * append one with `enabled = false`, by path for a user skill and by name for a project skill
  * (a project skill's path differs in every worktree). On: drop every entry that selects it.
  */
-export function switchedRules(
+export function ruleChange(
   rules: unknown[],
   skill: RuleSkill,
   byPath: boolean,
   enabled: boolean,
-): unknown[] {
-  if (enabled) return rules.filter((entry) => !selects(entry, skill));
+): RuleChange {
+  const indices = (pick: (entry: unknown) => boolean) =>
+    new Set(rules.flatMap((entry, i) => (pick(entry) ? [i] : [])));
+  if (enabled) return { drop: indices((entry) => selects(entry, skill)), append: null };
   const same = (entry: unknown) =>
     isTable(entry) &&
     (byPath
       ? typeof entry.path === "string" && fold(entry.path) === fold(skill.path)
       : entry.path === undefined && entry.name === skill.name);
-  const entry = byPath
+  const append = byPath
     ? { path: skill.path, enabled: false }
     : { name: skill.name, enabled: false };
-  return [...rules.filter((e) => !same(e)), entry];
+  return { drop: indices(same), append };
 }
 
-/** One `[[skills.config]]` block. */
-function block(entry: Table): string {
+/** The rule list after a change. */
+export function applyRuleChange(rules: unknown[], change: RuleChange): unknown[] {
+  const kept = rules.filter((_, i) => !change.drop.has(i));
+  return change.append ? [...kept, change.append] : kept;
+}
+
+/** One `[[skills.config]]` block, as lines. */
+function block(entry: Table): string[] {
   const lines = Object.entries(entry).map(([k, v]) => stringify({ [k]: v }).trim());
-  return ["[[skills.config]]", ...lines].join("\n");
+  return ["[[skills.config]]", ...lines];
+}
+
+const TABLE_HEADER = /^\s*\[/;
+const RULE_HEADER = /^\s*\[\[\s*skills\s*\.\s*config\s*\]\]\s*(#.*)?$/;
+/** Comment and blank lines: never removed by a text edit. */
+const KEPT = /^\s*(#.*)?$/;
+const isBlank = (line: string | undefined) => line !== undefined && line.trim() === "";
+
+/**
+ * Edit the `[[skills.config]]` blocks as text: a dropped entry loses its header and setting
+ * lines, while every comment and blank line stays (blank lines left doubled by the removal are
+ * collapsed). An appended entry goes after the last remaining block, or at the end of the file.
+ * Returns null when the entries aren't all written as such blocks (an inline array, say).
+ */
+function textEdit(text: string, rules: unknown[], change: RuleChange): string | null {
+  const eol = text.includes("\r\n") ? "\r\n" : "\n";
+  const lines = text === "" ? [] : text.split(/\r?\n/);
+  const starts = lines.flatMap((line, i) => (RULE_HEADER.test(line) ? [i] : []));
+  if (starts.length !== rules.length) return null;
+  const dropped = new Set<number>();
+  starts.forEach((start, k) => {
+    if (!change.drop.has(k)) return;
+    dropped.add(start);
+    for (let i = start + 1; i < lines.length && !TABLE_HEADER.test(lines[i] ?? ""); i++) {
+      if (!KEPT.test(lines[i] ?? "")) dropped.add(i);
+    }
+  });
+  const out: string[] = [];
+  let removedSinceText = false;
+  lines.forEach((line, i) => {
+    if (dropped.has(i)) {
+      removedSinceText = true;
+      return;
+    }
+    if (isBlank(line) && removedSinceText && (out.length === 0 || isBlank(out.at(-1)))) return;
+    out.push(line);
+    if (!isBlank(line)) removedSinceText = false;
+  });
+  if (!change.append) return out.join(eol);
+
+  const added = block(change.append);
+  const lastRule = out.findLastIndex((line) => RULE_HEADER.test(line));
+  if (lastRule < 0) {
+    while (out.length && isBlank(out.at(-1))) out.pop();
+    return [...out, ...(out.length ? [""] : []), ...added, ""].join(eol);
+  }
+  // After the last setting line of the last remaining block.
+  let at = lastRule;
+  for (let i = lastRule + 1; i < out.length && !TABLE_HEADER.test(out[i] ?? ""); i++) {
+    if (!KEPT.test(out[i] ?? "")) at = i;
+  }
+  const next = out[at + 1];
+  out.splice(at + 1, 0, "", ...added, ...(next !== undefined && !isBlank(next) ? [""] : []));
+  return out.join(eol);
 }
 
 /** Plain JSON view for comparisons (dates become strings). */
 const plain = (value: unknown) => JSON.parse(JSON.stringify(value)) as unknown;
 
+/** A document for comparisons: plain JSON, and an empty `[skills]` table counts as none. */
+function normalize(value: Table): Table {
+  const doc = plain(value) as Table;
+  if (isTable(doc.skills) && Object.keys(doc.skills).length === 0) delete doc.skills;
+  return doc;
+}
+
+/** The whole-line comments of a TOML text, each as often as it appears. */
+function comments(text: string): string[] {
+  return text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith("#"))
+    .sort();
+}
+
+/** True when every whole-line comment of `before` is still in `after`. */
+function keepsComments(before: string, after: string): boolean {
+  const left = comments(after);
+  return comments(before).every((c) => {
+    const i = left.indexOf(c);
+    if (i < 0) return false;
+    left.splice(i, 1);
+    return true;
+  });
+}
+
 /**
- * The file text before and after a switch. New entries go at the end of the file as
- * `[[skills.config]]` blocks when the file has none yet; otherwise the TOML library patches the
- * document. Either way the result is parsed back and must equal the expected document.
+ * The file text before and after a switch. The `[[skills.config]]` blocks are edited as text
+ * (`textEdit`); when the entries are written some other way, the TOML library patches the
+ * document. Either way the result must parse to the expected document and keep every comment,
+ * or the switch is refused (422 `config_edit_unsafe`) rather than lose part of the file.
  */
 export function renderRuleSwitch(file: string, skill: RuleSkill, byPath: boolean, on: boolean) {
   const { text, doc, rules } = load(file);
   const before = text ?? "";
   const existed = text !== null;
-  const next = switchedRules(rules, skill, byPath, on);
+  const change = ruleChange(rules, skill, byPath, on);
+  const next = applyRuleChange(rules, change);
   if (isDeepStrictEqual(plain(next), plain(rules))) {
     return { before, after: before, existed, changed: false };
   }
   const skills = isTable(doc.skills) ? { ...doc.skills } : {};
   if (next.length) skills.config = next;
   else delete skills.config;
-  const expected: Table = { ...doc, skills };
-  if (Object.keys(skills).length === 0) delete expected.skills;
+  const expected = normalize({ ...doc, skills });
 
-  const matches = (candidate: string) => {
+  const safe = (candidate: string | null): candidate is string => {
+    if (candidate === null || !keepsComments(before, candidate)) return false;
     try {
-      return isDeepStrictEqual(plain(parse(candidate)), plain(expected));
+      return isDeepStrictEqual(normalize(parse(candidate) as Table), expected);
     } catch {
       return false;
     }
   };
-  const eol = before.includes("\r\n") ? "\r\n" : "\n";
-  if (rules.length === 0) {
-    const added = next.filter(isTable).map(block).join("\n\n").split("\n").join(eol);
-    const head = before.trimEnd();
-    const appended = `${head}${head ? `${eol}${eol}` : ""}${added}${eol}`;
-    if (matches(appended)) return { before, after: appended, existed, changed: true };
-  }
+  const edited = textEdit(before, rules, change);
+  if (safe(edited)) return { before, after: edited, existed, changed: true };
   const patched = patch(before, expected);
-  if (!matches(patched)) {
-    throw new ServiceError(
-      500,
-      "config_edit_failed",
-      `CodeDen could not edit ${file} without changing other settings; edit it by hand`,
-    );
-  }
-  return { before, after: patched, existed, changed: true };
+  if (safe(patched)) return { before, after: patched, existed, changed: true };
+  throw new ServiceError(
+    422,
+    "config_edit_unsafe",
+    `CodeDen can't change the skill settings in ${file} without losing other settings or comments; edit it by hand`,
+  );
 }

@@ -56,8 +56,14 @@ function load(file: string): Loaded {
   return { text, doc, overrides: overrides ?? {} };
 }
 
-/** Read a settings file's overrides; a file that can't be used sets nothing. */
-export function readOverrides(source: HookFile): OverrideFile {
+/**
+ * Read a settings file's overrides. For listing, a file that can't be used sets nothing. With
+ * `strict` (planning a switch) its error is thrown instead: 403 `path_outside_root` for a link
+ * leading outside its folder, 422 `config_unparsable` for a file that doesn't parse. A switch
+ * must never pick its target while a file that applies can't be read, or it could write the
+ * wrong file.
+ */
+export function readOverrides(source: HookFile, strict = false): OverrideFile {
   try {
     guard(source);
     const { overrides } = load(source.file);
@@ -66,6 +72,7 @@ export function readOverrides(source: HookFile): OverrideFile {
     );
     return { source, overrides: new Map(known) };
   } catch (error) {
+    if (strict) throw error;
     return { source, overrides: new Map(), error: errorMessage(error) };
   }
 }

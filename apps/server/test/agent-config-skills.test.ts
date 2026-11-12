@@ -296,6 +296,103 @@ describe("skill switches", () => {
         '[[skills.config]]\nname = "release"\nenabled = false\n',
       );
     });
+
+    it("keeps the file's comments when it removes the only rule", () => {
+      put(codexConfig(), '# top\n[[skills.config]]\nname = "review"\nenabled = false\n# tail\n');
+      expect(find("review", "codex").enabled).toBe(false);
+      service.skills.apply(request("review", true, "codex"));
+      expect(readFileSync(codexConfig(), "utf8")).toBe("# top\n# tail\n");
+      expect(find("review", "codex")).toMatchObject({ enabled: true, setIn: null });
+    });
+
+    it("keeps header, rule and footer comments when it removes one of several rules", () => {
+      const lines = (...l: string[]) => l.join("\r\n");
+      const start = lines(
+        "# Codex settings",
+        'model = "gpt-5"',
+        "",
+        "[skills]",
+        "include_instructions = true",
+        "",
+        "# Rules",
+        "[[skills.config]]",
+        "# release is noisy",
+        'name = "release"',
+        "enabled = false",
+        "",
+        "[[skills.config]]",
+        'name = "other"',
+        "enabled = false",
+        "",
+        "[mcp_servers.docs]",
+        'command = "npx" # inline',
+        "# footer",
+        "",
+      );
+      put(codexConfig(), start);
+      service.skills.apply(request("release", true, "codex", "p1"));
+      const withoutRelease = lines(
+        "# Codex settings",
+        'model = "gpt-5"',
+        "",
+        "[skills]",
+        "include_instructions = true",
+        "",
+        "# Rules",
+        "# release is noisy",
+        "",
+        "[[skills.config]]",
+        'name = "other"',
+        "enabled = false",
+        "",
+        "[mcp_servers.docs]",
+        'command = "npx" # inline',
+        "# footer",
+        "",
+      );
+      expect(readFileSync(codexConfig(), "utf8")).toBe(withoutRelease);
+
+      // A new rule goes after the last remaining one, and removing it restores the file.
+      service.skills.apply(request("review", false, "codex"));
+      const added = readFileSync(codexConfig(), "utf8");
+      const reviewPath = find("review", "codex").file.absolutePath;
+      expect(added).toBe(
+        withoutRelease.replace(
+          "enabled = false\r\n\r\n[mcp_servers",
+          `enabled = false\r\n\r\n[[skills.config]]\r\npath = ${JSON.stringify(reviewPath)}\r\nenabled = false\r\n\r\n[mcp_servers`,
+        ),
+      );
+      expect(parseToml(added)).toMatchObject({
+        skills: {
+          include_instructions: true,
+          config: [
+            { name: "other", enabled: false },
+            { path: reviewPath, enabled: false },
+          ],
+        },
+        mcp_servers: { docs: { command: "npx" } },
+      });
+      service.skills.apply(request("review", true, "codex"));
+      expect(readFileSync(codexConfig(), "utf8")).toBe(withoutRelease);
+    });
+
+    it("patches rules written inline only when every comment survives", () => {
+      // Rules written as an inline array can't be edited as blocks; the structural patch is
+      // used only when it keeps every comment, and the switch is refused otherwise.
+      const inline = '[skills]\n# why\nconfig = [ { name = "release", enabled = false } ]\n';
+      put(codexConfig(), inline);
+      expect(errorCode(() => service.skills.apply(request("release", true, "codex", "p1")))).toBe(
+        "422 config_edit_unsafe",
+      );
+      expect(readFileSync(codexConfig(), "utf8")).toBe(inline);
+      expect(existsSync(backups) ? readdirSync(backups) : []).toEqual([]);
+
+      service.skills.apply(request("review", false, "codex"));
+      const after = readFileSync(codexConfig(), "utf8");
+      expect(after).toContain("# why");
+      expect(find("review", "codex").enabled).toBe(false);
+      expect(find("release", "codex", "p1").enabled).toBe(false);
+    });
   });
 
   describe("refusals", () => {
@@ -316,6 +413,60 @@ describe("skill switches", () => {
         "422 config_unparsable",
       );
       expect(existsSync(backups) ? readdirSync(backups) : []).toEqual([]);
+    });
+
+    it("refuses a switch while a project or local settings file doesn't parse", () => {
+      const backupsMade = () => (existsSync(backups) ? readdirSync(backups) : []);
+      for (const broken of [projectSettings(), localSettings()]) {
+        rmSync(join(repo, ".claude", "settings.json"), { force: true });
+        rmSync(join(repo, ".claude", "settings.local.json"), { force: true });
+        put(broken, "{ not json");
+        for (const enabled of [false, true]) {
+          const req = request("deploy", enabled, "claude", "p1");
+          expect(errorCode(() => service.skills.diff(req))).toBe("422 config_unparsable");
+          expect(errorCode(() => service.skills.apply(req))).toBe("422 config_unparsable");
+        }
+        // Nothing was written anywhere, the user's file included, and nothing was backed up.
+        expect(existsSync(userSettings())).toBe(false);
+        expect(readFileSync(broken, "utf8")).toBe("{ not json");
+        expect(backupsMade()).toEqual([]);
+        // Listing stays tolerant: the file just sets nothing.
+        expect(find("deploy", "claude", "p1")).toMatchObject({ enabled: true, setIn: null });
+      }
+    });
+
+    it("refuses a switch while a project's settings lead outside it through a link", () => {
+      const outside = join(dir, "outside-project");
+      put(
+        join(outside, "settings.local.json"),
+        JSON.stringify({ skillOverrides: { deploy: "off" } }),
+      );
+      put(join(outside, "skills", "lint", "SKILL.md"), skillMd("lint"));
+      rmSync(join(repo, ".claude"), { recursive: true, force: true });
+      symlinkSync(outside, join(repo, ".claude"), "junction");
+      put(userSettings(), '{ "model": "opus" }\n');
+      for (const enabled of [false, true]) {
+        const req = request("deploy", enabled, "claude", "p1");
+        expect(errorCode(() => service.skills.diff(req))).toBe("403 path_outside_root");
+        expect(errorCode(() => service.skills.apply(req))).toBe("403 path_outside_root");
+      }
+      expect(readFileSync(userSettings(), "utf8")).toBe('{ "model": "opus" }\n');
+      expect(readFileSync(join(outside, "settings.local.json"), "utf8")).toContain('"off"');
+      expect(existsSync(backups) ? readdirSync(backups) : []).toEqual([]);
+      // The linked file isn't read for the list either.
+      expect(find("deploy", "claude", "p1")).toMatchObject({ enabled: true, setIn: null });
+    });
+
+    it("doesn't read a Codex config.toml that leads outside home", () => {
+      const outside = join(dir, "outside-codex");
+      put(join(outside, "config.toml"), '[[skills.config]]\nname = "review"\nenabled = false\n');
+      put(join(outside, "skills", "review", "SKILL.md"), skillMd("review"));
+      rmSync(join(home, ".codex"), { recursive: true, force: true });
+      symlinkSync(outside, join(home, ".codex"), "junction");
+      expect(find("review", "codex")).toMatchObject({ enabled: true, setIn: null });
+      expect(errorCode(() => service.skills.diff(request("review", false, "codex")))).toBe(
+        "403 path_outside_root",
+      );
     });
 
     it("refuses a settings file that leads outside its folder through a link", () => {

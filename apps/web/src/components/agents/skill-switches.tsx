@@ -14,6 +14,9 @@ import { fileKey, type RowAddon } from "./config-files-view";
 import { PatchDialog } from "./patch-dialog";
 import { SWITCH_SCOPE_NOTE, skillStateLabel, skillStateTitle } from "./skill-state";
 
+/** Per-session queries that list skills: What's loaded and the composer's `/` menu. */
+export const SESSION_SKILL_QUERIES = [["agent-config-loaded"], ["commands"]] as const;
+
 /** A switch waiting for its diff to be confirmed. */
 interface Pending {
   skill: AgentSkill;
@@ -60,8 +63,10 @@ export function useSkillSwitches(projectId: string | null) {
     onSuccess: (res, p) => {
       setPending(null);
       queryClient.setQueryData(queryKey, { skills: res.skills });
-      // Sessions' What's loaded and `/` menus read the same setting.
-      void queryClient.invalidateQueries({ queryKey: ["agent-config-loaded"] });
+      // Every session's What's loaded and composer `/` menu (`use-suggestions.ts`, cached for
+      // a minute) read the same setting, so a cached menu must not keep offering the skill.
+      for (const key of SESSION_SKILL_QUERIES)
+        void queryClient.invalidateQueries({ queryKey: key });
       toast.success(`Switched ${p.req.enabled ? "on" : "off"} ${p.skill.name}`, {
         description: res.backupPath ? `Backup: ${res.backupPath}` : (res.file ?? undefined),
       });

@@ -93,8 +93,9 @@ export class AgentConfigSkills {
   // ------------------------------------------------------------------- helpers
 
   private withState(skills: DiscoveredSkill[], context: ClaudeContext): AgentSkill[] {
-    const claude = highestFirst(context.map(readOverrides));
-    const codexRules = readRules(this.codexConfig());
+    // Listing is tolerant: a file that can't be read safely sets nothing (`readOverrides`).
+    const claude = highestFirst(context.map((f) => readOverrides(f)));
+    const codexRules = this.codexRules();
     return skills.map((skill) => {
       if (skill.provider === "codex") {
         const state = ruleState(codexRules, { name: skill.name, path: skill.file.absolutePath });
@@ -123,9 +124,22 @@ export class AgentConfigSkills {
     return join(this.deps.home, ".codex", "config.toml");
   }
 
+  /** Codex's rules for listing; none when config.toml leads outside home or doesn't parse. */
+  private codexRules(): unknown[] {
+    try {
+      guard({ root: this.deps.home, file: this.codexConfig() });
+    } catch {
+      return [];
+    }
+    return readRules(this.codexConfig());
+  }
+
   /**
    * What a switch will do, with every input checked first: the skill must be one listed for
-   * `listProjectId` (404 `skill_not_found`), and the file written must stay inside its folder.
+   * `listProjectId` (404 `skill_not_found`); every settings file that applies must be readable
+   * and inside its folder (422 `config_unparsable`, 403 `path_outside_root`), so the target is
+   * never chosen around a file that can't be read; and the file written must stay inside its
+   * folder.
    */
   private plan(req: SkillSwitchRequest): Plan {
     if (!agentConfigFeatures[req.provider].skillSwitches) {
@@ -151,7 +165,7 @@ export class AgentConfigSkills {
         render: () => renderRuleSwitch(file.file, target, byPath, enabled),
       };
     }
-    const files: OverrideFile[] = this.pageContext(project).map(readOverrides);
+    const files: OverrideFile[] = this.pageContext(project).map((f) => readOverrides(f, true));
     const userFile = claudeHookFile("user", this.deps.home, null);
     const { target, value } = planOverride(files, userFile, skill.name, enabled);
     guard(target);

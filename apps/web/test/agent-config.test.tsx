@@ -137,7 +137,14 @@ describe("SkillsView", () => {
     const client = createMockClient();
     const diffSkillSwitch = vi.spyOn(client.agentConfig, "diffSkillSwitch");
     const switchSkill = vi.spyOn(client.agentConfig, "switchSkill");
-    renderWithClient(<SkillsView projectId="p-storefront" />, client, { withRouter: true });
+    const { queryClient } = renderWithClient(<SkillsView projectId="p-storefront" />, client, {
+      withRouter: true,
+    });
+    // A session's `/` menu cached before the switch (the composer keeps it for a minute).
+    const menu = ["commands", "s-checkout"];
+    queryClient.setQueryData(menu, [
+      { name: "playwright-e2e", description: "", kind: "skill", provider: "claude" },
+    ]);
     const toggle = await screen.findByRole("switch", { name: "playwright-e2e: on" });
     // A partial Claude state shows its native name; the skill stays switched on.
     expect(screen.getByText("name-only")).toBeTruthy();
@@ -166,6 +173,8 @@ describe("SkillsView", () => {
     expect(screen.getByText("off")).toBeTruthy();
     const row = screen.getByText("playwright-e2e").closest("[data-muted]");
     expect(row?.getAttribute("data-muted")).toBe("true");
+    // The cached menu is marked stale, so the composer asks again before offering the skill.
+    expect(queryClient.getQueryState(menu)?.isInvalidated).toBe(true);
   });
 });
 
