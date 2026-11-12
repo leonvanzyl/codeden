@@ -7,8 +7,9 @@ import type { DiffScope } from "@codeden/contracts";
 
 /**
  * Give the diff view's own "+" (its gutter button, drawn inside each `diffs-container`'s
- * shadow root) the Comment label and tooltip it lacks. The view creates the button when a
- * line is first hovered and reuses it, so call this on pointer and focus events.
+ * shadow root) the Comment label and tooltip it lacks. The view inserts the button while
+ * handling a line's first `pointermove` and reuses it, so call this as that event bubbles out
+ * (see `useCommentButtonLabels`). Labelled buttons are skipped, so repeated calls are cheap.
  */
 export function labelCommentButtons(host: ParentNode): void {
   for (const view of host.querySelectorAll("diffs-container")) {

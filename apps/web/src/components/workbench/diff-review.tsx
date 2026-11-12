@@ -51,7 +51,10 @@ export function useReviewAnnotations(
 
 /**
  * A ref for a file's diff card that labels the diff's "+" (see `labelCommentButtons`). The
- * pointer and focus events come up out of the diff's shadow root, as the button appears.
+ * diff inserts the button in its own `pointermove` handler, inside its shadow root; the same
+ * event then bubbles out to this card, so the button is labelled the moment it first shows.
+ * (`pointerover` won't do: it fires before the insertion, and moving from a line onto the
+ * button stays inside the shadow root, so that one never reaches the card.)
  */
 export function useCommentButtonLabels() {
   const ref = useRef<HTMLDivElement>(null);
@@ -59,10 +62,10 @@ export function useCommentButtonLabels() {
     const el = ref.current;
     if (!el) return;
     const label = () => labelCommentButtons(el);
-    el.addEventListener("pointerover", label);
+    el.addEventListener("pointermove", label);
     el.addEventListener("focusin", label);
     return () => {
-      el.removeEventListener("pointerover", label);
+      el.removeEventListener("pointermove", label);
       el.removeEventListener("focusin", label);
     };
   }, []);
