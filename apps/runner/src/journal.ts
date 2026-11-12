@@ -18,27 +18,61 @@ interface JournalState {
   ackedSeq: number;
 }
 
+interface Entry {
+  msg: RunnerEventMessage;
+  /** Size of its line in `journal.jsonl`. */
+  bytes: number;
+}
+
+export interface JournalOptions {
+  /** Compact once this many acked events are still in the file. Default 1,000. */
+  compactEntries?: number;
+  /** ...or once they take this many bytes. Default 1 MiB. */
+  compactBytes?: number;
+  /** While acks flow, write the acked position to `state.json` at most this often. Default 250 ms. */
+  stateWriteMs?: number;
+}
+
 /**
  * Durable runner event journal (§4.2). Events are appended to `journal.jsonl` with a
  * monotonically increasing seq and kept until the server acks them, so nothing is lost
  * while the server is away. `state.json` holds the stable runner id and seq counters.
  *
- * TODO(M1): batch fsyncs and compact lazily instead of rewriting on every ack.
+ * An ack only moves the acked position in memory. Acked events leave the file in one rewrite
+ * (compaction) once enough have piled up and they outweigh what is left, so each ack costs
+ * no more than its append did. The acked position reaches `state.json` at most every
+ * `stateWriteMs`, at compaction and on `close`. After a crash the journal may still hold events
+ * the server already acked; the server's `resume` acks them again and they are not replayed.
  */
 export class Journal {
   private readonly file: string;
   private readonly stateFile: string;
+  private readonly compactEntries: number;
+  private readonly compactBytes: number;
+  private readonly stateWriteMs: number;
   private state: JournalState;
-  private entries: RunnerEventMessage[] = [];
+  /** Every event in `journal.jsonl`, oldest first; those before `head` are acked. */
+  private entries: Entry[] = [];
+  private head = 0;
+  private fileBytes = 0;
+  private ackedBytes = 0;
+  private stateTimer: ReturnType<typeof setTimeout> | undefined;
 
-  constructor(dir: string) {
+  constructor(dir: string, opts: JournalOptions = {}) {
     mkdirSync(dir, { recursive: true });
     this.file = join(dir, "journal.jsonl");
     this.stateFile = join(dir, "state.json");
+    this.compactEntries = opts.compactEntries ?? 1000;
+    this.compactBytes = opts.compactBytes ?? 1024 * 1024;
+    this.stateWriteMs = opts.stateWriteMs ?? 250;
     this.state = this.loadState();
-    this.entries = this.loadEntries().filter((e) => e.seq > this.state.ackedSeq);
-    const maxSeq = this.entries.at(-1)?.seq ?? 0;
-    this.state.lastSeq = Math.max(this.state.lastSeq, maxSeq);
+    const { entries, torn } = this.loadEntries();
+    this.entries = entries;
+    for (const e of entries) this.fileBytes += e.bytes;
+    this.state.lastSeq = Math.max(this.state.lastSeq, entries.at(-1)?.msg.seq ?? 0);
+    this.advanceHead(this.state.ackedSeq);
+    // A crash mid-append leaves a torn last line: rewrite, so the next append gets its own line.
+    if (torn) this.compact();
   }
 
   get runnerId(): string {
@@ -50,7 +84,7 @@ export class Journal {
   }
 
   get unacked(): number {
-    return this.entries.length;
+    return this.entries.length - this.head;
   }
 
   /** Assign the next seq, persist the event, and return the wire message. */
@@ -62,22 +96,91 @@ export class Journal {
       ts: new Date().toISOString(),
       event,
     };
-    appendFileSync(this.file, `${JSON.stringify(msg)}\n`);
-    this.entries.push(msg);
+    const line = `${JSON.stringify(msg)}\n`;
+    appendFileSync(this.file, line);
+    const bytes = Buffer.byteLength(line);
+    this.entries.push({ msg, bytes });
+    this.fileBytes += bytes;
     return msg;
   }
 
-  /** Drop everything with `seq <= seq` (cumulative ack). */
+  /** Acknowledge everything with `seq <= seq` (cumulative ack). */
   ack(seq: number): void {
-    if (seq <= this.state.ackedSeq) return;
-    this.state.ackedSeq = Math.min(seq, this.state.lastSeq);
-    this.entries = this.entries.filter((e) => e.seq > seq);
-    this.rewrite();
+    const upTo = Math.min(seq, this.state.lastSeq);
+    if (upTo <= this.state.ackedSeq) return;
+    this.state.ackedSeq = upTo;
+    this.advanceHead(upTo);
+    if (this.compactDue()) this.compact();
+    else this.scheduleStateWrite();
   }
 
   /** Unacked events after `seq`, oldest first (for replay on resume). */
   after(seq: number): RunnerEventMessage[] {
-    return this.entries.filter((e) => e.seq > seq);
+    const out: RunnerEventMessage[] = [];
+    for (let i = this.head; i < this.entries.length; i++) {
+      const msg = this.entries[i]?.msg;
+      if (msg && msg.seq > seq) out.push(msg);
+    }
+    return out;
+  }
+
+  /** Persist the acked position and drop acked events from the file (runner shutdown). */
+  close(): void {
+    if (this.head > 0) this.compact();
+    else this.writeState();
+  }
+
+  private advanceHead(ackedSeq: number): void {
+    for (;;) {
+      const entry = this.entries[this.head];
+      if (!entry || entry.msg.seq > ackedSeq) return;
+      this.ackedBytes += entry.bytes;
+      this.head += 1;
+    }
+  }
+
+  /** Enough acked events piled up, and rewriting what is left costs no more than they do. */
+  private compactDue(): boolean {
+    const piledUp = this.head >= this.compactEntries || this.ackedBytes >= this.compactBytes;
+    return piledUp && this.ackedBytes >= this.fileBytes - this.ackedBytes;
+  }
+
+  /** Rewrite the file without its acked events. State first, so `lastSeq` outlives them. */
+  private compact(): void {
+    this.writeState();
+    const live = this.entries.slice(this.head);
+    const tmp = `${this.file}.tmp`;
+    writeFileSync(tmp, live.map((e) => `${JSON.stringify(e.msg)}\n`).join(""));
+    renameSync(tmp, this.file);
+    this.entries = live;
+    this.head = 0;
+    this.fileBytes -= this.ackedBytes;
+    this.ackedBytes = 0;
+  }
+
+  private scheduleStateWrite(): void {
+    if (this.stateTimer) return;
+    this.stateTimer = setTimeout(() => {
+      this.stateTimer = undefined;
+      try {
+        this.writeState();
+      } catch {
+        // Only the acked position is late; the next write or `close` catches up.
+      }
+    }, this.stateWriteMs);
+    this.stateTimer.unref();
+  }
+
+  private writeState(): void {
+    if (this.stateTimer) clearTimeout(this.stateTimer);
+    this.stateTimer = undefined;
+    this.persistState(this.state);
+  }
+
+  private persistState(state: JournalState): void {
+    const tmp = `${this.stateFile}.tmp`;
+    writeFileSync(tmp, `${JSON.stringify(state, null, 2)}\n`);
+    renameSync(tmp, this.stateFile);
   }
 
   private loadState(): JournalState {
@@ -90,32 +193,22 @@ export class Journal {
       // first run
     }
     const fresh = { runnerId: randomUUID(), lastSeq: 0, ackedSeq: 0 };
-    this.writeState(fresh);
+    this.persistState(fresh);
     return fresh;
   }
 
-  private loadEntries(): RunnerEventMessage[] {
-    if (!existsSync(this.file)) return [];
-    const out: RunnerEventMessage[] = [];
-    for (const line of readFileSync(this.file, "utf8").split("\n")) {
+  private loadEntries(): { entries: Entry[]; torn: boolean } {
+    if (!existsSync(this.file)) return { entries: [], torn: false };
+    const raw = readFileSync(this.file, "utf8");
+    const entries: Entry[] = [];
+    let torn = raw.length > 0 && !raw.endsWith("\n");
+    for (const line of raw.split("\n")) {
       if (!line.trim()) continue;
       const parsed = RunnerEventMessage.safeParse(safeJson(line));
-      if (parsed.success) out.push(parsed.data); // a torn last line is skipped
+      if (parsed.success) entries.push({ msg: parsed.data, bytes: Buffer.byteLength(line) + 1 });
+      else torn = true; // a line cut short by a crash is skipped
     }
-    return out.sort((a, b) => a.seq - b.seq);
-  }
-
-  private rewrite(): void {
-    const tmp = `${this.file}.tmp`;
-    writeFileSync(tmp, this.entries.map((e) => `${JSON.stringify(e)}\n`).join(""));
-    renameSync(tmp, this.file);
-    this.writeState(this.state);
-  }
-
-  private writeState(state: JournalState): void {
-    const tmp = `${this.stateFile}.tmp`;
-    writeFileSync(tmp, `${JSON.stringify(state, null, 2)}\n`);
-    renameSync(tmp, this.stateFile);
+    return { entries: entries.sort((a, b) => a.msg.seq - b.msg.seq), torn };
   }
 }
 

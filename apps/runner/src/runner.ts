@@ -285,6 +285,11 @@ export async function startRunner(opts: StartRunnerOptions): Promise<RunningRunn
       });
       process.off("exit", removeLock);
       stopped = true;
+      try {
+        journal.close();
+      } catch (error) {
+        log(`journal: ${String(error)}`);
+      }
       log("runner stopped");
     })();
     return closing;

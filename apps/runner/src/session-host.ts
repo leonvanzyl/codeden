@@ -5,6 +5,7 @@ import type {
   RunnerSessionInfo,
 } from "@codeden/contracts";
 import type { ProviderRegistry, ProviderSession } from "@codeden/providers";
+import { DeltaBatcher } from "./delta-batcher";
 import { CommandError } from "./errors";
 import { createCheckpoint, nextCheckpointIndex } from "./git/checkpoints";
 import { isWorkTree } from "./git/exec";
@@ -20,6 +21,8 @@ interface Hosted {
   checkpoints: boolean;
   /** Serializes checkpoint writes for this session. */
   checkpointChain: Promise<void>;
+  /** Emits the session's agent events, streamed deltas batched. */
+  events: DeltaBatcher;
   /** Why the session is closing, reported with its exit event. */
   closeReason?: "stopped" | "runner_exit";
   /** A running turn was interrupted by a drain: report it as a runner restart. */
@@ -34,7 +37,8 @@ export interface SessionHostOptions {
 
 /**
  * Owns live provider sessions on this runner and pumps their normalized events into the
- * journal (via `emit`). Sessions outlive server connections. Any number run concurrently.
+ * journal (via `emit`), streamed deltas batched (`DeltaBatcher`). Sessions outlive server
+ * connections. Any number run concurrently.
  * When the cwd is a git work tree, the host writes turn checkpoints (§9): a baseline when
  * the session starts and one after every root-thread turn ends.
  */
@@ -102,6 +106,9 @@ export class SessionHost {
       cwd: cmd.options.cwd,
       checkpoints,
       checkpointChain: Promise.resolve(),
+      events: new DeltaBatcher((event) =>
+        this.emit({ kind: "agent", sessionId: cmd.sessionId, event }),
+      ),
       drainInterrupted: false,
       turnCutOff: false,
     };
@@ -167,6 +174,7 @@ export class SessionHost {
     hosted.closeReason ??= reason;
     hosted.state = "closing";
     await hosted.session.close();
+    hosted.events.flush();
     await hosted.checkpointChain;
   }
 
@@ -221,6 +229,7 @@ export class SessionHost {
         const index = await nextCheckpointIndex(hosted.cwd, sessionId);
         if (baseline && index > 0) return;
         const cp = await createCheckpoint(hosted.cwd, sessionId, index, turnId);
+        hosted.events.flush();
         this.emit({
           kind: "checkpoint.created",
           sessionId,
@@ -242,8 +251,9 @@ export class SessionHost {
         // Track first: a turn's end queues its checkpoint before the server hears the turn
         // ended, so anything it asks after that (`settled`) waits for that checkpoint.
         this.track(sessionId, hosted, event);
-        this.emit({ kind: "agent", sessionId, event });
+        hosted.events.push(event);
       }
+      hosted.events.flush();
       await hosted.checkpointChain;
       this.emit({
         kind: "session.process",
@@ -256,6 +266,7 @@ export class SessionHost {
           : {}),
       });
     } catch (error) {
+      hosted.events.flush();
       const message = error instanceof Error ? error.message : String(error);
       this.emit({
         kind: "session.process",

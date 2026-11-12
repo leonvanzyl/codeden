@@ -97,7 +97,7 @@ The runner hosts everything that has to sit next to the code: agent processes (t
 
 - **Local today.** It's a separate, detached process that the server starts on demand. It's found again through a lock file in the data directory holding its port, token, PID and version.
 - **Survives server restarts.** A server restart (crash, update, dev reload) doesn't touch running agents. The server reconnects and catches up.
-- **Event journal.** The runner keeps events locally until the server acknowledges them by sequence number, so nothing is lost while the server is away.
+- **Event journal.** The runner keeps events locally until the server acknowledges them by sequence number, so nothing is lost while the server is away. Streamed deltas for one item are batched (up to about 50 ms) before they're journaled, and acknowledged events are compacted out of the journal lazily rather than on every ack.
 - **Upgrades.** On a version mismatch, the runner drains. It finishes or pauses turns, then restarts. Sessions are resumed through their provider's resume support, with an automatic "you were interrupted, continue" message when a turn was cut off.
 - **Remote later.** The same runner package can run inside an Upstash Box, a VPS or a container and connect back over the same protocol. That's the seam for the software factory; no remote backend ships in v1.
 

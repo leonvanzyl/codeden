@@ -39,12 +39,14 @@ describe("Journal", () => {
     journal.append({ kind: "runner.draining", reason: "b" });
     journal.append({ kind: "runner.draining", reason: "c" });
     journal.ack(1);
+    journal.close();
 
     const reloaded = new Journal(dir);
     expect(reloaded.runnerId).toBe(id);
     expect(reloaded.lastSeq).toBe(3);
     expect(reloaded.after(0).map((e) => e.seq)).toEqual([2, 3]);
     reloaded.ack(3);
+    reloaded.close();
     expect(new Journal(dir).unacked).toBe(0);
     expect(new Journal(dir).append({ kind: "runner.draining", reason: "d" }).seq).toBe(4);
   });
