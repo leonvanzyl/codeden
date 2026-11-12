@@ -2,6 +2,7 @@ import type { Session, SessionUsage, Usage, UsageTotals } from "@codeden/contrac
 import { screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { mockUsageApi } from "@/components/usage/mock-data";
+import { SessionCostChip } from "@/components/usage/session-cost";
 import { DetailsPanel } from "@/components/workbench/details-panel";
 import { makeSession } from "@/lib/api/mock/fixtures/helpers";
 import { emptyTranscript } from "@/lib/transcript/reducer";
@@ -102,13 +103,21 @@ describe("DetailsPanel context window (§12.6: cost sources are labelled honestl
     expect(barWidth).toBeNull();
   });
 
-  it("says a session is not priced instead of showing a cost", async () => {
+  it("says a session is not priced instead of showing a cost, like the header chip", async () => {
     liveUsage({ inputTokens: 4_000 });
-    ledger({ turns: 2, unpricedTurns: 2 });
-    render();
+    ledger({ turns: 2, unpricedTurns: 2, inputTokens: 4_000 });
+    renderWithClient(
+      <>
+        <SessionCostChip sessionId={ID} />
+        <DetailsPanel session={session()} />
+      </>,
+      undefined,
+      { withRouter: true },
+    );
     const { text, barWidth } = await contextWindow("Not priced");
     expect(text).not.toContain("$");
     for (const figure of MADE_UP) expect(text).not.toContain(figure);
     expect(barWidth).toBeNull();
+    expect((await screen.findByTestId("session-cost")).textContent).toBe("Not priced·4k tok");
   });
 });
