@@ -182,6 +182,20 @@ const REVIEW_FOCUS: Record<WorkType, string> = {
   docs: "Is every command, path, option and API it mentions correct for the code as written?",
 };
 
+/** How a reviewer repairs a broken install before testing (pnpm projects, non-interactive). */
+export const REINSTALL =
+  "`CI=true pnpm install --frozen-lockfile --config.confirm-modules-purge=false`";
+
+/**
+ * The reviewer's rules for testing (#206): CI on the PR's head is the authority for the full
+ * suite, and the reviewer's own environment is never a reason to request changes.
+ */
+export const CI_IS_AUTHORITATIVE = [
+  "CI on the pull request's head is the authority for the full test suite: it runs the suite on a clean machine, and green CI there means the suite passes, also for an acceptance criterion that asks for it.",
+  `A broken local environment (missing or corrupted dependencies, a module that won't load, timeouts under load) is an environment problem, not a defect of the pull request. Before testing, reinstall the dependencies cleanly and non-interactively (for pnpm: ${REINSTALL}) rather than giving up, then run what you can (typecheck, lint, the focused tests).`,
+  "Never request changes only because local verification couldn't run: approve when the code is right and CI is green, and say in the summary which local checks couldn't run and why. `request_changes` needs a cause in the pull request: a defect, a criterion not met, or red CI. If your environment is the only thing in your way, set `blockers: \"environment\"`, and the factory gives you the CI result instead of sending it to the author.",
+].join("\n");
+
 /** One verdict per review, but a call rejected for invalid input never counts as it. */
 const SUBMIT_REVIEW_RETRY =
   "If the call is rejected for invalid input, nothing was recorded: fix what the error names and call it again. Once a verdict is recorded, don't submit another.";
@@ -197,8 +211,8 @@ export function reviewerPrompt(
 ): string {
   const pr = item.pr ? `#${item.pr.number} (${item.pr.url})` : "the pull request";
   const read = localBase
-    ? `You are in the author's worktree, on the PR branch. Read the change locally and offline: \`git diff ${localBase}...HEAD\`, \`git log --oneline ${localBase}..HEAD\`, and the code around it; run the tests. Do not use the network (no \`gh\`, no fetch). Do not modify files, commit or push.`
-    : `Read the change (for example \`gh pr diff ${item.pr?.number ?? ""}\` and \`gh pr view ${item.pr?.number ?? ""}\`), and the code around it. Do not modify files, commit, push or comment on GitHub.`;
+    ? `You are in the author's worktree, on the PR branch. Read the change locally and offline: \`git diff ${localBase}...HEAD\`, \`git log --oneline ${localBase}..HEAD\`, and the code around it; run the tests. Do not use the network for git or GitHub (no \`gh\`, no fetch); installing the project's dependencies is fine. Do not modify tracked files, commit or push.`
+    : `Read the change (for example \`gh pr diff ${item.pr?.number ?? ""}\` and \`gh pr view ${item.pr?.number ?? ""}\`; \`gh pr checks ${item.pr?.number ?? ""}\` shows CI on its head), and the code around it. Do not modify tracked files, commit, push or comment on GitHub.`;
   const type = item.type ?? "feature";
   return [
     `You are the independent reviewer of pull request ${pr}: **${item.title}** (${type} pipeline). Another agent wrote it. ${autoMerge ? "CodeDen merges it automatically only if you approve and every other merge check passes." : "If you approve and every merge check passes, it goes to a person to merge."}`,
@@ -215,6 +229,7 @@ export function reviewerPrompt(
     read,
     FOREGROUND_COMMANDS,
     `Judge: ${REVIEW_FOCUS[type]} Does it fit the vision and stay out of its out-of-scope list and protected areas? Are there tests that prove the behaviour (or are none needed)? Any security problems (injection, secrets, unsafe input, risky dependencies)?`,
+    CI_IS_AUTHORITATIVE,
     UNTRUSTED_INPUT,
     "",
     `Then submit one verdict with \`factory_submit_review\`: \`approve\` only when everything holds, \`request_changes\` for fixable problems (they go back to the author), \`reject\` when the change should not exist. Be specific in the summary (up to ${REVIEW_SUMMARY_MAX.toLocaleString("en-US")} characters are stored). ${SUBMIT_REVIEW_RETRY}`,
@@ -300,7 +315,7 @@ export function tooLargePrompt(item: FactoryItem, detail: string, failed: MergeC
 
 /** Ask a reviewer to look again after a revision. */
 export function reReviewPrompt(item: FactoryItem): string {
-  return `The author pushed a revision to pull request #${item.pr?.number ?? "?"}. Review the updated change again against the same criteria and submit one fresh verdict with \`factory_submit_review\`. ${SUBMIT_REVIEW_RETRY}`;
+  return `The author pushed a revision to pull request #${item.pr?.number ?? "?"}. Review the updated change again against the same criteria and submit one fresh verdict with \`factory_submit_review\`. CI on its new head is still the authority for the full test suite, and your local environment is never a reason to request changes. ${SUBMIT_REVIEW_RETRY}`;
 }
 
 export const BUILDER_NUDGE =

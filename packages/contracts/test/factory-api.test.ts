@@ -251,6 +251,16 @@ describe("factory API contracts (§10.1)", () => {
     expect(verdict.security.concerns).toEqual([]);
     expect(ReviewVerdict.safeParse({ verdict: "maybe", summary: "x" }).success).toBe(false);
     expect(ReviewVerdict.parse(JSON.parse(JSON.stringify(verdict)))).toEqual(verdict);
+    expect(verdict.blockers).toBeUndefined();
+    // A request for changes blocked only by the reviewer's environment (#206).
+    const environment = ReviewVerdict.parse({
+      ...verdict,
+      verdict: "request_changes",
+      blockers: "environment",
+    });
+    expect(ReviewVerdict.parse(JSON.parse(JSON.stringify(environment)))).toEqual(environment);
+    expect(ReviewVerdictSubmission.parse(environment).blockers).toBe("environment");
+    expect(ReviewVerdict.safeParse({ ...verdict, blockers: "flaky" }).success).toBe(false);
     const decision = FactoryDecisionRequest.parse({
       question: "Polish index.html or migrate first?",
       decision: "Migrate first",

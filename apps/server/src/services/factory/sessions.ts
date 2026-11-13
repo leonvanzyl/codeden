@@ -166,15 +166,17 @@ export class FactorySessions {
   }
 
   /**
-   * Start the reviewer offline: in the builder's worktree when there is one, otherwise (a
-   * revert PR opened through the API) in a new worktree on the PR's head, fetched from origin
-   * by CodeDen before the session starts.
+   * Start the reviewer: in a new worktree on the PR's head, fetched from origin by CodeDen
+   * before the session starts, when `pr` is given (a revert PR opened through the API, or an
+   * earlier reviewer's environment in the builder's worktree couldn't verify the change);
+   * otherwise offline in the builder's worktree when there is one.
    */
   startReviewer(
     item: FactoryItem,
     vision: string,
     reviewer: { provider: string; model: string | null },
     note: string | null,
+    /** The PR's head to review in a fresh worktree; null to use the builder's worktree. */
     pr: { headBranch: string; baseBranch: string } | null,
     autoMerge: boolean,
     /** A brief of its own instead of the whole review (a conflict resolution's re-check). */
@@ -187,10 +189,7 @@ export class FactorySessions {
     const worktree = builder && !builder.worktreeRemovedAt ? builder.worktreePath : null;
     let workspace: StartSessionRequest["workspace"] = { mode: "worktree" };
     let localBase: string | null = null;
-    if (worktree) {
-      workspace = { mode: "existing", path: worktree };
-      localBase = builder?.baseBranch ?? "main";
-    } else if (pr) {
+    if (pr) {
       workspace = {
         mode: "worktree",
         branch: `codeden/review-${item.pr?.number ?? item.id.slice(0, 8)}-${item.id.slice(0, 4)}`,
@@ -198,6 +197,9 @@ export class FactorySessions {
         fetch: true,
       };
       localBase = `origin/${pr.baseBranch}`;
+    } else if (worktree) {
+      workspace = { mode: "existing", path: worktree };
+      localBase = builder?.baseBranch ?? "main";
     }
     return this.start({
       projectId: item.projectId,

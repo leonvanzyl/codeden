@@ -118,6 +118,19 @@ export const ReviewVerdict = z.object({
     note: z.string().optional(),
   }),
   security: z.object({ concerns: z.array(z.string()).default([]) }),
+  /**
+   * What stops an approval, with `request_changes`. `pr` (the default, when absent): something
+   * wrong with the pull request (a defect, a missing criterion, red CI). `environment`: only the
+   * reviewer's own local environment (missing or corrupted dependencies, timeouts under load)
+   * couldn't verify the change. Then CI on the PR's head is the authority for the full suite: the
+   * factory never sends the verdict to the author as a revise round.
+   */
+  blockers: z
+    .enum(["pr", "environment"])
+    .optional()
+    .describe(
+      "With `request_changes`: `pr` (default) when something is wrong with the pull request; `environment` when only your local environment couldn't verify it (broken dependencies, timeouts). CI on the PR's head is the authority for the full suite, so an `environment` verdict isn't sent to the author: you get the CI result instead.",
+    ),
 });
 export type ReviewVerdict = z.infer<typeof ReviewVerdict>;
 export type ReviewVerdictInit = z.input<typeof ReviewVerdict>;
