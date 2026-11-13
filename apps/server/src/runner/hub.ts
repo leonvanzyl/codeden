@@ -89,7 +89,11 @@ export class RunnerHub implements RunnerRouter {
     this.homePort = runnerPort(() => this.homeClient());
   }
 
-  /** Register a runner (a `runner.registered` event) and create its client; `start` it next. */
+  /**
+   * Create a runner's client (`start` it next), registering the runner first (a
+   * `runner.registered` event) when it is new, was deleted or changed. Re-adding an unchanged
+   * runner, such as the home runner on every server start, appends nothing.
+   */
   add(spec: RunnerSpec): RunnerClient {
     if (this.entries.has(spec.id)) throw new Error(`Runner ${spec.id} is already added`);
     const previous = findRunnerRecord(this.opts.db, spec.id);
@@ -108,9 +112,11 @@ export class RunnerHub implements RunnerRouter {
       lastSeenAt: previous?.lastSeenAt ?? null,
       lastError: null,
     };
-    this.opts.store.append([
-      { type: "runner.registered", sessionId: null, payload: { runner: record } },
-    ]);
+    if (!previous || previous.state === "deleted" || detailsChanged(previous, record)) {
+      this.opts.store.append([
+        { type: "runner.registered", sessionId: null, payload: { runner: record } },
+      ]);
+    }
     const name = record.home ? undefined : describeRunner(record);
     const log = this.opts.log;
     const client = new RunnerClient({
@@ -225,6 +231,18 @@ function unavailablePort(record: RunnerRecord): RunnerPort {
         new ServiceError(503, "runner_unavailable", `${name} is not available (${record.state})`),
       ),
   };
+}
+
+/** Whether what the server set up about a runner differs (not its live state). */
+function detailsChanged(a: RunnerRecord, b: RunnerRecord): boolean {
+  return (
+    a.backend !== b.backend ||
+    a.home !== b.home ||
+    a.sandboxRef !== b.sandboxRef ||
+    a.projectId !== b.projectId ||
+    a.sessionId !== b.sessionId ||
+    a.imageVersion !== b.imageVersion
+  );
 }
 
 const LIVE_STATE: Record<RunnerConnectionStatus["state"], RunnerRecordState> = {

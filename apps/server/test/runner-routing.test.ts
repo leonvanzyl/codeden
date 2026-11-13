@@ -101,6 +101,33 @@ describe("runners projection", () => {
       { id: HOME_RUNNER_ID, home: true, state: "connected", runnerId: "r-home" },
     ]);
   });
+
+  it("registers a runner only when it is new, deleted or changed (not on every restart)", async () => {
+    const spec = {
+      id: "rn-1",
+      backend: "docker",
+      dir,
+      lockFile: join(dir, "none.json"),
+      launch: null,
+    } as const;
+    const registered = () =>
+      store.listAfter(0, 1_000).filter((e) => e.type === "runner.registered").length;
+    const first = new RunnerHub({ db: database.db, store });
+    first.add(spec);
+    expect(registered()).toBe(1);
+    // A server restart adds the same runner again.
+    new RunnerHub({ db: database.db, store }).add(spec);
+    expect(registered()).toBe(1);
+    new RunnerHub({ db: database.db, store }).add({ ...spec, sandboxRef: "c2" });
+    expect(registered()).toBe(2);
+    await first.remove("rn-1", { deleted: true });
+    new RunnerHub({ db: database.db, store }).add({ ...spec, sandboxRef: "c2" });
+    expect(registered()).toBe(3);
+    expect(listRunnerRecords(database.db)[0]).toMatchObject({
+      state: "starting",
+      sandboxRef: "c2",
+    });
+  });
 });
 
 describe("RunnerHub routing", () => {
