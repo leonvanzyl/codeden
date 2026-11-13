@@ -147,9 +147,14 @@ describe("CodexAdapter model discovery", () => {
 
   it("keeps the last real list when a later discovery fails", async () => {
     process.env.FAKE_CODEX_MODEL_LIST = "paged";
-    const adapter = new CodexAdapter({ executable: fakeCodex, modelListTimeoutMs: 300 });
+    // A busy machine can take seconds to start the fake app-server: only the hanging
+    // discovery gets the short deadline (the adapter reads its options on every discovery).
+    const options = { executable: fakeCodex, modelListTimeoutMs: 30_000 };
+    const adapter = new CodexAdapter(options);
     await adapter.refreshModels();
+    expect(adapter.models()).toEqual(PAGED);
     process.env.FAKE_CODEX_MODEL_LIST = "hang";
+    options.modelListTimeoutMs = 300;
     await adapter.refreshModels();
     expect(adapter.models()).toEqual(PAGED);
   });

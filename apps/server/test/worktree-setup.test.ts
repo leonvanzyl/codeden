@@ -8,7 +8,7 @@ let h: Harness;
 beforeAll(async () => {
   const setup = `node -e "require('fs').writeFileSync('setup-ran.txt', 'yes'); console.log('setup output')"`;
   h = await startHarness({}, { ".codeden/project.json": JSON.stringify({ setup: [setup] }) });
-}, 60_000);
+});
 
 afterAll(async () => {
   await h?.close();
@@ -26,4 +26,4 @@ it("runs .codeden/project.json setup commands in a new worktree and records thei
       output: expect.stringContaining("setup output"),
     }),
   ]);
-}, 60_000);
+});

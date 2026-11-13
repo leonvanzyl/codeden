@@ -112,7 +112,7 @@ describe("agent configuration API", () => {
     memoryDir = join(home, ".claude", "projects", claudeProjectSlug(h.repo), "memory");
     put(join(memoryDir, "MEMORY.md"), "- [Testing](testing.md)\n");
     put(join(memoryDir, "testing.md"), "Run vitest.\n");
-  }, 60_000);
+  });
 
   afterAll(async () => {
     await h?.close();

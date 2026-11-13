@@ -18,7 +18,7 @@ describe("GET /api/sessions/:id/commands", () => {
 
   beforeAll(async () => {
     h = await startHarness();
-  }, 60_000);
+  });
   afterAll(async () => {
     await h?.close();
   });

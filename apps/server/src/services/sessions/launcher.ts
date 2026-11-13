@@ -78,6 +78,11 @@ interface PreparedWorkspace {
 
 const PREPARE_TIMEOUT_MS = 10 * 60_000;
 const START_TIMEOUT_MS = 60_000;
+/**
+ * `session.start` refusals after which no provider process of the session runs on the runner:
+ * it was neither hosted nor being opened (those answer `session_exists`), and this open failed.
+ */
+const NOTHING_RUNS = new Set(["open_failed", "unknown_provider"]);
 
 /**
  * Starts sessions on their runner (the one in `sessions.runnerId`, else the home runner):
@@ -123,21 +128,16 @@ export class SessionLauncher {
         workspaceFallback: fallback,
       }));
     }
-    const result = await runner.request(
+    const result = await this.open(
+      runner,
       {
-        name: "session.start",
-        sessionId,
-        providerId: session.provider,
-        options: this.sessionOptions({
-          ...session,
-          cwd: ws.cwd,
-          worktreePath: ws.worktreePath,
-          branch: ws.branch,
-          baseBranch: ws.baseBranch,
-        }),
-        input: withSetupNote(opts.input, ws.setupNote),
+        ...session,
+        cwd: ws.cwd,
+        worktreePath: ws.worktreePath,
+        branch: ws.branch,
+        baseBranch: ws.baseBranch,
       },
-      START_TIMEOUT_MS,
+      withSetupNote(opts.input, ws.setupNote),
     );
     repo.update(sessionId, (s) => ({
       ...s,
@@ -162,16 +162,7 @@ export class SessionLauncher {
     const runner = runnerForSession(this.deps, session.id);
     await this.requireRunner(runner);
     const { session: current, setupNote } = await this.restoreWorktree(session);
-    const result = await runner.request(
-      {
-        name: "session.start",
-        sessionId: current.id,
-        providerId: current.provider,
-        options: this.sessionOptions(current),
-        input: withSetupNote(input, setupNote),
-      },
-      START_TIMEOUT_MS,
-    );
+    const result = await this.open(runner, current, withSetupNote(input, setupNote));
     this.deps.repo.update(session.id, (s) => ({
       ...s,
       resumeToken: result.resumeToken ?? s.resumeToken,
@@ -225,25 +216,59 @@ export class SessionLauncher {
   }
 
   /**
-   * Provider options for a start or resume: model, effort, autonomy, plan mode, cwd, the
-   * CodeDen system prompt, and CodeDen's MCP server through the runner's local proxy with a
-   * freshly minted session token (minting revokes the previous one). A session still planning
-   * reopens in plan mode; one whose plan was approved reopens at its permission level.
+   * Open the provider session on the runner (`session.start`) with a freshly minted MCP token,
+   * then retire the tokens no running process holds (§8.3). Started: the session's other
+   * tokens (their processes are gone). Refused because the session already runs or is being
+   * opened (`session_exists`, a second resume racing the first after a restart): only the new
+   * token, since that process holds an earlier one. Could not be opened: all of them, nothing
+   * runs. Any other failure (a timeout, a lost connection, an error once the process ran)
+   * retires nothing: a process may hold the new token or an earlier one; the next open or the
+   * session's end retires them.
    */
-  sessionOptions(session: Session): SessionOptions {
+  private async open(runner: RunnerPort, session: Session, input: UserInput | undefined) {
+    const token = runner.mcpProxyUrl()
+      ? this.deps.tokens.mint({
+          role: session.role,
+          sessionId: session.id,
+          projectId: session.projectId,
+        })
+      : null;
+    try {
+      const result = await runner.request(
+        {
+          name: "session.start",
+          sessionId: session.id,
+          providerId: session.provider,
+          options: this.sessionOptions(session, token),
+          input,
+        },
+        START_TIMEOUT_MS,
+      );
+      if (token) this.deps.tokens.revokeSession(session.id, token);
+      return result;
+    } catch (error) {
+      const code = runnerErrorCode(error);
+      if (token && code === "session_exists") this.deps.tokens.revoke(token);
+      if (token && NOTHING_RUNS.has(code ?? "")) this.deps.tokens.revokeSession(session.id);
+      throw error;
+    }
+  }
+
+  /**
+   * Provider options for a start or resume: model, effort, autonomy, plan mode, cwd, the
+   * CodeDen system prompt, and, given the session's MCP token, CodeDen's MCP server through the
+   * runner's local proxy. A session still planning reopens in plan mode; one whose plan was
+   * approved reopens at its permission level.
+   */
+  sessionOptions(session: Session, mcpToken: string | null = null): SessionOptions {
     const proxyUrl = runnerForSession(this.deps, session.id).mcpProxyUrl();
     const mcpServers: McpServerConfig[] = [];
-    if (proxyUrl) {
-      const token = this.deps.tokens.mint({
-        role: session.role,
-        sessionId: session.id,
-        projectId: session.projectId,
-      });
+    if (proxyUrl && mcpToken) {
       mcpServers.push({
         transport: "http",
         name: MCP_SERVER_NAME,
         url: proxyUrl,
-        headers: { Authorization: `Bearer ${token}` },
+        headers: { Authorization: `Bearer ${mcpToken}` },
         toolTimeoutSec: 600,
         trusted: true,
       });

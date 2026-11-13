@@ -36,7 +36,7 @@ function userState(dir: string) {
 }
 
 // Each test runs several git commands; on loaded Windows runners that alone can take over 5 s.
-describe("turn checkpoints", { timeout: 20_000 }, () => {
+describe("turn checkpoints", () => {
   it("snapshots tracked, untracked, deleted and binary files but not ignored ones", async () => {
     const dir = repo({
       "README.md": "# demo\n",
@@ -191,7 +191,7 @@ describe("turn checkpoints", { timeout: 20_000 }, () => {
   });
 });
 
-describe("git.diff and git.status", { timeout: 20_000 }, () => {
+describe("git.diff and git.status", () => {
   it("diffs HEAD against the working tree including untracked files", async () => {
     const dir = repo({ "a.txt": "a\n" });
     write(dir, "a.txt", "b\n");

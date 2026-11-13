@@ -170,7 +170,7 @@ describe("automations API: create, duplicate, export and import", () => {
       { automations: { rescanMs: 0 }, github: { sync: false } },
       { ".codeden/automations/release-notes.md": RELEASE_NOTES },
     );
-  }, 60_000);
+  });
   afterAll(async () => {
     await h?.close();
   });

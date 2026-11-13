@@ -60,6 +60,19 @@ describe("PM tools and untrusted issues in turns the user didn't start (#137)", 
       (await h.detail(pmId)).session.status === "idle" ? true : undefined,
     );
   };
+  /**
+   * Wait until nothing is on its way to the PM: its agent sessions' turns ended, their reports
+   * reached it and the turn they woke it for is over. A late report would otherwise wake the
+   * PM after the turn a test starts, so that turn would no longer be its latest.
+   */
+  const pmSettled = () =>
+    waitUntil(async () => {
+      const busy = ["created", "queued", "starting", "running"];
+      const agents = h.server.services.sessionRepo.list({ projectId: GH, role: "agent" });
+      if (agents.some((s) => busy.includes(s.status))) return undefined;
+      if (h.server.services.orchestration.notices.undelivered("pm", GH).length) return undefined;
+      return (await h.detail(pmId)).session.status === "idle" ? true : undefined;
+    });
   const issueSessions = (number: number) =>
     h.server.services.sessionRepo
       .list({ projectId: GH, role: "agent" })
@@ -141,12 +154,12 @@ describe("PM tools and untrusted issues in turns the user didn't start (#137)", 
       { type: "project.created", sessionId: null, payload: { project: Project.parse(project) } },
     ]);
     github.githubProjects.add(GH);
-  }, 60_000);
+  });
   afterAll(async () => {
     await h?.close();
   });
 
-  it("start_session refuses a stranger's issue in a triage turn", { timeout: 60_000 }, async () => {
+  it("start_session refuses a stranger's issue in a triage turn", async () => {
     await waitUntil(() => h.server.services.automations.definitions.find(triageId));
     expect((await h.api("POST", `/automations/${triageId}/enable`, {})).status).toBe(200);
     h.server.services.store.append([
@@ -199,9 +212,7 @@ describe("PM tools and untrusted issues in turns the user didn't start (#137)", 
     expect(issueSessions(45)).toHaveLength(1);
   });
 
-  it("factory_admit_issue refuses in turns an automation or a GitHub notice started", {
-    timeout: 60_000,
-  }, async () => {
+  it("factory_admit_issue refuses in turns an automation or a GitHub notice started", async () => {
     const mode = await h.api("PUT", `/projects/${GH}/autonomy`, {
       mode: "software_factory",
       limits: { dailyBudget: { usd: 5 } },
@@ -248,9 +259,7 @@ describe("PM tools and untrusted issues in turns the user didn't start (#137)", 
     expect(item(ignored?.id as string)).toMatchObject({ stage: "ignored", trust: "untrusted" });
   });
 
-  it("still lets the PM admit and start untrusted work when the user asked in this turn", {
-    timeout: 60_000,
-  }, async () => {
+  it("still lets the PM admit and start untrusted work when the user asked in this turn", async () => {
     // Fresh issues from untrusted authors, so this doesn't depend on the tests above.
     h.server.services.store.append([
       {
@@ -265,6 +274,7 @@ describe("PM tools and untrusted issues in turns the user didn't start (#137)", 
     expect(ignored).toMatchObject({ trust: "untrusted", author: "eve" });
 
     const text = `Let #${opened.number} in, and start a session on #47.`;
+    await pmSettled();
     await h.api("POST", `/orchestration/projects/${GH}/pm/messages`, { input: { text } });
     await pmTurnDone(text);
     // Saved with the session, so a turn the runner keeps through a server restart stays yours.
@@ -282,9 +292,7 @@ describe("PM tools and untrusted issues in turns the user didn't start (#137)", 
     expect(issueSessions(47)).toHaveLength(1);
   });
 
-  it("counts a request the orchestrator passes on only when the user started its turn", {
-    timeout: 60_000,
-  }, async () => {
+  it("counts a request the orchestrator passes on only when the user started its turn", async () => {
     const asOrchestrator = (name: string, args: unknown, sessionId: string) =>
       h.server.services.tools.call(name, args, {
         role: "orchestrator",
@@ -317,6 +325,7 @@ describe("PM tools and untrusted issues in turns the user didn't start (#137)", 
       (await h.detail(orchestratorId)).session.status === "idle" ? true : undefined,
     );
     const relay = "Please start a session on #48 for the user.";
+    await pmSettled();
     expect(
       (await asOrchestrator("message_pm", { projectId: GH, text: relay }, orchestratorId)).isError,
     ).toBe(false);
@@ -353,9 +362,7 @@ describe("PM tools and untrusted issues in turns the user didn't start (#137)", 
     expect(issueSessions(49)).toHaveLength(0);
   });
 
-  it("keeps an automatic turn untrusted when the runner took it but its answer was lost", {
-    timeout: 60_000,
-  }, async () => {
+  it("keeps an automatic turn untrusted when the runner took it but its answer was lost", async () => {
     h.server.services.store.append([
       {
         type: "issue.updated",
@@ -429,9 +436,7 @@ describe("PM tools and untrusted issues in turns the user didn't start (#137)", 
     );
   });
 
-  it("never lets a user message that didn't start the turn authorize an automation's turn", {
-    timeout: 60_000,
-  }, async () => {
+  it("never lets a user message that didn't start the turn authorize an automation's turn", async () => {
     h.server.services.store.append([
       {
         type: "issue.updated",

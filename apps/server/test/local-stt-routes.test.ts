@@ -56,7 +56,7 @@ describe("local Whisper routes", () => {
         }),
       },
     });
-  }, 60_000);
+  });
 
   afterAll(async () => {
     await h?.close();

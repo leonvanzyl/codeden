@@ -14,6 +14,13 @@ import { removeTree } from "./remove-tree";
 
 export const TOKEN = "d".repeat(64);
 
+/**
+ * The shortest deadline of any server-to-runner command in tests (`runnerRequestTimeoutFloorMs`):
+ * on a busy machine the runner can take longer than the product's 5-30 s to stop a session or
+ * answer a status. Below the 120 s test timeout, so a command that never answers says so.
+ */
+export const RUNNER_REQUEST_TIMEOUT_FLOOR_MS = 90_000;
+
 /** A server with a real runner (Fake provider) and a local git repo as a project. */
 export interface Harness {
   home: string;
@@ -27,15 +34,20 @@ export interface Harness {
   close: () => Promise<void>;
 }
 
+/**
+ * Poll `probe` until it returns a value (not `undefined` or `false`). The default deadline is
+ * generous for a busy machine and half the runner project's 120 s test timeout
+ * (`vitest.config.ts`), so a slow wait reports itself before Vitest stops the test.
+ */
 export async function waitUntil<T>(
   probe: () => Promise<T | undefined> | T | undefined,
-  timeoutMs = 20_000,
+  timeoutMs = 60_000,
 ): Promise<T> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     const value = await probe();
     if (value !== undefined && value !== false) return value;
-    if (Date.now() > deadline) throw new Error("timed out");
+    if (Date.now() > deadline) throw new Error(`timed out after ${timeoutMs} ms`);
     await new Promise((r) => setTimeout(r, 50));
   }
 }
@@ -70,13 +82,21 @@ export async function startHarness(
     checkSetupOnStart: false,
     userHome: home,
     realtimeFlushMs: 10,
+    runnerRequestTimeoutFloorMs: RUNNER_REQUEST_TIMEOUT_FLOOR_MS,
     ...extra,
   });
   const api = async (method: string, path: string, body?: unknown) => {
-    const res = await fetch(`${server.url}/api${path}`, {
-      method,
-      headers: { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
-      body: body === undefined ? undefined : JSON.stringify(body),
+    const send = () =>
+      fetch(`${server.url}/api${path}`, {
+        method,
+        headers: { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      });
+    // On a busy machine the server can close an idle keep-alive connection just as fetch
+    // reuses it: the request fails with ECONNRESET before it was read, so send it again.
+    const res = await send().catch((error: unknown) => {
+      if ((error as { cause?: { code?: string } }).cause?.code === "ECONNRESET") return send();
+      throw error;
     });
     return { status: res.status, body: (await res.json()) as unknown };
   };

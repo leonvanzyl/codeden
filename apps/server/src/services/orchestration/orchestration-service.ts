@@ -14,6 +14,7 @@ import {
 import type { Db } from "../../db/client";
 import type { EventStore } from "../../events/store";
 import type { ArtifactService } from "../artifacts";
+import { isValidTimezone, machineTimezone } from "../automations/cron";
 import { errorMessage } from "../errors";
 import type { TrustedAuthors } from "../github/review-trust";
 import type { InboxService } from "../inbox-service";
@@ -69,6 +70,8 @@ export interface OrchestrationDeps {
   /** The project's trusted authors, whose PR reviews count without write access. Default: none. */
   trustedAuthors?: TrustedAuthors;
   automation?: AutomationPort;
+  /** The user's IANA timezone (the usage settings', else the machine's). Default: the machine's. */
+  timezone?: () => string;
   options?: OrchestrationOptions;
   log?: (message: string) => void;
 }
@@ -226,12 +229,26 @@ export class OrchestrationService {
     };
   }
 
+  /** The user's IANA timezone, for the clock times the PM and the orchestrator tell the user. */
+  timezone(): string {
+    const tz = this.deps.timezone?.();
+    return tz && isValidTimezone(tz) ? tz : machineTimezone();
+  }
+
   /** The digest text for a role session's next turn. */
   digestFor(session: Session): string {
     if (session.role === "pm" && session.projectId) {
-      return renderProjectDigest(this.projectStatus(session.projectId));
+      return renderProjectDigest(
+        this.projectStatus(session.projectId),
+        Date.now(),
+        this.timezone(),
+      );
     }
-    return renderOverviewDigest({ ...this.overview(), pmMessages: [] });
+    return renderOverviewDigest(
+      { ...this.overview(), pmMessages: [] },
+      Date.now(),
+      this.timezone(),
+    );
   }
 
   // ---------------------------------------------------------------- messaging

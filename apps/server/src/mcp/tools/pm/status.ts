@@ -12,7 +12,11 @@ export const getProjectStatus = defineTool({
   alwaysLoad: true,
   input: z.object({}),
   handler: async (_input, { services, projectId }) =>
-    renderProjectDigest(services.orchestration.projectStatus(projectId)),
+    renderProjectDigest(
+      services.orchestration.projectStatus(projectId),
+      Date.now(),
+      services.orchestration.timezone(),
+    ),
 });
 
 /** `list_scheduled_runs` (§8.4, always loaded). */
