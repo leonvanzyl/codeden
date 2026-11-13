@@ -1,0 +1,369 @@
+import type { AgentEvent, Item, ItemOf, ProviderCommand, Usage } from "@codeden/contracts";
+import type { AcpTurnOutcome } from "./errors";
+import {
+  type AcpToolContext,
+  type AcpToolState,
+  blockText,
+  mergeToolCall,
+  toolCallItem,
+} from "./items";
+import type {
+  AcpConfigOption,
+  AcpPlanEntry,
+  AcpPromptResult,
+  AcpSessionUpdate,
+  AcpToolCall,
+} from "./protocol";
+
+/** Where an item lives. */
+export interface ThreadCtx {
+  threadId: string;
+  turnId: string;
+}
+
+export type Todo = ItemOf<"todo_list">["todos"][number];
+
+export interface AcpMapperOptions {
+  sessionId: string;
+  emit: (event: AgentEvent) => void;
+  tools: AcpToolContext;
+  /** The agent switched mode on its own (`current_mode_update`). */
+  onMode?: (modeId: string) => void;
+  /** The agent's config options changed (`config_option_update`). */
+  onConfigOptions?: (options: AcpConfigOption[]) => void;
+}
+
+/**
+ * Translates one ACP session's `session/update` notifications into normalized `AgentEvent`s
+ * (§7.3). A CodeDen turn is one `session/prompt`; message and thought chunks stream into
+ * items that close when something else starts, tool calls are upserted by `toolCallId`, and
+ * the agent's plan becomes the turn's todo list. Updates outside a turn (the history replay of
+ * `session/load`) are dropped: CodeDen keeps its own transcript.
+ */
+export class AcpEventMapper {
+  readonly rootThreadId: string;
+  private turnId: string | undefined;
+  private text: { id: string; kind: "assistant_message" | "reasoning"; text: string } | undefined;
+  private seq = 0;
+  private readonly tools = new Map<string, AcpToolState>();
+  private todos: { ctx: ThreadCtx; item: ItemOf<"todo_list"> } | undefined;
+  private usage: Usage = {};
+  /** The agent's cumulative cost when the turn started, to report the turn's own share. */
+  private costAtStart: number | undefined;
+  private lastCost: number | undefined;
+
+  constructor(private readonly opts: AcpMapperOptions) {
+    this.rootThreadId = `${opts.sessionId}:thread-root`;
+  }
+
+  get currentTurnId(): string | undefined {
+    return this.turnId;
+  }
+
+  /** The current turn's context, while one runs. */
+  ctx(): ThreadCtx | undefined {
+    return this.turnId ? { threadId: this.rootThreadId, turnId: this.turnId } : undefined;
+  }
+
+  /**
+   * The item id of a tool call: scoped to its turn, since an agent may reuse a call id in a
+   * later turn and item ids are unique per session.
+   */
+  toolItemId(toolCallId: string): string {
+    return `${this.turnId ?? "turn"}:${toolCallId}`;
+  }
+
+  /** What is known about a tool call (for permission requests), merged with `call`. */
+  tool(call: AcpToolCall): AcpToolState {
+    const known = this.tools.get(call.toolCallId);
+    const state: AcpToolState = known ? { ...known } : { toolCallId: call.toolCallId };
+    mergeToolCall(state, call);
+    return state;
+  }
+
+  beginTurn(turnId: string): void {
+    if (this.turnId) this.endTurn({ type: "interrupted" });
+    this.turnId = turnId;
+    this.usage = {};
+    this.costAtStart = this.lastCost;
+    this.opts.emit({ type: "turn.started", threadId: this.rootThreadId, turnId });
+  }
+
+  handle(update: AcpSessionUpdate): void {
+    const kind = update.sessionUpdate;
+    if (kind === "current_mode_update") {
+      const mode = (update as { currentModeId?: unknown }).currentModeId;
+      if (typeof mode === "string") this.opts.onMode?.(mode);
+      return;
+    }
+    if (kind === "config_option_update") {
+      const options = (update as { configOptions?: unknown }).configOptions;
+      if (Array.isArray(options)) this.opts.onConfigOptions?.(options as AcpConfigOption[]);
+      return;
+    }
+    if (kind === "available_commands_update") {
+      this.commands(update as { availableCommands?: unknown });
+      return;
+    }
+    if (kind === "usage_update") {
+      this.usageUpdate(update as { used?: unknown; size?: unknown; cost?: unknown });
+      return;
+    }
+    const ctx = this.ctx();
+    if (!ctx) return; // Replayed history, or a late update after the turn ended.
+    switch (kind) {
+      case "agent_message_chunk":
+      case "agent_thought_chunk":
+        this.chunk(ctx, kind === "agent_thought_chunk" ? "reasoning" : "assistant_message", update);
+        return;
+      case "tool_call":
+      case "tool_call_update":
+        this.toolCall(ctx, update as AcpToolCall);
+        return;
+      case "plan": {
+        const entries = (update as { entries?: unknown }).entries;
+        if (Array.isArray(entries)) this.setTodos(planTodos(entries as AcpPlanEntry[]), false);
+        return;
+      }
+      default:
+        return; // user_message_chunk (CodeDen records prompts itself) and unknown kinds.
+    }
+  }
+
+  /** Replace (or, with `merge`, update by id) the turn's todo list. */
+  setTodos(todos: Todo[], merge: boolean): void {
+    const ctx = this.todos?.ctx ?? this.ctx();
+    if (!ctx) return;
+    if (this.todos) {
+      const next = merge ? mergeTodos(this.todos.item.todos, todos) : todos;
+      this.todos.item = { ...this.todos.item, todos: next };
+      this.opts.emit({ type: "item.updated", ...ctx, item: this.todos.item });
+      return;
+    }
+    this.closeText();
+    const item: ItemOf<"todo_list"> = {
+      id: `todos-${ctx.turnId}`,
+      kind: "todo_list",
+      status: "in_progress",
+      todos,
+    };
+    this.todos = { ctx, item };
+    this.opts.emit({ type: "item.started", ...ctx, item });
+  }
+
+  /** Add the token counts a `session/prompt` result reports. */
+  promptUsage(usage: AcpPromptResult["usage"]): void {
+    if (!usage || !this.turnId) return;
+    const cached = int(usage.cachedReadTokens);
+    const input = int(usage.inputTokens);
+    this.usage = {
+      ...this.usage,
+      ...(input !== undefined
+        ? { inputTokens: Math.max(0, input - (cached ?? 0) - (int(usage.cachedWriteTokens) ?? 0)) }
+        : {}),
+      ...(int(usage.outputTokens) !== undefined ? { outputTokens: int(usage.outputTokens) } : {}),
+      ...(cached !== undefined ? { cachedInputTokens: cached } : {}),
+      ...(int(usage.cachedWriteTokens) !== undefined
+        ? { cacheWriteTokens: int(usage.cachedWriteTokens) }
+        : {}),
+      ...(int(usage.thoughtTokens) !== undefined
+        ? { reasoningTokens: int(usage.thoughtTokens) }
+        : {}),
+    };
+    this.emitUsage();
+  }
+
+  /** A finished item in the current turn (after any message that was streaming). */
+  emitItem(item: Item): void {
+    const ctx = this.ctx();
+    if (!ctx) return;
+    this.closeText();
+    this.opts.emit({ type: "item.completed", ...ctx, item });
+  }
+
+  /** A notice in the current turn. */
+  notice(level: "info" | "warning", message: string, code: string): void {
+    const ctx = this.ctx();
+    if (!ctx) return;
+    this.emitItem({
+      id: `${code}-${ctx.turnId}-${++this.seq}`,
+      kind: "notice",
+      status: "completed",
+      level,
+      code,
+      message,
+    });
+  }
+
+  /** Close the current turn: open items complete (or cancel), then the turn ends. */
+  endTurn(outcome: AcpTurnOutcome): void {
+    const turnId = this.turnId;
+    if (!turnId) return;
+    const ok = outcome.type === "completed";
+    this.closeText();
+    const ctx = { threadId: this.rootThreadId, turnId };
+    for (const state of this.tools.values()) {
+      if (state.status === "completed" || state.status === "failed") continue;
+      const item = toolCallItem(state, this.opts.tools, this.toolItemId(state.toolCallId));
+      this.opts.emit({
+        type: "item.completed",
+        ...ctx,
+        item: { ...item, status: ok ? "completed" : "cancelled" } as Item,
+      });
+    }
+    this.tools.clear();
+    if (this.todos) {
+      const status = ok ? "completed" : "cancelled";
+      this.opts.emit({
+        type: "item.completed",
+        ...this.todos.ctx,
+        item: { ...this.todos.item, status },
+      });
+      this.todos = undefined;
+    }
+    this.turnId = undefined;
+    if (outcome.type === "completed") {
+      this.opts.emit({
+        type: "turn.completed",
+        ...ctx,
+        stopReason: outcome.stopReason ?? "end_turn",
+      });
+    } else if (outcome.type === "interrupted") {
+      this.opts.emit({ type: "turn.interrupted", ...ctx, reason: outcome.reason ?? "user" });
+    } else {
+      this.opts.emit({
+        type: "turn.failed",
+        ...ctx,
+        error: {
+          code: outcome.code ?? "turn_failed",
+          message: outcome.message,
+          ...(outcome.detail ? { detail: outcome.detail } : {}),
+          ...(outcome.kind ? { kind: outcome.kind } : {}),
+        },
+      });
+    }
+  }
+
+  // ---------------------------------------------------------------- internals
+
+  private chunk(
+    ctx: ThreadCtx,
+    kind: "assistant_message" | "reasoning",
+    update: AcpSessionUpdate,
+  ): void {
+    const text = blockText((update as { content?: never }).content);
+    if (!text) return;
+    if (this.text?.kind !== kind) {
+      this.closeText();
+      const id = `${kind === "reasoning" ? "reasoning" : "message"}-${ctx.turnId}-${++this.seq}`;
+      this.text = { id, kind, text: "" };
+      this.opts.emit({
+        type: "item.started",
+        ...ctx,
+        item: { id, kind, status: "in_progress", text: "" },
+      });
+    }
+    this.text.text += text;
+    this.opts.emit({
+      type: "item.delta",
+      ...ctx,
+      itemId: this.text.id,
+      delta: { type: "text", text },
+    });
+  }
+
+  /** Complete the streaming message or thought, if any. */
+  private closeText(): void {
+    const open = this.text;
+    const ctx = this.ctx() ?? this.todos?.ctx;
+    this.text = undefined;
+    if (!open || !ctx) return;
+    this.opts.emit({
+      type: "item.completed",
+      ...ctx,
+      item: { id: open.id, kind: open.kind, status: "completed", text: open.text },
+    });
+  }
+
+  private toolCall(ctx: ThreadCtx, call: AcpToolCall): void {
+    if (typeof call.toolCallId !== "string" || !call.toolCallId) return;
+    const known = this.tools.get(call.toolCallId);
+    const state: AcpToolState = known ?? { toolCallId: call.toolCallId, startedAt: Date.now() };
+    mergeToolCall(state, call);
+    this.tools.set(call.toolCallId, state);
+    if (!known) this.closeText();
+    const done = state.status === "completed" || state.status === "failed";
+    if (done) state.endedAt ??= Date.now();
+    const item = toolCallItem(state, this.opts.tools, this.toolItemId(state.toolCallId));
+    const type = done ? "item.completed" : known ? "item.updated" : "item.started";
+    if (done && !known)
+      this.opts.emit({ type: "item.started", ...ctx, item: { ...item, status: "in_progress" } });
+    this.opts.emit({ type, ...ctx, item });
+  }
+
+  private commands(update: { availableCommands?: unknown }): void {
+    if (!Array.isArray(update.availableCommands)) return;
+    const commands: ProviderCommand[] = [];
+    for (const c of update.availableCommands as { name?: unknown; description?: unknown }[]) {
+      if (typeof c?.name !== "string" || !c.name) continue;
+      commands.push({
+        name: c.name.replace(/^\//, ""),
+        description: typeof c.description === "string" ? c.description : "",
+      });
+    }
+    this.opts.emit({ type: "session.updated", commands });
+  }
+
+  private usageUpdate(update: { used?: unknown; size?: unknown; cost?: unknown }): void {
+    const cost = update.cost as { amount?: unknown; currency?: unknown } | null | undefined;
+    if (typeof cost?.amount === "number" && (!cost.currency || cost.currency === "USD")) {
+      this.lastCost = cost.amount;
+      if (this.turnId) {
+        this.usage.costUsd = Math.max(0, cost.amount - (this.costAtStart ?? 0));
+      }
+    }
+    const used = int(update.used);
+    const size = int(update.size);
+    if (used !== undefined) this.usage.contextTokens = used;
+    if (size !== undefined && size > 0) this.usage.contextWindow = size;
+    this.emitUsage();
+  }
+
+  private emitUsage(): void {
+    if (!Object.keys(this.usage).length) return;
+    this.opts.emit({
+      type: "usage.updated",
+      threadId: this.rootThreadId,
+      ...(this.turnId ? { turnId: this.turnId } : {}),
+      usage: { ...this.usage },
+    });
+  }
+}
+
+function int(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? Math.round(value)
+    : undefined;
+}
+
+/** An agent plan's entries as todos (unknown statuses count as pending). */
+export function planTodos(entries: readonly AcpPlanEntry[]): Todo[] {
+  return entries
+    .filter((e) => typeof e?.content === "string" && e.content.trim())
+    .map((e, i) => ({ id: String(i + 1), text: e.content, status: todoStatus(e.status) }));
+}
+
+export function todoStatus(status: unknown): Todo["status"] {
+  return status === "in_progress" || status === "completed" ? status : "pending";
+}
+
+/** Update `current` by id with `next`; new ids are appended. */
+function mergeTodos(current: readonly Todo[], next: readonly Todo[]): Todo[] {
+  const out = [...current];
+  for (const todo of next) {
+    const at = todo.id ? out.findIndex((t) => t.id === todo.id) : -1;
+    if (at >= 0) out[at] = todo;
+    else out.push(todo);
+  }
+  return out;
+}

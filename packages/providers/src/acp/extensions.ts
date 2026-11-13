@@ -1,0 +1,32 @@
+import type { ApprovalBroker } from "../approvals";
+import type { AcpEventMapper, ThreadCtx } from "./mapper";
+
+/** What a vendor extension can reach in its session. */
+export interface AcpExtensionHost {
+  readonly cwd: string;
+  readonly broker: ApprovalBroker;
+  readonly mapper: AcpEventMapper;
+  /** The running turn's context, if a turn runs. */
+  ctx(): ThreadCtx | undefined;
+  /** Plan mode is on. */
+  readonly planning: boolean;
+  /**
+   * The user approved the plan: the agent leaves plan mode for the session's level, and
+   * CodeDen hears `session.updated { planMode: false }`.
+   */
+  exitPlanMode(): Promise<void>;
+}
+
+/**
+ * An agent's vendor methods beyond ACP itself (`<vendor>/<method>`), plugged into the generic
+ * session. Anything not handled is refused with JSON-RPC "method not found" (requests) or
+ * ignored (notifications), which agents treat as an unsupported feature.
+ */
+export interface AcpExtensions {
+  /** Answer a vendor request. Returns undefined when this extension doesn't handle `method`. */
+  request?(method: string, params: unknown, host: AcpExtensionHost): Promise<unknown> | undefined;
+  /** Handle a vendor notification. */
+  notification?(method: string, params: unknown, host: AcpExtensionHost): void;
+  /** Extra `clientCapabilities` fields to advertise in `initialize` (vendor `_meta` flags). */
+  clientCapabilities?: Record<string, unknown>;
+}
