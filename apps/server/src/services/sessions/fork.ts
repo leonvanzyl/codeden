@@ -226,7 +226,8 @@ export function forkPlan(
     issue: source.issue,
     pr: null,
     resumeToken: origin.resumeToken,
-    runnerId: null,
+    // The copied conversation and checkpoint live on the source's runner: the fork runs there.
+    runnerId: source.runnerId,
     automationRunId: null,
     rootThreadId: null,
     forkedFrom: {

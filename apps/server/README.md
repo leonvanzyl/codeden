@@ -7,7 +7,8 @@ The long-lived CodeDen server (design §4.1): Hono HTTP API and UI WebSocket, th
 `RunnerHub` (`src/runner/hub.ts`) holds one `RunnerClient` per runner. The local runner is registered at start as the home runner (record id `home`, backend `local`). Each runner is a row of `runners`, projected from `runner.registered`, `runner.connected`, `runner.disconnected` and `runner.deleted`; acks stay in `runner_state`, keyed by the runner's journal id.
 
 - **Routing.** Services ask `runners.forSession(id)` for a session's runner: the one whose journal id is in `sessions.runnerId`. A session with no runner id, or one no record carries (sessions from before records existed, a home runner whose journal was reset), goes to the home runner. A session whose own runner is disconnected or deleted fails with `runner_unavailable` naming that runner.
-- **Home runner only:** provider detection and model refresh, utility jobs, setup re-checks, `mcp.test`, `ports.list`, the worktree sweep, and new sessions (placement comes with the execution backends).
+- **Home runner only:** provider detection and model refresh, utility jobs, setup re-checks, `mcp.test`, `ports.list`, the worktree sweep, and new sessions (placement comes with the execution backends). A fork stays on its source's runner, where the copied conversation and checkpoint are.
+- **Per session:** besides commands, a session's provider capabilities (steering a queued message now, read-only and plan-mode checks) and the CodeDen MCP endpoint shown in its agent config come from its own runner.
 - **Status.** The snapshot's `runner` is the home runner's connection, as before; `runners` lists every runner with its live state. The `runner` WebSocket message carries both.
 
 ## Internal MCP endpoint (§4.4, §8.3)

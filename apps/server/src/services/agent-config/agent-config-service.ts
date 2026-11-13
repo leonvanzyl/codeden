@@ -51,9 +51,9 @@ export interface AgentConfigServiceDeps {
   backupDir: string;
   /** `<codeden home>/agent-config/disabled-hooks.json`: hooks switched off in CodeDen. */
   disabledHooksFile: string;
-  /** CodeDen's own MCP endpoint as agents see it (the runner proxy). */
-  mcpProxyUrl: () => string | null;
-  /** The runner, which runs MCP connection tests next to the code (§4.2). */
+  /** CodeDen's own MCP endpoint as this session's agent sees it (its runner's proxy). */
+  mcpProxyUrl: (sessionId: string) => string | null;
+  /** The home runner, which runs MCP connection tests next to the code (§4.2). */
   runner: Pick<RunnerPort, "request">;
   /** The newest `/` command list a session's provider reported, or null (event log). */
   reportedCommands: (sessionId: string) => ProviderCommand[] | null;
@@ -171,7 +171,7 @@ export class AgentConfigService {
     const cwd = session.cwd;
     const home = this.deps.home;
     const mcpServers: McpServerEntry[] = [];
-    const proxy = this.deps.mcpProxyUrl();
+    const proxy = this.deps.mcpProxyUrl(sessionId);
     if (proxy) {
       mcpServers.push({
         provider: "codeden",

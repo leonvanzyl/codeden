@@ -10,7 +10,8 @@ export interface QueueServiceDeps {
   repo: SessionRepo;
   sessions: SessionService;
   artifacts: ArtifactLookup;
-  providers: () => ProviderInfo[];
+  /** The providers loaded by the runner that hosts this session. */
+  providers: (sessionId: string) => ProviderInfo[];
 }
 
 const BUSY = new Set(["running", "waiting"]);
@@ -54,7 +55,7 @@ export class QueueService {
       void this.deps.sessions.flushOutbox(sessionId).catch(() => undefined);
       throw conflict("No turn is running: the queue sends this message next", "no_turn");
     }
-    const canSteer = this.deps.providers().find((p) => p.id === session.provider)
+    const canSteer = this.deps.providers(sessionId).find((p) => p.id === session.provider)
       ?.capabilities.steer;
     if (!canSteer) throw conflict("This provider cannot steer a running turn", "unsupported");
     // Taken out before anything is awaited: delivery can no longer pick it up.

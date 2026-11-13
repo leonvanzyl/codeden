@@ -241,7 +241,7 @@ export function createServices(opts: ServicesOptions): AppServices {
     repo: sessionRepo,
     sessions,
     artifacts,
-    providers: () => opts.runner.providers(),
+    providers: (sessionId) => runners.forSession(sessionId).providers(),
   });
   const lifecycle = new SessionLifecycle({
     db: opts.db,
@@ -459,7 +459,8 @@ export function createServices(opts: ServicesOptions): AppServices {
       repo: sessionRepo,
       backupDir: join(opts.paths.backups, "agent-config"),
       disabledHooksFile: opts.paths.disabledHooks,
-      mcpProxyUrl: () => opts.runner.mcpProxyUrl(),
+      // The proxy the session's own runner gave its agent; MCP tests stay on the home runner.
+      mcpProxyUrl: (sessionId) => runners.forSession(sessionId).mcpProxyUrl(),
       runner: opts.runner,
       reportedCommands: (sessionId) => reportedCommands(opts.db, sessionId),
     }),
