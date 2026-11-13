@@ -82,14 +82,80 @@ describe("usage formatting", () => {
     expect(subagentCostLines(none, "api")[0]).toBe("Not priced: no price for x");
     expect(subagentCostText(undefined)).toBeNull();
     expect(subagentCostLines(undefined, "api")).toEqual([]);
+  });
 
-    // A cost is current while it priced the tokens the card shows.
-    const shown = [
-      { inputTokens: 1_200, outputTokens: 300, cacheReadTokens: 40_000, cacheWriteTokens: 15_000 },
-    ];
-    expect(costIsCurrent(reported, shown)).toBe(true);
-    expect(costIsCurrent(reported, [{ ...shown[0], outputTokens: 900 } as never])).toBe(false);
-    expect(costIsCurrent(undefined, shown)).toBe(false);
+  describe("whether a subagent's cost priced what its card shows", () => {
+    const tokens = {
+      inputTokens: 1_200,
+      outputTokens: 300,
+      cacheReadTokens: 40_000,
+      cacheWriteTokens: 15_000,
+    };
+    /** What the server returns for `usage` priced at `models` (one per entry, in order). */
+    const pricedAs = (
+      models: { model: string; costUsd?: number; reported?: boolean; tokens?: object }[],
+    ): SubagentCost => ({
+      itemId: "a1",
+      costUsd: 0.1,
+      costSource: "estimated",
+      models: models.map((m) => ({
+        ...tokens,
+        reasoningTokens: 0,
+        ...m.tokens,
+        model: m.model,
+        costUsd: m.costUsd ?? 0.05,
+        costSource: m.reported ? "reported" : "estimated",
+      })),
+    });
+    const haiku = { model: "claude-haiku-5-5", ...tokens };
+
+    it("matches the same figures, with an unnamed model priced as the session's", () => {
+      expect(costIsCurrent(pricedAs([{ model: "claude-haiku-5-5" }]), [haiku])).toBe(true);
+      expect(costIsCurrent(pricedAs([{ model: "claude-sonnet-4-5" }]), [tokens])).toBe(true);
+      // A zero reported with tokens is no figure: the server estimated it.
+      expect(
+        costIsCurrent(pricedAs([{ model: "claude-haiku-5-5" }]), [{ ...haiku, costUsd: 0 }]),
+      ).toBe(true);
+      expect(
+        costIsCurrent(pricedAs([{ model: "x", costUsd: 1.5, reported: true }]), [
+          { ...haiku, model: "x", costUsd: 1.5 },
+        ]),
+      ).toBe(true);
+    });
+
+    it("sees changed token counts, models, allocations and reported costs", () => {
+      const priced = pricedAs([{ model: "claude-haiku-5-5" }]);
+      expect(costIsCurrent(undefined, [haiku])).toBe(false);
+      expect(costIsCurrent(priced, [{ ...haiku, outputTokens: 900 }])).toBe(false);
+      expect(costIsCurrent(priced, [{ ...haiku, reasoningTokens: 40 }])).toBe(false);
+      // The same totals, but another model.
+      expect(costIsCurrent(priced, [{ ...haiku, model: "claude-opus-5-5" }])).toBe(false);
+      // The provider now reports a cost for the same tokens.
+      expect(costIsCurrent(priced, [{ ...haiku, costUsd: 1.5 }])).toBe(false);
+      expect(
+        costIsCurrent(pricedAs([{ model: "x", costUsd: 1.5, reported: true }]), [
+          { ...haiku, model: "x", costUsd: 2 },
+        ]),
+      ).toBe(false);
+      // The same totals moved between two models.
+      const half = {
+        inputTokens: 600,
+        outputTokens: 150,
+        cacheReadTokens: 20_000,
+        cacheWriteTokens: 7_500,
+      };
+      const split = pricedAs([
+        { model: "claude-haiku-5-5", tokens: half },
+        { model: "claude-opus-5-5", tokens: half },
+      ]);
+      const moved = [
+        { model: "claude-haiku-5-5", ...half, outputTokens: 50 },
+        { model: "claude-opus-5-5", ...half, outputTokens: 250 },
+      ];
+      expect(costIsCurrent(split, moved)).toBe(false);
+      // A model added.
+      expect(costIsCurrent(priced, [haiku, { ...haiku, model: "claude-opus-5-5" }])).toBe(false);
+    });
   });
 
   it("computes preset ranges ending today", () => {

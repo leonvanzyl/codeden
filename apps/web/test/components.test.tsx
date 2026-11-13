@@ -1,5 +1,6 @@
 import type { ItemOf, UserQuestion } from "@codeden/contracts";
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
+import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { VoiceButton } from "@/components/composer/voice-button";
 import { ConflictCard } from "@/components/project/conflict-card";
@@ -7,6 +8,7 @@ import { ApprovalCard } from "@/components/thread/cards/approval-card";
 import { QuestionCard } from "@/components/thread/cards/question-card";
 import { SubagentCard } from "@/components/thread/cards/subagent-card";
 import { WorkGroup } from "@/components/thread/work/work-group";
+import { usageKeys } from "@/components/usage/api";
 import { mockUsageApi } from "@/components/usage/mock-data";
 import { createMockClient } from "@/lib/api/mock";
 import { conflicts } from "@/lib/api/mock/fixtures/sessions";
@@ -391,6 +393,19 @@ describe("WorkGroup", () => {
   });
 });
 
+/** A subagent card whose item the test can replace (`bind` hands out the setter). */
+function LiveSubagentCard({
+  initial,
+  bind,
+}: {
+  initial: ItemOf<"subagent">;
+  bind: (replace: (item: ItemOf<"subagent">) => void) => void;
+}) {
+  const [item, setItem] = useState(initial);
+  bind(setItem);
+  return <SubagentCard item={item} sessionId="s1" />;
+}
+
 describe("SubagentCard", () => {
   const sub: ItemOf<"subagent"> = {
     id: "sa",
@@ -498,6 +513,64 @@ describe("SubagentCard", () => {
         .mockResolvedValue(priced(0.42));
       renderWithClient(<SubagentCard item={{ ...sub, stats }} sessionId="s1" />);
       expect(await screen.findByText(/≈ \$0\.42 · 48\.2k tokens/)).toBeTruthy();
+      expect(session).toHaveBeenCalledTimes(2);
+    });
+
+    /** The card with an item the test replaces, as live events replace it. */
+    function liveCard(initial: ItemOf<"subagent">) {
+      let replace: (item: ItemOf<"subagent">) => void = () => {};
+      const rendered = renderWithClient(
+        <LiveSubagentCard
+          initial={initial}
+          bind={(set) => {
+            replace = set;
+          }}
+        />,
+      );
+      return { ...rendered, update: (item: ItemOf<"subagent">) => act(() => replace(item)) };
+    }
+    const withUsage = (over: Partial<(typeof usage)[number]>) => {
+      const entry = { ...(usage[0] as (typeof usage)[number]), ...over };
+      return { item: { ...sub, stats: { ...stats, usage: [entry] } }, entry };
+    };
+
+    it("prices final figures that arrive while an older request is still running", async () => {
+      const early = withUsage({ outputTokens: 1 });
+      const final = withUsage({ outputTokens: 77 });
+      let release: (value: ReturnType<typeof priced>) => void = () => {};
+      const running = new Promise<ReturnType<typeof priced>>((resolve) => {
+        release = resolve;
+      });
+      const session = vi
+        .spyOn(mockUsageApi, "session")
+        .mockResolvedValueOnce(priced(0.01, early.entry))
+        .mockImplementationOnce(() => running)
+        .mockResolvedValue(priced(0.02, final.entry));
+      const { update, queryClient } = liveCard(early.item);
+      expect(await screen.findByText(/≈ \$0\.010 · 48\.2k tokens/)).toBeTruthy();
+
+      // Something else (the session header) fetches the session's usage again...
+      void queryClient.invalidateQueries({ queryKey: usageKeys.session("s1") });
+      await waitFor(() => expect(session).toHaveBeenCalledTimes(2));
+      // ...and the run's final figures arrive before that request returns the old prices.
+      update(final.item);
+      release(priced(0.01, early.entry));
+
+      expect(await screen.findByText(/≈ \$0\.020 · 48\.2k tokens/)).toBeTruthy();
+      expect(session).toHaveBeenCalledTimes(3);
+    });
+
+    it("prices a correction that changes the model but not the token counts", async () => {
+      const haiku = withUsage({ model: "claude-haiku-5-5" });
+      const opus = withUsage({ model: "claude-opus-5-5" });
+      const session = vi
+        .spyOn(mockUsageApi, "session")
+        .mockResolvedValueOnce(priced(0.42, haiku.entry))
+        .mockResolvedValue(priced(1.5, opus.entry));
+      const { update } = liveCard(haiku.item);
+      expect(await screen.findByText(/≈ \$0\.42 · 48\.2k tokens/)).toBeTruthy();
+      update(opus.item);
+      expect(await screen.findByText(/≈ \$1\.50 · 48\.2k tokens/)).toBeTruthy();
       expect(session).toHaveBeenCalledTimes(2);
     });
 
