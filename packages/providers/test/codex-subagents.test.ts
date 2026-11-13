@@ -239,7 +239,21 @@ describe("Codex sub-agents", () => {
         status: "completed",
         summary: "Found 3 callers.",
         prompt: expect.stringContaining("parseConfig"),
-        stats: { totalTokens: 4_200, toolUses: 1, durationMs: 5_000 },
+        stats: {
+          totalTokens: 4_200,
+          toolUses: 1,
+          durationMs: 5_000,
+          // By category, with the model the spawn asked for, for the card's cost.
+          usage: [
+            {
+              model: "gpt-5.2",
+              inputTokens: 4_100,
+              outputTokens: 100,
+              cacheReadTokens: 0,
+              cacheWriteTokens: 0,
+            },
+          ],
+        },
       },
     });
     // The root turn never moved.
@@ -252,6 +266,39 @@ describe("Codex sub-agents", () => {
           (e.type === "turn.completed" || e.type === "turn.interrupted"),
       ),
     ).toBe(false);
+  });
+
+  it("reports the agent's uncached input, cache and reasoning tokens; no model when none was asked", () => {
+    const { feed, events } = spawnedV2();
+    const breakdown = {
+      totalTokens: 52_000,
+      inputTokens: 50_000,
+      cachedInputTokens: 46_000,
+      cacheWriteInputTokens: 1_500,
+      outputTokens: 2_000,
+      reasoningOutputTokens: 800,
+    };
+    feed(CHILD, "turn/started", { turn: turn(CT, "inProgress") });
+    feed(CHILD, "thread/tokenUsage/updated", {
+      turnId: CT,
+      tokenUsage: { total: breakdown, last: breakdown, modelContextWindow: null },
+    });
+    feed(CHILD, "item/completed", { turnId: CT, item: message("m1", "Done.") });
+    feed(CHILD, "turn/completed", { turn: turn(CT, "completed") });
+
+    const card = subagentCards(events).at(-1);
+    expect(card?.status).toBe("completed");
+    expect(card?.stats?.totalTokens).toBe(52_000);
+    // OpenAI counts cached input inside `inputTokens`; the card's input is the uncached part.
+    expect(card?.stats?.usage).toEqual([
+      {
+        inputTokens: 4_000,
+        outputTokens: 2_000,
+        cacheReadTokens: 46_000,
+        cacheWriteTokens: 1_500,
+        reasoningTokens: 800,
+      },
+    ]);
   });
 
   it("fails the card when the spawn starts no agent", () => {

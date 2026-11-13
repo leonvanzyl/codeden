@@ -225,6 +225,11 @@ export const ApprovalRequestItem = z.object({
   toolInput: JsonValue.optional(),
   /** The tool call item this approval gates, if any. */
   toolCallItemId: Id.optional(),
+  /**
+   * A link the request asks the user to open (an MCP server's URL elicitation, e.g. to sign
+   * in). The card shows it; nothing opens it on the user's behalf. Web links only.
+   */
+  url: z.url({ protocol: /^https?$/ }).optional(),
   options: z.array(ApprovalDecision).default(["allow_once", "allow_session", "deny"]),
   decision: ApprovalDecision.optional(),
   decidedBy: ApprovalDecider.optional(),
@@ -260,7 +265,33 @@ export const UserQuestionItem = z.object({
    * turn ends, and an answer that arrives after the tool returned is sent as a new message.
    */
   deferred: z.boolean().optional(),
+  /**
+   * The MCP server asking, when the questions are its form (an MCP elicitation) rather than the
+   * agent's own: the answers go to that server as data. Unattended sessions withdraw such a form
+   * instead of answering it (§10.1).
+   */
+  mcpServer: z.string().min(1).optional(),
 });
+
+/**
+ * Tokens one model used in a subagent run, in the four billed categories (§7.3, §12.6). The
+ * server prices them when it reports the run's cost, like a turn's: the provider's USD figure
+ * when it gave one, else the price table.
+ */
+export const SubagentModelUsage = z.object({
+  /** Model id as the provider reports it; absent when it doesn't say (the session's model). */
+  model: z.string().min(1).optional(),
+  /** Uncached input tokens (excludes cache reads and writes). */
+  inputTokens: z.int().nonnegative(),
+  outputTokens: z.int().nonnegative(),
+  cacheReadTokens: z.int().nonnegative(),
+  cacheWriteTokens: z.int().nonnegative(),
+  /** Reasoning/thinking tokens where reported; already counted in `outputTokens`. */
+  reasoningTokens: z.int().nonnegative().optional(),
+  /** USD the provider reported for these calls, when it reports one. */
+  costUsd: z.number().nonnegative().optional(),
+});
+export type SubagentModelUsage = z.infer<typeof SubagentModelUsage>;
 
 /**
  * What a finished subagent used, as its provider reports it (§7.3). Each figure is optional:
@@ -274,6 +305,11 @@ export const SubagentStats = z.object({
   toolUses: z.int().nonnegative().optional(),
   /** How long the subagent ran, in milliseconds. */
   durationMs: z.int().nonnegative().optional(),
+  /**
+   * Tokens per model across the run's own model calls (a nested subagent's are on its own
+   * card), for the card's cost (`SessionUsage.subagents`). Display only, like the rest.
+   */
+  usage: z.array(SubagentModelUsage).optional(),
 });
 export type SubagentStats = z.infer<typeof SubagentStats>;
 
@@ -362,3 +398,8 @@ export const ItemDelta = z.discriminatedUnion("type", [
   z.object({ type: z.literal("tool_input"), partialJson: z.string() }),
 ]);
 export type ItemDelta = z.infer<typeof ItemDelta>;
+
+/** The text a delta appends (`partialJson` for tool input). */
+export function itemDeltaText(delta: ItemDelta): string {
+  return delta.type === "tool_input" ? delta.partialJson : delta.text;
+}

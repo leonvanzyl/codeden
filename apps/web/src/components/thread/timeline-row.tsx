@@ -78,7 +78,7 @@ export function TimelineRowView({ row, sessionId }: { row: Row; sessionId: strin
     case "assistant":
       return <AssistantMessage item={row.item} streaming={row.streaming} />;
     case "work":
-      return <WorkGroup entries={row.entries} live={row.live} />;
+      return <WorkGroup sessionId={sessionId} entries={row.entries} live={row.live} />;
     case "working":
       return <Working startedAt={row.turn.startedAt} />;
     case "turn-end":

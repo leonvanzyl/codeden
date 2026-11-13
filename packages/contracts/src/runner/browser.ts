@@ -165,6 +165,98 @@ export const BrowserHandoffTab = z.object({
 });
 export type BrowserHandoffTab = z.infer<typeof BrowserHandoffTab>;
 
+/** A key held down during an agent pointer action (`browser.mouse`). */
+export const BrowserModifierKey = z.enum(["Alt", "Control", "Meta", "Shift"]);
+export type BrowserModifierKey = z.infer<typeof BrowserModifierKey>;
+
+/** What an agent does at page coordinates (`browser.mouse`, §12.2 computer use, step 1). */
+export const BrowserMouseAction = z.enum(["click", "hover", "drag", "scroll"]);
+export type BrowserMouseAction = z.infer<typeof BrowserMouseAction>;
+
+/** Longest text `browser.type` types as key presses at the focused element (no `ref`). */
+export const MAX_FOCUS_TYPE_CHARS = 2_000;
+
+/** Largest scroll per axis in one agent `scroll` (CSS pixels). */
+export const MAX_AGENT_SCROLL = 10_000;
+
+/** A coordinate in the page viewport's CSS pixels; the runner checks it against the viewport. */
+const ViewportCoordinate = z.number().min(0).max(100_000);
+
+/**
+ * The fields of an agent pointer action. Coordinates are CSS pixels of the tab's viewport,
+ * origin top-left: the pixels of a viewport `browser.screenshot`, and the units of
+ * `getBoundingClientRect`. Which fields an action takes is checked by `checkBrowserMouse`.
+ */
+export const BrowserMouseFields = {
+  action: BrowserMouseAction,
+  /** The point to act at; the start point of a drag. */
+  x: ViewportCoordinate,
+  y: ViewportCoordinate,
+  /** Where a drag ends (`drag` only, required there). */
+  toX: ViewportCoordinate.optional(),
+  toY: ViewportCoordinate.optional(),
+  /** Scroll amount in CSS pixels (`scroll` only, at least one non-zero); positive `deltaY` scrolls down. */
+  deltaX: z.number().min(-MAX_AGENT_SCROLL).max(MAX_AGENT_SCROLL).optional(),
+  deltaY: z.number().min(-MAX_AGENT_SCROLL).max(MAX_AGENT_SCROLL).optional(),
+  /** `click` and `drag`; default `left`. */
+  button: z.enum(["left", "middle", "right"]).optional(),
+  /** `click` only: 2 is a double click, 3 a triple click. Default 1. */
+  clickCount: z.int().min(1).max(3).optional(),
+  /** Keys held for the whole action (shift-click, ctrl-click, alt-drag). */
+  modifiers: z.array(BrowserModifierKey).max(4).optional(),
+};
+
+type BrowserMouseShape = {
+  action: BrowserMouseAction;
+  toX?: number;
+  toY?: number;
+  deltaX?: number;
+  deltaY?: number;
+  button?: string;
+  clickCount?: number;
+};
+
+/** Fields that belong to one action only. */
+const ACTION_ONLY_FIELDS: Record<string, BrowserMouseAction[]> = {
+  toX: ["drag"],
+  toY: ["drag"],
+  deltaX: ["scroll"],
+  deltaY: ["scroll"],
+  button: ["click", "drag"],
+  clickCount: ["click"],
+};
+
+/**
+ * Cross-field rules of a pointer action, for `superRefine`: a drag needs `toX` and `toY`, a
+ * scroll needs a non-zero delta, and fields of other actions are refused (so a mistaken call
+ * fails instead of silently doing something else).
+ */
+export function checkBrowserMouse(value: BrowserMouseShape, ctx: z.RefinementCtx): void {
+  for (const [field, actions] of Object.entries(ACTION_ONLY_FIELDS)) {
+    if (value[field as keyof BrowserMouseShape] !== undefined && !actions.includes(value.action)) {
+      ctx.addIssue({
+        code: "custom",
+        path: [field],
+        message: `${field} is for ${actions.join(" and ")}, not ${value.action}`,
+      });
+    }
+  }
+  if (value.action === "drag") {
+    for (const field of ["toX", "toY"] as const) {
+      if (value[field] === undefined) {
+        ctx.addIssue({ code: "custom", path: [field], message: `A drag needs ${field}` });
+      }
+    }
+  }
+  if (value.action === "scroll" && !value.deltaX && !value.deltaY) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["deltaY"],
+      message: "A scroll needs a non-zero deltaX or deltaY",
+    });
+  }
+}
+
 const TabTarget = { sessionId: Id, tabId: BrowserTabId.optional() };
 
 /** `browser.*` commands (§12.2), spread into `RunnerCommand`. */
@@ -251,16 +343,37 @@ export const BrowserCommands = [
     button: z.enum(["left", "middle", "right"]).optional(),
     doubleClick: z.boolean().optional(),
   }),
-  /** Fill an editable element by ref; `submit` presses Enter afterwards. */
-  z.object({
-    name: z.literal("browser.type"),
-    ...TabTarget,
-    ref: BrowserElementRef,
-    text: z.string().max(100_000),
-    submit: z.boolean().optional(),
-  }),
+  /**
+   * Fill an editable element by ref, replacing its value. Without `ref`, type the text as key
+   * presses into whatever has focus (at most `MAX_FOCUS_TYPE_CHARS`), e.g. a canvas editor after
+   * a `browser.mouse` click. `submit` presses Enter afterwards.
+   */
+  z
+    .object({
+      name: z.literal("browser.type"),
+      ...TabTarget,
+      ref: BrowserElementRef.optional(),
+      text: z.string().max(100_000),
+      submit: z.boolean().optional(),
+    })
+    .superRefine((v, ctx) => {
+      if (v.ref === undefined && v.text.length > MAX_FOCUS_TYPE_CHARS) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["text"],
+          message: `Without a ref, type at most ${MAX_FOCUS_TYPE_CHARS} characters`,
+        });
+      }
+    }),
   /** Press a key or chord on the focused element, e.g. `Enter`, `Control+A`. */
   z.object({ name: z.literal("browser.press"), ...TabTarget, key: z.string().min(1).max(60) }),
+  /**
+   * Act at page coordinates (§12.2 computer use, step 1): click, hover, drag or scroll at CSS
+   * pixels of the tab's viewport. The runner refuses points outside the current viewport.
+   */
+  z
+    .object({ name: z.literal("browser.mouse"), ...TabTarget, ...BrowserMouseFields })
+    .superRefine(checkBrowserMouse),
   /** PNG screenshot of the viewport, the full page, or one element (`ref`) to an absolute path. */
   z.object({
     name: z.literal("browser.screenshot"),
@@ -344,6 +457,7 @@ export const BrowserCommandResults = {
   "browser.click": Empty,
   "browser.type": Empty,
   "browser.press": Empty,
+  "browser.mouse": Empty,
   "browser.screenshot": z.object({
     path: z.string(),
     width: z.int().positive(),

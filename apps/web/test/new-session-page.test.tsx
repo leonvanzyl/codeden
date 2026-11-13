@@ -65,7 +65,7 @@ function clientWith(startSession: Start): CodeDenClient {
 async function openDraft(client: CodeDenClient) {
   renderWithClient(<NewSessionPage projectId={PROJECT} />, client, { withRouter: true });
   await screen.findByTestId("new-session");
-  return screen.getByRole("textbox", { name: "Message" }) as HTMLTextAreaElement;
+  return screen.getByRole("combobox", { name: "Message" }) as HTMLTextAreaElement;
 }
 
 beforeEach(() => {
@@ -187,7 +187,7 @@ async function openDraftInHistory(client: CodeDenClient) {
     </ClientProvider>,
   );
   await screen.findByTestId("new-session");
-  const box = screen.getByRole("textbox", { name: "Message" }) as HTMLTextAreaElement;
+  const box = screen.getByRole("combobox", { name: "Message" }) as HTMLTextAreaElement;
   return { router, box };
 }
 

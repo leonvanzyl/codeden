@@ -48,6 +48,8 @@ export interface ClaudeSessionConfig {
   onModels?: (models: Awaited<ReturnType<Query["supportedModels"]>>) => void;
   /** The SDK's `query()`, loaded by the adapter (installed on demand in the published build). */
   query: ClaudeSdkModule["query"];
+  /** The SDK's transcript reader for subagents, for their final token counts (§7.3). */
+  getSubagentMessages?: ClaudeSdkModule["getSubagentMessages"];
   /** How long to wait for the CLI to confirm an interrupt before forcing the turn closed. */
   interruptTimeoutMs?: number;
   /** Claude's notes folders (plans, auto-memory); found from the user's settings by default. */
@@ -94,7 +96,14 @@ export class ClaudeSession implements ProviderSession {
     private readonly config: ClaudeSessionConfig,
   ) {
     const emit = (event: AgentEvent) => this.events.push(event);
-    this.mapper = new ClaudeEventMapper({ sessionId: opts.sessionId, cwd: opts.cwd, emit });
+    this.mapper = new ClaudeEventMapper({
+      sessionId: opts.sessionId,
+      cwd: opts.cwd,
+      emit,
+      onSubagentFinished: (toolUseId, agentId) => {
+        void this.correctSubagentUsage(toolUseId, agentId);
+      },
+    });
     this.broker = new ApprovalBroker(emit);
     this.autonomy = opts.autonomy;
     this.policy = new ClaudePolicy(
@@ -117,6 +126,23 @@ export class ClaudeSession implements ProviderSession {
 
   resumeToken(): string | undefined {
     return this.mapper.resumeToken ?? this.opts.resumeToken;
+  }
+
+  /**
+   * A subagent's streamed messages don't carry their calls' final output counts; its
+   * transcript does. Read it once the run finished and let the card take the final figures.
+   * If it can't be read (another config folder, not written yet), the streamed ones stay.
+   */
+  private async correctSubagentUsage(toolUseId: string, agentId: string): Promise<void> {
+    const read = this.config.getSubagentMessages;
+    const claudeSessionId = this.resumeToken();
+    if (!read || !claudeSessionId || this.closed) return;
+    try {
+      const transcript = await read(claudeSessionId, agentId, { dir: this.opts.cwd });
+      if (!this.closed) this.mapper.correctSubagentUsage(toolUseId, transcript);
+    } catch {
+      // Keep the figures from the streamed messages.
+    }
   }
 
   /**

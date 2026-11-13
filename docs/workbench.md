@@ -16,7 +16,7 @@ Everything an agent touches sits next to its chat. Open the right panel with **C
 - Streaming Markdown with syntax-highlighted code.
 - Tool calls are grouped into collapsible **work blocks** ("Ran 2 commands and called 1 tool") with live command output.
 - **Plans and todos**, **subagents**, **approvals** and **questions** get their own cards. Approvals and questions are answered right in the card (or from the inbox).
-- **Subagents** run as child threads. Their card shows live status and, once the subagent finishes, the tokens, tool calls and time it used (e.g. `48.2k tokens · 23 tool calls · 1m 12s`) when the provider reports them; click it to open the child thread in a side panel. Approvals raised inside a subagent surface in the parent and in the inbox.
+- **Subagents** run as child threads. Their card shows live status and, once the subagent finishes, what it cost and the tokens, tool calls and time it used (e.g. `≈ $0.42 · 48.2k tokens · 23 tool calls · 1m 12s`) when the provider reports them. Hover the figures for the cost per model, split into input, output, cache reads and cache writes. The cost is priced like the session's: `≈` marks an estimate from list prices, and with a subscription login it is the API-equivalent cost. It is part of the turn's cost, not added on top. Click the card to open the child thread in a side panel. Approvals raised inside a subagent surface in the parent and in the inbox.
 - Each turn's footer shows how long it worked and, where available, its cost and tokens. The session header shows the running total.
 
 ## The composer
@@ -113,7 +113,8 @@ The runner launches one Chromium (your installed **Edge** or **Chrome**; Edge fi
 |---|---|
 | `browser_navigate` | Open a URL (starts the browser on first use) |
 | `browser_snapshot` | An accessibility snapshot with element refs |
-| `browser_click`, `browser_type`, `browser_press` | Act on a ref, or press a key or chord |
+| `browser_click`, `browser_type`, `browser_press` | Act on a ref, or press a key or chord. Without a ref, `browser_type` types into whatever has focus |
+| `browser_mouse` | Click, hover, drag or scroll at a point, for canvases, maps, drag handles, sliders and hover menus that have no useful ref. Points are the page's CSS pixels from the top-left corner of the visible area: the pixels of a viewport `browser_screenshot`, not of a `fullPage` or element (`ref`) one. Points outside the visible area are refused |
 | `browser_screenshot` | Viewport, full page or one element; `share: true` posts it to the chat |
 | `browser_logs` | Console and network entries |
 | `browser_wait` | For a selector, text or network idle |

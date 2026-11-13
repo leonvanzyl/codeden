@@ -1,4 +1,4 @@
-import type { EventEnvelope } from "@codeden/contracts";
+import type { EventEnvelope, FactoryStatus } from "@codeden/contracts";
 import { type QueryClient, useQuery } from "@tanstack/react-query";
 import { useClient } from "./api";
 import { ApiRequestError } from "./api/http";
@@ -27,14 +27,36 @@ export function invalidateFactory(queryClient: QueryClient, env: EventEnvelope):
   }
 }
 
+/** Status refresh while work is in flight: spend and session counts move without events. */
+export const BUSY_REFRESH_MS = 30_000;
+/**
+ * Status refresh while the factory is idle. Everything the loop changes arrives as an event
+ * (above); this slow poll only keeps spend from the project's other sessions (budget scope
+ * "project") and the "last check" current, since a loop check that changes nothing sends none.
+ */
+export const IDLE_REFRESH_MS = 5 * 60_000;
+
+/** How often an open factory view refetches its status: fast only while work is in flight. */
+export function statusRefreshMs(status: FactoryStatus | undefined): number {
+  const busy =
+    !status ||
+    status.activeSessions > 0 ||
+    status.inProgress.length > 0 ||
+    status.loopState === "discovering";
+  return busy ? BUSY_REFRESH_MS : IDLE_REFRESH_MS;
+}
+
+/**
+ * The factory panel's status: refetched on every factory event, and polled (see
+ * `statusRefreshMs`), so its "last check" is as of the last refresh.
+ */
 export function useFactoryStatus(projectId: string, enabled = true) {
   const client = useClient();
   return useQuery({
     queryKey: factoryKeys.status(projectId),
     queryFn: () => client.factory.status(projectId),
     enabled,
-    // Spend and session counts move without loop events.
-    refetchInterval: 30_000,
+    refetchInterval: (query) => statusRefreshMs(query.state.data),
   });
 }
 

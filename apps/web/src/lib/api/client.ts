@@ -39,6 +39,7 @@ import type {
   SpeechSummaryResponse,
   StartSessionRequestInit,
   StartSessionResponse,
+  ToolOutputResponse,
   TranscriptMessage,
   UiServerMessage,
   UpdateProjectRequest,
@@ -105,6 +106,11 @@ export interface CodeDenClient {
 
   // Sessions and turns.
   getSessionDetail(sessionId: string): Promise<SessionDetail>;
+  /**
+   * The output the server stored for a tool call, for when the transcript's copy was cut
+   * (`output.truncated`): large outputs are fetched on demand, not pushed (§6).
+   */
+  getToolOutput(sessionId: string, itemId: string): Promise<ToolOutputResponse>;
   sendMessage(sessionId: string, input: UserInputInit, mode: SendMode): Promise<void>;
   interrupt(sessionId: string): Promise<void>;
   respond(sessionId: string, requestId: string, response: RuntimeResponse): Promise<void>;

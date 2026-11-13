@@ -27,6 +27,11 @@ export interface MapperOptions {
   cwd: string;
   emit: (event: AgentEvent) => void;
   newId?: () => string;
+  /**
+   * A subagent finished with tokens counted from its streamed messages, whose output figures
+   * are not final: the session can read its transcript and pass it to `correctSubagentUsage`.
+   */
+  onSubagentFinished?: (toolUseId: string, agentId: string) => void;
 }
 
 /**
@@ -70,8 +75,12 @@ export class ClaudeEventMapper {
     this.rootThreadId = `${opts.sessionId}:thread-root`;
     this.emit = opts.emit;
     this.newId = opts.newId ?? randomUUID;
-    this.subagents = new SubagentTracker(opts.sessionId, this.emit, this.newId, (ctx, ok) =>
-      this.tools.finishTurn(ctx, ok),
+    this.subagents = new SubagentTracker(
+      opts.sessionId,
+      this.emit,
+      this.newId,
+      (ctx, ok) => this.tools.finishTurn(ctx, ok),
+      opts.onSubagentFinished,
     );
     this.tools = new ToolTracker(
       opts.cwd,
@@ -148,6 +157,14 @@ export class ClaudeEventMapper {
     return this.tools.ctx(toolUseId) ?? this.rootCtx();
   }
 
+  /**
+   * A finished subagent's transcript (`getSubagentMessages`): its calls' final token counts
+   * replace the streamed ones, and the card is sent again when that changes it.
+   */
+  correctSubagentUsage(toolUseId: string, transcript: readonly unknown[]): void {
+    this.subagents.correctUsage(toolUseId, transcript);
+  }
+
   /** Emit an item event in a context. */
   item(
     ctx: ThreadCtx,
@@ -217,6 +234,8 @@ export class ClaudeEventMapper {
     const messageId = str(message, "id") ?? this.newId();
     if (isRoot)
       this.contextTokens = contextTokensFromMessageUsage(message.usage) ?? this.contextTokens;
+    else if (typeof msg.parent_tool_use_id === "string")
+      this.subagents.onAssistant(msg.parent_tool_use_id, msg);
     const content = Array.isArray(message.content) ? (message.content as Block[]) : [];
     for (const block of content) {
       if (

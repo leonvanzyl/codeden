@@ -39,6 +39,7 @@ import {
 import { backfillUsageLedger } from "./backfill";
 import { BUNDLED_PRICES } from "./prices";
 import { buildReport, type ReportNames, toCsv } from "./report";
+import { subagentCosts } from "./subagents";
 
 export interface UsageServiceOptions {
   db: Db;
@@ -128,15 +129,15 @@ export class UsageService {
       .from(usageLedger)
       .where(eq(usageLedger.sessionId, sessionId))
       .all();
-    const rows = priceRows(raw.map(toLedgerRow), this.settings().prices, this.timezone());
+    const prices = this.settings().prices;
+    const rows = priceRows(raw.map(toLedgerRow), prices, this.timezone());
     rows.sort((a, b) => a.ts.localeCompare(b.ts));
-    const provider =
-      rows[0]?.provider ??
-      this.opts.db
-        .select({ provider: sessions.provider })
-        .from(sessions)
-        .where(eq(sessions.id, sessionId))
-        .get()?.provider;
+    const session = this.opts.db
+      .select({ provider: sessions.provider, model: sessions.model })
+      .from(sessions)
+      .where(eq(sessions.id, sessionId))
+      .get();
+    const provider = rows[0]?.provider ?? session?.provider;
     const billing = provider ? ((await this.billing())[provider] ?? "unknown") : "unknown";
     return {
       sessionId,
@@ -152,6 +153,8 @@ export class UsageService {
         costUsd: r.costUsd,
         costSource: r.costSource,
       })),
+      // Display only: what each subagent cost, for its card (§7.3); never part of the totals.
+      subagents: session ? subagentCosts(this.opts.db, sessionId, session, prices) : [],
     };
   }
 

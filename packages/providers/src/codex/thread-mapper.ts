@@ -3,7 +3,7 @@ import type { AgentNames } from "./collab";
 import { classifyCodexError, codexErrorCode, usageLimitResetsAt } from "./errors";
 import { mapThreadItem, startedItem } from "./items";
 import type { ServerNotification } from "./protocol";
-import type { RateLimitSnapshot, ThreadItem, Turn } from "./protocol/v2";
+import type { RateLimitSnapshot, ThreadItem, ThreadTokenUsage, Turn } from "./protocol/v2";
 import { CodexTurnUsage } from "./usage";
 
 type Todo = ItemOf<"todo_list">["todos"][number];
@@ -64,8 +64,8 @@ export interface ThreadMapperOptions {
   onItemStarted?: (item: Item) => void;
   /** Every completed item of this thread. */
   onItemCompleted?: (item: Item) => void;
-  /** The thread's running token total, as Codex reports it. */
-  onTokens?: (totalTokens: number) => void;
+  /** The thread's token usage report (its running `total` and `last` request), as Codex sent it. */
+  onTokens?: (usage: ThreadTokenUsage) => void;
 }
 
 /**
@@ -157,7 +157,7 @@ export class CodexThreadMapper {
         this.updatePlan(n.params.turnId, n.params.plan);
         return;
       case "thread/tokenUsage/updated": {
-        this.o.onTokens?.(n.params.tokenUsage.total.totalTokens);
+        this.o.onTokens?.(n.params.tokenUsage);
         const usage = this.turnUsage.add(n.params.turnId, n.params.tokenUsage);
         // The context meter is the session's own agent's: a sub-agent's context is not it.
         if (!this.o.root) {

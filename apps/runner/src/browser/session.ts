@@ -324,24 +324,39 @@ export class BrowserSession {
     }
   }
 
-  /** A native view's actual size (CSS pixels and scale), as the desktop panel laid it out. */
+  /**
+   * A view's own size (CSS pixels and scale); undefined while it has none. Throws when the page
+   * doesn't answer in time.
+   */
+  private async viewSize(page: Page): Promise<ViewportMetrics | undefined> {
+    // A string: the runner has no DOM types, and the page computes it in its own realm. A page
+    // busy in a long script must not stall input or a viewport answer.
+    const metrics = (await withTimeout(
+      page.evaluate("[window.innerWidth, window.innerHeight, window.devicePixelRatio]"),
+      NATIVE_MEASURE_TIMEOUT_MS,
+    )) as number[];
+    const [width, height, scale] = metrics;
+    return width && height ? { width, height, deviceScaleFactor: scale || 1 } : undefined;
+  }
+
+  /** The shown native view's size, just measured: the session's viewport follows it. */
+  private adopt(next: ViewportMetrics): void {
+    const changed = !sameViewport(next, this.viewport);
+    this.viewport = next;
+    this.measuredAt = Date.now();
+    // The screencast's metadata for stills, and its frame size floor, follow the real view.
+    if (changed) void this.screencast.setFrameSize(nativeFrame(), next);
+  }
+
+  /**
+   * The shown native view's actual size, as the desktop panel laid it out. Tolerant, for viewer
+   * input and viewport answers: a view that doesn't answer keeps its last size.
+   */
   private async measure(): Promise<ViewportMetrics> {
     try {
-      // A string: the runner has no DOM types, and the page computes it in its own realm. A page
-      // busy in a long script must not stall input or a viewport answer: keep the last size.
-      const metrics = (await withTimeout(
-        this.page().evaluate("[window.innerWidth, window.innerHeight, window.devicePixelRatio]"),
-        NATIVE_MEASURE_TIMEOUT_MS,
-      )) as number[];
-      const [width, height, scale] = metrics;
-      if (width && height) {
-        const next = { width, height, deviceScaleFactor: scale || 1 };
-        const changed = !sameViewport(next, this.viewport);
-        this.viewport = next;
-        // The screencast's metadata for stills, and its frame size floor, follow the real view.
-        if (changed) void this.screencast.setFrameSize(nativeFrame(), next);
-      }
-      this.measuredAt = Date.now();
+      const next = await this.viewSize(this.page());
+      if (next) this.adopt(next);
+      else this.measuredAt = Date.now();
     } catch {
       // No tab yet, or it is navigating: keep the last size.
     }
@@ -354,6 +369,28 @@ export class BrowserSession {
    */
   async syncViewport(): Promise<void> {
     if (this.native) await this.measure();
+  }
+
+  /**
+   * The viewport of `tabId` (default: the active tab) that an agent's coordinates refer to, now:
+   * the emulated size every tab shares, or a native view's own size measured fresh (agent actions
+   * are few, and the panel may have just resized). A native view in the background can differ
+   * from the shown one, so only the shown view's size updates the session's viewport. Strict,
+   * unlike `measure`: a view that can't be measured (busy in a script, navigating) fails with a
+   * retryable `viewport_unavailable` instead of borrowing another size, so no action is sent.
+   */
+  async currentViewport(tabId?: string): Promise<ViewportMetrics> {
+    const state = this.tabState(tabId);
+    if (!this.native) return { ...this.viewport };
+    const size = await this.viewSize(state.page).catch(() => undefined);
+    if (!size) {
+      throw new CommandError(
+        "viewport_unavailable",
+        `Could not measure the size of tab ${state.tabId} (the page may be busy or loading), so nothing was done. Try again in a moment.`,
+      );
+    }
+    if (state.tabId === this.activeTabId) this.adopt(size);
+    return { ...size };
   }
 
   /** The native view's size for input, measured at most once a second (pointer moves are many). */

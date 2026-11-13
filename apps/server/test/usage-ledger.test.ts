@@ -219,6 +219,77 @@ describe("UsageService", () => {
     expect(usage.spendSince("2026-11-07", "p1").usd).toBeCloseTo(1.5);
   });
 
+  it("prices finished subagents for their cards without counting them anywhere else", async () => {
+    usage.saveSettings({
+      timezone: "UTC",
+      budgets: [{ id: "daily", projectId: null, period: "daily", limitUsd: 1 }],
+    });
+    turn("s1", "u1", { inputTokens: 10, outputTokens: 20, cachedInputTokens: 300, costUsd: 0.05 });
+    const range = { from: "2026-11-01", to: "2026-11-07" };
+    const before = {
+      session: await usage.sessionUsage("s1"),
+      ledger: database.db.select().from(usageLedger).all(),
+      report: (await usage.report(range)).totals,
+      budgets: usage.budgets(),
+      spend: usage.spendSince("2026-11-07", "p1"),
+    };
+    expect(before.session.subagents).toEqual([]);
+
+    const card = (id: string, status: "in_progress" | "completed", stats?: object) =>
+      ({
+        type: "item.completed",
+        threadId: "t",
+        turnId: "u1",
+        item: {
+          id,
+          kind: "subagent",
+          status,
+          childThreadId: `t-${id}`,
+          ...(stats ? { stats } : {}),
+        },
+      }) as AgentEvent;
+    const haiku = {
+      model: "claude-haiku-5-5",
+      inputTokens: 1_000,
+      outputTokens: 2_000,
+      cacheReadTokens: 100_000,
+      cacheWriteTokens: 20_000,
+    };
+    emit(
+      "s1",
+      card("a1", "completed", { totalTokens: 123_000, usage: [haiku] }),
+      // Still running, or finished without tokens per model: no cost.
+      card("a2", "in_progress"),
+      card("a3", "completed", { totalTokens: 5, toolUses: 1 }),
+    );
+
+    const after = await usage.sessionUsage("s1");
+    expect(after.subagents).toEqual([
+      {
+        itemId: "a1",
+        // $0.0001 + $0.001 + $0.001 + $0.0025 at Haiku 5.5's list prices.
+        costUsd: 0.0046,
+        costSource: "estimated",
+        models: [
+          {
+            ...haiku,
+            label: "Haiku 5.5",
+            reasoningTokens: 0,
+            costUsd: 0.0046,
+            costSource: "estimated",
+          },
+        ],
+      },
+    ]);
+    const { subagents: _added, ...rest } = after;
+    const { subagents: _none, ...restBefore } = before.session;
+    expect(rest).toEqual(restBefore);
+    expect(database.db.select().from(usageLedger).all()).toEqual(before.ledger);
+    expect((await usage.report(range)).totals).toEqual(before.report);
+    expect(usage.budgets()).toEqual(before.budgets);
+    expect(usage.spendSince("2026-11-07", "p1")).toEqual(before.spend);
+  });
+
   it("rejects duplicate budget ids", () => {
     const b = { id: "x", projectId: null, period: "daily" as const, limitUsd: 1 };
     expect(() => usage.saveSettings({ budgets: [b, b] })).toThrow(/unique/);

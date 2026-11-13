@@ -45,14 +45,16 @@ export interface UnwatchedApprovalsDeps {
 }
 
 /**
- * Approvals nobody is there to answer (§10.1, §11.2). Nothing here ever approves: it denies, with
- * guidance, so the agent carries on instead of waiting forever (fail closed).
- * - The PM and the factory's sessions in a dark factory are denied at once, as their questions
+ * Approvals, and MCP servers' forms, nobody is there to answer (§10.1, §11.2). Nothing here ever
+ * approves or fills in a form: an approval is denied, with guidance, and a form is withdrawn
+ * (`cancel`, no data sent), so the agent carries on instead of waiting forever (fail closed).
+ * - The PM and the factory's sessions in a dark factory are answered at once, as their questions
  *   are answered at once.
  * - Sessions started by an automation, a PM or the factory otherwise wait
- *   {@link UNWATCHED_APPROVAL_WAIT_MS} for the user, then are denied. A scheduled run then
- *   finishes instead of blocking the next ones.
- * Sessions the user started wait for the user, however long.
+ *   {@link UNWATCHED_APPROVAL_WAIT_MS} for the user. A scheduled run then finishes instead of
+ *   blocking the next ones.
+ * Sessions the user started wait for the user, however long. The agent's own questions are left
+ * to the factory's rules (`answerProviderQuestion`).
  */
 export class UnwatchedApprovals {
   private unsubscribe: (() => void) | undefined;
@@ -60,11 +62,11 @@ export class UnwatchedApprovals {
 
   constructor(private readonly deps: UnwatchedApprovalsDeps) {}
 
-  /** Watch new approvals, and pick up the ones already open (a restart keeps their age). */
+  /** Watch new requests, and pick up the ones already open (a restart keeps their age). */
   start(): void {
     this.unsubscribe ??= this.deps.store.subscribe((events) => this.onEvents(events));
     for (const item of this.deps.inbox.list()) {
-      if (item.kind === "approval") this.track(item);
+      if (item.kind === "approval" || item.kind === "question") this.track(item);
     }
   }
 
@@ -79,7 +81,7 @@ export class UnwatchedApprovals {
     for (const e of events) {
       if (e.type !== "inbox.created" && e.type !== "inbox.updated") continue;
       const { item } = e.payload as { item: InboxItem };
-      if (item.kind !== "approval") continue;
+      if (item.kind !== "approval" && item.kind !== "question") continue;
       if (item.status !== "open") {
         clearTimeout(this.timers.get(item.id));
         this.timers.delete(item.id);
@@ -93,10 +95,11 @@ export class UnwatchedApprovals {
   private track(item: InboxItem): void {
     const { sessionId, requestId } = item;
     if (item.status !== "open" || !sessionId || !requestId || this.timers.has(item.id)) return;
+    if (item.kind === "question" && !this.isMcpForm(item)) return;
     const session = this.deps.repo.find(sessionId)?.session;
     if (!session) return;
     if (unattendedSession(this.deps, sessionId)) {
-      void this.deny(item, UNATTENDED_APPROVAL);
+      void this.close(item, UNATTENDED_APPROVAL);
       return;
     }
     if (!isUnwatched(session)) return;
@@ -105,7 +108,7 @@ export class UnwatchedApprovals {
     const timer = setTimeout(
       () => {
         this.timers.delete(item.id);
-        void this.deny(item, noAnswerDenial(waitMs));
+        void this.close(item, noAnswerDenial(waitMs));
       },
       Math.max(0, waitMs - (Number.isFinite(age) ? age : 0)),
     );
@@ -113,17 +116,28 @@ export class UnwatchedApprovals {
     this.timers.set(item.id, timer);
   }
 
-  private async deny(item: InboxItem, message: string): Promise<void> {
+  /** A question that is an MCP server's form (its transcript item names the server). */
+  private isMcpForm(item: InboxItem): boolean {
+    if (!item.sessionId || !item.itemId) return false;
+    const mirrored = this.deps.repo.item(item.sessionId, item.itemId)?.item;
+    return mirrored?.kind === "user_question" && mirrored.mcpServer !== undefined;
+  }
+
+  /** Deny an approval with `message`, or withdraw a form: never approve, never invent data. */
+  private async close(item: InboxItem, message: string): Promise<void> {
     if (this.deps.inbox.find(item.id)?.status !== "open") return;
     if (!item.sessionId || !item.requestId) return;
     try {
       await this.deps.respond(item.sessionId, {
         requestId: item.requestId,
-        response: { kind: "approval", decision: "deny", message, decidedBy: "policy" },
+        response:
+          item.kind === "approval"
+            ? { kind: "approval", decision: "deny", message, decidedBy: "policy" }
+            : { kind: "cancel" },
       });
     } catch (error) {
       // The user answered first, or the session is gone.
-      this.deps.log?.(`approvals: deny ${item.id}: ${errorMessage(error)}`);
+      this.deps.log?.(`approvals: close ${item.id}: ${errorMessage(error)}`);
     }
   }
 }

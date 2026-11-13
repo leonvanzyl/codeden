@@ -1,8 +1,14 @@
-import type { AutonomyLevel, ItemOf, RuntimeResponse, UserQuestion } from "@codeden/contracts";
-import type { ApprovalBroker, ItemCtx } from "../approvals";
-import type { RiskAssessment, RiskContext } from "../policy/risk";
+import type { UserQuestion } from "@codeden/contracts";
+import type { RiskAssessment } from "../policy/risk";
 import { shorten } from "../util/text";
-import { commandRisk, levelAllows, patchRisk, permissionsRisk } from "./policy";
+import {
+  type ApprovalContext,
+  type ApprovalItem,
+  approvedByPolicy,
+  decisionOf,
+} from "./approval-context";
+import { handleElicitation } from "./elicitation";
+import { commandRisk, patchRisk, permissionsRisk } from "./policy";
 import type { ServerRequest } from "./protocol";
 import type {
   CommandExecutionApprovalDecision,
@@ -10,50 +16,6 @@ import type {
   ToolRequestUserInputResponse,
 } from "./protocol/v2";
 import { CodexRpcError } from "./rpc";
-
-export interface ApprovalContext {
-  broker: ApprovalBroker;
-  risk: RiskContext;
-  /**
-   * The session's current permission level. Under Auto and Full, requests the level allows are
-   * approved by policy instead of reaching the user (§11.2). Default `supervised`: ask for all.
-   */
-  autonomy?: () => AutonomyLevel;
-  /**
-   * Where a request's item goes, from the Codex thread and turn that raised it (a sub-agent's
-   * requests go to its child thread).
-   */
-  ctx: (codexThreadId: string, turnId: string) => ItemCtx;
-  /** Paths touched by a pending file change item, if known. */
-  filePaths: (itemId: string) => string[] | undefined;
-}
-
-type ApprovalItem = ItemOf<"approval_request">;
-
-const decisionOf = (r: RuntimeResponse) => (r.kind === "approval" ? r.decision : "cancel");
-
-/**
- * Approve `item` by policy when the permission level allows `risk`: record it as decided by
- * policy (shown in the transcript, never waited on) and return true. Otherwise return false and
- * the caller asks the user, with the classifier's reason.
- */
-function approvedByPolicy(
-  ac: ApprovalContext,
-  p: { threadId: string; turnId: string },
-  item: ApprovalItem,
-  risk: RiskAssessment,
-): boolean {
-  const autonomy = ac.autonomy?.() ?? "supervised";
-  if (!levelAllows(autonomy, risk)) return false;
-  ac.broker.record(ac.ctx(p.threadId, p.turnId), {
-    ...item,
-    status: "completed",
-    reason: `Allowed by the ${autonomy === "full" ? "Full" : "Auto"} permission level`,
-    decision: "allow_once",
-    decidedBy: "policy",
-  });
-  return true;
-}
 
 /** The item with the classifier's verdict, for the user to decide. */
 function withRisk(item: ApprovalItem, risk: RiskAssessment): ApprovalItem {
@@ -189,7 +151,7 @@ export async function handleServerRequest(
       return { answers };
     }
     case "mcpServer/elicitation/request":
-      return { action: "decline", content: null, _meta: null };
+      return handleElicitation(req.params, ac);
     case "execCommandApproval":
     case "applyPatchApproval":
       // Legacy v1 approvals; v2 clients never receive them, but never leave the agent hanging.

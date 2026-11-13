@@ -119,7 +119,28 @@ export const sampleAgentEvents: AgentEvent[] = [
       childThreadId: "t2",
       agentType: "reviewer",
       summary: "Looks good",
-      stats: { totalTokens: 48213, toolUses: 23, durationMs: 72000 },
+      stats: {
+        totalTokens: 48213,
+        toolUses: 23,
+        durationMs: 72000,
+        usage: [
+          {
+            model: "claude-haiku-5-5",
+            inputTokens: 12,
+            outputTokens: 900,
+            cacheReadTokens: 410_000,
+            cacheWriteTokens: 38_000,
+            reasoningTokens: 120,
+          },
+          {
+            inputTokens: 5,
+            outputTokens: 40,
+            cacheReadTokens: 0,
+            cacheWriteTokens: 0,
+            costUsd: 0.01,
+          },
+        ],
+      },
     },
   },
   {

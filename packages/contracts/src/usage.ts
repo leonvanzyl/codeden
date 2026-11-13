@@ -217,12 +217,41 @@ export const TurnUsage = z.object({
 });
 export type TurnUsage = z.infer<typeof TurnUsage>;
 
+/** One model's share of a subagent run's cost. */
+export const SubagentModelCost = z.object({
+  ...TokenCounts.shape,
+  /** The model the tokens were priced as (the session's model when the provider named none). */
+  model: z.string(),
+  /** The price table's name for the model, when it has one. */
+  label: z.string().optional(),
+  costUsd: z.number().nonnegative(),
+  costSource: CostSource,
+});
+export type SubagentModelCost = z.infer<typeof SubagentModelCost>;
+
+/**
+ * What a finished subagent run cost, priced from `SubagentStats.usage` when read (§7.3). Display
+ * only: the run's tokens are already in its session's turns, so this is never added to totals.
+ * `reported` when every model's cost came from the provider, `unpriced` when no model could be
+ * priced, else `estimated`.
+ */
+export const SubagentCost = z.object({
+  /** The `subagent` item. */
+  itemId: Id,
+  costUsd: z.number().nonnegative(),
+  costSource: CostSource,
+  models: z.array(SubagentModelCost),
+});
+export type SubagentCost = z.infer<typeof SubagentCost>;
+
 /** `GET /api/usage/sessions/:id`: totals for the session header plus per-turn rows. */
 export const SessionUsage = z.object({
   sessionId: Id,
   totals: UsageTotals,
   billing: BillingMode,
   turns: z.array(TurnUsage),
+  /** The cost of each finished subagent that reported tokens per model, for its card. */
+  subagents: z.array(SubagentCost).default([]),
 });
 export type SessionUsage = z.infer<typeof SessionUsage>;
 

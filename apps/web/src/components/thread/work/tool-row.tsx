@@ -5,10 +5,12 @@ import type { WorkEntry } from "@/lib/transcript/timeline";
 import { cn } from "@/lib/utils";
 import { useLayoutStore } from "@/stores/layout";
 import { CommandOutput } from "./command-output";
+import { useShownOutput } from "./cut-output";
 import { entryIcon, entryLabel } from "./tool-meta";
 
-function Details({ entry }: { entry: WorkEntry }) {
+function Details({ sessionId, entry }: { sessionId: string; entry: WorkEntry }) {
   const openTab = useLayoutStore((s) => s.openRightTab);
+  const shown = useShownOutput(sessionId, entry);
   if (entry.kind === "reasoning") {
     return (
       <p className="text-[13px] leading-relaxed whitespace-pre-wrap wrap-break-word text-muted-foreground italic">
@@ -21,10 +23,11 @@ function Details({ entry }: { entry: WorkEntry }) {
       return (
         <CommandOutput
           command={entry.command}
-          output={entry.output?.text ?? ""}
+          output={shown.text}
           running={entry.status === "in_progress"}
           exitCode={entry.exitCode}
           cwd={entry.cwd}
+          notice={shown.notice}
         />
       );
     case "file_edit":
@@ -63,12 +66,13 @@ function Details({ entry }: { entry: WorkEntry }) {
       );
     default: {
       const input = entry.input !== undefined ? JSON.stringify(entry.input, null, 2) : null;
-      const output = entry.output?.text;
-      if (!input && !output && !entry.error) return null;
+      const output = shown.text;
+      if (!input && !output && !shown.notice && !entry.error) return null;
       return (
         // Long unbroken tokens (ids, URLs, compact JSON) wrap anywhere so they never widen the row.
         <div className="space-y-1.5 rounded-lg border border-border bg-surface p-2.5 font-mono text-[11.5px] wrap-anywhere text-muted-foreground">
           {input && <pre className="whitespace-pre-wrap">{input}</pre>}
+          {shown.notice}
           {output && (
             <pre className="max-h-48 overflow-auto whitespace-pre-wrap text-foreground/80 scroll-thin">
               {output}
@@ -89,14 +93,22 @@ function Details({ entry }: { entry: WorkEntry }) {
  */
 const ROW_COLUMNS = "grid-cols-[auto_minmax(0,auto)_minmax(0,auto)_minmax(0,auto)_1fr_auto]";
 
-/** One tool call or reasoning step: a 26px row that expands into details. */
-export function ToolRow({
-  entry,
-  defaultOpen = false,
-}: {
+interface ToolRowProps {
+  sessionId: string;
   entry: WorkEntry;
   defaultOpen?: boolean;
-}) {
+}
+
+/**
+ * One tool call or reasoning step: a 26px row that expands into details. Its state (expanded,
+ * loaded full output) belongs to one item, so a row handed another item (the "now running" row
+ * of a collapsed work group) starts afresh.
+ */
+export function ToolRow(props: ToolRowProps) {
+  return <ToolRowView key={`${props.sessionId}:${props.entry.id}`} {...props} />;
+}
+
+function ToolRowView({ sessionId, entry, defaultOpen = false }: ToolRowProps) {
   const [open, setOpen] = useState(defaultOpen);
   const Icon = entryIcon(entry);
   const { verb, target, meta } = entryLabel(entry);
@@ -164,7 +176,7 @@ export function ToolRow({
       </button>
       {showDetails && (
         <div className="mt-1 mb-2 ml-6">
-          <Details entry={entry} />
+          <Details sessionId={sessionId} entry={entry} />
         </div>
       )}
     </div>

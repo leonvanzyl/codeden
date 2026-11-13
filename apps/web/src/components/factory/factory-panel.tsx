@@ -250,6 +250,8 @@ export function FactoryPanel({ project }: { project: Project }) {
           {f.tuning.maxChangedLines !== null
             ? `up to ${f.tuning.maxChangedLines.toLocaleString()} changed lines`
             : "no size limit"}
+          {/* As of the panel's last refresh: on factory events, every 30 s while work is in
+              flight, every 5 min while idle (`useFactoryStatus`). */}
           {f.lastTickAt && ` · last check ${ago(f.lastTickAt)}`}
         </p>
       </div>

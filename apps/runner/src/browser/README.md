@@ -22,7 +22,8 @@ through CDP, and `BrowserSession` doesn't care which engine is underneath.
 | `viewport.ts` | Viewport policy: clamps (`fitViewport`), frame pixel size (`framePixels`), `Emulation.setDeviceMetricsOverride` parameters |
 | `screencast.ts` | `Page.startScreencast` on the active tab, JPEG frames sized to the viewport's device pixels as `browser.frame` stream data with metadata, throttled by delaying `Page.screencastFrameAck`, paused when the last viewer leaves, follows tab switches, restarts on resize |
 | `input.ts` | Panel mouse/keyboard -> `Input.dispatchMouseEvent` / `dispatchKeyEvent` / `insertText`, coordinates mapped from the displayed frame onto the viewport the frame showed |
-| `agent.ts` | Agent primitives: aria snapshot with refs, click/type by ref, press, screenshot (viewport, full page, element) to a path, guarded evaluate, wait for selector/text/network idle |
+| `agent.ts` | Agent primitives: aria snapshot with refs, click/type by ref (or type at the focused element), press, screenshot (viewport, full page, element) to a path, guarded evaluate, wait for selector/text/network idle |
+| `pointer.ts` | Agent pointer actions at coordinates (`browser.mouse`): click, hover, drag, scroll on Playwright's mouse, with modifiers held, points checked against the current viewport, the button and keys always released, and scrolls waited on until the page settles |
 | `logs.ts` | Bounded console and network logs per session (ring buffers, `since` paging) |
 | `handlers.ts` | `createBrowserCommandHandlers({ manager })`: one handler per `browser.*` runner command |
 
@@ -96,6 +97,22 @@ page, also while an agent acts (the panel shows "Agent is acting" from the serve
 HiDPI viewer doesn't double the image an agent gets. With no viewer, the page keeps its last
 size (default 1280x800).
 
+**Coordinates** (`browser.mouse`, computer use step 1) are the same CSS pixels: a point read
+off a viewport screenshot goes to Playwright's mouse unchanged, which sends
+`Input.dispatchMouseEvent` in CSS pixels whatever the emulated scale. Points outside the
+viewport are refused (`out_of_bounds`, naming the size); on native views the target tab's own
+view is measured fresh for each action (a view in the background can differ from the shown
+one, and measuring it leaves the session's viewport alone). If that view can't be measured
+(busy in a script past the 2 s limit, or navigating), the action fails with a retryable
+`viewport_unavailable` and nothing is sent: it never borrows another view's size. Viewer input
+keeps the tolerant path, which uses the last known size of the shown view. A drag presses at the start, moves
+to the end in about one step per 20 px (5 to 50) so drag thresholds see motion, and releases.
+Playwright counts a button or key as held before its press is dispatched, so a failed step
+(the press included) still releases every button and key the action tried to press, keeping
+the original error. A scroll moves the pointer to the point first, so the wheel reaches the
+scroller under it, then waits until no `scroll` event came for 100 ms (at most about 1 s), so a
+screenshot right after shows the result.
+
 ## Native engine: the desktop app's views (§17 Phase 2)
 
 `browser.open` with a `relay` (`ws://127.0.0.1:<port>/cdp/<sessionId>` plus a secret) backs a
@@ -118,8 +135,9 @@ browser.
   (2560x1600 device pixels), never sized to a viewer. Pointer input from those viewers is mapped
   against the view's measured CSS size (re-measured at most once a second), never the frame
   metadata, whose units follow the platform's scale handling (DIPs on HiDPI macOS).
-- **Everything else is unchanged**: aria snapshots and refs, click/type/press, screenshots,
-  console and network logs, evaluate, waits, the screencast for phones and input from them.
+- **Everything else is unchanged**: aria snapshots and refs, click/type/press, pointer actions at
+  coordinates, screenshots, console and network logs, evaluate, waits, the screencast for phones
+  and input from them.
   Refs in native views may carry a frame prefix (`f1e5`); they work like any other ref.
 - **Closing.** `browser.close` (or the session stopping) closes the views. Stopping the runner
   only disconnects: the views stay in the app, and the next `browser.open` with the relay

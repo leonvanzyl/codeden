@@ -4,7 +4,11 @@ import type {
   RunnerEvent,
   RunnerSessionInfo,
 } from "@codeden/contracts";
-import type { ProviderRegistry, ProviderSession } from "@codeden/providers";
+import {
+  type ProviderRegistry,
+  type ProviderSession,
+  ProviderSessionError,
+} from "@codeden/providers";
 import { CommandError } from "./errors";
 import { createCheckpoint, nextCheckpointIndex } from "./git/checkpoints";
 import { isWorkTree } from "./git/exec";
@@ -120,7 +124,15 @@ export class SessionHost {
   async send(cmd: RunnerCommandOf<"session.send">): Promise<void> {
     const hosted = this.get(cmd.sessionId);
     await hosted.checkpointChain;
-    await hosted.session.send(cmd.input);
+    try {
+      await hosted.session.send(cmd.input);
+    } catch (error) {
+      // The server queues the message behind the running turn instead of failing the session.
+      if (error instanceof ProviderSessionError && error.code === "turn_running") {
+        throw new CommandError("turn_running", error.message);
+      }
+      throw error;
+    }
   }
 
   async steer(cmd: RunnerCommandOf<"session.steer">): Promise<void> {

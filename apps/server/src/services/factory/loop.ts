@@ -15,6 +15,7 @@ import { advanceBuilding, advanceWatching } from "./progress";
 import { recoverNoCiFailures } from "./rebase";
 import { advanceScout } from "./scout";
 import { mayAutoMerge } from "./trust";
+import { recoverTurnRaceFailures } from "./turn-race";
 import { advanceVerifying } from "./verify";
 
 export { FACTORY_LABEL } from "./intake";
@@ -98,13 +99,17 @@ export async function runTick(
   loop = await intakeIssues(ctx, project, loop);
   loop = await intakeFailedChecks(ctx, project, loop);
   await classifyPending(ctx, project);
+  // Items whose builder was marked failed by a message racing its turn go back to building,
+  // ahead of new work for the free agents.
+  await recoverTurnRaceFailures(ctx, project, loop);
   await assignAgents(ctx, project, loop);
   if (project.autonomyMode === "dark_factory") loop = await advanceScout(ctx, project, loop);
   return save(ctx, { ...loop, state: deriveState(ctx, projectId, loop) }, now);
 }
 
+/** Ticks that change nothing append nothing (the status shows the tick time from memory). */
 function save(ctx: FactoryContext, loop: FactoryLoop, now: Date): FactoryLoop {
-  return ctx.store.saveLoop({ ...loop, lastTickAt: now.toISOString() });
+  return ctx.store.saveTick(loop, now.toISOString());
 }
 
 /** The loop state the panel shows: the most advanced stage with work in it. */

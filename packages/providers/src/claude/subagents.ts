@@ -5,6 +5,7 @@ import {
   statsFromToolUseResult,
   statsFromUsageTrailer,
 } from "./subagent-stats";
+import { SubagentUsage } from "./subagent-usage";
 import { toolResultText } from "./tools";
 
 /** A thread plus the turn currently running in it. */
@@ -16,9 +17,14 @@ export interface ThreadCtx {
 interface Subagent {
   parent: ThreadCtx;
   child: ThreadCtx;
+  /** The card as last sent (its final form once done). */
   item: ItemOf<"subagent">;
   background: boolean;
   done: boolean;
+  /** Claude Code's id for the run (its `task_id`), which names its transcript. */
+  agentId?: string;
+  /** Tokens per model of the run's own calls. */
+  usage: SubagentUsage;
 }
 
 type Raw = Record<string, unknown>;
@@ -26,7 +32,9 @@ type Raw = Record<string, unknown>;
 /**
  * Subagent (Agent/Task tool) runs as child threads (§7.3). The parent gets a `subagent` item;
  * messages tagged with `parent_tool_use_id` go to the child thread. Background subagents
- * finish on `task_notification`, foreground ones on their `tool_result`.
+ * finish on `task_notification`, foreground ones on their `tool_result`. The card's figures
+ * include the run's tokens per model, from its streamed messages; `onFinished` lets the
+ * session read the final figures from the run's transcript (`correctUsage`).
  */
 export class SubagentTracker {
   private readonly runs = new Map<string, Subagent>();
@@ -36,6 +44,7 @@ export class SubagentTracker {
     private readonly emit: (event: AgentEvent) => void,
     private readonly newId: () => string,
     private readonly onThreadEnd: (ctx: ThreadCtx, finished: boolean) => void = () => {},
+    private readonly onFinished: (toolUseId: string, agentId: string) => void = () => {},
   ) {}
 
   ctx(toolUseId: string): ThreadCtx | undefined {
@@ -63,6 +72,7 @@ export class SubagentTracker {
       item,
       background: input.run_in_background === true,
       done: false,
+      usage: new SubagentUsage(),
     });
     this.emit({
       type: "thread.started",
@@ -80,7 +90,30 @@ export class SubagentTracker {
 
   onTaskStarted(msg: Raw): void {
     const run = this.runs.get(str(msg, "tool_use_id") ?? "");
-    if (run && msg.is_backgrounded === true) run.background = true;
+    if (!run) return;
+    if (msg.is_backgrounded === true) run.background = true;
+    run.agentId ??= str(msg, "task_id");
+  }
+
+  /** One of the run's own `assistant` messages (`parent_tool_use_id` is its tool use). */
+  onAssistant(toolUseId: string, msg: Raw): void {
+    const run = this.runs.get(toolUseId);
+    if (!run || run.done) return;
+    run.agentId ??= str(msg, "agent_id");
+    if (msg.message && typeof msg.message === "object") run.usage.addFrame(msg.message as Raw);
+  }
+
+  /**
+   * The final figures of a finished run's calls, from its transcript: the card is sent again
+   * when they change what it shows (§7.3).
+   */
+  correctUsage(toolUseId: string, transcript: readonly unknown[]): void {
+    const run = this.runs.get(toolUseId);
+    if (!run?.done || !run.usage.applyTranscript(transcript)) return;
+    const usage = run.usage.summary();
+    if (!usage) return;
+    run.item = { ...run.item, stats: { ...run.item.stats, usage } };
+    this.emit({ type: "item.completed", ...run.parent, item: run.item });
   }
 
   onToolResult(
@@ -91,6 +124,7 @@ export class SubagentTracker {
   ): void {
     const run = this.runs.get(toolUseId);
     if (!run || run.done) return;
+    run.agentId ??= str(toolUseResult, "agentId");
     const status = str(toolUseResult, "status");
     if (
       !isError &&
@@ -107,6 +141,8 @@ export class SubagentTracker {
   onTaskNotification(msg: Raw): void {
     const toolUseId = str(msg, "tool_use_id");
     if (!toolUseId) return;
+    const run = this.runs.get(toolUseId);
+    if (run) run.agentId ??= str(msg, "task_id");
     const status = str(msg, "status");
     const summary = str(msg, "summary");
     this.finish(
@@ -152,11 +188,17 @@ export class SubagentTracker {
     }
     const status =
       outcome === "completed" ? "completed" : outcome === "failed" ? "failed" : "cancelled";
-    this.emit({
-      type: "item.completed",
-      ...run.parent,
-      item: { ...run.item, status, ...(summary ? { summary } : {}), ...(stats ? { stats } : {}) },
-    });
+    // What the run used so far, also when it stopped early.
+    const usage = run.usage.summary();
+    const figures = usage ? { ...stats, usage } : stats;
+    run.item = {
+      ...run.item,
+      status,
+      ...(summary ? { summary } : {}),
+      ...(figures ? { stats: figures } : {}),
+    };
+    this.emit({ type: "item.completed", ...run.parent, item: run.item });
+    if (usage && run.agentId) this.onFinished(toolUseId, run.agentId);
   }
 }
 

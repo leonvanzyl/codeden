@@ -1,4 +1,4 @@
-import type { Usage } from "@codeden/contracts";
+import type { SubagentModelUsage, Usage } from "@codeden/contracts";
 import { count, unixToIso } from "../util/text";
 import type { RateLimitSnapshot, ThreadTokenUsage } from "./protocol/v2";
 
@@ -63,6 +63,22 @@ export function tokenUsage(u: ThreadTokenUsage): Usage {
   if (u.modelContextWindow && u.modelContextWindow > 0)
     usage.contextWindow = Math.round(u.modelContextWindow);
   return usage;
+}
+
+/**
+ * A sub-agent's tokens for its card (§7.3), from its thread's running `total`, in the same
+ * terms as `tokenUsage`. `model` is the one its spawn asked for; absent, it runs the session's.
+ */
+export function subagentUsage(u: ThreadTokenUsage, model?: string): SubagentModelUsage {
+  const t = tokenUsage(u);
+  return {
+    ...(model ? { model } : {}),
+    inputTokens: t.inputTokens ?? 0,
+    outputTokens: t.outputTokens ?? 0,
+    cacheReadTokens: t.cachedInputTokens ?? 0,
+    cacheWriteTokens: t.cacheWriteTokens ?? 0,
+    ...(t.reasoningTokens ? { reasoningTokens: t.reasoningTokens } : {}),
+  };
 }
 
 function windowId(minutes: number | null, fallback: string): string {

@@ -1,4 +1,4 @@
-import type { ItemOf, UserQuestion } from "@codeden/contracts";
+import type { ItemOf, RuntimeResponse, UserQuestion } from "@codeden/contracts";
 import { useMutation } from "@tanstack/react-query";
 import { Check, MessageCircleQuestion } from "lucide-react";
 import { useLayoutEffect, useRef, useState } from "react";
@@ -10,7 +10,10 @@ import { cn } from "@/lib/utils";
 
 type Answers = Record<string, string[]>;
 
-/** Structured questions from the agent, answered inline with options and optional free text. */
+/**
+ * Structured questions from the agent, answered inline with options and optional free text. An
+ * MCP server's form (`mcpServer`) can also be dismissed, so the user never has to make up data.
+ */
 export function QuestionCard({
   item,
   sessionId,
@@ -23,8 +26,7 @@ export function QuestionCard({
   const [freeText, setFreeText] = useState<Record<string, string>>({});
   const pending = item.status === "in_progress";
   const submit = useMutation({
-    mutationFn: (final: Answers) =>
-      client.respond(sessionId, item.requestId, { kind: "answer", answers: final }),
+    mutationFn: (response: RuntimeResponse) => client.respond(sessionId, item.requestId, response),
     onError: (e) => toast.error("Couldn't send your answer", { description: e.message }),
   });
 
@@ -37,6 +39,7 @@ export function QuestionCard({
         {item.decidedBy === "pm" && (
           <p className="text-2xs text-muted-foreground">Answered by the project manager</p>
         )}
+        {item.status === "cancelled" && <p className="text-2xs text-muted-foreground">Dismissed</p>}
       </div>
     );
   }
@@ -134,12 +137,25 @@ export function QuestionCard({
       </div>
       <div className="flex items-center justify-end gap-2 border-t border-border bg-muted/30 px-3.5 py-2">
         <span className="mr-auto text-2xs text-muted-foreground">
-          The agent is paused until you answer.
+          {item.mcpServer
+            ? `Your answers go to ${item.mcpServer}. The agent waits until you answer or dismiss.`
+            : "The agent is paused until you answer."}
         </span>
+        {item.mcpServer && (
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={submit.isPending || submit.isSuccess}
+            className="text-muted-foreground"
+            onClick={() => submit.mutate({ kind: "cancel" })}
+          >
+            Dismiss
+          </Button>
+        )}
         <Button
           size="sm"
           disabled={!complete || submit.isPending || submit.isSuccess}
-          onClick={() => submit.mutate(final())}
+          onClick={() => submit.mutate({ kind: "answer", answers: final() })}
         >
           Send answer
         </Button>

@@ -71,7 +71,10 @@ export interface ClaudeAdapterOptions {
    * Load the SDK (tests stub it). By default sessions use `loadClaudeSdk()`, and discovery
    * uses it only when the SDK is ready without an install (`claudeSdkReady()`).
    */
-  loadSdk?: () => Promise<Pick<ClaudeSdkModule, "query" | "forkSession" | "getSessionMessages">>;
+  loadSdk?: () => Promise<
+    Pick<ClaudeSdkModule, "query" | "forkSession" | "getSessionMessages"> &
+      Partial<Pick<ClaudeSdkModule, "getSubagentMessages">>
+  >;
 }
 
 /** Claude Code through the Claude Agent SDK and the user's installed `claude` (§7.2). */
@@ -135,10 +138,11 @@ export class ClaudeAdapter implements ProviderAdapter {
   async openSession(opts: SessionOptions): Promise<ProviderSession> {
     const executable = this.executable();
     if (!executable) throw new Error("Claude Code is not installed (no `claude` on PATH)");
-    const { query } = await (this.options.loadSdk ?? loadClaudeSdk)();
+    const { query, getSubagentMessages } = await (this.options.loadSdk ?? loadClaudeSdk)();
     return new ClaudeSession(await withFork(this, opts), {
       executable,
       query,
+      ...(getSubagentMessages ? { getSubagentMessages } : {}),
       // Every session start reports the list of the `claude` it runs: the cheapest refresh.
       onModels: (models) => {
         if (!models.length) return;
