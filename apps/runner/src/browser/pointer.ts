@@ -99,7 +99,11 @@ function pointsOf(command: MouseCommand): Point[] {
   return points;
 }
 
-/** Run `action` with `modifiers` held, releasing every key it pressed, also on failure. */
+/**
+ * Run `action` with `modifiers` held, releasing every key it tried to press, also on failure.
+ * A key counts as held before its press resolves: Playwright marks it down before dispatching,
+ * so a press that fails can still leave it held for the next action in the shared browser.
+ */
 async function withModifiers(
   page: PointerPage,
   modifiers: BrowserModifierKey[],
@@ -107,26 +111,40 @@ async function withModifiers(
 ): Promise<void> {
   const held: BrowserModifierKey[] = [];
   try {
-    for (const key of modifiers) {
-      await page.keyboard.down(key);
+    for (const key of new Set(modifiers)) {
       held.push(key);
+      await page.keyboard.down(key);
     }
     await action();
   } finally {
+    // Release errors never hide the action's own error (or success).
     for (const key of held.reverse()) await page.keyboard.up(key).catch(() => undefined);
+  }
+}
+
+/**
+ * Run steps that press `button`, releasing it if any of them fails, the press included (like
+ * keys, Playwright marks a button held before the press is dispatched). The error is kept.
+ */
+async function releasingOnFailure(
+  page: PointerPage,
+  button: MouseCommand["button"],
+  steps: () => Promise<void>,
+): Promise<void> {
+  try {
+    await steps();
+  } catch (error) {
+    await page.mouse.up({ button }).catch(() => undefined);
+    throw error;
   }
 }
 
 async function drag(page: PointerPage, from: Point, to: Point, button: MouseCommand["button"]) {
   await page.mouse.move(from.x, from.y);
-  await page.mouse.down({ button });
-  try {
+  await releasingOnFailure(page, button, async () => {
+    await page.mouse.down({ button });
     await page.mouse.move(to.x, to.y, { steps: dragSteps(from, to) });
-  } catch (error) {
-    // Never leave a button held down on the page.
-    await page.mouse.up({ button }).catch(() => undefined);
-    throw error;
-  }
+  });
   await page.mouse.up({ button });
 }
 
@@ -156,10 +174,12 @@ export async function mouseAction(
     await withModifiers(page, command.modifiers ?? [], async () => {
       switch (command.action) {
         case "click":
-          await page.mouse.click(at.x, at.y, {
-            button: command.button,
-            clickCount: command.clickCount ?? 1,
-          });
+          await releasingOnFailure(page, command.button, () =>
+            page.mouse.click(at.x, at.y, {
+              button: command.button,
+              clickCount: command.clickCount ?? 1,
+            }),
+          );
           return;
         case "hover":
           await page.mouse.move(at.x, at.y);
@@ -189,6 +209,7 @@ export async function mouse(
   session: BrowserSession,
   command: MouseCommand & { tabId?: string },
 ): Promise<void> {
+  // The bounds are the target tab's own: a native view in the background may differ in size.
   const page = session.page(command.tabId);
-  await mouseAction(page, command, await session.currentViewport());
+  await mouseAction(page, command, await session.currentViewport(command.tabId));
 }

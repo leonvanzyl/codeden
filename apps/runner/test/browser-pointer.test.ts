@@ -6,15 +6,20 @@ import {
   type PointerPage,
 } from "../src/browser/pointer";
 
-/** A page that records the mouse and keyboard calls it gets; `fail` makes one of them throw. */
-function fakePage(fail?: string) {
+/**
+ * A page that records the mouse and keyboard calls it gets. A call `fail` matches (by its
+ * recorded text, e.g. `mouse.down({})`) is recorded first, then rejects, as Playwright marks a
+ * button or key held before the press it dispatches fails.
+ */
+function fakePage(fail?: (call: string) => boolean) {
   const calls: string[] = [];
   const record =
     (name: string) =>
     async (...args: unknown[]) => {
       const shown = args.filter((a) => a !== undefined).map((a) => JSON.stringify(a));
-      calls.push(`${name}(${shown.join(", ")})`);
-      if (fail && name === fail) throw new Error(`${name} broke\nstack`);
+      const call = `${name}(${shown.join(", ")})`;
+      calls.push(call);
+      if (fail?.(call)) throw new Error(`${name} broke\nstack`);
     };
   const page = {
     mouse: {
@@ -83,32 +88,73 @@ describe("agent pointer actions", () => {
   });
 
   it("releases the button and the modifiers when a drag fails midway", async () => {
-    const { page, calls } = fakePage("mouse.move");
+    const drag = { action: "drag", x: 1, y: 1, toX: 200, toY: 1 } as const;
+    const first = fakePage((c) => c === "mouse.move(1, 1)");
     // The first move (to the start) fails: nothing was pressed yet, modifiers are released.
-    await expect(
-      run(page, { action: "drag", x: 1, y: 1, toX: 200, toY: 1, modifiers: ["Alt"] }),
-    ).rejects.toMatchObject({
+    await expect(run(first.page, { ...drag, modifiers: ["Alt"] })).rejects.toMatchObject({
       code: "action_failed",
       message: "Mouse drag at (1, 1) failed: mouse.move broke",
     });
-    expect(calls).toEqual(['keyboard.down("Alt")', "mouse.move(1, 1)", 'keyboard.up("Alt")']);
+    expect(first.calls).toEqual(['keyboard.down("Alt")', "mouse.move(1, 1)", 'keyboard.up("Alt")']);
 
     // The move to the end fails after the press: the button is released too.
-    let moves = 0;
-    const second = fakePage();
-    const move = second.page.mouse.move;
-    second.page.mouse.move = async (...args: Parameters<typeof move>) => {
-      await move(...args);
-      if (++moves === 2) throw new Error("page closed");
-    };
-    await expect(
-      run(second.page, { action: "drag", x: 1, y: 1, toX: 200, toY: 1, button: "middle" }),
-    ).rejects.toMatchObject({ code: "action_failed" });
+    const second = fakePage((c) => c.startsWith("mouse.move(200"));
+    await expect(run(second.page, { ...drag, button: "middle" })).rejects.toMatchObject({
+      code: "action_failed",
+    });
     expect(second.calls).toEqual([
       "mouse.move(1, 1)",
       'mouse.down({"button":"middle"})',
       'mouse.move(200, 1, {"steps":10})',
       'mouse.up({"button":"middle"})',
+    ]);
+  });
+
+  it("releases a button whose press itself failed, keeping the press's error", async () => {
+    // A drag's press fails: the button may already count as held, so it is released.
+    const drag = fakePage((c) => c.startsWith("mouse.down"));
+    await expect(
+      run(drag.page, { action: "drag", x: 1, y: 1, toX: 200, toY: 1, modifiers: ["Alt"] }),
+    ).rejects.toMatchObject({
+      code: "action_failed",
+      message: "Mouse drag at (1, 1) failed: mouse.down broke",
+    });
+    expect(drag.calls).toEqual([
+      'keyboard.down("Alt")',
+      "mouse.move(1, 1)",
+      "mouse.down({})",
+      "mouse.up({})",
+      'keyboard.up("Alt")',
+    ]);
+
+    // A click presses inside Playwright's own click: a failed click releases its button too.
+    const click = fakePage((c) => c.startsWith("mouse.click"));
+    await expect(
+      run(click.page, { action: "click", x: 5, y: 6, button: "right" }),
+    ).rejects.toMatchObject({ message: "Mouse click at (5, 6) failed: mouse.click broke" });
+    expect(click.calls).toEqual([
+      'mouse.click(5, 6, {"button":"right","clickCount":1})',
+      'mouse.up({"button":"right"})',
+    ]);
+  });
+
+  it("releases a modifier whose press failed, and the ones pressed before it", async () => {
+    const only = fakePage((c) => c.startsWith("keyboard.down"));
+    await expect(
+      run(only.page, { action: "click", x: 1, y: 1, modifiers: ["Shift"] }),
+    ).rejects.toMatchObject({ message: "Mouse click at (1, 1) failed: keyboard.down broke" });
+    expect(only.calls).toEqual(['keyboard.down("Shift")', 'keyboard.up("Shift")']);
+
+    // The second key fails after the first succeeded; releases failing too can't hide the error.
+    const second = fakePage((c) => c === 'keyboard.down("Control")' || c.startsWith("keyboard.up"));
+    await expect(
+      run(second.page, { action: "hover", x: 1, y: 1, modifiers: ["Shift", "Control"] }),
+    ).rejects.toMatchObject({ message: "Mouse hover at (1, 1) failed: keyboard.down broke" });
+    expect(second.calls).toEqual([
+      'keyboard.down("Shift")',
+      'keyboard.down("Control")',
+      'keyboard.up("Control")',
+      'keyboard.up("Shift")',
     ]);
   });
 

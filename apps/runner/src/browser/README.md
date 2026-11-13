@@ -100,11 +100,15 @@ size (default 1280x800).
 **Coordinates** (`browser.mouse`, computer use step 1) are the same CSS pixels: a point read
 off a viewport screenshot goes to Playwright's mouse unchanged, which sends
 `Input.dispatchMouseEvent` in CSS pixels whatever the emulated scale. Points outside the
-viewport are refused (`out_of_bounds`, naming the size); on native views the size is measured
-fresh for each action. A drag presses at the start, moves to the end in about one step per
-20 px (5 to 50) so drag thresholds see motion, and releases. A scroll moves the pointer to the
-point first, so the wheel reaches the scroller under it, then waits until no `scroll` event
-came for 100 ms (at most about 1 s), so a screenshot right after shows the result.
+viewport are refused (`out_of_bounds`, naming the size); on native views the target tab's own
+view is measured fresh for each action (a view in the background can differ from the shown
+one, and measuring it leaves the session's viewport alone). A drag presses at the start, moves
+to the end in about one step per 20 px (5 to 50) so drag thresholds see motion, and releases.
+Playwright counts a button or key as held before its press is dispatched, so a failed step
+(the press included) still releases every button and key the action tried to press, keeping
+the original error. A scroll moves the pointer to the point first, so the wheel reaches the
+scroller under it, then waits until no `scroll` event came for 100 ms (at most about 1 s), so a
+screenshot right after shows the result.
 
 ## Native engine: the desktop app's views (§17 Phase 2)
 

@@ -219,6 +219,34 @@ describe.skipIf(!hasBrowser)("native engine (installed Edge/Chrome)", { timeout:
       .toEqual({ engine: "runner", urls: [`${site.url}/page2`] });
   });
 
+  it("checks an agent's coordinates against the target view's own size", async () => {
+    // The shown view is 800x600; a view in the background kept 400x300 (as the app's views can).
+    const session = await manager.open("s5", site.url, relay);
+    const shown = session.listTabs()[0]?.tabId ?? "";
+    const back = await session.openTab(site.url);
+    await session.activate(shown);
+    await session.page(shown).setViewportSize({ width: 800, height: 600 });
+    await session.page(back.tabId).setViewportSize({ width: 400, height: 300 });
+    const click = (x: number, y: number, tabId?: string) =>
+      handlers.execute({ name: "browser.mouse", sessionId: "s5", tabId, action: "click", x, y });
+
+    // Inside the shown view, outside the background one: refused with the target's size.
+    await expect(click(700, 500, back.tabId)).rejects.toMatchObject({
+      code: "out_of_bounds",
+      message: expect.stringContaining("(400x300 CSS pixels)"),
+    });
+    // Inside the background view: accepted there, on that tab (its big button is at 100-300).
+    await click(200, 150, back.tabId);
+    expect(await session.page(back.tabId).textContent("#big")).toBe("clicked by human");
+    // The shown view is still measured as itself.
+    await click(700, 500);
+    await expect(click(850, 10)).rejects.toMatchObject({
+      message: expect.stringContaining("(800x600 CSS pixels)"),
+    });
+    expect([session.viewportSize.width, session.viewportSize.height]).toEqual([800, 600]);
+    await handlers.execute({ name: "browser.close", sessionId: "s5" });
+  });
+
   it("a page stuck in a long script can't stall a native viewport answer", async () => {
     await manager.open("s4", site.url, relay);
     const page = manager.get("s4").page();

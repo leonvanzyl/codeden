@@ -324,18 +324,26 @@ export class BrowserSession {
     }
   }
 
-  /** A native view's actual size (CSS pixels and scale), as the desktop panel laid it out. */
+  /**
+   * A view's own size (CSS pixels and scale); undefined while it has none. Throws when the page
+   * doesn't answer in time.
+   */
+  private async viewSize(page: Page): Promise<ViewportMetrics | undefined> {
+    // A string: the runner has no DOM types, and the page computes it in its own realm. A page
+    // busy in a long script must not stall input or a viewport answer.
+    const metrics = (await withTimeout(
+      page.evaluate("[window.innerWidth, window.innerHeight, window.devicePixelRatio]"),
+      NATIVE_MEASURE_TIMEOUT_MS,
+    )) as number[];
+    const [width, height, scale] = metrics;
+    return width && height ? { width, height, deviceScaleFactor: scale || 1 } : undefined;
+  }
+
+  /** The shown native view's actual size, as the desktop panel laid it out (kept on failure). */
   private async measure(): Promise<ViewportMetrics> {
     try {
-      // A string: the runner has no DOM types, and the page computes it in its own realm. A page
-      // busy in a long script must not stall input or a viewport answer: keep the last size.
-      const metrics = (await withTimeout(
-        this.page().evaluate("[window.innerWidth, window.innerHeight, window.devicePixelRatio]"),
-        NATIVE_MEASURE_TIMEOUT_MS,
-      )) as number[];
-      const [width, height, scale] = metrics;
-      if (width && height) {
-        const next = { width, height, deviceScaleFactor: scale || 1 };
+      const next = await this.viewSize(this.page());
+      if (next) {
         const changed = !sameViewport(next, this.viewport);
         this.viewport = next;
         // The screencast's metadata for stills, and its frame size floor, follow the real view.
@@ -357,12 +365,18 @@ export class BrowserSession {
   }
 
   /**
-   * The viewport an agent's coordinates refer to, now: the emulated size, or a native view's
-   * size measured fresh (agent actions are few, and the desktop panel may have just resized).
+   * The viewport of `tabId` (default: the active tab) that an agent's coordinates refer to, now:
+   * the emulated size every tab shares, or a native view's own size measured fresh (agent actions
+   * are few, and the panel may have just resized). A native view in the background can differ
+   * from the shown one; measuring it leaves the session's viewport, which follows the shown
+   * view, alone. A view that doesn't answer in time gets the last known size, as for input.
    */
-  async currentViewport(): Promise<ViewportMetrics> {
-    this.assertOpen();
-    return this.native ? this.measure() : { ...this.viewport };
+  async currentViewport(tabId?: string): Promise<ViewportMetrics> {
+    const state = this.tabState(tabId);
+    if (!this.native) return { ...this.viewport };
+    if (state.tabId === this.activeTabId) return this.measure();
+    const size = await this.viewSize(state.page).catch(() => undefined);
+    return size ?? { ...this.viewport };
   }
 
   /** The native view's size for input, measured at most once a second (pointer moves are many). */
