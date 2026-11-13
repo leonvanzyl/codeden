@@ -73,6 +73,7 @@ Agents attach screenshots, test output and other files with `attach_evidence`:
 - Files are committed to a dedicated orphan branch, **`codeden/evidence`**, under `pr-<n>/<session>/` or `issue-<n>/<session>/`. CodeDen uses the Git Data API, so no checkout is touched and your branches stay clean.
 - One comment on the PR or issue embeds the images and includes the summary and test output.
 - Images are linked through `github.com/<owner>/<repo>/blob/<commit>/<path>?raw=true`, which GitHub serves to signed-in readers, so they **render inline in private repositories too**.
+- Secrets files (`.env`, `.npmrc`, SSH keys, `*.pem`, ...) and CodeDen's own credential files are never attached, even when renamed or reached through a symlink. See [Security → Files](security.md#files).
 
 Browser screenshots taken with `browser_screenshot` can go straight into evidence, which is how the [UI review automation](automations.md#built-in-templates) and the factory's `ui_evidence` merge check work.
 

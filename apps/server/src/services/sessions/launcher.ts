@@ -13,17 +13,22 @@ import type { McpTokenStore } from "../../mcp/tokens";
 import { errorMessage, ServiceError } from "../errors";
 import type { InboxService } from "../inbox-service";
 import type { ProjectService } from "../projects/project-service";
-import { type RunnerPort, runnerErrorCode } from "../runner-port";
+import {
+  type RunnerDeps,
+  type RunnerPort,
+  runnerErrorCode,
+  runnerForSession,
+  runnerUnavailable,
+} from "../runner-port";
 import { slugWords } from "./conflicts";
 import type { ForkStart } from "./fork";
 import { ownBranch } from "./own-branch";
 import type { SessionRepo } from "./repo";
 import { setupFailureNote, withSetupNote } from "./setup-failure";
 
-export interface LauncherDeps {
+export interface LauncherDeps extends RunnerDeps {
   repo: SessionRepo;
   projects: ProjectService;
-  runner: RunnerPort;
   inbox: InboxService;
   /**
    * CodeDen's data directory (§6), sent with every session so the agent's policy guards the
@@ -75,9 +80,10 @@ const PREPARE_TIMEOUT_MS = 10 * 60_000;
 const START_TIMEOUT_MS = 60_000;
 
 /**
- * Starts sessions on the runner: prepares the workspace (`workspace.prepare`), then opens the
- * provider session (`session.start`). Failures mark the session failed and raise a
- * `run_failed` inbox item instead of throwing, since starts run in the background.
+ * Starts sessions on their runner (the one in `sessions.runnerId`, else the home runner):
+ * prepares the workspace (`workspace.prepare`), then opens the provider session
+ * (`session.start`). Failures mark the session failed and raise a `run_failed` inbox item
+ * instead of throwing, since starts run in the background.
  */
 export class SessionLauncher {
   constructor(private readonly deps: LauncherDeps) {}
@@ -96,11 +102,12 @@ export class SessionLauncher {
    * Throws on failure; nothing reaches the provider when the workspace could not be prepared.
    */
   private async start(sessionId: string, opts: LaunchOptions): Promise<void> {
-    const { repo, runner } = this.deps;
+    const { repo } = this.deps;
     const session = repo.get(sessionId);
-    await this.requireRunner();
+    const runner = runnerForSession(this.deps, sessionId);
+    await this.requireRunner(runner);
     const project = session.projectId ? this.deps.projects.get(session.projectId) : null;
-    const ws = await this.prepareWorkspace(session, project, opts.workspace, opts.fork);
+    const ws = await this.prepareWorkspace(runner, session, project, opts.workspace, opts.fork);
     repo.update(sessionId, (s) => ({
       ...s,
       cwd: ws.cwd,
@@ -135,7 +142,7 @@ export class SessionLauncher {
     repo.update(sessionId, (s) => ({
       ...s,
       resumeToken: s.resumeToken ?? result.resumeToken,
-      runnerId: runner.runnerId(),
+      runnerId: runner.runnerId() ?? s.runnerId,
       status: s.status === "starting" ? (opts.input ? "running" : "idle") : s.status,
     }));
   }
@@ -152,9 +159,10 @@ export class SessionLauncher {
       await this.start(session.id, { ...forkStart, ...(input ? { input } : {}) });
       return;
     }
-    await this.requireRunner();
+    const runner = runnerForSession(this.deps, session.id);
+    await this.requireRunner(runner);
     const { session: current, setupNote } = await this.restoreWorktree(session);
-    const result = await this.deps.runner.request(
+    const result = await runner.request(
       {
         name: "session.start",
         sessionId: current.id,
@@ -167,7 +175,7 @@ export class SessionLauncher {
     this.deps.repo.update(session.id, (s) => ({
       ...s,
       resumeToken: result.resumeToken ?? s.resumeToken,
-      runnerId: this.deps.runner.runnerId(),
+      runnerId: runner.runnerId() ?? s.runnerId,
     }));
   }
 
@@ -180,7 +188,7 @@ export class SessionLauncher {
       return { session, setupNote: null };
     }
     const project = this.deps.projects.get(session.projectId);
-    const result = await this.deps.runner.request(
+    const result = await runnerForSession(this.deps, session.id).request(
       {
         name: "workspace.prepare",
         sessionId: session.id,
@@ -223,7 +231,7 @@ export class SessionLauncher {
    * reopens in plan mode; one whose plan was approved reopens at its permission level.
    */
   sessionOptions(session: Session): SessionOptions {
-    const proxyUrl = this.deps.runner.mcpProxyUrl();
+    const proxyUrl = runnerForSession(this.deps, session.id).mcpProxyUrl();
     const mcpServers: McpServerConfig[] = [];
     if (proxyUrl) {
       const token = this.deps.tokens.mint({
@@ -275,12 +283,13 @@ export class SessionLauncher {
     }
   }
 
-  private async requireRunner(): Promise<void> {
-    const ok = await this.deps.runner.waitForConnection(this.deps.connectTimeoutMs ?? 15_000);
-    if (!ok) throw new ServiceError(503, "runner_unavailable", "The runner is not connected");
+  private async requireRunner(runner: RunnerPort): Promise<void> {
+    const ok = await runner.waitForConnection(this.deps.connectTimeoutMs ?? 15_000);
+    if (!ok) throw runnerUnavailable(runner);
   }
 
   private async prepareWorkspace(
+    runner: RunnerPort,
     session: Session,
     project: Project | null,
     req: WorkspaceRequest,
@@ -311,7 +320,7 @@ export class SessionLauncher {
     const fetch =
       req.fetch ?? (project.kind === "github" && req.mode === "worktree" && !req.baseRef);
     try {
-      const result = await this.deps.runner.request(
+      const result = await runner.request(
         {
           name: "workspace.prepare",
           sessionId: session.id,

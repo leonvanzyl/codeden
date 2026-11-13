@@ -1,8 +1,8 @@
-import type { FactoryItem, FactoryLoop, Project } from "@codeden/contracts";
+import type { FactoryItem, FactoryLoop, GitHubPrRef, Project } from "@codeden/contracts";
 import { errorMessage } from "../errors";
 import { type FactoryContext, factoryNotice, raiseInbox } from "./context";
 import type { FactoryPr } from "./github-port";
-import { stuckInboxId } from "./stuck";
+import { stuckDecisionId, stuckInboxId } from "./stuck";
 
 /**
  * The Merge step (§10.1): every check passed. With auto-merge on and trusted work, the factory
@@ -16,11 +16,33 @@ export const readyInboxId = (itemId: string) => `inbox:factory-ready:${itemId}`;
 /** Inbox id of a PR escalated to the user (a protected area). */
 export const escalatedInboxId = (itemId: string) => `inbox:factory-escalated:${itemId}`;
 
-/** Close the open inbox items about an item's PR (ready to merge, protected area, stuck). */
+/** The inbox items about an item's PR: ready to merge, protected area, stuck (and its dark-factory decision). */
+function prInboxIds(itemId: string): string[] {
+  return [
+    readyInboxId(itemId),
+    escalatedInboxId(itemId),
+    stuckInboxId(itemId),
+    stuckDecisionId(itemId),
+  ];
+}
+
+/**
+ * Resolve the open inbox items about an item's PR once it is decided or replaced. A resolved
+ * decision stays on record (the digest still lists it); it just no longer waits on the user.
+ */
 export function closeInboxFor(ctx: FactoryContext, itemId: string, note: string): void {
-  for (const id of [readyInboxId(itemId), escalatedInboxId(itemId), stuckInboxId(itemId)]) {
+  for (const id of prInboxIds(itemId)) {
     const open = ctx.inbox.find(id);
     if (open?.status === "open") ctx.inbox.close(open, "resolved", { note });
+  }
+}
+
+/** Point the open inbox items about an item's PR at the PR that replaced it. */
+export function retargetInboxFor(ctx: FactoryContext, itemId: string, pr: GitHubPrRef): void {
+  for (const id of prInboxIds(itemId)) {
+    const open = ctx.inbox.find(id);
+    if (open?.status !== "open" || open.pr?.number === pr.number) continue;
+    ctx.inbox.put({ ...open, pr, updatedAt: ctx.now().toISOString() });
   }
 }
 

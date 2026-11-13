@@ -31,7 +31,7 @@ import {
 import type { AutomationPort, GithubPort } from "./orchestration/ports";
 import { ProjectService } from "./projects/project-service";
 import { ProjectRedetector } from "./projects/redetector";
-import { type RunnerPort, redetectProviders } from "./runner-port";
+import { type RunnerPort, type RunnerRouter, redetectProviders, singleRunner } from "./runner-port";
 import type { SecretStore } from "./secrets";
 import { AutoRetry, type AutoRetryDeps } from "./sessions/auto-retry";
 import { GeneratedImages } from "./sessions/generated-images";
@@ -64,7 +64,10 @@ export interface ServicesOptions {
   store: EventStore;
   settings: SettingsStore;
   paths: HomePaths;
+  /** The home runner: provider detection, utility jobs, orchestrator and PMs. */
   runner: RunnerPort;
+  /** Routes each session to its own runner (`docs/remote-runners.md` §8); default: `runner`. */
+  runners?: RunnerRouter;
   secrets: SecretStore;
   exec?: Exec;
   /** Finds claude, codex and gh for the setup checks (tests fake it with `exec`). */
@@ -114,7 +117,10 @@ export interface AppServices {
   store: EventStore;
   settings: SettingsStore;
   paths: HomePaths;
+  /** The home runner (global work). Session work goes through `runners.forSession`. */
   runner: RunnerPort;
+  /** Which runner serves each session. */
+  runners: RunnerRouter;
   secrets: SecretStore;
   utility: UtilityService;
   projects: ProjectService;
@@ -175,6 +181,7 @@ export interface AppServices {
 export function createServices(opts: ServicesOptions): AppServices {
   const exec = opts.exec ?? runTool;
   const userHome = opts.userHome ?? homedir();
+  const runners = opts.runners ?? singleRunner(opts.runner);
   const utility =
     opts.utility ??
     new ProviderUtilityService({
@@ -209,6 +216,7 @@ export function createServices(opts: ServicesOptions): AppServices {
     repo: sessionRepo,
     projects,
     runner: opts.runner,
+    runners,
     inbox,
     home: opts.paths.home,
     worktreesDir: opts.paths.worktrees,
@@ -220,6 +228,7 @@ export function createServices(opts: ServicesOptions): AppServices {
     repo: sessionRepo,
     projects,
     runner: opts.runner,
+    runners,
     inbox,
     artifacts,
     settings: opts.settings,
@@ -233,7 +242,7 @@ export function createServices(opts: ServicesOptions): AppServices {
     repo: sessionRepo,
     sessions,
     artifacts,
-    providers: () => opts.runner.providers(),
+    providers: (sessionId) => runners.forSession(sessionId).providers(),
   });
   const lifecycle = new SessionLifecycle({
     db: opts.db,
@@ -251,10 +260,12 @@ export function createServices(opts: ServicesOptions): AppServices {
     projects,
     repo: sessionRepo,
     runner: opts.runner,
+    runners,
     artifacts,
     inbox,
     exec,
     secrets: opts.secrets,
+    home: opts.paths.home,
     ...opts.github,
     log: opts.log,
   });
@@ -314,6 +325,7 @@ export function createServices(opts: ServicesOptions): AppServices {
     sessions,
     projects,
     inbox,
+    artifacts,
     github: opts.orchestration?.github ?? new GithubServicePort(github),
     trustedAuthors,
     automation: opts.orchestration?.automation ?? automations,
@@ -324,6 +336,7 @@ export function createServices(opts: ServicesOptions): AppServices {
     repo: sessionRepo,
     projects,
     runner: opts.runner,
+    runners,
     store: opts.store,
     settings: () => opts.settings.get(),
     stopSession: (id) => (sessions as SessionService).stop(id),
@@ -364,6 +377,7 @@ export function createServices(opts: ServicesOptions): AppServices {
     settings: opts.settings,
     paths: opts.paths,
     runner: opts.runner,
+    runners,
     secrets: opts.secrets,
     utility,
     projects,
@@ -377,12 +391,14 @@ export function createServices(opts: ServicesOptions): AppServices {
       sessions,
       launcher,
       runner: opts.runner,
+      runners,
       log: opts.log,
     }),
     inbox,
     artifacts,
     browser: new BrowserService({
       runner: opts.runner,
+      runners,
       repo: sessionRepo,
       settings: () => opts.settings.get(),
       log: opts.log,
@@ -448,7 +464,8 @@ export function createServices(opts: ServicesOptions): AppServices {
       repo: sessionRepo,
       backupDir: join(opts.paths.backups, "agent-config"),
       disabledHooksFile: opts.paths.disabledHooks,
-      mcpProxyUrl: () => opts.runner.mcpProxyUrl(),
+      // The proxy the session's own runner gave its agent; MCP tests stay on the home runner.
+      mcpProxyUrl: (sessionId) => runners.forSession(sessionId).mcpProxyUrl(),
       runner: opts.runner,
       reportedCommands: (sessionId) => reportedCommands(opts.db, sessionId),
     }),
@@ -458,7 +475,12 @@ export function createServices(opts: ServicesOptions): AppServices {
     userHome,
     questions,
     mcpTokens,
-    workbench: new WorkbenchService({ db: opts.db, repo: sessionRepo, runner: opts.runner }),
+    workbench: new WorkbenchService({
+      db: opts.db,
+      repo: sessionRepo,
+      runner: opts.runner,
+      runners,
+    }),
     tools: undefined as unknown as ToolRegistry,
   };
   services.tools = new ToolRegistry(allTools, services, opts.log);

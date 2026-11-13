@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { StartSessionResponse } from "./api";
+import { StartSessionRequest, StartSessionResponse } from "./api";
 import { AutonomyLevel, Id, ReasoningEffort } from "./common";
 import { InboxItemStatus } from "./entities/inbox";
 import { Session } from "./entities/session";
@@ -42,9 +42,16 @@ export const ListConflictsQuery = z.object({
 });
 export type ListConflictsQuery = z.infer<typeof ListConflictsQuery>;
 
-/** `POST /api/conflicts/:id/resolve`: the decision (wait, skip, join or force with a reason). */
-export const ResolveConflictRequest = ConflictDecision;
+/**
+ * `POST /api/conflicts/:id/resolve`: the decision (wait, skip, join or force with a reason).
+ * `start` replaces the request saved with the conflict: the New session draft as it is when the
+ * card is answered, so edits made after the first send are what starts. Same project only.
+ */
+export const ResolveConflictRequest = ConflictDecision.and(
+  z.object({ start: StartSessionRequest.optional() }),
+);
 export type ResolveConflictRequest = z.infer<typeof ResolveConflictRequest>;
+export type ResolveConflictRequestInit = z.input<typeof ResolveConflictRequest>;
 
 export const ResolveConflictResponse = z.object({
   conflict: ConflictRecord,

@@ -30,8 +30,13 @@ export function sessionRoutes(s: AppServices) {
       .post("/", jsonBody(StartSessionRequest), async (c) => {
         const req = c.req.valid("json");
         const result = await s.sessions.start(req);
-        if (result.status !== "conflict") return c.json(result, 200);
-        // Persist the conflict (inbox item) so it can be resolved later (§8.4).
+        if (result.status !== "conflict") {
+          // A new version of a request that had an open conflict: that conflict is done.
+          s.orchestration.conflicts.closeReplaced(req, result);
+          return c.json(result, 200);
+        }
+        // Persist the conflict (inbox item) so it can be resolved later (§8.4); it replaces the
+        // open conflict of an earlier version of the same request.
         const record = s.orchestration.conflicts.record(req, result.existing);
         return c.json({ ...result, conflictId: record.id }, 409);
       })

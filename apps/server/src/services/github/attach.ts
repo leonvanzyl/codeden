@@ -1,9 +1,11 @@
-import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, isAbsolute, relative, resolve } from "node:path";
 import type { GitHubRepo, Session } from "@codeden/contracts";
 import { type ArtifactService, MAX_ATTACHMENT_BYTES } from "../artifacts";
 import { badRequest, forbidden, notFound } from "../errors";
+import { realPathOf } from "../files/path-guard";
+import { assertNotSecret } from "../secret-files";
 import { sessionWorkdir } from "../sessions/workdir";
 import type { GithubClient } from "./client";
 import { commitEvidence, type EvidenceFile, evidenceComment } from "./evidence";
@@ -44,21 +46,25 @@ function isInside(root: string, path: string): boolean {
 
 /**
  * Read evidence sources, confined to the session's worktree, the temp folder and its own
- * artifacts (by id, or by the path `browser_screenshot` prints).
+ * artifacts (by id, or by the path `browser_screenshot` prints). Secrets files and CodeDen's
+ * own credential files (in `home`, its data directory) are refused wherever they are, since
+ * evidence is published to GitHub.
  */
 export function readEvidence(
   session: Session,
   artifacts: ArtifactService,
   sources: EvidenceSource[],
+  home?: string,
 ): EvidenceFile[] {
   if (sources.length > MAX_EVIDENCE_FILES) {
     throw badRequest(`Attach at most ${MAX_EVIDENCE_FILES} files at once`);
   }
   const cwd = sessionWorkdir(session);
-  const roots = [cwd, tmpdir(), artifacts.sessionDir(session.id)]
-    .filter(existsSync)
-    .map((p) => realpathSync(p));
+  const roots = [cwd, tmpdir(), artifacts.sessionDir(session.id)].flatMap(
+    (p) => realPathOf(p) ?? [],
+  );
   return sources.map((source) => {
+    // Every check and the read use the real file (links, junctions and short names resolved).
     let file: string;
     let name: string;
     if (source.artifactId) {
@@ -67,20 +73,28 @@ export function readEvidence(
         artifact.sessionId === session.id ||
         (artifact.projectId !== null && artifact.projectId === session.projectId);
       if (!sameOwner) throw forbidden(`Artifact ${source.artifactId} belongs to another project`);
-      file = artifacts.filePath(artifact);
+      file = artifacts.realFilePath(artifact);
       name = source.name ?? artifact.name;
+      // Its file may be a link to another artifact's file; that one's original name counts too.
+      const target = artifacts.artifactForFile(file)?.name;
+      assertNotSecret(
+        { realPath: file, names: [artifacts.filePath(artifact), artifact.name, target, name] },
+        home,
+      );
     } else if (source.path) {
       const absolute = resolve(cwd, source.path);
-      if (!existsSync(absolute) || !statSync(absolute).isFile()) {
-        throw notFound(`File not found: ${source.path}`, "file_not_found");
-      }
-      file = realpathSync(absolute);
+      const real = existsSync(absolute) && statSync(absolute).isFile() && realPathOf(absolute);
+      if (!real) throw notFound(`File not found: ${source.path}`, "file_not_found");
+      file = real;
       if (!roots.some((root) => isInside(root, file))) {
         throw forbidden(
           "Only files inside your working directory, the temp folder or your own CodeDen artifacts can be attached (or pass an artifactId)",
         );
       }
       name = source.name ?? basename(file);
+      // A stored artifact's file has a generated name; its original name counts too.
+      const stored = artifacts.artifactForFile(file)?.name;
+      assertNotSecret({ realPath: file, names: [source.path, stored, name] }, home);
     } else {
       throw badRequest("Each file needs a path or an artifactId");
     }
@@ -100,6 +114,7 @@ export async function attachEvidence(
   session: Session,
   repo: GitHubRepo,
   input: AttachEvidenceInput,
+  home?: string,
 ): Promise<AttachEvidenceResult> {
   const target =
     input.target ??
@@ -111,7 +126,7 @@ export async function attachEvidence(
   if (!target) {
     throw badRequest("This session has no pull request or issue yet; pass target", "no_target");
   }
-  const files = readEvidence(session, artifacts, input.files ?? []);
+  const files = readEvidence(session, artifacts, input.files ?? [], home);
   if (files.length === 0 && !input.summary && !input.testOutput) {
     throw badRequest("Pass files, a summary or test output");
   }

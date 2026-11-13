@@ -1,3 +1,5 @@
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { InboxItem } from "@codeden/contracts";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
@@ -165,6 +167,28 @@ describe("CodeDen MCP endpoint", () => {
     expect(d.followups?.suggestions.map((s) => s.prompt)).toEqual(["Add docs", "Run the linter"]);
     const artifacts = h.server.services.artifacts.list({ sessionId });
     expect(artifacts[0]).toMatchObject({ kind: "image", mediaType: "image/png" });
+  });
+
+  it("never stores a secrets file as an artifact (attach_evidence could publish it)", async () => {
+    const cwd = h.server.services.sessionRepo.get(sessionId).cwd;
+    writeFileSync(join(cwd, ".env"), "SECRET=hunter2\n");
+    writeFileSync(join(cwd, "notes.txt"), "notes\n");
+    const client = await connect(token);
+    const before = h.server.services.artifacts.list({ sessionId }).length;
+    for (const args of [
+      { path: ".env" },
+      { path: ".env", name: "config.txt" },
+      { path: "notes.txt", name: "id_rsa" },
+    ]) {
+      const result = await client.callTool({ name: "share_to_chat", arguments: args });
+      expect(result.isError, JSON.stringify(args)).toBe(true);
+      expect(text(result)).toMatch(/secrets file/);
+    }
+    expect(h.server.services.artifacts.list({ sessionId })).toHaveLength(before);
+    expect(
+      text(await client.callTool({ name: "share_to_chat", arguments: { path: "notes.txt" } })),
+    ).toMatch(/Shared notes\.txt/);
+    await client.close();
   });
 
   it("checks browser_mouse fields per action, then sends valid calls to the session browser", async () => {

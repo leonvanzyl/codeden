@@ -50,20 +50,24 @@ export interface ConflictOutcome {
 /**
  * A start request that matched running work (§8.4). The same four choices the agents get:
  * wait (queue behind), skip, join (send as a follow-up) or force (with a recorded reason).
- * `decideWith` retries something other than a session start (an automation's run now).
+ * `decideWith` replaces the retry of the saved request: an automation's run now, or the New
+ * session draft as it is when the decision is made.
  * `replace` opens the resulting session in place of the current history entry (the New session
- * draft becomes that session, so Back doesn't return to an emptied draft).
+ * draft becomes that session, so Back doesn't return to an emptied draft). `startBlocked` says
+ * why nothing can start right now (an empty draft): Wait, Join and Force wait, Skip still works.
  */
 export function ConflictCard({
   conflict,
   onResolved,
   decideWith,
   replace = false,
+  startBlocked = null,
 }: {
   conflict: ConflictRecord;
   onResolved?: (result: ConflictOutcome) => void;
   decideWith?: (decision: ConflictDecision) => Promise<ConflictOutcome>;
   replace?: boolean;
+  startBlocked?: string | null;
 }) {
   const client = useClient();
   const queryClient = useQueryClient();
@@ -71,6 +75,7 @@ export function ConflictCard({
   const [forcing, setForcing] = useState(false);
   const [reason, setReason] = useState("");
   const existing = conflict.existing[0];
+  const blocked = Boolean(startBlocked);
   const resolve = useMutation({
     mutationFn: (decision: ConflictDecision): Promise<ConflictOutcome> =>
       decideWith ? decideWith(decision) : decide(client, conflict, decision),
@@ -147,7 +152,7 @@ export function ConflictCard({
             <Button
               size="sm"
               variant="destructive"
-              disabled={!reason.trim() || resolve.isPending}
+              disabled={!reason.trim() || blocked || resolve.isPending}
               onClick={() => resolve.mutate({ resolution: "force", reason: reason.trim() })}
             >
               Start anyway
@@ -161,14 +166,14 @@ export function ConflictCard({
             <Button
               size="sm"
               onClick={() => resolve.mutate({ resolution: "wait", behindId: existing?.id })}
-              disabled={resolve.isPending}
+              disabled={blocked || resolve.isPending}
             >
               <Clock /> Wait
             </Button>
             <Button
               size="sm"
               variant="outline"
-              disabled={!existing?.sessionId || resolve.isPending}
+              disabled={!existing?.sessionId || blocked || resolve.isPending}
               onClick={() =>
                 existing?.sessionId &&
                 resolve.mutate({ resolution: "join", sessionId: existing.sessionId })
@@ -188,13 +193,19 @@ export function ConflictCard({
               size="sm"
               variant="ghost"
               className="text-muted-foreground"
+              disabled={blocked}
               onClick={() => setForcing(true)}
             >
               <Zap /> Force…
             </Button>
-            <span className="ml-auto flex items-center gap-1 self-center text-3xs text-muted-foreground/70">
-              <ListPlus className="size-3" /> Wait queues it to start when the current run finishes
-            </span>
+            {startBlocked ? (
+              <span className="ml-auto self-center text-3xs text-chart-5">{startBlocked}</span>
+            ) : (
+              <span className="ml-auto flex items-center gap-1 self-center text-3xs text-muted-foreground/70">
+                <ListPlus className="size-3" /> Wait queues it to start when the current run
+                finishes
+              </span>
+            )}
           </div>
         )}
       </div>

@@ -1,7 +1,7 @@
 import { rmSync } from "node:fs";
 import {
   CODEDEN_VERSION,
-  type RunnerConnectionStatus,
+  HOME_RUNNER_ID,
   type ServerLock,
   TerminalQuery,
 } from "@codeden/contracts";
@@ -23,7 +23,8 @@ import { WsHub } from "./realtime/hub";
 import { TerminalBridge } from "./realtime/terminals";
 import { createApi } from "./routes/api";
 import { findWebDir, mountWeb } from "./routes/static";
-import { RunnerClient } from "./runner/client";
+import type { RunnerClient } from "./runner/client";
+import { RunnerHub } from "./runner/hub";
 import {
   defaultRunnerLaunch,
   type RunnerLaunchConfig,
@@ -33,7 +34,6 @@ import { loopbackOrigins, securityMiddleware } from "./security";
 import { type AppServices, createServices, type ServicesOptions } from "./services/container";
 import type { Exec } from "./services/exec";
 import { FILE_RESET_NOTICES, reportFileReset } from "./services/file-reset-notice";
-import { runnerPort } from "./services/runner-port";
 import { createSecretStore, MemorySecretStore, type SecretStore } from "./services/secrets";
 import { sessionWorkdir } from "./services/sessions/workdir";
 import type { Locate } from "./services/setup/tool-lookup";
@@ -148,7 +148,10 @@ export interface RunningServer {
   store: EventStore;
   database: Database;
   services: AppServices;
+  /** The home runner's client (none when the runner is off). */
   runner: RunnerClient | undefined;
+  /** Every runner the server drives, and which one serves each session. */
+  runners: RunnerHub;
   /** Network access (§15.1): the switch, password, remote sessions and the listener binding. */
   network: NetworkAccess;
   /** Stop listening and disconnect from the runner (which keeps running). */
@@ -171,14 +174,21 @@ export async function startServer(opts: StartServerOptions): Promise<RunningServ
   let runner: RunnerClient | undefined;
   let closing: Promise<void> | undefined;
 
-  const disabledStatus: RunnerConnectionStatus = {
-    state: "disabled",
-    runnerId: null,
-    version: null,
-    providers: [],
-    lastError: null,
-  };
-  const runnerStatus = () => runner?.status ?? disabledStatus;
+  // Runners call back into the terminal and browser bridges and session recovery, which exist
+  // once the services and routes below are made; nothing connects before `add` at the end.
+  const runners = new RunnerHub({
+    db: database.db,
+    store,
+    mcpUpstreamUrl: () => `http://127.0.0.1:${port}/mcp`,
+    onStatus: () => hub.broadcastRunner(runners.status()),
+    onStream: (stream) => {
+      if (stream.kind === "pty.output") terminals.onStream(stream);
+      else browserBridge.onStream(stream);
+    },
+    onReady: (runnerId) => void services.recovery.onRunnerReady(runnerId),
+    log,
+  });
+  const runnerStatus = () => runners.status();
   const hub = new WsHub(store, database.db, runnerStatus, {
     flushMs: opts.realtimeFlushMs,
     updateStatus: () => services.updates.snapshot(),
@@ -194,7 +204,8 @@ export async function startServer(opts: StartServerOptions): Promise<RunningServ
     store,
     settings,
     paths,
-    runner: runnerPort(() => runner),
+    runner: runners.home(),
+    runners,
     secrets,
     exec: opts.exec,
     locate: opts.locate,
@@ -297,6 +308,7 @@ export async function startServer(opts: StartServerOptions): Promise<RunningServ
   );
   const terminals = new TerminalBridge({
     runner: services.runner,
+    runners,
     cwdFor: (sessionId) => {
       const session = sessionId ? services.sessionRepo.find(sessionId)?.session : undefined;
       return session ? sessionWorkdir(session) : paths.home;
@@ -350,21 +362,14 @@ export async function startServer(opts: StartServerOptions): Promise<RunningServ
       ...(opts.openCodeExecutable ? ["--opencode", opts.openCodeExecutable] : []),
     ];
     const launch = opts.runner ?? defaultRunnerLaunch(args) ?? null;
-    runner = new RunnerClient({
-      home: paths.home,
+    runner = runners.add({
+      id: HOME_RUNNER_ID,
+      backend: "local",
+      home: true,
+      dir: paths.home,
       lockFile: paths.runnerLock,
-      db: database.db,
-      store,
       launch,
-      mcpUpstreamUrl: `${url}/mcp`,
       startTimeouts: opts.runnerStartTimeouts,
-      onStatus: (status) => hub.broadcastRunner(status),
-      onStream: (stream) => {
-        if (stream.kind === "pty.output") terminals.onStream(stream);
-        else browserBridge.onStream(stream);
-      },
-      onReady: () => void services.recovery.onRunnerReady(),
-      log,
     });
     const started = runner.start();
     if (opts.waitForRunner) await started;
@@ -389,10 +394,7 @@ export async function startServer(opts: StartServerOptions): Promise<RunningServ
       await services.localStt.stop();
       stopUpdateEvents();
       stopTerminalEvents();
-      if (runner) {
-        if (closeOpts.stopRunner) await runner.shutdownRunner();
-        else await runner.stop();
-      }
+      await runners.close({ stopHome: closeOpts.stopRunner });
       hub.close();
       wss.close();
       await listener.close();
@@ -412,6 +414,7 @@ export async function startServer(opts: StartServerOptions): Promise<RunningServ
     database,
     services,
     runner,
+    runners,
     network,
     close,
   };

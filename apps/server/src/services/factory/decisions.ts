@@ -12,6 +12,7 @@ import type { FactoryContext } from "./context";
 import { announceType } from "./intake";
 import { lateReviewPrompt } from "./prompts";
 import { recheckOf, withoutRecheck } from "./rebase";
+import { ownershipAfterRetry } from "./rebuild";
 
 /**
  * Decisions on work items (§10.1): letting an untrusted issue in, correcting a type, retrying
@@ -125,7 +126,9 @@ export function retry(ctx: FactoryContext, projectId: string, itemId: string): F
     reviewerSessionId: null,
     reviewerProvider: null,
     reviewerNote: null,
-    nudges: {},
+    // Its PRs stay owned: the open one and any still to be closed are closed, with a link,
+    // once the new attempt's PR is open.
+    nudges: ownershipAfterRetry(ctx, i),
     reason: null,
     failureKind: null,
     note: "Retried",

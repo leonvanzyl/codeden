@@ -118,6 +118,11 @@ export const PR_STATE_LABEL: Record<FactoryPrState, { label: string; tone: Tone;
     tone: "running",
     help: "It still conflicted after three requests to rebase, so the work is redone from the default branch. The new pull request replaces this one.",
   },
+  superseded: {
+    label: "Superseded",
+    tone: "idle",
+    help: "A newer pull request for the same work replaced this one. The factory closes it with a link to the new one.",
+  },
   merged: { label: "Merged", tone: "done", help: "Merged today." },
   waiting_for_you: {
     label: "Waiting for you",

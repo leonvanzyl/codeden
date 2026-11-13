@@ -56,6 +56,7 @@ export function snapshot(
     automations: [],
     scheduled: [],
     runner: { state: "disabled", runnerId: null, version: null, providers: [], lastError: null },
+    runners: [],
   };
 }
 

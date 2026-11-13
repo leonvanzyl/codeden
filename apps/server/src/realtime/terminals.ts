@@ -10,10 +10,9 @@ import {
 } from "@codeden/contracts";
 import type { WSContext, WSEvents } from "hono/ws";
 import { errorMessage } from "../services/errors";
-import type { RunnerPort } from "../services/runner-port";
+import { type RunnerDeps, type RunnerPort, runnerForSession } from "../services/runner-port";
 
-export interface TerminalBridgeDeps {
-  runner: RunnerPort;
+export interface TerminalBridgeDeps extends RunnerDeps {
   /** Working directory for a new terminal: the session's worktree, else the CodeDen home. */
   cwdFor: (sessionId: string | undefined) => string;
   log?: (message: string) => void;
@@ -23,9 +22,15 @@ export interface TerminalBridgeDeps {
  * Bridges UI terminal sockets (`/ws/pty`, §12.1) to runner terminals (`pty.*`). Terminals
  * live in the runner, so closing a socket only detaches; `kill` closes the terminal.
  * Output arrives as runner stream data and is fanned out to every attached socket.
+ *
+ * A session's terminal runs on the session's runner, any other on the home runner. The server
+ * makes every pty id (`pty-<uuid>`), so ids are unique across runners and output, exits and
+ * sockets stay keyed by pty id alone.
  */
 export class TerminalBridge {
   private readonly sockets = new Map<string, Set<WSContext>>();
+  /** The runner of each terminal opened or attached through this server. */
+  private readonly runners = new Map<string, RunnerPort>();
 
   constructor(private readonly deps: TerminalBridgeDeps) {}
 
@@ -67,6 +72,7 @@ export class TerminalBridge {
     for (const e of events) {
       if (e.type !== "pty.exited") continue;
       const { ptyId, exitCode } = (e as EventOf<"pty.exited">).payload;
+      if (!this.sockets.get(ptyId)?.size) this.runners.delete(ptyId);
       for (const ws of this.sockets.get(ptyId) ?? [])
         control(ws, { type: "exited", ptyId, exitCode });
     }
@@ -77,10 +83,11 @@ export class TerminalBridge {
     query: TerminalQuery,
     onReady: (ptyId: string) => void,
   ): Promise<void> {
-    const { runner } = this.deps;
     try {
       if (query.ptyId) {
+        const runner = this.runners.get(query.ptyId) ?? this.runnerFor(query.sessionId);
         const attached = await runner.request({ name: "pty.attach", ptyId: query.ptyId });
+        this.runners.set(query.ptyId, runner);
         this.attach(query.ptyId, ws);
         onReady(query.ptyId);
         control(ws, { type: "opened", ptyId: query.ptyId, pid: attached.pid, attached: true });
@@ -91,6 +98,8 @@ export class TerminalBridge {
         return;
       }
       const ptyId = `pty-${randomUUID()}`;
+      const runner = this.runnerFor(query.sessionId);
+      this.runners.set(ptyId, runner);
       this.attach(ptyId, ws);
       const opened = await runner.request({
         name: "pty.open",
@@ -111,7 +120,7 @@ export class TerminalBridge {
   }
 
   private async handle(ptyId: string, msg: TerminalClientMessage): Promise<void> {
-    const { runner } = this.deps;
+    const runner = this.runners.get(ptyId) ?? this.deps.runner;
     switch (msg.type) {
       case "input":
         await runner.request({ name: "pty.input", ptyId, data: msg.data });
@@ -126,9 +135,15 @@ export class TerminalBridge {
           control(ws, { type: "exited", ptyId, exitCode: null });
         }
         this.sockets.delete(ptyId);
+        this.runners.delete(ptyId);
         return;
       }
     }
+  }
+
+  /** The session's runner, or the home runner for a terminal outside any session. */
+  private runnerFor(sessionId: string | undefined): RunnerPort {
+    return sessionId ? runnerForSession(this.deps, sessionId) : this.deps.runner;
   }
 
   private attach(ptyId: string, ws: WSContext): void {

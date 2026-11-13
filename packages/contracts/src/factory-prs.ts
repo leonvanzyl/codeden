@@ -32,6 +32,8 @@ export type FactoryFailureKind = z.infer<typeof FactoryFailureKind>;
  * - `rebasing`: it has merge conflicts and an agent is rebasing it;
  * - `rebuilding`: it kept conflicting, so its work is being redone from the default branch;
  *   the new PR replaces it;
+ * - `superseded`: a newer PR for the same work replaced it (a rebuild's, or an integrator's);
+ *   the factory closes it with a link to the new one, retrying until GitHub accepts;
  * - `merged`: merged by the factory (or on GitHub) today;
  * - `waiting_for_you`: a person merges it (auto-merge off, an untrusted author, a protected
  *   area, or checks that failed after the revise rounds); the factory still keeps it free of
@@ -45,6 +47,7 @@ export const FactoryPrState = z.enum([
   "updating",
   "rebasing",
   "rebuilding",
+  "superseded",
   "merged",
   "waiting_for_you",
   "stuck",

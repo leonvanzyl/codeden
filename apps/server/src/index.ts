@@ -5,6 +5,7 @@ export { generatePassphrase } from "./network/password";
 export { PasswordRuleError, RemoteAccessStore } from "./network/store";
 export { ensureHome, type HomePaths, homePaths, resolveHome } from "./paths";
 export { RunnerClient, RunnerCommandError } from "./runner/client";
+export { RunnerHub, type RunnerSpec, type RunnersStatus } from "./runner/hub";
 export { defaultRunnerLaunch, type RunnerLaunchConfig } from "./runner/launcher";
 export { isProcessAlive, readLiveRunnerLock } from "./runner/lock";
 export { type AppType, type RunningServer, type StartServerOptions, startServer } from "./server";

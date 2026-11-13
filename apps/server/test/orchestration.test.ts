@@ -201,15 +201,33 @@ describe("orchestration (§8): role sessions, digest, tools, notices, conflicts"
   });
 
   it("persists user conflicts as inbox items resolvable with wait, skip, join or force", async () => {
+    const PNG_B64 =
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+    const image = {
+      type: "image",
+      mediaType: "image/png",
+      name: "image.png",
+      source: { type: "base64", data: PNG_B64 },
+    };
     const dup = {
       workKey: "automation:security-audit",
       purpose: "Audit again",
-      input: { text: "audit" },
+      input: { text: "audit", attachments: [image] },
     };
+    const first = await h.api("POST", "/sessions", {
+      projectId: h.projectId,
+      provider: "fake",
+      ...dup,
+      input: { text: "audit" },
+    });
+    expect(first.status).toBe(409);
+    const firstId = (first.body as { conflictId: string }).conflictId;
+    // Sent again (with an image now): the new conflict replaces the first one (#169).
     const res = await h.api("POST", "/sessions", {
       projectId: h.projectId,
       provider: "fake",
       ...dup,
+      replacesConflict: firstId,
     });
     expect(res.status).toBe(409);
     const conflictId = (res.body as { conflictId: string }).conflictId;
@@ -219,6 +237,10 @@ describe("orchestration (§8): role sessions, digest, tools, notices, conflicts"
       ConflictRecord.parse(c),
     );
     expect(open.map((c) => c.id)).toContain(conflictId);
+    expect(open.map((c) => c.id)).not.toContain(firstId);
+    expect(
+      (await h.api("POST", `/conflicts/${firstId}/resolve`, { resolution: "wait" })).status,
+    ).toBe(409);
     const inbox = (await h.api("GET", "/inbox")).body as { id: string; kind: string }[];
     expect(inbox.find((i) => i.id === conflictId)?.kind).toBe("conflict");
 
@@ -229,6 +251,12 @@ describe("orchestration (§8): role sessions, digest, tools, notices, conflicts"
     const out = resolved.body as { conflict: ConflictRecord; result: StartSessionResponse };
     expect(out.result.status).toBe("queued");
     expect(out.conflict).toMatchObject({ status: "resolved", resolution: { resolution: "wait" } });
+    // The pasted image was saved as an artifact: neither the record nor the pending start
+    // carries its bytes (#169).
+    expect(JSON.stringify(out.conflict)).not.toContain(PNG_B64);
+    const queuedId = out.result.status === "queued" ? out.result.sessionId : "";
+    const pending = h.server.services.sessionRepo.find(queuedId)?.startMeta?.pending;
+    expect(pending?.input?.attachments[0]).toMatchObject({ source: { type: "artifact" } });
     expect(
       (await h.api("POST", `/conflicts/${conflictId}/resolve`, { resolution: "skip" })).status,
     ).toBe(409);

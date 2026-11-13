@@ -18,6 +18,18 @@ function realish(p: string): string {
   return rest.length ? resolve(real, ...rest) : real;
 }
 
+/**
+ * The real path of an existing file or folder (symlinks, junctions and Windows short names
+ * resolved), or `undefined` when it doesn't exist.
+ */
+export function realPathOf(path: string): string | undefined {
+  try {
+    return realpathSync.native(path);
+  } catch {
+    return undefined;
+  }
+}
+
 /** True when `child` is `root` or inside it (no `..` escape, no other drive). */
 export function isInside(root: string, child: string): boolean {
   const a = caseInsensitive ? root.toLowerCase() : root;

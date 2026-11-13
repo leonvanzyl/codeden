@@ -1,7 +1,6 @@
 import type {
   ArchiveSessionResponse,
   ClaudeSdkStatus,
-  ConflictDecision,
   ConflictRecord,
   CreateProjectRequest,
   CreateProjectResponse,
@@ -22,6 +21,7 @@ import type {
   Project,
   RefreshModelsResponse,
   RefreshProjectResponse,
+  ResolveConflictRequestInit,
   ResolveConflictResponse,
   RestoreFilesRequest,
   RestoreFilesResponse,
@@ -142,7 +142,11 @@ export interface CodeDenClient {
 
   // Conflicts (§8.4): persisted start requests that matched running work.
   listConflicts(query?: { projectId?: string }): Promise<ConflictRecord[]>;
-  resolveConflict(conflictId: string, decision: ConflictDecision): Promise<ResolveConflictResponse>;
+  /** The decision, plus `start` to start that request instead of the saved one. */
+  resolveConflict(
+    conflictId: string,
+    request: ResolveConflictRequestInit,
+  ): Promise<ResolveConflictResponse>;
 
   // Inbox (§11.1).
   resolveInbox(itemId: string, resolution: InboxResolution): Promise<InboxItem>;

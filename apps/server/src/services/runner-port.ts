@@ -24,6 +24,50 @@ export interface RunnerPort {
     command: RunnerCommandOf<N>,
     timeoutMs?: number,
   ): Promise<RunnerCommandResult<N>>;
+  /**
+   * Names the runner in errors ("Runner rn-1 (docker)"); absent for the home runner, whose
+   * errors keep saying "the runner".
+   */
+  describe?(): string;
+}
+
+/**
+ * Which runner serves what (`docs/remote-runners.md` §8): the home runner for global work
+ * (provider detection, utility jobs, the orchestrator and PMs) and each session's own runner,
+ * the one in `sessions.runnerId`.
+ */
+export interface RunnerRouter {
+  home(): RunnerPort;
+  forSession(sessionId: string): RunnerPort;
+  /** The runner with this journal id; the home runner when no other runner has it. */
+  forRunnerId(runnerId: string): RunnerPort;
+}
+
+/** Service deps that reach runners: the home runner, and a router when there are several. */
+export interface RunnerDeps {
+  runner: RunnerPort;
+  /** Routes sessions to their own runner; without it every session uses `runner`. */
+  runners?: RunnerRouter;
+}
+
+/** A router for a single runner: every session uses it (tests, and a server with one runner). */
+export function singleRunner(port: RunnerPort): RunnerRouter {
+  return { home: () => port, forSession: () => port, forRunnerId: () => port };
+}
+
+/** The runner that hosts this session. */
+export function runnerForSession(deps: RunnerDeps, sessionId: string): RunnerPort {
+  return deps.runners ? deps.runners.forSession(sessionId) : deps.runner;
+}
+
+/** The error for a runner that is not connected, naming it when it isn't the home runner. */
+export function runnerUnavailable(runner: RunnerPort): ServiceError {
+  const name = runner.describe?.();
+  return new ServiceError(
+    503,
+    "runner_unavailable",
+    name ? `${name} is not connected` : "The runner is not connected",
+  );
 }
 
 /** Error code carried by a failed runner command (`RunnerCommandError.code`), if any. */
@@ -93,9 +137,13 @@ export async function refreshProviderModels(
   }
 }
 
-/** `RunnerPort` over the server's (possibly absent) `RunnerClient`. */
-export function runnerPort(get: () => RunnerClient | undefined): RunnerPort {
+/**
+ * `RunnerPort` over a (possibly absent) `RunnerClient`. `name` names a runner other than the
+ * home runner in errors.
+ */
+export function runnerPort(get: () => RunnerClient | undefined, name?: string): RunnerPort {
   return {
+    ...(name ? { describe: () => name } : {}),
     isConnected: () => get()?.status.state === "connected",
     runnerId: () => get()?.status.runnerId ?? null,
     providers: () => get()?.status.providers ?? [],
@@ -116,7 +164,11 @@ export function runnerPort(get: () => RunnerClient | undefined): RunnerPort {
       const client = get();
       if (!client) {
         return Promise.reject(
-          new ServiceError(503, "runner_unavailable", "No runner is configured"),
+          new ServiceError(
+            503,
+            "runner_unavailable",
+            name ? `${name} is not available` : "No runner is configured",
+          ),
         );
       }
       return client.request(command, timeoutMs);

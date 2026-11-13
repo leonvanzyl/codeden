@@ -10,8 +10,13 @@ import { sendToSession } from "@/lib/send-to-session";
 import { matchesCombo, shortcut } from "@/lib/shortcuts";
 import { cn } from "@/lib/utils";
 import { getDraft, useComposerStore } from "@/stores/composer";
-import { toInputAttachments } from "./attachments";
-import { ComposerBox, canSendDraft, composerPlaceholders, isSendKey } from "./composer-box";
+import {
+  ComposerBox,
+  canSendDraft,
+  composerPlaceholders,
+  draftInput,
+  isSendKey,
+} from "./composer-box";
 import { SessionOptions } from "./session-options";
 import { SuggestionMenu, suggestionOptionId, suggestionStatus } from "./suggestion-menu";
 import { applyTrigger } from "./trigger";
@@ -61,10 +66,7 @@ export function Composer({
   const canSend = canSendDraft(draft);
   const submit = (override?: SendMode) => {
     if (!canSend) return;
-    onSend(
-      { text: draft.text.trim(), attachments: toInputAttachments(draft.attachments) },
-      override ?? (running ? (canSteer ? mode : "queue") : "send"),
-    );
+    onSend(draftInput(draft), override ?? (running ? (canSteer ? mode : "queue") : "send"));
   };
 
   const pick = (insert: string) => {

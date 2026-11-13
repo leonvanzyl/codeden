@@ -26,7 +26,7 @@ import { badRequest, conflict, errorMessage, ServiceError } from "../errors";
 import type { Exec } from "../exec";
 import type { InboxService } from "../inbox-service";
 import type { ProjectService } from "../projects/project-service";
-import type { RunnerPort } from "../runner-port";
+import type { RunnerDeps } from "../runner-port";
 import type { SecretStore } from "../secrets";
 import type { SessionRepo } from "../sessions/repo";
 import { type AttachEvidenceInput, type AttachEvidenceResult, attachEvidence } from "./attach";
@@ -44,16 +44,17 @@ import { PrReviewInbox } from "./review-inbox";
 import { GithubStore, type IssueStateFilter } from "./store";
 import { GithubSync } from "./sync";
 
-export interface GithubServiceDeps {
+export interface GithubServiceDeps extends RunnerDeps {
   db: Db;
   store: EventStore;
   projects: ProjectService;
   repo: SessionRepo;
-  runner: RunnerPort;
   artifacts: ArtifactService;
   inbox: InboxService;
   exec: Exec;
   secrets: SecretStore;
+  /** CodeDen's data directory: its credential files are never attached as evidence (§15). */
+  home?: string;
   /** `fetch` for Octokit and the API base URL (tests point them at a fake GitHub). */
   fetch?: typeof fetch;
   baseUrl?: string;
@@ -96,6 +97,7 @@ export class GithubService {
       client: this.client,
       repo: deps.repo,
       runner: deps.runner,
+      runners: deps.runners,
       inbox: deps.inbox,
       repoOf: (projectId) => this.repoOrNull(projectId),
       log: deps.log,
@@ -320,6 +322,7 @@ export class GithubService {
       session,
       this.githubRepo(session.projectId),
       input,
+      this.deps.home,
     );
   }
 
@@ -416,7 +419,8 @@ export class GithubService {
   }
 
   private prDeps() {
-    return { ...this.issueDeps(), runner: this.deps.runner, repo: this.deps.repo };
+    const { runner, runners, repo } = this.deps;
+    return { ...this.issueDeps(), runner, runners, repo };
   }
 }
 

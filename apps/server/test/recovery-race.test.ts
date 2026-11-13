@@ -1,6 +1,6 @@
 import type { Session } from "@codeden/contracts";
 import { describe, expect, it, vi } from "vitest";
-import type { RunnerPort } from "../src/services/runner-port";
+import type { RunnerPort, RunnerRouter } from "../src/services/runner-port";
 import type { SessionLauncher } from "../src/services/sessions/launcher";
 import { SessionRecovery } from "../src/services/sessions/recovery";
 import type { SessionRepo } from "../src/services/sessions/repo";
@@ -13,7 +13,7 @@ import { sampleSession } from "./helpers";
  * session turns `running` before the reply is handled, and the reply does not list it.
  */
 describe("session recovery", () => {
-  function setup(initial: Session[]) {
+  function setup(initial: Session[], runners?: (home: RunnerPort) => RunnerRouter) {
     const sessions = new Map(initial.map((s) => [s.id, s]));
     const repo = {
       list: ({ status }: { status?: string[] }) =>
@@ -41,7 +41,13 @@ describe("session recovery", () => {
       }),
       providers: () => [{ id: "fake", capabilities: { resume: true } }],
     } as unknown as RunnerPort;
-    const recovery = new SessionRecovery({ repo, sessions: service, launcher, runner });
+    const recovery = new SessionRecovery({
+      repo,
+      sessions: service,
+      launcher,
+      runner,
+      runners: runners?.(runner),
+    });
     return {
       recovery,
       repo,
@@ -64,6 +70,43 @@ describe("session recovery", () => {
     expect(t.fail).not.toHaveBeenCalled();
     expect(t.continueAfterRestart).not.toHaveBeenCalled();
     expect(t.sessions.get("new")?.status).toBe("running");
+  });
+
+  it("only resumes the cut-off sessions of the runner that became ready", async () => {
+    const other = {
+      request: vi.fn(async () => ({
+        sessions: [],
+        ptys: [],
+        journal: { lastSeq: 0, unacked: 0 },
+        draining: false,
+      })),
+      providers: () => [{ id: "fake", capabilities: { resume: true } }],
+    } as unknown as RunnerPort;
+    const cut = {
+      ...sampleSession,
+      status: "running",
+      provider: "fake",
+      resumeToken: "r",
+    } as const;
+    const t = setup(
+      [
+        { ...cut, id: "at-home" },
+        { ...cut, id: "on-b", runnerId: "r-b" },
+      ],
+      (home) => ({
+        home: () => home,
+        forSession: (id) => (id === "on-b" ? other : home),
+        forRunnerId: (runnerId) => (runnerId === "r-b" ? other : home),
+      }),
+    );
+    await t.recovery.onRunnerReady("r-b");
+    expect(other.request).toHaveBeenCalledWith({ name: "runner.status" }, 10_000);
+    expect(t.continueAfterRestart.mock.calls.map((c) => (c as unknown[])[0])).toEqual(["on-b"]);
+    await t.recovery.onRunnerReady("r-home");
+    expect(t.continueAfterRestart.mock.calls.map((c) => (c as unknown[])[0])).toEqual([
+      "on-b",
+      "at-home",
+    ]);
   });
 
   it("still resumes a session whose turn was cut off before the runner was ready", async () => {

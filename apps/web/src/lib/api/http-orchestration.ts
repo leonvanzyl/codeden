@@ -85,7 +85,7 @@ export function httpSessionConflictApi(http: Fetcher): SessionAndConflictApi {
       http.post(`/sessions/${enc(id)}/unarchive`, {}, (v) => Session.parse(v)),
     listConflicts: (q = {}) =>
       http.get(`/conflicts${qs(q)}`, (v) => ConflictRecord.array().parse(v)),
-    resolveConflict: (id, decision) =>
-      http.post(`/conflicts/${enc(id)}/resolve`, decision, (v) => ResolveConflictResponse.parse(v)),
+    resolveConflict: (id, request) =>
+      http.post(`/conflicts/${enc(id)}/resolve`, request, (v) => ResolveConflictResponse.parse(v)),
   };
 }

@@ -13,6 +13,7 @@ import { advanceOwned } from "./owned";
 import { budgetExceeded, freeSlots, localDay, mayBuild, queueOrder } from "./policy";
 import { advanceBuilding, advanceWatching } from "./progress";
 import { advanceQueue } from "./queue";
+import { closeReplacedPrs } from "./rebuild";
 import { recoverInfraFailures } from "./recover";
 import { advanceScout } from "./scout";
 import { OWNED_STAGES } from "./store";
@@ -84,6 +85,10 @@ export async function runTick(
     }
     if (stage === "verifying") loop = await advanceQueue(ctx, project, loop);
   }
+  // PRs a rebuild or an integrator replaced are closed, whatever their item's stage by now.
+  await closeReplacedPrs(ctx, project).catch((error: unknown) =>
+    ctx.log?.(`factory: closing replaced PRs: ${errorMessage(error)}`),
+  );
   // Finished work gives back its sessions and worktrees, also while paused.
   archiveFinished(ctx, projectId);
 

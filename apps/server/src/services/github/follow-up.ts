@@ -1,15 +1,14 @@
 import type { GitHubRepo, GithubPr, RawEventEnvelope, Session } from "@codeden/contracts";
 import { errorMessage } from "../errors";
 import type { InboxService } from "../inbox-service";
-import { type RunnerPort, runnerErrorCode } from "../runner-port";
+import { type RunnerDeps, runnerErrorCode, runnerForSession } from "../runner-port";
 import type { SessionRepo } from "../sessions/repo";
 import type { GithubClient } from "./client";
 import { commentOnIssue } from "./issues";
 
-export interface FollowUpDeps {
+export interface FollowUpDeps extends RunnerDeps {
   client: GithubClient;
   repo: SessionRepo;
-  runner: RunnerPort;
   inbox: InboxService;
   /** The GitHub coordinates of a project, or null for local projects. */
   repoOf: (projectId: string) => GitHubRepo | null;
@@ -68,7 +67,10 @@ export class PrFollowUp {
 
   private async stopProcess(sessionId: string): Promise<void> {
     try {
-      await this.deps.runner.request({ name: "session.stop", sessionId }, 15_000);
+      await runnerForSession(this.deps, sessionId).request(
+        { name: "session.stop", sessionId },
+        15_000,
+      );
     } catch (error) {
       const code = runnerErrorCode(error);
       if (code !== "unknown_session" && code !== "runner_unavailable") {

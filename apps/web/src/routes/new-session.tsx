@@ -68,7 +68,13 @@ export function NewSessionPage({ projectId }: { projectId: string }) {
       </div>
       {start.conflict && (
         <div className="mx-auto w-full max-w-[46rem] px-3 pb-2 sm:px-6">
-          <ConflictCard conflict={start.conflict} onResolved={start.onConflictResolved} replace />
+          <ConflictCard
+            conflict={start.conflict}
+            decideWith={start.decide}
+            onResolved={start.onConflictResolved}
+            startBlocked={start.startBlocked}
+            replace
+          />
         </div>
       )}
       <Composer

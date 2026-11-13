@@ -1,7 +1,6 @@
 import {
   CODEDEN_VERSION,
   type RawEventEnvelope,
-  type RunnerConnectionStatus,
   UI_PROTOCOL_VERSION,
   UiClientMessage,
   type UiServerMessage,
@@ -10,6 +9,7 @@ import {
 import type { WSContext, WSEvents } from "hono/ws";
 import type { Db } from "../db/client";
 import type { EventStore } from "../events/store";
+import type { RunnersStatus } from "../runner/hub";
 import { type ArtifactLookup, clientEvent } from "../services/sessions/client-items";
 import { coalesceEvents } from "./coalesce";
 import { collectDirty, type Dirty, emptyDirty, isDirty, loadTranscript } from "./transcript";
@@ -67,7 +67,7 @@ export class WsHub {
   constructor(
     private readonly store: EventStore,
     private readonly db: Db,
-    private readonly runnerStatus: () => RunnerConnectionStatus,
+    private readonly runnerStatus: () => RunnersStatus,
     private readonly opts: WsHubOptions = {},
   ) {
     this.flushMs = opts.flushMs ?? 40;
@@ -96,7 +96,7 @@ export class WsHub {
           serverVersion: CODEDEN_VERSION,
           seq: this.store.headSeq(),
         });
-        send(ws, { type: "runner", runner: this.runnerStatus() });
+        send(ws, { type: "runner", ...this.runnerStatus() });
         const update = this.opts.updateStatus?.();
         if (update) send(ws, { type: "update", update });
       },
@@ -135,9 +135,9 @@ export class WsHub {
     };
   }
 
-  /** Push a runner status change to every client. */
-  broadcastRunner(runner: RunnerConnectionStatus): void {
-    for (const client of this.clients) send(client.ws, { type: "runner", runner });
+  /** Push a runner status change to every client: the home runner's, and every runner. */
+  broadcastRunner(status: RunnersStatus): void {
+    for (const client of this.clients) send(client.ws, { type: "runner", ...status });
   }
 
   /** Push an update check or self-update change to every client (§16). */

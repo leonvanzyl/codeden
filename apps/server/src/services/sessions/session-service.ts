@@ -23,7 +23,13 @@ import { badRequest, conflict, ServiceError } from "../errors";
 import type { InboxService } from "../inbox-service";
 import { projectDefaultProvider } from "../projects/project-config";
 import type { ProjectService } from "../projects/project-service";
-import { type RunnerPort, runnerErrorCode, toServiceError } from "../runner-port";
+import {
+  type RunnerDeps,
+  type RunnerPort,
+  runnerErrorCode,
+  runnerForSession,
+  toServiceError,
+} from "../runner-port";
 import { derivePurpose, deriveWorkKey, findConflicts } from "./conflicts";
 import { planFork } from "./fork";
 import type { InputDecorator } from "./input-decorator";
@@ -35,10 +41,9 @@ import type { Answerer, QuestionBroker } from "./questions";
 import { applyPendingConfig, updateSession } from "./reconfigure";
 import type { SessionRepo, StoredStartMeta } from "./repo";
 
-export interface SessionServiceDeps {
+export interface SessionServiceDeps extends RunnerDeps {
   repo: SessionRepo;
   projects: ProjectService;
-  runner: RunnerPort;
   inbox: InboxService;
   artifacts: ArtifactService;
   settings: SettingsStore;
@@ -98,22 +103,32 @@ export class SessionService {
     if (req.autonomy === "read_only" || req.planMode !== undefined) {
       const session = this.deps.repo.get(id);
       if (req.autonomy === "read_only") {
-        this.assertReadOnlySupported(session.role, session.provider, req.autonomy);
+        this.assertReadOnlySupported(session.role, session.provider, req.autonomy, id);
       }
-      if (req.planMode !== undefined) this.assertPlanModeSupported(session.role, session.provider);
+      if (req.planMode !== undefined) {
+        this.assertPlanModeSupported(session.role, session.provider, id);
+      }
     }
-    return updateSession(this.deps.repo, this.deps.runner, id, req);
+    return updateSession(this.deps.repo, this.runnerOf(id), id, req);
   }
 
-  /** Reject the `read_only` level on a provider that cannot enforce it (§11.2). */
-  private assertReadOnlySupported(role: Session["role"], providerId: string, level: AutonomyLevel) {
-    const problem = readOnlyUnsupported(role, level, this.provider(providerId));
+  /**
+   * Reject the `read_only` level on a provider that cannot enforce it (§11.2), as loaded by the
+   * session's runner (the home runner for a session not made yet).
+   */
+  private assertReadOnlySupported(
+    role: Session["role"],
+    providerId: string,
+    level: AutonomyLevel,
+    sessionId?: string,
+  ) {
+    const problem = readOnlyUnsupported(role, level, this.provider(providerId, sessionId));
     if (problem) throw badRequest(problem, "read_only_unsupported");
   }
 
   /** Reject plan mode for role sessions and on providers without `capabilities.planMode`. */
-  private assertPlanModeSupported(role: Session["role"], providerId: string) {
-    const problem = planModeUnsupported(role, this.provider(providerId));
+  private assertPlanModeSupported(role: Session["role"], providerId: string, sessionId?: string) {
+    const problem = planModeUnsupported(role, this.provider(providerId, sessionId));
     if (problem) throw badRequest(problem, "plan_mode_unsupported");
   }
 
@@ -172,21 +187,20 @@ export class SessionService {
       }
     }
 
-    const session = this.buildSession(req, project, {
-      purpose,
-      workKey,
-      scope,
-      queued: queuedBehind.length > 0,
-    });
+    const queued = queuedBehind.length > 0;
+    const session = this.buildSession(req, project, { purpose, workKey, scope, queued });
     const meta: StoredStartMeta = {
       workspaceMode: req.workspace.mode,
       workspaceFallback: null,
       forced,
       queuedBehind,
-      pending: queuedBehind.length > 0 ? { input: req.input, workspace: req.workspace } : null,
+      // A pending start keeps its pasted images as artifacts, like a queued message.
+      pending: queued
+        ? { input: req.input && this.externalize(session, req.input), workspace: req.workspace }
+        : null,
     };
     repo.create(session, meta);
-    if (queuedBehind.length > 0) {
+    if (queued) {
       return { status: "queued", sessionId: session.id, behind: queuedBehind };
     }
     this.launchInBackground(session.id, req.input, req.workspace);
@@ -199,8 +213,8 @@ export class SessionService {
    * `fork.ts`). The worktree is made in the background.
    */
   async fork(id: string, req: ForkSessionRequest): Promise<ForkSessionResponse> {
-    const { repo, projects, runner } = this.deps;
-    const plan = await planFork({ repo, projects, runner }, id, req);
+    const { repo, projects } = this.deps;
+    const plan = await planFork({ repo, projects, runner: this.runnerOf(id) }, id, req);
     repo.create(plan.session, plan.meta);
     this.launchInBackground(plan.session.id, undefined, plan.start.workspace, plan.start.fork);
     return { sessionId: plan.session.id };
@@ -265,21 +279,25 @@ export class SessionService {
   async steer(id: string, raw: UserInput): Promise<void> {
     const session = this.deps.repo.get(id);
     if (!BUSY.has(session.status)) throw conflict("No turn is running", "no_turn");
-    if (!this.provider(session.provider)?.capabilities.steer) {
+    if (!this.provider(session.provider, id)?.capabilities.steer) {
       throw conflict("This provider cannot steer a running turn", "unsupported");
     }
     const input = this.forRunner(session, raw);
-    await this.deps.runner.request({ name: "session.steer", sessionId: id, input }).catch((e) => {
-      throw toServiceError(e);
-    });
+    await this.runnerOf(id)
+      .request({ name: "session.steer", sessionId: id, input })
+      .catch((e) => {
+        throw toServiceError(e);
+      });
   }
 
   async interrupt(id: string): Promise<void> {
     this.deps.repo.get(id);
     this.deps.outbox.clear(id);
-    await this.deps.runner.request({ name: "session.interrupt", sessionId: id }).catch((e) => {
-      throw toServiceError(e);
-    });
+    await this.runnerOf(id)
+      .request({ name: "session.interrupt", sessionId: id })
+      .catch((e) => {
+        throw toServiceError(e);
+      });
   }
 
   /** Answer a question or approval; `by` is who answered a question (the user or the PM). */
@@ -287,7 +305,7 @@ export class SessionService {
     this.deps.repo.get(id);
     // Questions asked through CodeDen's ask_user tool are answered here, not by the provider.
     if (await this.deps.questions.respond(id, req.requestId, req.response, by)) return;
-    await this.deps.runner
+    await this.runnerOf(id)
       .request({
         name: "session.respond",
         sessionId: id,
@@ -317,7 +335,7 @@ export class SessionService {
     this.holds.release(id);
     if (session.status !== "queued" && session.status !== "created") {
       try {
-        await this.deps.runner.request({ name: "session.stop", sessionId: id }, 15_000);
+        await this.runnerOf(id).request({ name: "session.stop", sessionId: id }, 15_000);
       } catch (error) {
         const code = runnerErrorCode(error);
         if (code !== "unknown_session" && code !== "runner_unavailable")
@@ -363,9 +381,9 @@ export class SessionService {
     }
   }
 
-  /** The runner is ready again: retry every paused delivery (§4.2). */
-  releaseOutboxes(): void {
-    this.holds.releaseAll();
+  /** A runner is ready again: retry the paused deliveries of its sessions (§4.2). */
+  releaseOutboxes(which?: (sessionId: string) => boolean): void {
+    this.holds.releaseAll(which);
   }
 
   /**
@@ -425,7 +443,8 @@ export class SessionService {
 
   /** Hand a turn's input to the runner, resuming the session when it no longer hosts it. */
   private async deliver(session: Session, input: UserInput): Promise<void> {
-    await applyPendingConfig(this.deps.repo, this.deps.runner, session);
+    const runner = this.runnerOf(session.id);
+    await applyPendingConfig(this.deps.repo, runner, session);
     const previous = session.status;
     // Messaging an archived session brings it back.
     this.deps.repo.update(session.id, (s) => ({
@@ -441,7 +460,7 @@ export class SessionService {
         return;
       }
       try {
-        await this.deps.runner.request({ name: "session.send", sessionId: session.id, input });
+        await runner.request({ name: "session.send", sessionId: session.id, input });
       } catch (error) {
         // The runner no longer hosts it (restart, stopped): resume through the provider.
         if (runnerErrorCode(error) !== "unknown_session") throw error;
@@ -498,8 +517,15 @@ export class SessionService {
     this.launching.set(id, promise);
   }
 
-  private provider(id: string): ProviderInfo | undefined {
-    return this.deps.runner.providers().find((p) => p.id === id);
+  /** The runner that hosts this session (`sessions.runnerId`, else the home runner). */
+  private runnerOf(sessionId: string): RunnerPort {
+    return runnerForSession(this.deps, sessionId);
+  }
+
+  /** A provider as loaded by the session's runner, or the home runner's without a session. */
+  private provider(id: string, sessionId?: string): ProviderInfo | undefined {
+    const runner = sessionId ? this.runnerOf(sessionId) : this.deps.runner;
+    return runner.providers().find((p) => p.id === id);
   }
 
   private resolveProvider(req: StartSessionRequest, projectDefault: string | null): string {

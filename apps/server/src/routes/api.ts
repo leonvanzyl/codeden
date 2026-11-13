@@ -39,7 +39,8 @@ import { utilityRoutes, workbenchRoutes } from "./workbench";
 
 export interface ApiContext {
   services: AppServices;
-  runnerStatus: () => Snapshot["runner"];
+  /** The home runner's connection and every runner (`RunnerHub.status`). */
+  runnerStatus: () => Pick<Snapshot, "runner" | "runners">;
   startedAt: number;
   /** Stop the server (and optionally the runner) after the response is sent. */
   shutdown: (opts: { stopRunner: boolean }) => void;
@@ -142,7 +143,7 @@ function buildSnapshot(ctx: ApiContext): Snapshot {
     automations: s.db.select().from(automations).all().map(rowToAutomation),
     scheduled: s.orchestration.automation.listScheduledRuns(null, 20),
     roleSessions: s.orchestration.roles.refs(),
-    runner: ctx.runnerStatus(),
+    ...ctx.runnerStatus(),
   };
 }
 
