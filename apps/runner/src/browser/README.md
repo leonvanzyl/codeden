@@ -102,7 +102,10 @@ off a viewport screenshot goes to Playwright's mouse unchanged, which sends
 `Input.dispatchMouseEvent` in CSS pixels whatever the emulated scale. Points outside the
 viewport are refused (`out_of_bounds`, naming the size); on native views the target tab's own
 view is measured fresh for each action (a view in the background can differ from the shown
-one, and measuring it leaves the session's viewport alone). A drag presses at the start, moves
+one, and measuring it leaves the session's viewport alone). If that view can't be measured
+(busy in a script past the 2 s limit, or navigating), the action fails with a retryable
+`viewport_unavailable` and nothing is sent: it never borrows another view's size. Viewer input
+keeps the tolerant path, which uses the last known size of the shown view. A drag presses at the start, moves
 to the end in about one step per 20 px (5 to 50) so drag thresholds see motion, and releases.
 Playwright counts a button or key as held before its press is dispatched, so a failed step
 (the press included) still releases every button and key the action tried to press, keeping

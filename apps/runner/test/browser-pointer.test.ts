@@ -2,9 +2,12 @@ import { describe, expect, it } from "vitest";
 import {
   dragSteps,
   type MouseCommand,
+  mouse,
   mouseAction,
   type PointerPage,
 } from "../src/browser/pointer";
+import type { BrowserSession } from "../src/browser/session";
+import { CommandError } from "../src/errors";
 
 /**
  * A page that records the mouse and keyboard calls it gets. A call `fail` matches (by its
@@ -174,6 +177,24 @@ describe("agent pointer actions", () => {
       });
     }
     // Nothing reached the page.
+    expect(calls).toEqual([]);
+  });
+
+  it("sends nothing to the target tab when its viewport can't be measured", async () => {
+    const { page, calls } = fakePage();
+    const tabs: Array<string | undefined> = [];
+    const session = {
+      page: () => page,
+      currentViewport: async (tabId?: string) => {
+        tabs.push(tabId);
+        throw new CommandError("viewport_unavailable", "Could not measure the size of tab t2");
+      },
+    } as unknown as BrowserSession;
+    await expect(
+      mouse(session, { action: "drag", x: 1, y: 1, toX: 5, toY: 5, tabId: "t2" }),
+    ).rejects.toMatchObject({ code: "viewport_unavailable" });
+    // The target tab's own size was asked for, and nothing reached the page.
+    expect(tabs).toEqual(["t2"]);
     expect(calls).toEqual([]);
   });
 

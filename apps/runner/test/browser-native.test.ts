@@ -244,6 +244,21 @@ describe.skipIf(!hasBrowser)("native engine (installed Edge/Chrome)", { timeout:
       message: expect.stringContaining("(800x600 CSS pixels)"),
     });
     expect([session.viewportSize.width, session.viewportSize.height]).toEqual([800, 600]);
+
+    // A background view that can't be measured (busy for 3 s, longer than the 2 s measure) is
+    // never acted on with the shown view's size: the action fails and nothing is dispatched.
+    const target = session.page(back.tabId);
+    await target.goto(site.url);
+    await target.evaluate(
+      "setTimeout(() => { const end = Date.now() + 3000; while (Date.now() < end); }, 0)",
+    );
+    await new Promise((r) => setTimeout(r, 100));
+    await expect(click(200, 150, back.tabId)).rejects.toMatchObject({
+      code: "viewport_unavailable",
+      message: expect.stringContaining(`tab ${back.tabId}`),
+    });
+    // Once the page is free again, its button was never clicked.
+    expect(await target.textContent("#big")).toBe("Press me");
     await handlers.execute({ name: "browser.close", sessionId: "s5" });
   });
 
