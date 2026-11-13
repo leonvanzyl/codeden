@@ -1,4 +1,11 @@
-import type { BrowserEngine, BrowserServerMessage, BrowserTab } from "@codeden/contracts";
+import {
+  type BrowserDialog,
+  type BrowserDialogClosed,
+  type BrowserEngine,
+  type BrowserServerMessage,
+  type BrowserTab,
+  DIALOG_TIMEOUT_MS,
+} from "@codeden/contracts";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { ApiRequestError, useClient } from "@/lib/api";
@@ -6,6 +13,27 @@ import type { BrowserChannel, BrowserConnection } from "@/lib/api/feature-apis";
 
 export type FrameMessage = Extract<BrowserServerMessage, { type: "frame" }>;
 export type AppliedViewport = Omit<Extract<BrowserServerMessage, { type: "viewport" }>, "type">;
+
+/** Page dialogs waiting for an answer; `version` changes with every update. */
+export interface PageDialogs {
+  open: BrowserDialog[];
+  version: number;
+}
+
+/** Tell the user about a dialog that closed without them: the agent or the timeout answered. */
+function noteClosed(closed: BrowserDialogClosed): void {
+  const what = closed.type === "beforeunload" ? '"Leave this page?"' : `a ${closed.type}`;
+  if (closed.by === "timeout") {
+    const minutes = Math.round(DIALOG_TIMEOUT_MS / 60_000);
+    toast(`Dismissed ${what} nobody answered`, {
+      description: `${closed.message || "The page"} waited ${minutes} minutes.`,
+    });
+  } else if (closed.by === "agent") {
+    toast(`The agent ${closed.accepted ? "accepted" : "dismissed"} ${what}`, {
+      description: closed.message || undefined,
+    });
+  }
+}
 
 export interface SessionBrowser {
   connection: BrowserConnection;
@@ -19,6 +47,8 @@ export interface SessionBrowser {
   viewport: AppliedViewport | null;
   /** An agent is driving the browser right now (or was a moment ago). */
   agentActing: boolean;
+  /** The page dialogs (alert, confirm, prompt) waiting for an answer: the page is paused. */
+  dialogs: PageDialogs;
   /** Subscribe to screencast frames (kept out of React state). */
   onFrame(listener: (frame: FrameMessage) => void): () => void;
   channel: BrowserChannel | null;
@@ -48,6 +78,7 @@ export function useSessionBrowser(sessionId: string, native = false): SessionBro
   const [engine, setEngine] = useState<BrowserEngine | null>(null);
   const [viewport, setViewport] = useState<AppliedViewport | null>(null);
   const [agentActing, setAgentActing] = useState(false);
+  const [dialogs, setDialogs] = useState<PageDialogs>({ open: [], version: 0 });
   const frameListeners = useRef(new Set<(f: FrameMessage) => void>());
   /** The newest frame, replayed to new listeners (it can arrive before the canvas mounts). */
   const lastFrame = useRef<FrameMessage | null>(null);
@@ -69,6 +100,7 @@ export function useSessionBrowser(sessionId: string, native = false): SessionBro
     setEngine(null);
     setViewport(null);
     setAgentActing(false);
+    setDialogs((d) => ({ open: [], version: d.version + 1 }));
     lastFrame.current = null;
     const offConn = ch.onConnection(setConnection);
     const offMsg = ch.onMessage((msg) => {
@@ -76,7 +108,13 @@ export function useSessionBrowser(sessionId: string, native = false): SessionBro
         setOpen(msg.open);
         setTabs(msg.tabs);
         setEngine(msg.open ? (msg.engine ?? "runner") : null);
-        if (!msg.open) setAgentActing(false);
+        if (!msg.open) {
+          setAgentActing(false);
+          setDialogs((d) => ({ open: [], version: d.version + 1 }));
+        }
+      } else if (msg.type === "dialogs") {
+        setDialogs((d) => ({ open: msg.dialogs, version: d.version + 1 }));
+        if (msg.closed) noteClosed(msg.closed);
       } else if (msg.type === "viewport") {
         const { type: _t, ...applied } = msg;
         setViewport(applied);
@@ -132,6 +170,7 @@ export function useSessionBrowser(sessionId: string, native = false): SessionBro
       engine,
       viewport,
       agentActing,
+      dialogs,
       channel,
       onFrame,
       run,
@@ -162,6 +201,7 @@ export function useSessionBrowser(sessionId: string, native = false): SessionBro
     engine,
     viewport,
     agentActing,
+    dialogs,
     onFrame,
   ]);
 }

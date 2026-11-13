@@ -115,12 +115,14 @@ The runner launches one Chromium (your installed **Edge** or **Chrome**; Edge fi
 | `browser_snapshot` | An accessibility snapshot with element refs |
 | `browser_click`, `browser_type`, `browser_press` | Act on a ref, or press a key or chord. Without a ref, `browser_type` types into whatever has focus |
 | `browser_mouse` | Click, hover, drag or scroll at a point, for canvases, maps, drag handles, sliders and hover menus that have no useful ref. Points are the page's CSS pixels from the top-left corner of the visible area: the pixels of a viewport `browser_screenshot`, not of a `fullPage` or element (`ref`) one. Points outside the visible area are refused |
+| `browser_dialog` | Answer the page's alert, confirm or prompt (OK or Cancel, and the prompt's text) |
 | `browser_screenshot` | Viewport, full page or one element; `share: true` posts it to the chat |
 | `browser_logs` | Console and network entries |
 | `browser_wait` | For a selector, text or network idle |
 | `browser_evaluate` | Run a small JavaScript expression (5 s timeout, size-capped result) |
 | `browser_open_dev_server` | Open `localhost:<port>`, or the only running dev server |
 
+- **Dialogs wait for an answer.** When the page opens an `alert`, `confirm` or `prompt` (a "Delete this item?"), the page pauses and the panel shows the dialog over it with **OK** and **Cancel** (and a text field for a prompt). You or the agent can answer it; the panel says who did. A dialog nobody answers is dismissed after 2 minutes, so a page never waits forever. When you or an agent navigate away with the address bar or the browser tools, a page's "Leave site?" is accepted on its own.
 - **Dev servers** running on your machine are discovered, so you and the agents can open them in one click.
 - Screenshots can be shared to the chat (`share_to_chat`) or attached to a PR or issue as [evidence](github.md#evidence).
 - `chrome://`, `edge://`, `devtools://` and `javascript:` URLs are refused.

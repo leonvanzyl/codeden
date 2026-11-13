@@ -101,6 +101,11 @@ export function openBrowserSocket(
       // Not queued: the open handler sends the latest one.
       send(viewport, false);
     },
+    dialog: (tabId, accept, promptText) =>
+      send(
+        { type: "dialog", tabId, accept, ...(promptText !== undefined && { promptText }) },
+        false,
+      ),
     close() {
       closed = true;
       const socket = ws;
