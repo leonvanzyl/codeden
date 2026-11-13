@@ -1,3 +1,4 @@
+import { resolve } from "node:path";
 import {
   RUNNER_PROTOCOL_VERSION,
   type RunnerToServerMessage,
@@ -73,6 +74,11 @@ export class ServerConnection {
           sessions: this.core.host.list(),
           journal: { lastSeq: this.core.journal.lastSeq, unacked: this.core.journal.unacked },
           draining: this.core.isDraining(),
+          // Where it runs, so the server never guesses paths or separators (remote runners).
+          platform: process.platform,
+          arch: process.arch,
+          home: resolve(this.core.home),
+          backend: this.core.backend,
         });
         return;
       case "resume":

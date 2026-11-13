@@ -1,4 +1,9 @@
-import type { RunnerCommand, RunnerCommandResult, RunnerEvent } from "@codeden/contracts";
+import type {
+  RunnerBackendId,
+  RunnerCommand,
+  RunnerCommandResult,
+  RunnerEvent,
+} from "@codeden/contracts";
 import { FORK_POINT_MISSING, type ProviderRegistry, refreshProcessPath } from "@codeden/providers";
 import type { BrowserCommandHandlers } from "./browser";
 import { CommandError } from "./errors";
@@ -20,6 +25,8 @@ import { prepareWorkspace } from "./workspace/worktree";
 /** Everything command handlers need; owned by `startRunner`. */
 export interface RunnerCore {
   home: string;
+  /** Where this runner runs, reported in `welcome` (`docs/remote-runners.md` §5). */
+  backend: RunnerBackendId;
   version: string;
   journal: Journal;
   host: SessionHost;
