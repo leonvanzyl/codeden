@@ -8,6 +8,7 @@ import type {
   ScheduledRun,
   WorkSummary,
 } from "@codeden/contracts";
+import { localDateTime, machineTimezone } from "../automations/cron";
 
 /**
  * The status digest (§8.4): structured data (`ProjectStatus`, `Overview`) and its compact
@@ -184,18 +185,34 @@ function block(open: string, close: string, lines: string[]): string {
   return [open, ...lines.map(neutralizeTags), close].join("\n");
 }
 
-/** The PM's digest for its project. */
-export function renderProjectDigest(s: ProjectStatus, now = Date.now()): string {
-  const at = new Date(now).toISOString();
+/**
+ * The digest's clock: `at` in UTC, plus the user's timezone and local time (#207), so the PM and
+ * the orchestrator tell the user clock times they recognise.
+ */
+function clock(now: number, timeZone: string): string {
+  const at = new Date(now);
+  return `at="${at.toISOString()}" tz="${timeZone}" local="${localDateTime(at, timeZone)}"`;
+}
+
+/** The PM's digest for its project; `timeZone` is the user's IANA timezone. */
+export function renderProjectDigest(
+  s: ProjectStatus,
+  now = Date.now(),
+  timeZone = machineTimezone(),
+): string {
   return block(
-    `<codeden_status project=${quote(neutralizeTags(s.project.name))} mode="${s.project.mode}" at="${at}">`,
+    `<codeden_status project=${quote(neutralizeTags(s.project.name))} mode="${s.project.mode}" ${clock(now, timeZone)}>`,
     "</codeden_status>",
     projectLines(s, now),
   );
 }
 
 /** The orchestrator's digest: every project rolled up. */
-export function renderOverviewDigest(o: Overview, now = Date.now()): string {
+export function renderOverviewDigest(
+  o: Overview,
+  now = Date.now(),
+  timeZone = machineTimezone(),
+): string {
   const lines: string[] = [];
   if (o.projects.length === 0) lines.push("No projects yet.");
   for (const p of o.projects) {
@@ -212,7 +229,7 @@ export function renderOverviewDigest(o: Overview, now = Date.now()): string {
     for (const m of o.pmMessages) lines.push(`- ${m.projectId ?? "?"}: ${quote(m.text, 300)}`);
   }
   return block(
-    `<codeden_status scope="all projects" at="${new Date(now).toISOString()}">`,
+    `<codeden_status scope="all projects" ${clock(now, timeZone)}>`,
     "</codeden_status>",
     lines,
   );

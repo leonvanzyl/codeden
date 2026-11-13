@@ -85,6 +85,12 @@ export function localTime(at: Date, tz: string): string {
   return `${p.hour}:${p.minute}`;
 }
 
+/** `YYYY-MM-DD HH:MM` of `at` in `tz` (a clock time to tell the user). */
+export function localDateTime(at: Date, tz: string): string {
+  const p = localParts(at, tz);
+  return `${p.year}-${p.month}-${p.day} ${p.hour}:${p.minute}`;
+}
+
 /**
  * True when `at` falls inside the quiet hours `[start, end)`; windows may wrap midnight
  * (`22:00`-`07:00`). Times are in the quiet hours' own timezone, else `fallbackTz`.
