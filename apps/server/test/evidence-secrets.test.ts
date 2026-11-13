@@ -1,8 +1,18 @@
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { CODEDEN_CREDENTIAL_FILES, INVALID_COPY_SUFFIX } from "@codeden/contracts";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { shareToChat } from "../src/mcp/tools/share-to-chat";
+import { RemoteAccessStore } from "../src/network/store";
 import type { AppServices } from "../src/services/container";
 import { EVIDENCE_BRANCH } from "../src/services/github/evidence";
 import { createGithubEnv, type GithubEnv } from "./support/github-env";
@@ -165,6 +175,74 @@ describe("attach_evidence refuses secrets", () => {
       files: [{ path: ".env.example" }, { path: "shot.png" }],
     });
     expect(result.files.map((f) => f.name)).toEqual(["env.example", "shot.png"]);
+  });
+});
+
+describe("copies CodeDen keeps of a damaged credential file", () => {
+  // #170: a malformed remote-access.json is kept as `remote-access.json.invalid-<timestamp>`,
+  // with the password and session-token hashes still in it.
+  function remoteAccessBackup(): string {
+    const file = join(env.dir, "remote-access.json");
+    writeFileSync(file, '{"enabled":true,"password":{"hash":"scrypt$secret-hash"');
+    let copy: string | undefined;
+    new RemoteAccessStore(
+      file,
+      () => 1_700_000_000_000,
+      (reset) => {
+        copy = reset.copy;
+      },
+    );
+    expect(copy).toBe(`${file}${INVALID_COPY_SUFFIX}1700000000000`);
+    expect(readFileSync(copy as string, "utf8")).toContain("secret-hash");
+    return copy as string;
+  }
+
+  function nothingStored(sessionId: string) {
+    expect(env.artifacts.list({ sessionId })).toEqual([]);
+    nothingPublished();
+  }
+
+  it("attach_evidence refuses the remote-access backup, under any published name", async () => {
+    const copy = remoteAccessBackup();
+    const session = issueSession();
+    for (const file of [{ path: copy }, { path: copy, name: "notes.txt" }]) {
+      await expect(env.service.attachEvidence(session.id, { files: [file] })).rejects.toMatchObject(
+        refused,
+      );
+    }
+    nothingStored(session.id);
+  });
+
+  it("share_to_chat refuses the remote-access backup, under any name", async () => {
+    const copy = remoteAccessBackup();
+    const session = issueSession();
+    for (const input of [{ path: copy }, { path: copy, name: "shot.png" }]) {
+      await expect(share(session.id, input)).rejects.toMatchObject(refused);
+    }
+    nothingStored(session.id);
+  });
+
+  it("refuses the backup through a symlink with a harmless name", async (ctx) => {
+    const copy = remoteAccessBackup();
+    fileSymlinkOrSkip(copy, join(env.dir, "report.txt"), () => ctx.skip());
+    const session = issueSession();
+    await expect(
+      env.service.attachEvidence(session.id, { files: [{ path: "report.txt" }] }),
+    ).rejects.toMatchObject(refused);
+    await expect(share(session.id, { path: "report.txt" })).rejects.toMatchObject(refused);
+    nothingStored(session.id);
+  });
+
+  it.each(CODEDEN_CREDENTIAL_FILES)("refuses a copy of %s", async (name) => {
+    const copy = join(env.dir, `${name}${INVALID_COPY_SUFFIX}42`);
+    mkdirSync(dirname(copy), { recursive: true });
+    writeFileSync(copy, SECRET);
+    const session = issueSession();
+    await expect(
+      env.service.attachEvidence(session.id, { files: [{ path: copy, name: "log.txt" }] }),
+    ).rejects.toMatchObject(refused);
+    await expect(share(session.id, { path: copy, name: "log.txt" })).rejects.toMatchObject(refused);
+    nothingStored(session.id);
   });
 });
 
