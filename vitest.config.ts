@@ -1,5 +1,5 @@
 import { readdirSync, readFileSync, realpathSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { availableParallelism, cpus, tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { configDefaults, defineConfig } from "vitest/config";
@@ -184,9 +184,46 @@ const SLOW = [
   },
 ];
 
-export default defineConfig(({ mode }) => ({
-  test: {
-    passWithNoTests: true,
-    projects: mode === "slow" ? SLOW : FAST,
-  },
-}));
+/** The share of the machine's CPU time that was idle over the next `ms` (0 to 1). */
+async function idleShare(ms: number): Promise<number> {
+  const sample = () =>
+    cpus().reduce(
+      (sum, { times: t }) => ({
+        idle: sum.idle + t.idle,
+        all: sum.all + t.user + t.nice + t.sys + t.idle + t.irq,
+      }),
+      { idle: 0, all: 0 },
+    );
+  const before = sample();
+  await new Promise((resolve) => setTimeout(resolve, ms));
+  const after = sample();
+  const all = after.all - before.all;
+  return all > 0 ? (after.idle - before.idle) / all : 1;
+}
+
+/**
+ * On a machine other builds already keep busy (factory builders and reviewers running
+ * `pnpm test` side by side), run a quarter of the CPUs' worth of workers instead of one per
+ * CPU. With a worker per CPU on top of that load, the process-heavy suites starved each other
+ * past their timeouts, and Vitest's own workers could not start within its fixed 60 s.
+ * `VITEST_MAX_WORKERS` (which Vitest reads for every project) or `--maxWorkers` still wins.
+ */
+async function capWorkersWhenBusy(): Promise<void> {
+  if (process.env.VITEST_MAX_WORKERS) return;
+  if (process.argv.some((arg) => arg.startsWith("--maxWorkers"))) return;
+  const idle = await idleShare(300);
+  if (idle >= 0.5) return;
+  const workers = Math.max(2, Math.floor(availableParallelism() / 4));
+  process.env.VITEST_MAX_WORKERS = String(workers);
+  console.log(`The machine is busy (${Math.round(idle * 100)}% idle): ${workers} test workers.`);
+}
+
+export default defineConfig(async ({ mode }) => {
+  await capWorkersWhenBusy();
+  return {
+    test: {
+      passWithNoTests: true,
+      projects: mode === "slow" ? SLOW : FAST,
+    },
+  };
+});
