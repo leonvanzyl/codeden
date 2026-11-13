@@ -17,6 +17,11 @@ export interface CheckInputs {
   pr: FactoryPr;
   issueTitle: string | null;
   review: ReviewVerdict | null;
+  /**
+   * An agent rebased the PR to resolve merge conflicts after the reviewer approved: the
+   * approval waits for the reviewer's re-check of the resolution.
+   */
+  recheck?: boolean;
   /** Provider of the reviewer, for the pending message. */
   reviewer: string | null;
   /** The item's pipeline; a docs change that touches no code needs no agent review. */
@@ -66,6 +71,10 @@ export function hasTestResults(body: string): boolean {
 /** The `ci` check's detail while the PR has merge conflicts (the author is asked to rebase). */
 export const CONFLICTS_DETAIL =
   "Merge conflicts with the base branch: GitHub runs no CI until they are resolved, so the author is rebasing";
+
+/** The `review` check's detail while the reviewer re-checks a conflict resolution. */
+export const RECHECK_DETAIL =
+  "Rebased to resolve merge conflicts after the approval: the reviewer re-checks the resolution (git range-diff)";
 
 const NEVER_STARTED = "CI never started on ";
 
@@ -160,6 +169,7 @@ export function evaluateChecks(i: CheckInputs): { checks: MergeCheck[]; outcome:
     set("review", "skipped", "Docs-only change: the docs pipeline has no agent review");
   else if (!i.review)
     set("review", "pending", `Waiting for the review${i.reviewer ? ` (${i.reviewer})` : ""}`);
+  else if (i.review.verdict === "approve" && i.recheck) set("review", "pending", RECHECK_DETAIL);
   else if (i.review.verdict === "approve") set("review", "pass", i.review.summary);
   else set("review", "fail", `${i.review.verdict}: ${i.review.summary}`);
 

@@ -11,6 +11,7 @@ import { errorMessage } from "../errors";
 import { EVIDENCE_HEADING } from "../github/evidence";
 import type { GithubService } from "../github/github-service";
 import { authorAssociation } from "../github/graphql";
+import * as prOps from "./github-port-prs";
 
 /** A pull request as the merge checks read it. */
 export interface FactoryPr {
@@ -87,6 +88,20 @@ export interface FactoryGithub {
   commitChecks(projectId: string, sha: string): Promise<CommitChecks>;
   /** Head of the default branch and its CI state. */
   mainHead(projectId: string): Promise<{ sha: string; checks: CommitChecks; failed: string[] }>;
+  /** Commits the default branch has that the PR's head (`headSha`) doesn't; 0 when up to date. */
+  behindBy(projectId: string, number: number, headSha: string): Promise<number>;
+  /**
+   * Bring a PR up to date with the default branch on GitHub (`update-branch`, no agent). Throws
+   * when the head is no longer `expectedHeadSha` or the merge would conflict.
+   */
+  updateBranch(projectId: string, number: number, expectedHeadSha: string): Promise<void>;
+  /** Comment on a pull request, then close it (a rebuild replaced it). */
+  closePr(projectId: string, number: number, comment: string): Promise<void>;
+  /**
+   * Whether CI can run on the repository: Actions enabled with an active workflow. Null when
+   * GitHub doesn't say.
+   */
+  actionsAvailable(projectId: string): Promise<boolean | null>;
   /**
    * Open a PR reverting a squash merge when it is still the head of the default branch;
    * null when main moved on (the loop then asks an agent to write the revert).
@@ -257,6 +272,22 @@ export class GithubFactoryPort implements FactoryGithub {
     );
     const { state, failed } = await this.checksFor(projectId, branch.commit.sha);
     return { sha: branch.commit.sha, checks: state, failed };
+  }
+
+  behindBy(projectId: string, _number: number, headSha: string): Promise<number> {
+    return prOps.behindBy(this.github, projectId, headSha);
+  }
+
+  updateBranch(projectId: string, number: number, expectedHeadSha: string): Promise<void> {
+    return prOps.updateBranch(this.github, projectId, number, expectedHeadSha);
+  }
+
+  closePr(projectId: string, number: number, comment: string): Promise<void> {
+    return prOps.closePr(this.github, projectId, number, comment);
+  }
+
+  actionsAvailable(projectId: string): Promise<boolean | null> {
+    return prOps.actionsAvailable(this.github, projectId);
   }
 
   async shareVision(projectId: string, path: string, contents: string) {

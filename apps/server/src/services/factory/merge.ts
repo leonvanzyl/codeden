@@ -2,6 +2,7 @@ import type { FactoryItem, FactoryLoop, Project } from "@codeden/contracts";
 import { errorMessage } from "../errors";
 import { type FactoryContext, factoryNotice, raiseInbox } from "./context";
 import type { FactoryPr } from "./github-port";
+import { stuckInboxId } from "./stuck";
 
 /**
  * The Merge step (§10.1): every check passed. With auto-merge on and trusted work, the factory
@@ -11,6 +12,17 @@ import type { FactoryPr } from "./github-port";
 
 /** Inbox id of "ready for you to merge". */
 export const readyInboxId = (itemId: string) => `inbox:factory-ready:${itemId}`;
+
+/** Inbox id of a PR escalated to the user (a protected area). */
+export const escalatedInboxId = (itemId: string) => `inbox:factory-escalated:${itemId}`;
+
+/** Close the open inbox items about an item's PR (ready to merge, protected area, stuck). */
+export function closeInboxFor(ctx: FactoryContext, itemId: string, note: string): void {
+  for (const id of [readyInboxId(itemId), escalatedInboxId(itemId), stuckInboxId(itemId)]) {
+    const open = ctx.inbox.find(id);
+    if (open?.status === "open") ctx.inbox.close(open, "resolved", { note });
+  }
+}
 
 /** The PR was merged or closed by someone (a person, on GitHub). */
 export function prDecidedOutside(
@@ -24,15 +36,18 @@ export function prDecidedOutside(
     ...i,
     pr: ref,
     stage: merged ? "merged" : "rejected",
-    reason: merged ? null : "The pull request was closed on GitHub",
+    // A protected area stays the reason it was a person's to merge.
+    reason: merged
+      ? i.stage === "escalated"
+        ? i.reason
+        : null
+      : "The pull request was closed on GitHub",
+    failureKind: null,
     note: merged ? "Merged on GitHub" : null,
     mergedAt: merged ? (i.mergedAt ?? at) : i.mergedAt,
-    finishedAt: at,
+    finishedAt: i.finishedAt ?? at,
   }));
-  const ready = ctx.inbox.find(readyInboxId(item.id));
-  if (ready?.status === "open") {
-    ctx.inbox.close(ready, "resolved", { note: merged ? "merged" : "closed" });
-  }
+  closeInboxFor(ctx, item.id, merged ? "merged" : "closed");
 }
 
 /** Every check passed and the factory doesn't merge this one: it's the user's to merge. */
@@ -142,23 +157,4 @@ export async function autoMerge(
     wake: false,
   });
   return { ...loop, mergesToday: loop.mergesToday + 1, consecutiveFailures: 0 };
-}
-
-/**
- * Escalated items (a protected area) wait for a person; once they merge or close the PR on
- * GitHub, the item is done. Reads the synced PR, no API call.
- */
-export function advanceEscalated(ctx: FactoryContext, project: Project, item: FactoryItem): void {
-  if (!item.pr) return;
-  const ref = ctx.github.prRef(project.id, item.pr.number);
-  if (ref && (ref.state === "merged" || ref.state === "closed")) {
-    ctx.store.updateItem(item.id, (i) => ({
-      ...i,
-      pr: ref,
-      stage: ref.state === "merged" ? "merged" : "rejected",
-      reason: ref.state === "merged" ? i.reason : "The pull request was closed on GitHub",
-      note: ref.state === "merged" ? "Merged on GitHub" : null,
-      mergedAt: ref.state === "merged" ? (i.mergedAt ?? ctx.now().toISOString()) : i.mergedAt,
-    }));
-  }
 }

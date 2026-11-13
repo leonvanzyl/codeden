@@ -51,6 +51,14 @@ export const factoryStatus = defineTool({
       inProgress: s.inProgress.map(brief),
       ignored: s.ignored.map(brief),
       mergeChecks: s.mergeChecks,
+      // The PRs the factory owns: the merge queue first, then the rest and today's merges.
+      pullRequests: s.pullRequests.map((p) => ({
+        pr: p.pr.number,
+        title: p.title,
+        state: p.state,
+        queuePosition: p.queuePosition,
+        note: p.note,
+      })),
       recent: s.recent.slice(0, 10).map(brief),
       scout: s.scout,
     };

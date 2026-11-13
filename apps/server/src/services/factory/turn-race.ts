@@ -149,10 +149,23 @@ export async function recoverTurnRaceFailures(
   }
 }
 
+/**
+ * Whether this step owns the failed item: its builder failed because a message raced its turn,
+ * and it wasn't told to carry on yet. The general infrastructure recovery (`recover.ts`) leaves
+ * such items to it.
+ */
+export function ownsTurnRaceFailure(ctx: FactoryContext, item: FactoryItem): boolean {
+  if (item.reason !== BUILDER_FAILED_REASON || !item.builderSessionId) return false;
+  const s = ctx.repo.find(item.builderSessionId)?.session;
+  const failure = s ? turnRaceFailure(ctx, s) : undefined;
+  return failure !== undefined && !item.nudges[TOLD_PREFIX + failure.id];
+}
+
 /** What going back to building changes on a recovered item. */
 const REOPEN = {
   stage: "building",
   reason: null,
+  failureKind: null,
   note: "Back to building: its builder was marked failed by a message that raced its turn",
   finishedAt: null,
   sessionsArchivedAt: null,

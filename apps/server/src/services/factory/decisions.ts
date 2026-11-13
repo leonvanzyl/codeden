@@ -11,6 +11,7 @@ import { sessionsToArchive } from "./cleanup";
 import type { FactoryContext } from "./context";
 import { announceType } from "./intake";
 import { lateReviewPrompt } from "./prompts";
+import { recheckOf, withoutRecheck } from "./rebase";
 
 /**
  * Decisions on work items (§10.1): letting an untrusted issue in, correcting a type, retrying
@@ -126,6 +127,7 @@ export function retry(ctx: FactoryContext, projectId: string, itemId: string): F
     reviewerNote: null,
     nudges: {},
     reason: null,
+    failureKind: null,
     note: "Retried",
     sessionsArchivedAt: null,
     earlierSessionIds: [...new Set([...i.earlierSessionIds, ...earlier])],
@@ -168,9 +170,17 @@ export function submitReview(
       message: `Not recorded: the item is ${item.stage}${item.stage === "building" ? " (the author is revising it; you will be asked to review again)" : ""}.`,
     };
   }
+  // A re-check of a conflict resolution: an approval keeps the earlier verdict.
+  const recheck = Boolean(item.review && recheckOf(item));
   ctx.store.updateItem(item.id, (i) => {
-    const { rereview_sent: _s, reviewer: _r, ...nudges } = i.nudges;
-    return { ...i, review: verdict, nudges };
+    const { rereview_sent: _s, reviewer: _r, ...nudges } = withoutRecheck(i.nudges);
+    const keep = recheck && verdict.verdict === "approve" && i.review;
+    return { ...i, review: keep ? i.review : verdict, nudges };
   });
-  return { recorded: true, message: `Verdict recorded: ${verdict.verdict}.` };
+  return {
+    recorded: true,
+    message: recheck
+      ? `Re-check recorded: ${verdict.verdict}.${verdict.verdict === "approve" ? " Your earlier verdict stands." : ""}`
+      : `Verdict recorded: ${verdict.verdict}.`,
+  };
 }

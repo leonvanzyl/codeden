@@ -26,6 +26,8 @@ export type NewFactoryItem = Pick<
 export const ACTIVE_STAGES: FactoryItemStage[] = ["building", "verifying", "watching"];
 /** Stages of items waiting to be classified or for a free agent. */
 export const WAITING_STAGES: FactoryItemStage[] = ["candidate", "backlog"];
+/** Stages whose pull request the loop still owns outside verification (see `owned.ts`). */
+export const OWNED_STAGES: FactoryItemStage[] = ["failed", "escalated"];
 /** Stages after which an item's sessions have nothing left to do (see `cleanup.ts`). */
 export const FINISHED_STAGES: FactoryItemStage[] = ["merged", "reverted", "rejected", "failed"];
 /** Final stages. */
@@ -246,6 +248,8 @@ const ITEM_DEFAULTS = {
   largeChange: null,
   sessionsArchivedAt: null,
   earlierSessionIds: [],
+  failureKind: null,
+  rebuiltFrom: null,
 } satisfies Partial<FactoryItem>;
 
 /** An item as read from the projection, with the fields newer versions added. */
