@@ -81,8 +81,35 @@ describe("usage contracts", () => {
       stale: false,
     };
     expect(RateLimitWindow.parse(window)).toEqual(window);
-    const session = { sessionId: "s1", totals, billing: "subscription", turns: [] };
+    const subagent = {
+      itemId: "toolu_1",
+      costUsd: 0.0421,
+      costSource: "estimated",
+      models: [
+        {
+          model: "claude-haiku-5-5",
+          label: "Haiku 5.5",
+          inputTokens: 12,
+          outputTokens: 900,
+          cacheReadTokens: 410_000,
+          cacheWriteTokens: 38_000,
+          reasoningTokens: 0,
+          costUsd: 0.0421,
+          costSource: "estimated",
+        },
+      ],
+    };
+    const session = {
+      sessionId: "s1",
+      totals,
+      billing: "subscription",
+      turns: [],
+      subagents: [subagent],
+    };
     expect(SessionUsage.parse(session)).toEqual(session);
+    // A response from before subagent costs reads as having none.
+    const { subagents: _none, ...older } = session;
+    expect(SessionUsage.parse(older).subagents).toEqual([]);
   });
 
   it("validates report queries", () => {

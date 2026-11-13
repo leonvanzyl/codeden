@@ -274,6 +274,26 @@ export const UserQuestionItem = z.object({
 });
 
 /**
+ * Tokens one model used in a subagent run, in the four billed categories (§7.3, §12.6). The
+ * server prices them when it reports the run's cost, like a turn's: the provider's USD figure
+ * when it gave one, else the price table.
+ */
+export const SubagentModelUsage = z.object({
+  /** Model id as the provider reports it; absent when it doesn't say (the session's model). */
+  model: z.string().min(1).optional(),
+  /** Uncached input tokens (excludes cache reads and writes). */
+  inputTokens: z.int().nonnegative(),
+  outputTokens: z.int().nonnegative(),
+  cacheReadTokens: z.int().nonnegative(),
+  cacheWriteTokens: z.int().nonnegative(),
+  /** Reasoning/thinking tokens where reported; already counted in `outputTokens`. */
+  reasoningTokens: z.int().nonnegative().optional(),
+  /** USD the provider reported for these calls, when it reports one. */
+  costUsd: z.number().nonnegative().optional(),
+});
+export type SubagentModelUsage = z.infer<typeof SubagentModelUsage>;
+
+/**
  * What a finished subagent used, as its provider reports it (§7.3). Each figure is optional:
  * a provider that reports none leaves `SubagentItem.stats` out. Display only: never added to
  * usage totals (`usage.updated`), which come from the provider's own turn figures.
@@ -285,6 +305,11 @@ export const SubagentStats = z.object({
   toolUses: z.int().nonnegative().optional(),
   /** How long the subagent ran, in milliseconds. */
   durationMs: z.int().nonnegative().optional(),
+  /**
+   * Tokens per model across the run's own model calls (a nested subagent's are on its own
+   * card), for the card's cost (`SessionUsage.subagents`). Display only, like the rest.
+   */
+  usage: z.array(SubagentModelUsage).optional(),
 });
 export type SubagentStats = z.infer<typeof SubagentStats>;
 

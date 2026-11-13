@@ -1,4 +1,4 @@
-import type { BillingMode, UsageTotals } from "@codeden/contracts";
+import type { BillingMode, SubagentCost, UsageTotals } from "@codeden/contracts";
 
 /** "$3.20", "$0.042", "$1,284"; estimates read "≈ $3.20". */
 export function money(n: number, estimated = false): string {
@@ -37,6 +37,43 @@ export function percent(fraction: number | null): string {
 
 export function totalTokens(t: UsageTotals): number {
   return t.inputTokens + t.outputTokens + t.cacheReadTokens + t.cacheWriteTokens;
+}
+
+/** A subagent card's cost figure, "≈ $0.42" for estimates; null when nothing could be priced. */
+export function subagentCostText(cost: SubagentCost | undefined): string | null {
+  if (!cost || cost.costSource === "unpriced") return null;
+  return money(cost.costUsd, cost.costSource === "estimated");
+}
+
+/** What kind of figure a subagent's cost is, labelled like the session's (§12.6). */
+function subagentCostHeading(cost: SubagentCost, billing: BillingMode): string {
+  const unpriced = cost.models.filter((m) => m.costSource === "unpriced").map((m) => m.model);
+  if (cost.costSource === "unpriced") return `Not priced: no price for ${unpriced.join(", ")}`;
+  const kind = billing === "subscription" ? "API-equivalent cost" : "Subagent cost";
+  const label = cost.costSource === "estimated" ? `${kind} (estimated from list prices)` : kind;
+  return unpriced.length > 0 ? `${label} · not priced: ${unpriced.join(", ")}` : label;
+}
+
+/**
+ * Tooltip lines for a subagent's cost: what kind of figure it is, then one line per model,
+ * "Haiku 5.5: ≈ $0.012 · 1k input · 300 output · 40k cache reads · 15k cache writes".
+ */
+export function subagentCostLines(cost: SubagentCost | undefined, billing: BillingMode): string[] {
+  if (!cost) return [];
+  return [
+    subagentCostHeading(cost, billing),
+    ...cost.models.map((m) => {
+      const price =
+        m.costSource === "unpriced" ? "not priced" : money(m.costUsd, m.costSource === "estimated");
+      return [
+        `${m.label ?? m.model}: ${price}`,
+        `${tokens(m.inputTokens)} input`,
+        `${tokens(m.outputTokens)} output`,
+        `${tokens(m.cacheReadTokens)} cache reads`,
+        `${tokens(m.cacheWriteTokens)} cache writes`,
+      ].join(" · ");
+    }),
+  ];
 }
 
 /** Change against the previous period: "+12%", "−4%", or null when there is no baseline. */

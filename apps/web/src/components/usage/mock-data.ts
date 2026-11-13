@@ -144,6 +144,27 @@ export const mockUsageApi: UsageApi = {
     totals: totals(1.84),
     billing: "subscription",
     turns: [],
+    // The checkout transcript's Explore subagent, priced at Sonnet 5.5's list prices.
+    subagents: [
+      {
+        itemId: "ck-explore",
+        costUsd: 0.19173,
+        costSource: "estimated",
+        models: [
+          {
+            model: "claude-sonnet-5-5",
+            label: "Sonnet 5.5",
+            inputTokens: 1_240,
+            outputTokens: 3_180,
+            cacheReadTokens: 412_000,
+            cacheWriteTokens: 46_500,
+            reasoningTokens: 0,
+            costUsd: 0.19173,
+            costSource: "estimated",
+          },
+        ],
+      },
+    ],
   }),
   project: async (projectId) => ({
     projectId,

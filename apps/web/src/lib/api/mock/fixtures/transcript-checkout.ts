@@ -143,7 +143,20 @@ export const checkoutTranscript = buildTranscript(
           description: "Find where the cart total is set",
           summary:
             "useCart.updateQuantity sets the total from whichever price response lands last.",
-          stats: { totalTokens: 48_213, toolUses: 23, durationMs: 72_000 },
+          stats: {
+            totalTokens: 48_213,
+            toolUses: 23,
+            durationMs: 72_000,
+            usage: [
+              {
+                model: "claude-sonnet-5-5",
+                inputTokens: 1_240,
+                outputTokens: 3_180,
+                cacheReadTokens: 412_000,
+                cacheWriteTokens: 46_500,
+              },
+            ],
+          },
         },
         read("ck-t3", "src/checkout/useCart.ts", 1, 64),
         cmd("ck-t4", "pnpm test:e2e checkout --repeat-each=20", failingRun, 1, 41_700),

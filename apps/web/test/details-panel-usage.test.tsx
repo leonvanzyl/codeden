@@ -35,6 +35,7 @@ function ledger(totals: Partial<UsageTotals>, billing: SessionUsage["billing"] =
     sessionId: ID,
     billing,
     turns: [],
+    subagents: [],
     totals: {
       inputTokens: 0,
       outputTokens: 0,
