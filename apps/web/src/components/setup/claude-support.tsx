@@ -83,9 +83,10 @@ export function ClaudeSupportRow() {
       )}
       <div className="min-w-0 flex-1">
         <div className="text-[13.5px] font-medium">Claude Code support</div>
+        {/* Wraps rather than truncates: on a phone a cut-off line hides what will happen. */}
         <div
           className={cn(
-            "truncate text-2xs",
+            "text-2xs break-words",
             state === "failed" ? "text-status-failed/90" : "text-muted-foreground",
           )}
           title={message(data)}
