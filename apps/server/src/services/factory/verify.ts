@@ -144,7 +144,7 @@ export async function advanceVerifying(
     }
     const reviewed = checks.find((c) => c.name === "review")?.state !== "skipped";
     if (!reviewed) return loop;
-    current = await ensureReviewer(ctx, project, current, vision.text, pr);
+    current = await ensureReviewer(ctx, project, loop, current, vision.text, pr);
     return reviewerStalled(ctx, project, loop, current);
   }
 

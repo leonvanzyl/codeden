@@ -5,25 +5,27 @@ import { InfoHint } from "@/components/common/info-hint";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { type AgentsDraft, AgentsTuning } from "./agents-tuning";
 import { REVIEW_AREAS_HELP, SCOUT_HELP } from "./meta";
 
 /**
  * The tuning knobs the editor exposes. It saves them as a patch, so the rest (review areas, the
- * builder provider) keep their saved values.
+ * idle grace) keep their saved values.
  */
-export type TuningDraft = Pick<
-  FactoryTuning,
-  | "requireCi"
-  | "maxChangedLines"
-  | "maxChangedFiles"
-  | "auditCommand"
-  | "maxFixAttempts"
-  | "watchTimeoutMin"
-  | "minBacklog"
-  | "discoveryIntervalMin"
-  | "discoveryPerRound"
-  | "maxIssuesPerRound"
->;
+export type TuningDraft = AgentsDraft &
+  Pick<
+    FactoryTuning,
+    | "requireCi"
+    | "maxChangedLines"
+    | "maxChangedFiles"
+    | "auditCommand"
+    | "maxFixAttempts"
+    | "watchTimeoutMin"
+    | "minBacklog"
+    | "discoveryIntervalMin"
+    | "discoveryPerRound"
+    | "maxIssuesPerRound"
+  >;
 
 /** The editable tuning knobs of a saved tuning. */
 export function tuningDraft(t: FactoryTuning): TuningDraft {
@@ -38,6 +40,11 @@ export function tuningDraft(t: FactoryTuning): TuningDraft {
     discoveryIntervalMin: t.discoveryIntervalMin,
     discoveryPerRound: t.discoveryPerRound,
     maxIssuesPerRound: t.maxIssuesPerRound,
+    builderProvider: t.builderProvider,
+    builderModel: t.builderModel,
+    reviewerProvider: t.reviewerProvider,
+    reviewerModel: t.reviewerModel,
+    reviewerFallback: t.reviewerFallback,
   };
 }
 
@@ -474,6 +481,9 @@ export function LimitsEditor({
             />
           </Field>
         </div>
+      )}
+      {tuning && onTuningChange && (
+        <AgentsTuning value={tuning} onChange={(a) => onTuningChange({ ...tuning, ...a })} />
       )}
     </div>
   );

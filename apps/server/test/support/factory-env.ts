@@ -7,6 +7,7 @@ import {
   type Notice,
   type Project,
   type ProviderInfo,
+  type ProviderStatus,
   type Session,
   type StartSessionRequest,
   type StartSessionResponse,
@@ -14,6 +15,7 @@ import {
 import { type Database, openDatabase } from "../../src/db/client";
 import { EventStore } from "../../src/events/store";
 import type { Exec, ExecResult } from "../../src/services/exec";
+import type { RateLimitReading } from "../../src/services/factory/availability";
 import { FactoryService } from "../../src/services/factory/factory-service";
 import { VISION_TEMPLATE } from "../../src/services/factory/vision";
 import { InboxService } from "../../src/services/inbox-service";
@@ -60,6 +62,12 @@ export interface FactoryEnv {
   /** Session filters the budget asked spend for (null: the whole project). */
   spendFilters: Array<string[] | null>;
   providers: string[];
+  /** What detection reports per provider, over "installed and signed in". */
+  detected: Record<string, Partial<ProviderStatus>>;
+  /** How many times the factory asked the runner to detect providers. */
+  detections: number;
+  /** Rate-limit windows the usage service reports. */
+  rateLimits: RateLimitReading[];
   /** The utility model's answer to the "Identify type" call (null: no model). */
   model: (system: string, prompt: string) => Promise<string | null>;
   /** Shift of the factory clock against real time (day rollover, CI grace). */
@@ -140,6 +148,9 @@ export function createFactoryEnv(
     spend: { usd: 0, tokens: 0 },
     spendFilters: [],
     providers: opts.providers ?? ["claude", "codex"],
+    detected: {},
+    detections: 0,
+    rateLimits: [],
     model: async () => null,
     clock: { offsetMs: 0 },
   } as unknown as FactoryEnv;
@@ -200,7 +211,21 @@ export function createFactoryEnv(
   } as unknown as SessionService;
   env.sessions = sessions;
   const runner = {
-    providers: () => env.providers.map((id) => ({ id }) as ProviderInfo),
+    providers: () => env.providers.map((id) => ({ id, displayName: id }) as ProviderInfo),
+    isConnected: () => true,
+    // Provider detection: installed and signed in unless a test says otherwise.
+    request: async (command: { name: string }) => {
+      if (command.name !== "provider.detect") throw new Error(`unexpected ${command.name}`);
+      env.detections += 1;
+      return {
+        statuses: env.providers.map((providerId) => ({
+          providerId,
+          installed: true,
+          loggedIn: true,
+          ...env.detected[providerId],
+        })),
+      };
+    },
   } as unknown as RunnerPort;
 
   const build = () =>
@@ -216,6 +241,7 @@ export function createFactoryEnv(
           env.spendFilters.push(ids ? [...ids] : null);
           return env.spend;
         },
+        rateLimitWindows: () => env.rateLimits,
       },
       inbox,
       notify: (draft) => {
