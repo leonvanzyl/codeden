@@ -15,6 +15,7 @@ import {
   type SessionOptions,
   type UserInput,
 } from "@codeden/contracts";
+import { agentEnv } from "../util/agent-env";
 import type { ResolvedCommand } from "../util/exec";
 import { explicitModel } from "../util/model";
 import { permissionModeFor } from "./permissions";
@@ -67,13 +68,12 @@ export function executableOptions(
   );
 }
 
-/** Environment for the Claude process: the user's env plus session extras. */
+/** Environment for the Claude process: the user's env (`agentEnv`) plus session extras. */
 export function claudeEnv(
   extra: Record<string, string> | undefined,
 ): Record<string, string | undefined> {
   return {
-    ...process.env,
-    ...extra,
+    ...agentEnv(extra),
     CLAUDE_AGENT_SDK_CLIENT_APP: `codeden/${CODEDEN_VERSION}`,
   };
 }

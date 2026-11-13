@@ -84,6 +84,7 @@ const DISABLED: RunnerConnectionStatus = {
 export class RunnerHub implements RunnerRouter {
   private readonly entries = new Map<string, Entry>();
   private readonly homePort: RunnerPort;
+  private closed = false;
 
   constructor(private readonly opts: RunnerHubOptions) {
     this.homePort = runnerPort(() => this.homeClient());
@@ -95,6 +96,7 @@ export class RunnerHub implements RunnerRouter {
    * runner, such as the home runner on every server start, appends nothing.
    */
   add(spec: RunnerSpec): RunnerClient {
+    if (this.closed) throw new Error("The runner hub is closed");
     if (this.entries.has(spec.id)) throw new Error(`Runner ${spec.id} is already added`);
     const previous = findRunnerRecord(this.opts.db, spec.id);
     const record: RunnerRecord = {
@@ -117,11 +119,19 @@ export class RunnerHub implements RunnerRouter {
         { type: "runner.registered", sessionId: null, payload: { runner: record } },
       ]);
     }
-    const name = record.home ? undefined : describeRunner(record);
+    // Errors name the runner with its journal id, read when they happen: the client learns it on
+    // connecting, the record keeps it from earlier connections.
+    const describe = record.home
+      ? undefined
+      : () => {
+          const runnerId =
+            client.status.runnerId ?? findRunnerRecord(this.opts.db, spec.id)?.runnerId ?? null;
+          return describeRunner({ ...record, runnerId }, true);
+        };
     const log = this.opts.log;
-    const client = new RunnerClient({
+    const client: RunnerClient = new RunnerClient({
       recordId: spec.id,
-      name,
+      describe,
       home: spec.dir,
       lockFile: spec.lockFile,
       db: this.opts.db,
@@ -135,11 +145,14 @@ export class RunnerHub implements RunnerRouter {
       onReady: (runnerId) => this.opts.onReady?.(runnerId),
       log: log && ((message) => log(record.home ? message : `[${spec.id}] ${message}`)),
     });
-    this.entries.set(spec.id, { spec, client, port: runnerPort(() => client, name) });
+    this.entries.set(spec.id, { spec, client, port: runnerPort(() => client, describe) });
     return client;
   }
 
-  /** Disconnect from a runner and forget it; `deleted` also marks its record deleted. */
+  /**
+   * Disconnect from a runner and forget it; `deleted` also marks its record deleted. A
+   * connection still in flight is cancelled first, so nothing is recorded after `deleted`.
+   */
   async remove(id: string, opts: { deleted?: boolean } = {}): Promise<void> {
     const entry = this.entries.get(id);
     this.entries.delete(id);
@@ -200,8 +213,12 @@ export class RunnerHub implements RunnerRouter {
     });
   }
 
-  /** Disconnect from every runner; `stopHome` also asks the home runner process to exit. */
+  /**
+   * Disconnect from every runner, cancelling connections still in flight; `stopHome` also asks
+   * the home runner process to exit. No runner can be added afterwards.
+   */
   async close(opts: { stopHome?: boolean } = {}): Promise<void> {
+    this.closed = true;
     await Promise.all(
       [...this.entries.values()].map(({ spec, client }) =>
         spec.home && opts.stopHome ? client.shutdownRunner() : client.stop(),

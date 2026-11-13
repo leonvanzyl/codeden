@@ -712,7 +712,7 @@ The goal is to get from `npx codeden` to your first session in under a minute, w
 - **Request checks.** `Origin` and `Host` headers are checked, which blocks other websites and DNS rebinding from reaching the local API. While network access is on they also accept the machine's own LAN and VPN addresses on the server port, and nothing else.
 - **The UI token.** It's delivered once through the launch URL and then held in an HttpOnly, SameSite=Strict cookie.
 - **MCP tokens** are per session and role-scoped, and revoked when the session ends.
-- **Agent environments.** Agent processes inherit the user's environment minus CodeDen's own secrets. Tokens are never logged or written into transcripts.
+- **Agent environments.** Agent processes (every provider), terminals and setup scripts inherit the user's environment minus CodeDen's own `CODEDEN_*` variables (its home, installer, secrets and the like) and `ELECTRON_RUN_AS_NODE`. A variable CodeDen means a session to see is passed explicitly (`SessionOptions.env`). Tokens are never logged or written into transcripts.
 - **CodeDen's own credential files** (the install token, the runner lock and the remote access store in the data directory) are never read or written by an agent without the user, at any level; read-only sessions are refused (§11.2, which also lists the known gaps).
 - **Approvals.** Risky-action approvals follow §11.2. The orchestrator and PMs can't write project code.
 - **Remote access** (phone, tablet, LAN, the user's own VPN) is opt-in and password-protected; see §15.1.

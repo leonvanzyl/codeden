@@ -1,6 +1,7 @@
 import type { ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { createInterface } from "node:readline";
+import { agentEnv } from "../util/agent-env";
 import { killTree, type ResolvedCommand, spawnResolved } from "../util/exec";
 import { OpenCodeClient } from "./client";
 import { HIDDEN_ENV_VARS } from "./plugin";
@@ -177,9 +178,10 @@ function readUrl(child: ChildProcess, timeoutMs: number, signal?: AbortSignal): 
 const tail = (stderr: string) => (stderr.trim() ? `: ${stderr.trim().slice(-500)}` : "");
 
 /**
- * The server's environment: the runner's, the session's extras, the password and the inline
- * config. `ELECTRON_RUN_AS_NODE` and any inherited OpenCode secrets are dropped (Windows env
- * names are case-insensitive, so matching ignores case). A user's own
+ * The server's environment: the runner's without CodeDen's own variables (`agentEnv`), the
+ * session's extras, the password and the inline config. `ELECTRON_RUN_AS_NODE` and any
+ * inherited OpenCode secrets are dropped (Windows env names are case-insensitive, so matching
+ * ignores case). A user's own
  * `OPENCODE_CONFIG_CONTENT` is kept underneath CodeDen's.
  */
 export function openCodeServerEnv(
@@ -191,7 +193,7 @@ export function openCodeServerEnv(
   const drop = new Set(["ELECTRON_RUN_AS_NODE", ...HIDDEN_ENV_VARS]);
   const env: NodeJS.ProcessEnv = {};
   let userConfig: string | undefined;
-  for (const [key, value] of Object.entries({ ...base, ...extra })) {
+  for (const [key, value] of Object.entries(agentEnv(extra, base))) {
     const upper = key.toUpperCase();
     if (upper === "OPENCODE_CONFIG_CONTENT") userConfig = value;
     if (!drop.has(upper)) env[key] = value;
