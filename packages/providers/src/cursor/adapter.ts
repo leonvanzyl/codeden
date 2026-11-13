@@ -35,7 +35,8 @@ export const CURSOR_AGENT: AcpAgentSpec = {
  * mode with its plan approval; questions are Cursor's question requests; resume is
  * `session/load`. Not wired up: steering (ACP has no way to add input to a running prompt),
  * subagents, rollback, fork and reasoning effort (Cursor lists each effort as its own model).
- * Images and CodeDen's MCP tools depend on what the CLI reports in `initialize`.
+ * Images and MCP servers (CodeDen's tools are an HTTP MCP server) follow what the CLI reports
+ * in `initialize`, once detection or a session has started it.
  */
 const BASE_CAPABILITIES: ProviderCapabilities = {
   resume: true,
@@ -101,8 +102,13 @@ export class CursorAdapter implements ProviderAdapter {
     const caps = this.info?.agentCapabilities;
     return {
       ...BASE_CAPABILITIES,
-      ...(caps ? { images: caps.promptCapabilities?.image === true } : {}),
-      ...(caps?.loadSession === false ? { resume: false } : {}),
+      ...(caps
+        ? {
+            resume: caps.loadSession === true,
+            images: caps.promptCapabilities?.image === true,
+            mcp: caps.mcpCapabilities?.http === true,
+          }
+        : {}),
     };
   }
 
@@ -163,6 +169,7 @@ export class CursorAdapter implements ProviderAdapter {
       ...(this.options.probeTimeoutMs ? { timeoutMs: this.options.probeTimeoutMs } : {}),
     })
       .then((result) => {
+        if (result.info) this.info = result.info;
         if (result.models.length) this.setModels(cursorModelInfos(result.models), exe);
         else if (!this.listed) {
           this.catalog.set(

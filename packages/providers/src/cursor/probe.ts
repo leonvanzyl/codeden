@@ -1,5 +1,6 @@
 import type { AcpModel } from "../acp/config";
 import { startAgent } from "../acp/process";
+import type { AcpInitializeResult } from "../acp/protocol";
 import { AcpRpcError, METHOD_NOT_FOUND } from "../acp/rpc";
 import { type ResolvedCommand, runCommand } from "../util/exec";
 import { parseCursorStatus } from "./detect";
@@ -16,6 +17,8 @@ export interface CursorProbe {
   current?: string;
   /** Why the ACP server didn't start, when it didn't. */
   error?: string;
+  /** What the CLI reported in `initialize` (its capabilities). */
+  info?: AcpInitializeResult;
 }
 
 /**
@@ -53,6 +56,7 @@ export async function probeCursor(
       },
     );
     result.acp = true;
+    result.info = started.info;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     result.error = [message, stderr.trim().split(/\r?\n/).slice(-3).join(" ")]

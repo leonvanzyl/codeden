@@ -127,7 +127,10 @@ describe("detectCursor", () => {
     const adapter = new CursorAdapter({ executable: fakeAgent });
     await adapter.refreshModels();
     expect(adapter.models().map((m) => m.id)).toEqual(["default", "gpt-5", "sonnet-4.5"]);
+    // What the CLI reported in `initialize` refines the flags.
     expect(adapter.capabilities()).toMatchObject({
+      images: true,
+      mcp: true,
       planMode: true,
       resume: true,
       userQuestions: true,
