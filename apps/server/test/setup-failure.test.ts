@@ -30,7 +30,7 @@ describe("a session whose worktree setup fails", () => {
   beforeAll(async () => {
     const setup = `node -e "console.error('lockfile is out of date'); process.exit(7)"`;
     h = await startHarness({}, { ".codeden/project.json": JSON.stringify({ setup: [setup] }) });
-  }, 60_000);
+  });
 
   afterAll(async () => {
     await h?.close();
@@ -47,5 +47,5 @@ describe("a session whose worktree setup fails", () => {
     expect(first.input.text).toMatch(/^Setup command `node -e .*` failed \(exit 7\):\n```\n/);
     expect(first.input.text).toContain("lockfile is out of date");
     expect(first.input.text.endsWith("\n\nAdd a test")).toBe(true);
-  }, 60_000);
+  });
 });

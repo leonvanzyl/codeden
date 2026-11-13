@@ -45,6 +45,8 @@ export interface SessionHostOptions {
  */
 export class SessionHost {
   private readonly sessions = new Map<string, Hosted>();
+  /** Sessions a `start` is opening, until they are hosted. */
+  private readonly opening = new Set<string>();
 
   constructor(
     private readonly registry: ProviderRegistry,
@@ -71,8 +73,13 @@ export class SessionHost {
     return [...this.sessions.values()].filter((h) => h.state === "running").length;
   }
 
+  /**
+   * Open a provider session and host it. A session that is hosted, or still being opened by
+   * an earlier start, is refused with `session_exists`: a second open would run the
+   * conversation twice (one of them with an MCP token the server has retired).
+   */
   async start(cmd: RunnerCommandOf<"session.start">): Promise<{ resumeToken: string | null }> {
-    if (this.sessions.has(cmd.sessionId)) {
+    if (this.sessions.has(cmd.sessionId) || this.opening.has(cmd.sessionId)) {
       throw new CommandError("session_exists", `Session ${cmd.sessionId} is already running`);
     }
     const adapter = this.registry.get(cmd.providerId);
@@ -84,33 +91,40 @@ export class SessionHost {
           (available.length > 0 ? ` (available: ${available.join(", ")})` : ""),
       );
     }
-    this.emit({ kind: "session.process", sessionId: cmd.sessionId, state: "starting" });
-    let session: ProviderSession;
+    this.opening.add(cmd.sessionId);
+    let hosted: Hosted;
     try {
-      session = await adapter.openSession(agentSessionOptions(cmd.options));
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      this.emit({
-        kind: "session.process",
-        sessionId: cmd.sessionId,
-        state: "crashed",
-        error: { code: "open_failed", message },
-      });
-      throw new CommandError("open_failed", `Could not open the session: ${message}`);
+      this.emit({ kind: "session.process", sessionId: cmd.sessionId, state: "starting" });
+      let opened: ProviderSession;
+      try {
+        opened = await adapter.openSession(agentSessionOptions(cmd.options));
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        this.emit({
+          kind: "session.process",
+          sessionId: cmd.sessionId,
+          state: "crashed",
+          error: { code: "open_failed", message },
+        });
+        throw new CommandError("open_failed", `Could not open the session: ${message}`);
+      }
+      const checkpoints = cmd.checkpoints !== false && (await isWorkTree(cmd.options.cwd));
+      hosted = {
+        providerId: cmd.providerId,
+        session: opened,
+        state: "idle",
+        rootThreadId: undefined,
+        cwd: cmd.options.cwd,
+        checkpoints,
+        checkpointChain: Promise.resolve(),
+        drainInterrupted: false,
+        turnCutOff: false,
+      };
+      this.sessions.set(cmd.sessionId, hosted);
+    } finally {
+      this.opening.delete(cmd.sessionId);
     }
-    const checkpoints = cmd.checkpoints !== false && (await isWorkTree(cmd.options.cwd));
-    const hosted: Hosted = {
-      providerId: cmd.providerId,
-      session,
-      state: "idle",
-      rootThreadId: undefined,
-      cwd: cmd.options.cwd,
-      checkpoints,
-      checkpointChain: Promise.resolve(),
-      drainInterrupted: false,
-      turnCutOff: false,
-    };
-    this.sessions.set(cmd.sessionId, hosted);
+    const { session, checkpoints } = hosted;
     if (checkpoints) this.checkpoint(cmd.sessionId, hosted, undefined, true);
     this.emit({ kind: "session.process", sessionId: cmd.sessionId, state: "ready" });
     void this.pump(cmd.sessionId, hosted);

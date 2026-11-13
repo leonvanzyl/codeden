@@ -17,7 +17,7 @@ type Listed = RunnerCommandResult<"checkpoint.list">;
  * turn's end before the checkpoint is written, so the server asks for the list `settled`. Here
  * the list is requested at the worst moment: inside the very `turn.completed` event.
  */
-describe("checkpoint.list settled", { timeout: 20_000 }, () => {
+describe("checkpoint.list settled", () => {
   it("includes the checkpoint of a turn that has just ended", async () => {
     const repo = makeRepo();
     cleanup.push(() => removeDir(repo));

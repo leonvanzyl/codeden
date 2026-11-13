@@ -20,7 +20,7 @@ beforeAll(async () => {
   h = await startHarness();
   sessionId = await h.startFakeSession();
   worktree = (await h.detail(sessionId)).session.worktreePath ?? "";
-}, 60_000);
+});
 
 afterAll(async () => {
   await h?.close();
@@ -70,7 +70,7 @@ describe("checkpoints, diffs and git", () => {
     );
     expect(restored.deleted).toEqual(["hello.txt"]);
     expect(existsSync(join(worktree, "hello.txt"))).toBe(false);
-  }, 60_000);
+  });
 
   it("commits in the worktree and reports push failures", async () => {
     writeFileSync(join(worktree, "notes.md"), "notes\n");
@@ -115,11 +115,11 @@ describe("terminal channel", () => {
     );
     // bash with bracketed paste emits `ESC[?2004l\r` before the command's output, so allow
     // carriage returns at the start of the line.
-    await waitUntil(() => /(^|\n)\r*codeden-ready\r?\n/.test(output.replace(ansi, "")), 20_000);
+    await waitUntil(() => /(^|\n)\r*codeden-ready\r?\n/.test(output.replace(ansi, "")));
     ws.send(JSON.stringify({ type: "kill" }));
-    await waitUntil(() => controls.some((c) => c.type === "exited"), 20_000);
+    await waitUntil(() => controls.some((c) => c.type === "exited"));
     ws.close();
-  }, 40_000);
+  });
 
   it("needs the install token", async () => {
     const ws = new WebSocket(`${h.server.url.replace("http", "ws")}/ws/pty`);

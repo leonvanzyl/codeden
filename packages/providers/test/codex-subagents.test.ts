@@ -581,6 +581,32 @@ describe("Codex sub-agents", () => {
     });
   });
 
+  it("keeps a Stop when Codex confirms the stopped turn after CodeDen closed it", () => {
+    const { mapper, events, feed, items, stopped } = setup();
+    feed(ROOT, "turn/started", { turn: turn(RT, "inProgress") });
+    feed(ROOT, "item/started", { turnId: RT, item: spawn("inProgress", []) });
+    mapper.stopSubagents();
+    // The stop's deadline closes the turn, then Codex's own confirmation arrives: that is the
+    // same turn ending, not new work, so the pending spawn's agent is still stopped.
+    mapper.endTurn({ type: "interrupted" });
+    feed(ROOT, "turn/completed", { turn: turn(RT, "interrupted") });
+    expect(events.filter((e) => e.type === "turn.interrupted").at(-1)).toMatchObject({
+      threadId: ROOT_THREAD,
+      turnId: RT,
+      forkPoint: RT,
+    });
+    feed(ROOT, "item/completed", { turnId: RT, item: spawn("completed", [CHILD]) });
+    feed(CHILD, "turn/started", { turn: turn(CT, "inProgress") });
+    expect(stopped).toEqual([[CHILD, CT]]);
+    expect(items("subagent", "item.updated")).toEqual([]);
+
+    // The same for the agent's turn: a late confirmation doesn't show it working again.
+    mapper.endSubagentTurn(CHILD, CT, { type: "interrupted" });
+    feed(CHILD, "turn/completed", { turn: turn(CT, "interrupted") });
+    expect(items("subagent", "item.updated")).toEqual([]);
+    expect(subagentCards(events).at(-1)).toMatchObject({ id: "call-spawn", status: "cancelled" });
+  });
+
   it("routes a sub-agent's approvals to its child thread", async () => {
     const { mapper, feed } = spawnedV2();
     feed(CHILD, "turn/started", { turn: turn(CT, "inProgress") });

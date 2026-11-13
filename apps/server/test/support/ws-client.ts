@@ -36,7 +36,7 @@ export class TestWsClient {
   waitFor(predicate: (m: UiServerMessage) => boolean, timeoutMs?: number): Promise<UiServerMessage>;
   waitFor(
     predicate: (m: UiServerMessage) => boolean,
-    timeoutMs = 15_000,
+    timeoutMs = 60_000,
   ): Promise<UiServerMessage> {
     return new Promise((resolve, reject) => {
       const check = () => {

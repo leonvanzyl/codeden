@@ -92,7 +92,7 @@ describe("issue triage (§10)", () => {
     h.server.services.store.append([
       { type: "project.created", sessionId: null, payload: { project: Project.parse(project) } },
     ]);
-  }, 60_000);
+  });
   afterAll(async () => {
     await h?.close();
   });

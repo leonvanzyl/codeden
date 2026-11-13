@@ -31,8 +31,8 @@ export interface LifecycleDeps {
 /**
  * Session statuses after which its MCP tokens are revoked (§8.3). Not `failed`: a failed turn
  * leaves the provider process running with its token, and the next message reaches that same
- * process; a session whose process is gone is resumed with a freshly minted token, which
- * revokes the old one.
+ * process; a session whose process is gone is resumed with a freshly minted token, and the
+ * old one is revoked once the runner has started it (`SessionLauncher`).
  */
 const ENDED = new Set(["stopped", "completed"]);
 

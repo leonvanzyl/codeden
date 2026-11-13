@@ -5,7 +5,7 @@ let h: Harness;
 
 beforeAll(async () => {
   h = await startHarness({ autoRetry: { delaysMs: [50, 50, 50], usageMarginMs: 50 } });
-}, 60_000);
+});
 
 afterAll(async () => {
   await h?.close();
@@ -32,7 +32,7 @@ it("continues a session whose turn failed on an overloaded API, without a failed
   });
   expect(detail.session.status).toBe("idle");
   expect(h.server.services.inbox.list({ sessionId: id }).map((i) => i.kind)).toEqual([]);
-}, 60_000);
+});
 
 it("continues a session after its usage limit resets", async () => {
   const id = await h.startFakeSession("Do the work [fail:usage]");
@@ -40,4 +40,4 @@ it("continues a session after its usage limit resets", async () => {
   expect(messages(id)[1]?.text).toBe(
     "Previous turn stopped (usage limit reached); continue where you left off.",
   );
-}, 60_000);
+});

@@ -60,6 +60,11 @@ export interface RunnerClientOptions {
   /** How long a version-mismatch drain may wait for running turns. Default 5 minutes. */
   drainTimeoutMs?: number;
   /**
+   * No command gives up sooner than this, whatever deadline its caller set (tests on a busy
+   * machine, where the runner answers slowly). Default: each command's own deadline.
+   */
+  requestTimeoutFloorMs?: number;
+  /**
    * Called once a current, non-draining runner is connected and configured (MCP proxy set),
    * e.g. to resume sessions interrupted by a runner restart.
    */
@@ -153,11 +158,12 @@ export class RunnerClient {
       throw this.unavailable("is not connected");
     }
     const id = randomUUID();
+    const deadlineMs = Math.max(timeoutMs, this.opts.requestTimeoutFloorMs ?? 0);
     const result = new Promise<unknown>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
         reject(new RunnerCommandError("timeout", `Runner command ${command.name} timed out`));
-      }, timeoutMs);
+      }, deadlineMs);
       this.pending.set(id, { name: command.name, resolve, reject, timer });
     });
     this.send({ type: "command", id, command: command as RunnerCommand });
