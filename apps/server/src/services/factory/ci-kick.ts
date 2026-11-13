@@ -2,6 +2,7 @@ import type { FactoryItem, Project } from "@codeden/contracts";
 import { errorMessage } from "../errors";
 import type { FactoryContext } from "./context";
 import type { FactoryPr } from "./github-port";
+import { freeSlots } from "./policy";
 import { ciKickPrompt } from "./prompts-integration";
 import { prAgent, startIntegrator } from "./rebase";
 import { isBusy } from "./sessions";
@@ -12,7 +13,7 @@ import { isBusy } from "./sessions";
  * (`recover.ts`), and the verify step carries the kick out, retrying until it happens:
  * - a PR behind the default branch is brought up to date on GitHub (a new head, no agent);
  * - otherwise its agent pushes an empty commit: the builder while its session exists, or a
- *   fresh integrator on the PR's head branch when it is gone (waiting for a free agent).
+ *   fresh integrator on the PR's head branch when it is gone. Either waits for a free agent.
  * A conflicting PR needs none: the conflict flow rebases it, which makes a new head.
  */
 
@@ -73,6 +74,11 @@ export async function kickCi(
   const at = ctx.now().toISOString();
   if (agent) {
     if (isBusy(agent)) return true;
+    // Its turn holds an agent slot like any other the factory starts: wait for a free one.
+    if (freeSlots(ctx.sessions.activeCount(project.id), project.factoryLimits) === 0) {
+      note(ctx, item, "CI never started: waiting for a free agent to push a commit that starts it");
+      return true;
+    }
     await ctx.sessions.message(agent.id, ciKickPrompt(item));
     ctx.store.updateItem(item.id, (i) => {
       const { [KICK]: _kick, ...nudges } = i.nudges;

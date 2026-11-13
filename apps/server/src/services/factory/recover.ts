@@ -7,6 +7,7 @@ import { markStuck } from "./outcomes";
 import { freeSlots } from "./policy";
 import { continuePrompt } from "./prompts-integration";
 import { prAgent } from "./rebase";
+import { isRecheckObligation } from "./recheck";
 import { isBusy } from "./sessions";
 import { ownsTurnRaceFailure } from "./turn-race";
 
@@ -66,8 +67,8 @@ function openPr(ctx: FactoryContext, project: Project, item: FactoryItem, builde
  * The nudges a recovered item starts from: the earlier attempt's waits and reminders are
  * dropped (they would stop the fresh one at once), but every obligation it still owes is kept:
  * its recoveries, revise rounds and rebase requests, a conflict resolution the reviewer still
- * has to re-check (`recheck_<old head>`, sent again to whichever reviewer takes it), and PRs
- * still to be closed.
+ * has to re-check (`recheck.ts`; asked again of whichever reviewer takes it), and PRs still to
+ * be closed.
  */
 function freshNudges(nudges: FactoryItem["nudges"], at: string): FactoryItem["nudges"] {
   const keep = Object.entries(nudges).filter(
@@ -76,7 +77,7 @@ function freshNudges(nudges: FactoryItem["nudges"], at: string): FactoryItem["nu
       k.startsWith("fix_") ||
       k.startsWith("rebase_") ||
       k.startsWith("conflict_from_") ||
-      (k.startsWith("recheck_") && k !== "recheck_sent") ||
+      isRecheckObligation(k) ||
       k.startsWith("supersede_"),
   );
   return {

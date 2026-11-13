@@ -64,9 +64,10 @@ export function failItem(
 }
 
 /**
- * A protected area was touched: hand the PR to a human and never merge it. One of the few
- * things that reach the PM and the inbox (a recorded decision, in a dark factory). The loop
- * still owns the PR: it keeps it free of conflicts until a person merges or closes it.
+ * A protected area was touched: hand the PR to a human and never merge it. Truly stuck
+ * (`failureKind: stuck`), so one of the few things that reach the PM and the inbox (a recorded
+ * decision, in a dark factory). The loop still owns the PR: it keeps it free of conflicts until
+ * a person merges or closes it.
  */
 export function escalate(
   ctx: FactoryContext,
@@ -79,6 +80,7 @@ export function escalate(
     ...i,
     stage: "escalated",
     reason: why,
+    failureKind: "stuck",
     note: null,
     finishedAt: ctx.now().toISOString(),
   }));

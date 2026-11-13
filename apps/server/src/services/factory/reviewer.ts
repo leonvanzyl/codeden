@@ -15,7 +15,8 @@ import {
   skipProvider,
   skippedProviders,
 } from "./provider-failure";
-import { baseBranchOf, recheckOf } from "./rebase";
+import { baseBranchOf } from "./rebase";
+import { recheckOf, recheckSent, recheckSentFor, withoutRecheckRequest } from "./recheck";
 import { pickReviewer, type ReviewerChoice, type ReviewerWait } from "./reviewer-choice";
 import { mayAutoMerge } from "./trust";
 
@@ -30,15 +31,6 @@ const ENDED = new Set(["idle", "interrupted", "completed", "failed", "stopped"])
 
 /** Times a reviewer session that died is replaced before the item fails (infrastructure). */
 const MAX_REVIEWER_RESTARTS = 3;
-
-/** The re-check request was sent to the current reviewer. */
-const RECHECK_SENT = "recheck_sent";
-
-/** The nudges without the "re-check sent" mark: a fresh reviewer gets the re-check again. */
-function resendRecheck(nudges: FactoryItem["nudges"]): FactoryItem["nudges"] {
-  const { [RECHECK_SENT]: _sent, ...rest } = nudges;
-  return rest;
-}
 
 /**
  * Where a new reviewer works: in the PR agent's worktree while it is there (offline, on the
@@ -161,7 +153,8 @@ export async function ensureReviewer(
  * An agent rebased the PR to resolve conflicts after the reviewer approved: the reviewer
  * re-checks only the resolution (`git range-diff`). When the reviewer session can't take the
  * message any more, a fresh reviewer does that same re-check, told what was approved; the
- * earlier verdict stands if it approves.
+ * earlier verdict stands if it approves. One request at a time, recorded with the head it is
+ * about: its verdict answers for that head, and a newer one is asked about once it is in.
  */
 async function requestRecheck(
   ctx: FactoryContext,
@@ -172,13 +165,13 @@ async function requestRecheck(
   pr: FactoryPr,
   oldHead: string,
 ): Promise<FactoryItem> {
-  if (item.nudges[RECHECK_SENT]) return item;
+  if (recheckSentFor(item) !== null) return item;
   const newHead = pr.headSha ?? "HEAD";
+  const sent = recheckSent(pr.headSha, ctx.now().toISOString());
   const base = baseBranchOf(project);
   const reviewer = item.reviewerSessionId
     ? ctx.repo.find(item.reviewerSessionId)?.session
     : undefined;
-  const at = ctx.now().toISOString();
   if (reviewer && reviewer.status !== "failed" && !reviewer.archivedAt) {
     await ctx.sessions.message(reviewer.id, recheckPrompt(item, oldHead, newHead, base));
     return ctx.store.updateItem(item.id, (i) => {
@@ -186,7 +179,7 @@ async function requestRecheck(
       return {
         ...i,
         note: "Rebased after the review: the reviewer re-checks the conflict resolution",
-        nudges: { ...nudges, [RECHECK_SENT]: at },
+        nudges: { ...nudges, ...sent },
       };
     });
   }
@@ -218,7 +211,7 @@ async function requestRecheck(
       reviewerProvider: res.provider,
       reviewerNote: res.note,
       note: "Rebased after the review: a fresh reviewer re-checks the conflict resolution",
-      nudges: { ...nudges, [RECHECK_SENT]: at },
+      nudges: { ...nudges, ...sent },
     };
   });
 }
@@ -235,7 +228,7 @@ export async function reviewerStalled(
   loop: FactoryLoop,
   item: FactoryItem,
 ): Promise<FactoryLoop> {
-  const rechecking = Boolean(item.review && recheckOf(item) && item.nudges[RECHECK_SENT]);
+  const rechecking = Boolean(item.review && recheckOf(item) && recheckSentFor(item) !== null);
   if ((item.review && !rechecking) || !item.reviewerSessionId || item.nudges.rereview_pending)
     return loop;
   const s = ctx.repo.find(item.reviewerSessionId)?.session;
@@ -250,7 +243,7 @@ export async function reviewerStalled(
     ctx.store.updateItem(item.id, (i) => ({
       ...i,
       reviewerSessionId: null,
-      nudges: { ...resendRecheck(i.nudges), reviewer_restarted: ctx.now().toISOString() },
+      nudges: { ...withoutRecheckRequest(i.nudges), reviewer_restarted: ctx.now().toISOString() },
     }));
     return loop;
   }
@@ -291,7 +284,7 @@ async function reviewerProviderFailed(
     ...i,
     reviewerSessionId: null,
     note: `The reviewer stopped: ${unavailableText(name, cause)}. A fresh reviewer starts on an available provider.`,
-    nudges: skipProvider(resendRecheck(i.nudges), s.provider, cause.until, ctx.now()),
+    nudges: skipProvider(withoutRecheckRequest(i.nudges), s.provider, cause.until, ctx.now()),
   }));
   return loop;
 }
@@ -313,7 +306,7 @@ function reviewerDied(ctx: FactoryContext, loop: FactoryLoop, item: FactoryItem)
   ctx.store.updateItem(item.id, (i) => ({
     ...i,
     reviewerSessionId: null,
-    nudges: { ...resendRecheck(i.nudges), [`reviewer_failed_${n + 1}`]: at },
+    nudges: { ...withoutRecheckRequest(i.nudges), [`reviewer_failed_${n + 1}`]: at },
   }));
   return loop;
 }
