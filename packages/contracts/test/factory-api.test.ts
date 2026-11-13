@@ -73,6 +73,7 @@ const item: FactoryItem = {
   largeChange: null,
   sessionsArchivedAt: null,
   earlierSessionIds: [],
+  stepSince: ts,
   createdAt: ts,
   updatedAt: ts,
   mergedAt: null,
@@ -173,11 +174,13 @@ describe("factory API contracts (§10.1)", () => {
       investigation: _i,
       failureKind: _fk,
       rebuiltFrom: _rf,
+      stepSince: _ss,
       ...old
     } = item;
     expect(FactoryItem.parse(old)).toMatchObject({
       failureKind: null,
       rebuiltFrom: null,
+      stepSince: null,
       largeChange: null,
       sessionsArchivedAt: null,
       earlierSessionIds: [],
@@ -316,6 +319,51 @@ describe("factory API contracts (§10.1)", () => {
       lastTickAt: null,
     });
     expect(status.tuning.requireCi).toBe(true);
+    // A status from before the Factory view's stats still parses, with empty figures.
+    expect(status.stats).toEqual({
+      mergedToday: 0,
+      failedToday: 0,
+      revertedToday: 0,
+      medianMergeMs7d: null,
+      merged7d: 0,
+    });
+    const work = {
+      id: "i1",
+      title: "Add a counter",
+      workKey: "issue:3",
+      issue: item.issue,
+      pr: item.pr,
+      score: null,
+      sessionId: "s1",
+      stage: "failed",
+      step: "stopped",
+      source: "issue",
+      reason: "Checks failed",
+      note: null,
+      updatedAt: ts,
+    };
+    // Work items from before it lack the step time, merge and finish times and failure kind.
+    expect(FactoryStatus.parse({ ...status, recent: [work] }).recent[0]).toMatchObject({
+      stepSince: null,
+      mergedAt: null,
+      finishedAt: null,
+      failureKind: null,
+    });
+    const viewed = FactoryStatus.parse({
+      ...status,
+      stats: {
+        mergedToday: 2,
+        failedToday: 1,
+        revertedToday: 1,
+        medianMergeMs7d: 5_400_000,
+        merged7d: 9,
+      },
+      recent: [{ ...work, stepSince: ts, finishedAt: ts, failureKind: "stuck" }],
+    });
+    expect(FactoryStatus.parse(JSON.parse(JSON.stringify(viewed)))).toEqual(viewed);
+    expect(
+      FactoryStatus.safeParse({ ...status, stats: { ...viewed.stats, failedToday: -1 } }).success,
+    ).toBe(false);
     // A status from before the merge queue still parses; its entries round-trip.
     expect(status.pullRequests).toEqual([]);
     const pullRequests = [

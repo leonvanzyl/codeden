@@ -10,6 +10,7 @@ import { budgetSpend, type FactoryContext, visionOf } from "./context";
 import { localDay, queueOrder } from "./policy";
 import { pullRequests } from "./pr-status";
 import { scoutStatus } from "./scout";
+import { factoryStats } from "./stats";
 import { ACTIVE_STAGES, DONE_STAGES, WAITING_STAGES } from "./store";
 
 /** A work item for the panel and the pipeline diagram. */
@@ -35,6 +36,10 @@ export function workItem(i: FactoryItem): FactoryWorkItem {
     attempts: i.attempts,
     reason: i.reason,
     note: i.note,
+    failureKind: i.failureKind,
+    stepSince: i.stepSince,
+    mergedAt: i.mergedAt,
+    finishedAt: i.finishedAt,
     updatedAt: i.updatedAt,
   };
 }
@@ -79,6 +84,7 @@ export async function buildStatus(ctx: FactoryContext, projectId: string): Promi
     tuning: loop.tuning,
     spendToday: { usd: Math.round(spend.usd * 10_000) / 10_000, tokens: spend.tokens },
     mergesToday: loop.day === localDay(ctx.now()) ? loop.mergesToday : 0,
+    stats: factoryStats(all, ctx.now()),
     consecutiveFailures: loop.consecutiveFailures,
     activeSessions: ctx.sessions.activeCount(projectId),
     backlog: waiting.map(workItem),

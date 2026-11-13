@@ -210,6 +210,12 @@ export const FactoryItem = z.object({
    * once none of them is busy (a turn is never cut off), then empties the list.
    */
   earlierSessionIds: z.array(Id).default([]),
+  /**
+   * When the item entered its current pipeline step (`pipelineStep`), for "how long has it been
+   * here" on the Factory view. Set on creation and whenever the step changes; null on items
+   * saved before it existed (readers fall back to `updatedAt`).
+   */
+  stepSince: Timestamp.nullable().default(null),
   createdAt: Timestamp,
   updatedAt: Timestamp,
   mergedAt: Timestamp.nullable(),
@@ -509,9 +515,36 @@ export const FactoryWorkItem = z.object({
   attempts: z.int().nonnegative().default(0),
   reason: z.string().nullable(),
   note: z.string().nullable(),
+  /** Why it failed, for items that did (see `FactoryFailureKind`). */
+  failureKind: FactoryFailureKind.nullable().default(null),
+  /** When it entered its current pipeline step; null when unknown (use `updatedAt`). */
+  stepSince: Timestamp.nullable().default(null),
+  mergedAt: Timestamp.nullable().default(null),
+  finishedAt: Timestamp.nullable().default(null),
   updatedAt: Timestamp,
 });
 export type FactoryWorkItem = z.infer<typeof FactoryWorkItem>;
+
+/**
+ * Throughput figures of the Factory view's stats strip, counted over the project's items by the
+ * server's local day (the same day the merge counter and the budget use).
+ */
+export const FactoryStats = z.object({
+  /** Factory items merged today, by CodeDen or by a person on GitHub. */
+  mergedToday: z.int().nonnegative().default(0),
+  /** Items that failed today. */
+  failedToday: z.int().nonnegative().default(0),
+  /** Items whose merge was reverted today. */
+  revertedToday: z.int().nonnegative().default(0),
+  /**
+   * Median time from the factory taking the issue in (`createdAt`) to its merge, over the items
+   * merged in the last 7 days, in milliseconds; null when none merged.
+   */
+  medianMergeMs7d: z.number().nonnegative().nullable().default(null),
+  /** How many merges the median is over. */
+  merged7d: z.int().nonnegative().default(0),
+});
+export type FactoryStats = z.infer<typeof FactoryStats>;
 
 /** Merge-check results of one item with a PR. */
 export const FactoryMergeChecks = z.object({
@@ -539,6 +572,8 @@ export const FactoryStatus = z.object({
   tuning: FactoryTuning,
   spendToday: z.object({ tokens: z.int().nonnegative(), usd: z.number().nonnegative() }),
   mergesToday: z.int().nonnegative(),
+  /** Today's merges, failures and reverts and the 7-day median time to merge. */
+  stats: FactoryStats.prefault({}),
   consecutiveFailures: z.int().nonnegative(),
   activeSessions: z.int().nonnegative(),
   /** Waiting: being classified (`candidate`) or for a free agent (`backlog`). */

@@ -7,6 +7,7 @@ import {
   type FactoryLoop,
   FactoryTuning,
   LEGACY_SIZE_LIMITS,
+  pipelineStep,
   ScoutState,
 } from "@codeden/contracts";
 import { and, asc, desc, eq, inArray, or, sql } from "drizzle-orm";
@@ -192,6 +193,7 @@ export class FactoryStore {
       finishedAt: null,
       ...draft,
       id: randomUUID(),
+      stepSince: now,
       createdAt: now,
       updatedAt: now,
     };
@@ -202,6 +204,7 @@ export class FactoryStore {
   /**
    * Apply a change to an item; writes only when something changed. `touch: false` keeps
    * `updatedAt`, for bookkeeping that isn't progress (the digest and the recent list go by it).
+   * A change that moves the item to another pipeline step restarts `stepSince`.
    */
   updateItem(
     id: string,
@@ -212,8 +215,10 @@ export class FactoryStore {
     if (!current) throw new Error(`No factory item ${id}`);
     const changed = change(current);
     if (JSON.stringify(changed) === JSON.stringify(current)) return current;
-    const next =
-      opts.touch === false ? changed : { ...changed, updatedAt: new Date().toISOString() };
+    const now = new Date().toISOString();
+    const stepped =
+      pipelineStep(changed) === pipelineStep(current) ? changed : { ...changed, stepSince: now };
+    const next = opts.touch === false ? stepped : { ...stepped, updatedAt: now };
     this.events.append([
       { type: "factory.item.updated", sessionId: null, payload: { item: next } },
     ]);
@@ -250,6 +255,7 @@ const ITEM_DEFAULTS = {
   earlierSessionIds: [],
   failureKind: null,
   rebuiltFrom: null,
+  stepSince: null,
 } satisfies Partial<FactoryItem>;
 
 /** An item as read from the projection, with the fields newer versions added. */
