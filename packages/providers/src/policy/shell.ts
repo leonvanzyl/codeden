@@ -22,20 +22,28 @@ export interface SimpleCommand {
   /** True when the command reads the output of the one before it (`a | b`, `a |& b`). */
   piped?: boolean;
   /**
-   * PowerShell list arguments (`a,b`: unquoted commas, outside POSIX shells), each word with its
-   * elements. A comma inside quotes or escaped is part of the name.
+   * PowerShell list arguments (`a,b`: unquoted commas, outside POSIX shells), each word with the
+   * positions of its unquoted commas. A comma inside quotes or escaped is part of the name.
    */
-  lists?: Map<string, string[]>;
+  lists?: Map<string, number[]>;
 }
 
+/** What a word may stand for as paths, from `from` on (after an attached option, `-fFILE`). */
+export type WordPaths = (word: string, from: number) => string[];
+
 /**
- * `words` with each PowerShell list argument followed by its elements (`a,b` -> `a,b`, `a`, `b`),
- * so every path in a list is checked on its own. The whole word stays: when the shell is unknown
- * it may be one name, or a brace expansion (`{a,b}`).
+ * The paths a word of `cmd` may stand for, from `from` on: its text and, for a PowerShell list
+ * (`a,b`), each element. The whole text stays: when the shell is unknown it may be one name, or a
+ * brace expansion (`{a,b}`). Callers apply it after reading the word's role, so a list given as a
+ * search pattern stays data.
  */
-export function withListElements(cmd: SimpleCommand, words: string[]): string[] {
-  const { lists } = cmd;
-  return lists ? words.flatMap((w) => [w, ...(lists.get(w) ?? [])]) : words;
+export function wordPaths(cmd: SimpleCommand, word: string, from = 0): string[] {
+  const text = word.slice(from);
+  const commas = cmd.lists?.get(word)?.filter((at) => at >= from) ?? [];
+  if (!commas.length) return [text];
+  const bounds = [from - 1, ...commas, word.length];
+  const elements = bounds.slice(1).map((end, k) => word.slice((bounds[k] as number) + 1, end));
+  return [text, ...elements.filter(Boolean)];
 }
 
 /** Parse a command line into its simple commands. */
@@ -89,15 +97,15 @@ class Builder {
     this.commas = [];
   }
 
-  /** Note the current word's list elements, split at its unquoted commas. */
+  /**
+   * Note where the current word's unquoted commas are. The same text written twice with different
+   * quoting keeps every comma either one had, so its list is never missed.
+   */
   private addList(): void {
-    const bounds = [-1, ...this.commas, this.word.length];
-    const elements = bounds
-      .slice(1)
-      .map((end, k) => this.word.slice((bounds[k] as number) + 1, end))
-      .filter(Boolean);
     this.cmd.lists ??= new Map();
-    this.cmd.lists.set(this.word, elements);
+    const seen = this.cmd.lists.get(this.word) ?? [];
+    const commas = [...new Set([...seen, ...this.commas])].sort((a, b) => a - b);
+    this.cmd.lists.set(this.word, commas);
   }
 
   endCommand(): void {

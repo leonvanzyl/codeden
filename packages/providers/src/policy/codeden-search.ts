@@ -7,7 +7,15 @@ import {
   wildcardPattern,
 } from "./codeden-home";
 import { isInside, type PathContext, pathApi, samePath } from "./paths";
-import { braceAlternatives, DATA, SEARCHES, searchArgs, searchOperands } from "./secrets";
+import {
+  parseSearch,
+  SEARCHES,
+  type SearchWord,
+  searchOperands,
+  searchOptionValues,
+} from "./search-words";
+import { braceAlternatives, DATA } from "./secrets";
+import type { WordPaths } from "./shell";
 
 /**
  * Searches and listings that reach CodeDen's credential files from a folder above them
@@ -45,38 +53,40 @@ function optionValues(args: string[], names: string[], anyCase: boolean): string
 const GREPS = new Set(["grep", "egrep", "fgrep", "zgrep"]);
 
 /** `grep -r`, `-R`, `-rn`, `--recursive`, `-d recurse`: grep reads folders only then. */
-function grepRecursive(args: string[]): boolean {
-  return args.some(
-    (a, i) =>
-      /^-[a-zA-Z]*[rR][a-zA-Z]*$/.test(a) ||
-      a === "--recursive" ||
-      a === "--dereference-recursive" ||
-      /^(--directories=|-d)recurse$/.test(a) ||
-      ((a === "-d" || a === "--directories") && args[i + 1] === "recurse"),
+function grepRecursive(words: SearchWord[]): boolean {
+  return (
+    words.some(
+      (w) => w.role === "option" && /^(-r|-R|--recursive|--dereference-recursive)$/.test(w.text),
+    ) || searchOptionValues(words, ["-d", "--directories"]).includes("recurse")
   );
 }
 
-/** The folders a search reads recursively, with its name filters. */
-function searchWalks(bin: string, words: string[], ctx: PathContext): Walk[] {
-  // `grep -re. ~` is `grep -r -e . ~`: take clustered options apart before reading roles.
-  const args = searchArgs(bin, words);
+/**
+ * The folders a search reads recursively, with its name filters. Roles come from `parseSearch`
+ * (`grep -re. ~` is `grep -r -e . ~`; in `rg -r-g x ~`, `-g` is replacement text, not a filter),
+ * and each root may be a PowerShell list (`paths`).
+ */
+function searchWalks(bin: string, args: string[], ctx: PathContext, paths: WordPaths): Walk[] {
+  const words = parseSearch(bin, args);
+  const operands = searchOperands(words).flatMap((w) => paths(args[w.arg] as string, w.from));
   if (bin === "rg" || bin === "ag" || bin === "ack") {
     // Only ripgrep's globs narrow; `!glob` excludes, and other filters are regexes or types.
     const names =
       bin === "rg"
-        ? optionValues(args, ["-g", "--glob", "--iglob"], false).filter((n) => !n.startsWith("!"))
+        ? searchOptionValues(words, ["-g", "--glob", "--iglob"]).filter((n) => !n.startsWith("!"))
         : [];
-    return [{ roots: searchOperands(bin, args), recursive: true, names }];
+    return [{ roots: operands, recursive: true, names }];
   }
   if (GREPS.has(bin)) {
-    if (!grepRecursive(args)) return [];
-    const names = optionValues(args, ["--include"], false);
-    return [{ roots: searchOperands(bin, args), recursive: true, names }];
+    if (!grepRecursive(words)) return [];
+    const names = searchOptionValues(words, ["--include"]);
+    return [{ roots: operands, recursive: true, names }];
   }
-  if (bin === "findstr" && args.some((a) => /^\/[a-z]*s[a-z]*$/i.test(a))) {
+  const sub = words.some((w) => w.role === "option" && /^\/[a-z]*s[a-z]*$/i.test(w.text));
+  if (bin === "findstr" && sub) {
     // `findstr /s x C:\dir\*.txt` reads `*.txt` in `C:\dir` and every folder below it.
     const p = pathApi(ctx);
-    return searchOperands(bin, args).map((operand) => ({
+    return operands.map((operand) => ({
       roots: [p.dirname(operand)],
       recursive: true,
       names: [p.basename(operand)],
@@ -186,17 +196,19 @@ export function searchReaches(
 /**
  * How a command reaches CodeDen's credential files other than by naming one: a recursive search
  * from a folder above them, or a listing (or `echo`ed path) whose output `feeds` another command.
- * Returns the word it reaches them through.
+ * `paths` gives what a word may stand for (a PowerShell list's elements). Returns the word it
+ * reaches them through.
  */
 export function reachesThroughFolder(
   bin: string,
   args: string[],
   ctx: PathContext,
   feeds: boolean,
+  paths: WordPaths = (word, from) => [word.slice(from)],
 ): string | undefined {
   if (!ctx.codedenHome) return undefined;
   if (SEARCHES.has(bin)) {
-    for (const walk of searchWalks(bin, args, ctx)) {
+    for (const walk of searchWalks(bin, args, ctx, paths)) {
       const root = walkReaches(walk, ctx);
       if (root) return root;
     }
@@ -206,6 +218,8 @@ export function reachesThroughFolder(
     const root = walk && walkReaches(walk, ctx);
     if (root) return root;
   }
-  if (feeds && DATA.has(bin)) return args.find((a) => touchesCodedenCredentials(a, ctx));
+  if (feeds && DATA.has(bin)) {
+    return args.find((a) => paths(a, 0).some((path) => touchesCodedenCredentials(path, ctx)));
+  }
   return undefined;
 }
