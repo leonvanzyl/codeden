@@ -182,20 +182,31 @@ function count(file: string, sql: string): number {
   }
 }
 
-/** Start the backfill in a child process, kill it partway, report what survived. */
+/**
+ * Start the backfill in a child process, kill it `afterMs` after its first batch committed (so
+ * a slow start doesn't eat the time), report what survived.
+ */
 async function interrupted(file: string, afterMs: number): Promise<number> {
   const src = (path: string) => JSON.stringify(pathToFileURL(join(import.meta.dirname, path)).href);
   const script = `
     import { openDatabase } from ${src("../src/db/client.ts")};
     import { SearchBackfill } from ${src("../src/services/search/backfill.ts")};
     const database = openDatabase(${JSON.stringify(file)});
-    await new SearchBackfill(database.db).run();
+    const backfill = new SearchBackfill(database.db);
+    backfill.step();
+    console.log("first batch committed");
+    await backfill.run();
     database.close();`;
   const child = spawn(process.execPath, ["--import", "tsx", "--input-type=module", "-e", script], {
-    stdio: "inherit",
+    stdio: ["ignore", "pipe", "inherit"],
   });
   const exited = new Promise((r) => child.once("exit", r));
-  const timer = setTimeout(() => child.kill("SIGKILL"), afterMs);
+  let timer: NodeJS.Timeout | undefined;
+  child.stdout.on("data", (chunk: Buffer) => {
+    if (!timer && chunk.toString().includes("first batch committed")) {
+      timer = setTimeout(() => child.kill("SIGKILL"), afterMs);
+    }
+  });
   await exited;
   clearTimeout(timer);
   return count(file, "SELECT count(*) AS n FROM item_search");
@@ -226,7 +237,7 @@ async function main() {
   const left = new SearchBackfill(resumed.db).pending();
   resumed.close();
   console.log(
-    `killed the backfill after 4 s: ${survived} rows in item_search kept, ${left} items left to read on the next start`,
+    `killed the backfill 4 s after its first batch: ${survived} rows in item_search kept, ${left} items left to read on the next start`,
   );
 
   t = performance.now();

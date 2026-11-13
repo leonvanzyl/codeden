@@ -86,6 +86,19 @@ describe("issue #166 (P3): query hygiene and short terms", () => {
     expect(ids("pret ÉA")).toEqual(["s1/a1"]);
     expect(ids("prêt ea")).toEqual(["s1/a1"]);
   });
+
+  it("finds combining marks NFC can't compose, by the accented and the plain spelling", () => {
+    session("s1");
+    completed("s1", say("a1", "Note x́yz here"));
+    completed("s1", say("a2", "Then ā́bc there"));
+    for (const q of ["x́yz", "xyz", "X́YZ"]) expect(ids(q), q).toEqual(["s1/a1"]);
+    for (const q of ["ā́bc", "abc", "ábc"]) expect(ids(q), q).toEqual(["s1/a2"]);
+    // The highlight covers the marks too.
+    for (const q of ["x́yz", "xyz"]) {
+      const [hit] = search(q).hits;
+      expect(hit?.snippet.filter((p) => p.match).map((p) => p.text)).toEqual(["x́yz"]);
+    }
+  });
 });
 
 describe("issue #166 (P3): items an older build wrote are indexed after upgrading again", () => {

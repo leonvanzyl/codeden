@@ -5,7 +5,6 @@ import {
   searchMatchRanges,
   searchTerms,
   type ToolKind,
-  TRANSCRIPT_SEARCH_MIN_TERM,
   type TranscriptSearchHit,
   type TranscriptSearchQuery,
   type TranscriptSearchResponse,
@@ -15,6 +14,7 @@ import type { Db } from "../../db/client";
 import { threads } from "../../db/schema";
 import { HIGHLIGHT_CLOSE, HIGHLIGHT_OPEN } from "./item-text";
 import { snippetParts } from "./snippet";
+import { termTrigrams } from "./trigrams";
 
 /**
  * Most index candidates one request looks at. Matches come newest first and a request stops
@@ -24,38 +24,35 @@ import { snippetParts } from "./snippet";
  */
 export const CANDIDATE_BUDGET = 2_000;
 
-/** The search terms of a query and the FTS5 expression that finds candidates for them. */
+/** The search terms of a query. */
 export interface ParsedQuery {
   /** The terms as typed (without control characters, NFC), each once. */
   terms: string[];
   /** The terms folded (lower case, no accents): each must appear in a hit's folded text. */
   folded: string[];
-  /**
-   * FTS5 MATCH expression: every trigram of every term of 3+ characters, each a quoted string,
-   * so quotes, `*`, `:`, `-`, parentheses and words like `OR` or `NEAR` are searched literally
-   * and never parsed as query syntax. Null when no term is long enough to use the index.
-   */
-  match: string | null;
 }
 
 /**
  * Split a query into terms. The index (`detail=none`) stores which items hold each trigram,
- * not where, so it finds candidates holding every trigram of the long terms; the text check
- * then requires each term, long or short, as a substring ignoring case and accents.
+ * not where, so it finds candidates holding every trigram of the terms (`matchExpression`);
+ * the text check then requires each term, long or short, as a substring ignoring case and
+ * accents.
  */
 export function parseQuery(q: string): ParsedQuery {
   const terms = searchTerms(q);
   const folded = [...new Set(terms.map(foldSearchText).filter(Boolean))];
-  const trigrams = new Set<string>();
-  for (const term of terms) {
-    const chars = [...term];
-    for (let i = 0; i + TRANSCRIPT_SEARCH_MIN_TERM <= chars.length; i++) {
-      trigrams.add(chars.slice(i, i + TRANSCRIPT_SEARCH_MIN_TERM).join(""));
-    }
-  }
-  const match =
-    trigrams.size > 0 ? [...trigrams].map((t) => `"${t.replaceAll('"', '""')}"`).join(" ") : null;
-  return { terms, folded, match };
+  return { terms, folded };
+}
+
+/**
+ * FTS5 MATCH expression for the terms: every trigram the index's tokenizer makes of them, each
+ * a quoted string, so quotes, `*`, `:`, `-`, parentheses and words like `OR` or `NEAR` are
+ * searched literally and never parsed as query syntax. Null when no term has 3 characters left
+ * after tokenizing, so the index can't be used.
+ */
+export function matchExpression(db: Db, terms: string[]): string | null {
+  const trigrams = termTrigrams(db.$client, terms);
+  return trigrams.length > 0 ? trigrams.map((t) => `"${t.replaceAll('"', '""')}"`).join(" ") : null;
 }
 
 interface CandidateRow {
@@ -81,9 +78,10 @@ interface ItemRow {
 export function searchTranscripts(db: Db, query: TranscriptSearchQuery): TranscriptSearchResponse {
   const q = cleanSearchQuery(query.q);
   const parsed = parseQuery(q);
-  if (!parsed.match) return { query: q, hits: [], nextCursor: null };
+  const match = matchExpression(db, parsed.terms);
+  if (!match) return { query: q, hits: [], nextCursor: null };
 
-  const { text, params } = candidateQuery(query, parsed.match);
+  const { text, params } = candidateQuery(query, match);
   const found: CandidateRow[] = [];
   let scanned = 0;
   let lastId: number | undefined;

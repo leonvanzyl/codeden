@@ -15,7 +15,7 @@ import { type Database, openDatabase } from "../src/db/client";
 import { itemSearch } from "../src/db/schema";
 import { applyProjection } from "../src/events/projector";
 import { EventStore } from "../src/events/store";
-import { parseQuery, searchTranscripts } from "../src/services/search/search";
+import { matchExpression, parseQuery, searchTranscripts } from "../src/services/search/search";
 import { sampleSession } from "./helpers";
 
 let dir: string;
@@ -231,12 +231,14 @@ describe("transcript search queries", () => {
     expect(search("pr")).toEqual({ query: "pr", hits: [], nextCursor: null });
     expect(search("a b")).toMatchObject({ hits: [] });
     expect(ids("cart pr")).toEqual(["s1/a1"]);
-    // Every trigram of the long terms, quoted; short terms only filter.
-    expect(parseQuery('say "hi" to NEAR to')).toEqual({
+    // Every trigram of the long terms as the index tokenizes it, quoted; short terms only filter.
+    const parsed = parseQuery('say "hi" to NEAR to');
+    expect(parsed).toEqual({
       terms: ["say", '"hi"', "to", "NEAR"],
       folded: ["say", '"hi"', "to", "near"],
-      match: '"say" """hi" "hi""" "NEA" "EAR"',
     });
+    expect(matchExpression(database.db, parsed.terms)).toBe('"say" """hi" "hi""" "nea" "ear"');
+    expect(matchExpression(database.db, ["to", "x́y"])).toBeNull();
   });
 
   it("highlights every term, short ones included, and finds the trigrams in order only", () => {

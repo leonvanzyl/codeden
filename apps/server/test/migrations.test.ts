@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { findMigrationsDir, openDatabase } from "../src/db/client";
 import { SearchBackfill } from "../src/services/search/backfill";
+import { SEARCH_TOKENIZER } from "../src/services/search/trigrams";
 
 const all = findMigrationsDir();
 const names = readdirSync(all).filter((n) => /^\d{14}_/.test(n));
@@ -303,6 +304,8 @@ describe("migrations", { timeout: 30_000 }, () => {
             .get() as { sql: string }
         ).sql;
         expect(sql).toContain("detail='none'");
+        // Query trigrams are tokenized with the same tokenizer as the index.
+        expect(sql).toContain(`tokenize='${SEARCH_TOKENIZER}'`);
       } finally {
         database.close();
       }
