@@ -4,7 +4,7 @@ import type { FactoryPr } from "./github-port";
 import { failItem } from "./outcomes";
 import { freeSlots } from "./policy";
 import { REBASE_WHY, rebasePrompt } from "./prompts";
-import { integratorPrompt } from "./prompts-integration";
+import { type IntegratorTask, integratorPrompt } from "./prompts-integration";
 import { rebuild } from "./rebuild";
 import { isBusy } from "./sessions";
 import { FINISHED_STAGES } from "./store";
@@ -160,24 +160,30 @@ async function askToRebase(
 /**
  * A fresh integrator takes over the PR when the session that wrote it is gone: a worktree on
  * the PR's head branch, a brief with the issue, the PR description and the review history.
- * It becomes the item's PR agent. Waits for a free agent slot.
+ * It becomes the item's PR agent, so the PR's later follow-ups (conflicts, CI, the audit, the
+ * review's worktree) go to it. Waits for a free agent slot; true once it started. `marks` are
+ * nudges recorded when it starts.
  */
-async function startIntegrator(
+export async function startIntegrator(
   ctx: FactoryContext,
   project: Project,
   item: FactoryItem,
   pr: FactoryPr,
-  also: string[],
-): Promise<void> {
+  task: IntegratorTask,
+  marks: string[],
+): Promise<boolean> {
   const base = baseBranchOf(project);
+  const what =
+    task === "conflicts"
+      ? `Merge conflicts with ${base}`
+      : "CI never started on its head and its author's session is gone";
   if (freeSlots(ctx.sessions.activeCount(project.id), project.factoryLimits) === 0) {
     ctx.store.updateItem(item.id, (i) => ({
       ...i,
-      note: `Merge conflicts with ${base}: waiting for a free agent to integrate it`,
+      note: `${what}: waiting for a free agent to take the pull request over`,
     }));
-    return;
+    return false;
   }
-  const ask = rebaseAsks(item) + 1;
   const res = await ctx.sessions.startIntegrator(
     item,
     { number: pr.ref.number, headBranch: pr.headBranch },
@@ -185,27 +191,28 @@ async function startIntegrator(
       item,
       { number: pr.ref.number, url: pr.ref.url, body: pr.body, headBranch: pr.headBranch },
       base,
+      task,
     ),
   );
   if (res.status !== "started") {
     ctx.store.updateItem(item.id, (i) => ({
       ...i,
-      note: `Merge conflicts with ${base}: the integrator could not start (${res.status})`,
+      note: `${what}: the integrator could not start (${res.status})`,
     }));
-    return;
+    return false;
   }
   const session = ctx.repo.find(res.sessionId)?.session;
   const at = ctx.now().toISOString();
-  const marks = Object.fromEntries([`${REBASE}${ask}`, ...also].map((k) => [k, at]));
   ctx.store.updateItem(item.id, (i) => ({
     ...i,
     builderSessionId: res.sessionId,
     builderProvider: session?.provider ?? i.builderProvider,
-    note: `Merge conflicts with ${base}: an integrator is rebasing it (the author's session is gone)`,
-    nudges: { ...i.nudges, ...marks },
+    note: `${what}: an integrator took the pull request over`,
+    nudges: { ...i.nudges, ...Object.fromEntries(marks.map((k) => [k, at])) },
     // Finished work's integrator is archived again once its turn is over.
     sessionsArchivedAt: FINISHED_STAGES.includes(i.stage) ? null : i.sessionsArchivedAt,
   }));
+  return true;
 }
 
 /**
@@ -242,7 +249,7 @@ export async function advanceConflicting(
   const from = asked === 0 && item.stage === "verifying" && pr.headSha;
   const also = from ? [`${CONFLICT_FROM}${pr.headSha}`] : [];
   if (!agent) {
-    await startIntegrator(ctx, project, item, pr, also);
+    await startIntegrator(ctx, project, item, pr, "conflicts", [`${REBASE}${asked + 1}`, ...also]);
     return loop;
   }
   const note = `Merge conflicts with ${branch}: the author is rebasing (not a revise round)`;

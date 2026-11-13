@@ -13,6 +13,7 @@ import {
   rebaseAsks,
   trackHead,
 } from "./rebase";
+import { adoptAgentPr } from "./rebuild";
 import { recoverable } from "./recover";
 import { isBusy } from "./sessions";
 
@@ -41,6 +42,12 @@ export async function advanceOwned(
   item: FactoryItem,
 ): Promise<FactoryLoop> {
   if (!item.pr) return loop;
+  // An integrator that opened a new PR for the work: the item follows it (still a person's to
+  // merge), and the old one is closed with a link (`closeReplacedPrs`).
+  const before = item.pr.number;
+  item = adoptAgentPr(ctx, project, item);
+  if (!item.pr) return loop;
+  const adopted = item.pr.number !== before;
   // Merged or closed by a person: the synced PR says so, no API call.
   const ref = ctx.github.prRef(project.id, item.pr.number);
   if (ref && (ref.state === "merged" || ref.state === "closed")) {
@@ -49,7 +56,7 @@ export async function advanceOwned(
   }
   // A failure outside its code goes back to verification by itself (`recover.ts`).
   if (recoverable(item)) return loop;
-  if (!due(ctx, item)) return loop;
+  if (!adopted && !due(ctx, item)) return loop;
   let pr: FactoryPr;
   try {
     pr = await ctx.github.prDetails(project.id, item.pr.number);

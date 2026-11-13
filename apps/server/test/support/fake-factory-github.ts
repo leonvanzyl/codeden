@@ -46,6 +46,10 @@ export class FakeFactoryGithub implements FactoryGithub {
   updates: Array<{ number: number; expectedHeadSha: string }> = [];
   /** PRs closed through `closePr`, with their comment. */
   closed: Array<{ number: number; comment: string }> = [];
+  /** `closePr` calls, refused ones included. */
+  closeAttempts = 0;
+  /** How many more `closePr` calls GitHub refuses (a transient error). */
+  closeFailures = 0;
   /** CI state of the new head an `update-branch` makes (it starts running). */
   ciAfterUpdate: ChecksState = "pending";
   /** What `actionsAvailable` answers. */
@@ -218,6 +222,11 @@ export class FakeFactoryGithub implements FactoryGithub {
   async closePr(_projectId: string, number: number, comment: string): Promise<void> {
     const pr = this.prs.get(number);
     if (!pr) throw new Error(`no PR ${number}`);
+    this.closeAttempts++;
+    if (this.closeFailures > 0) {
+      this.closeFailures--;
+      throw new Error("GitHub is having a moment (502)");
+    }
     this.comments.push({ number, body: comment });
     this.closed.push({ number, comment });
     pr.ref = { ...pr.ref, state: "closed" };

@@ -312,10 +312,22 @@ describe("factory API contracts (§10.1)", () => {
         queuePosition: null,
         note: null,
       },
+      {
+        itemId: "i3",
+        title: "Fix the footer",
+        pr: { number: 2, url: "https://github.com/acme/app/pull/2", state: "open" },
+        state: "superseded",
+        queuePosition: null,
+        note: "Superseded by #6: closing it",
+      },
     ];
     const withQueue = FactoryStatus.parse({ ...status, pullRequests });
     expect(FactoryStatus.parse(JSON.parse(JSON.stringify(withQueue)))).toEqual(withQueue);
-    expect(withQueue.pullRequests.map((p) => p.state)).toEqual(["queued", "rebasing"]);
+    expect(withQueue.pullRequests.map((p) => p.state)).toEqual([
+      "queued",
+      "rebasing",
+      "superseded",
+    ]);
     expect(
       FactoryStatus.safeParse({
         ...status,

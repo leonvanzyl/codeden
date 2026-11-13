@@ -9,6 +9,7 @@ import type { FactoryContext } from "./context";
 import { localDay } from "./policy";
 import { isRebasing, isUpdating, mergeQueue } from "./queue";
 import { rebaseAsks } from "./rebase";
+import { replacedPrs } from "./rebuild";
 import { mayAutoMerge } from "./trust";
 
 /**
@@ -77,6 +78,23 @@ export function pullRequests(
   const others: FactoryPrEntry[] = [];
   const merged: FactoryPrEntry[] = [];
   for (const i of items) {
+    // PRs a newer one replaced stay listed until the factory has closed them.
+    for (const old of replacedPrs(i)) {
+      const ref = ctx.github.prRef(project.id, old.number) ?? {
+        number: old.number,
+        url: i.rebuiltFrom?.number === old.number ? i.rebuiltFrom.url : "",
+        state: "open" as const,
+      };
+      if (!ref.url || ref.state === "closed" || ref.state === "merged") continue;
+      others.push({
+        itemId: i.id,
+        title: i.title,
+        pr: ref,
+        state: "superseded",
+        queuePosition: null,
+        note: i.pr ? `Superseded by #${i.pr.number}: closing it` : "Superseded: closing it",
+      });
+    }
     if (position.has(i.id)) continue;
     if (
       i.stage === "watching" ||

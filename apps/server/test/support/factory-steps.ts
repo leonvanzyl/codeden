@@ -6,6 +6,7 @@ import {
   type ReviewVerdictInit,
 } from "@codeden/contracts";
 import { expect } from "vitest";
+import { OWNED_RECHECK_MS } from "../../src/services/factory/owned";
 import type { FactoryEnv } from "./factory-env";
 import type { FakePr } from "./fake-factory-github";
 
@@ -99,5 +100,50 @@ export function factorySteps(env: () => FactoryEnv) {
     return e().factory.submitReview(session, ReviewVerdict.parse(verdict));
   };
 
-  return { item, tick, later, lastMessageTo, enable, backlogItem, openPr, verifying, review };
+  /** Answer every rebase request with the conflicts still there, until the item leaves verification. */
+  const keepConflicting = async (id: string) => {
+    for (let n = 0; n < 4 && item(id).stage === "verifying"; n++) {
+      await e().setStatus(item(id).builderSessionId as string, "idle");
+      await tick();
+    }
+  };
+
+  /** Mark the item failed, as after its revise rounds ran out. */
+  const failed = (id: string) =>
+    e().factory.data.updateItem(id, (i) => ({
+      ...i,
+      stage: "failed",
+      reason: "review: request_changes: still has gaps",
+      failureKind: "checks",
+      finishedAt: new Date().toISOString(),
+    }));
+
+  /**
+   * As if `OWNED_RECHECK_MS` had passed since the loop last read an owned item's PR (sessions
+   * stamp real time, so the test clock isn't moved past the agent's turns).
+   */
+  const readAgainSoon = (id: string) => {
+    const at = new Date(Date.now() - OWNED_RECHECK_MS - 1).toISOString();
+    e().factory.data.updateItem(id, (i) => ({ ...i, nudges: { ...i.nudges, owned_checked: at } }));
+  };
+
+  /** The panel's entry for a PR. */
+  const prEntry = async (prNumber: number) =>
+    (await e().factory.status(e().project.id)).pullRequests.find((p) => p.pr.number === prNumber);
+
+  return {
+    item,
+    tick,
+    later,
+    lastMessageTo,
+    enable,
+    backlogItem,
+    openPr,
+    verifying,
+    review,
+    keepConflicting,
+    failed,
+    readAgainSoon,
+    prEntry,
+  };
 }

@@ -129,11 +129,14 @@ export class FactorySessions {
     note: string | null,
     pr: { headBranch: string; baseBranch: string } | null,
     autoMerge: boolean,
+    /** A brief of its own instead of the whole review (a conflict resolution's re-check). */
+    text?: string,
   ): Promise<StartSessionResponse> {
     const builder = item.builderSessionId
       ? this.deps.repo.find(item.builderSessionId)?.session
       : undefined;
-    const worktree = builder?.worktreePath ?? null;
+    // A worktree cleanup removed is no place to review: the PR's head is fetched instead.
+    const worktree = builder && !builder.worktreeRemovedAt ? builder.worktreePath : null;
     let workspace: StartSessionRequest["workspace"] = { mode: "worktree" };
     let localBase: string | null = null;
     if (worktree) {
@@ -156,7 +159,7 @@ export class FactorySessions {
       title: `Review: ${item.title}`.slice(0, 200),
       issue: item.issue ?? undefined,
       workspace,
-      input: brief(reviewerPrompt(item, vision, note, localBase, autoMerge)),
+      input: brief(text ?? reviewerPrompt(item, vision, note, localBase, autoMerge)),
     });
   }
 

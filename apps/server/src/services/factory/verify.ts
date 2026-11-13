@@ -6,15 +6,13 @@ import {
 } from "@codeden/contracts";
 import { errorMessage } from "../errors";
 import { codeFiles, evaluateChecks, hasTestResults, sameChecks } from "./checks";
+import { kickCi } from "./ci-kick";
 import { type FactoryContext, visionOf } from "./context";
-import { failReview, handleFailure } from "./failures";
+import { handleFailure } from "./failures";
 import type { FactoryPr, PrEvidence } from "./github-port";
-import { stoppedSinceNudge } from "./idle";
 import { prDecidedOutside, readyForYou } from "./merge";
 import { escalate, failItem, runAudit } from "./outcomes";
-import { isUiFile, pickReviewer } from "./policy";
-import { REVIEWER_NUDGE, reReviewPrompt } from "./prompts";
-import { recheckPrompt } from "./prompts-integration";
+import { isUiFile } from "./policy";
 import { joinQueue, leaveQueue } from "./queue";
 import {
   advanceConflicting,
@@ -25,16 +23,11 @@ import {
   trackedHead,
   trackHead,
   UPDATE,
-  withoutRecheck,
   worktreeSettled,
 } from "./rebase";
-import { adoptAgentPr, closeReplaced } from "./rebuild";
+import { adoptAgentPr } from "./rebuild";
+import { ensureReviewer, reviewerStalled } from "./reviewer";
 import { mayAutoMerge } from "./trust";
-
-const ENDED = new Set(["idle", "interrupted", "completed", "failed", "stopped"]);
-
-/** Times a reviewer session that died is replaced before the item fails (infrastructure). */
-const MAX_REVIEWER_RESTARTS = 3;
 
 /** Audit results per item and head commit (re-run after a restart is fine). */
 const auditCache = new Map<string, { ok: boolean; detail: string }>();
@@ -57,8 +50,7 @@ export async function advanceVerifying(
   item: FactoryItem,
 ): Promise<FactoryLoop> {
   if (!item.pr) return failItem(ctx, loop, item, "The item has no pull request");
-  await closeReplaced(ctx, project, item);
-  item = await adoptAgentPr(ctx, project, item);
+  item = adoptAgentPr(ctx, project, item);
   if (!item.pr) return loop;
   // Ready and waiting for a person: the synced PR says when they merge or close it; GitHub
   // itself is asked again only every few minutes (new commits, CI, conflicts).
@@ -87,6 +79,10 @@ export async function advanceVerifying(
     prDecidedOutside(ctx, item, pr.ref);
     return loop;
   }
+  // CI that never started is started again (by its agent, or an integrator that takes the PR
+  // over when the author's session is gone); its clock waits until that happened.
+  const kicking = await kickCi(ctx, project, item, pr);
+  item = ctx.store.item(item.id) ?? item;
 
   const vision = visionOf(project);
   const now = ctx.now();
@@ -120,7 +116,7 @@ export async function advanceVerifying(
     testOutput: evidence.testOutput,
     audit: auditCache.get(headKey) ?? null,
     auditConfigured,
-    ciTimedOut: now.getTime() - Date.parse(head.since) > ctx.ciGraceMs,
+    ciTimedOut: !kicking && now.getTime() - Date.parse(head.since) > ctx.ciGraceMs,
     limits: project.factoryLimits,
     tuning: loop.tuning,
     largeChange: item.largeChange ?? null,
@@ -197,164 +193,4 @@ async function gatherEvidence(
     screenshots: wantScreens ? found.screenshots : null,
     testOutput: wantTests ? found.testOutput : false,
   };
-}
-
-/**
- * Start the independent reviewer (another provider when possible), ask it to look again, or
- * ask it to re-check only a conflict resolution an agent made since it approved.
- */
-async function ensureReviewer(
-  ctx: FactoryContext,
-  project: Project,
-  item: FactoryItem,
-  vision: string,
-  pr: FactoryPr,
-): Promise<FactoryItem> {
-  const old = recheckOf(item);
-  if (item.review && old) return requestRecheck(ctx, project, item, old, pr.headSha ?? "HEAD");
-  if (item.review) return item;
-  if (item.reviewerSessionId) {
-    if (!item.nudges.rereview_pending) return item;
-    await ctx.sessions.message(item.reviewerSessionId, reReviewPrompt(item));
-    return ctx.store.updateItem(item.id, (i) => {
-      const { rereview_pending: _p, ...rest } = i.nudges;
-      return { ...i, nudges: { ...rest, rereview_sent: ctx.now().toISOString() } };
-    });
-  }
-  if (ctx.sessions.activeCount(item.projectId) >= project.factoryLimits.maxConcurrentSessions) {
-    return ctx.store.updateItem(item.id, (i) => ({
-      ...i,
-      note: "Waiting for a free agent for the review",
-    }));
-  }
-  const choice = pickReviewer(item.builderProvider, ctx.sessions.providers());
-  // No builder worktree (a revert PR opened through the API): review the PR's head locally.
-  const head = item.builderSessionId
-    ? null
-    : { headBranch: pr.headBranch, baseBranch: project.defaultBranch ?? "main" };
-  const res = await ctx.sessions.startReviewer(
-    item,
-    vision,
-    choice.provider,
-    choice.note,
-    head,
-    mayAutoMerge(item, project.factoryLimits),
-  );
-  if (res.status !== "started") {
-    return ctx.store.updateItem(item.id, (i) => ({
-      ...i,
-      note: `Review not started (${res.status})`,
-    }));
-  }
-  return ctx.store.updateItem(item.id, (i) => ({
-    ...i,
-    reviewerSessionId: res.sessionId,
-    reviewerProvider: choice.provider,
-    reviewerNote: choice.note,
-    note: null,
-  }));
-}
-
-/**
- * An agent rebased the PR to resolve conflicts after the reviewer approved: the reviewer
- * re-checks only the resolution (`git range-diff`). When the reviewer session can't take the
- * message any more, a fresh reviewer reviews the whole PR instead.
- */
-async function requestRecheck(
-  ctx: FactoryContext,
-  project: Project,
-  item: FactoryItem,
-  oldHead: string,
-  newHead: string,
-): Promise<FactoryItem> {
-  if (item.nudges.recheck_sent) return item;
-  const reviewer = item.reviewerSessionId
-    ? ctx.repo.find(item.reviewerSessionId)?.session
-    : undefined;
-  if (!reviewer || reviewer.status === "failed" || reviewer.archivedAt) {
-    return ctx.store.updateItem(item.id, (i) => ({
-      ...i,
-      review: null,
-      reviewerSessionId: null,
-      note: "Rebased after the review, and the reviewer is gone: a fresh review follows",
-      nudges: withoutRecheck(i.nudges),
-    }));
-  }
-  await ctx.sessions.message(
-    reviewer.id,
-    recheckPrompt(item, oldHead, newHead, baseBranchOf(project)),
-  );
-  const at = ctx.now().toISOString();
-  return ctx.store.updateItem(item.id, (i) => {
-    const { reviewer: _nudged, ...nudges } = i.nudges;
-    return {
-      ...i,
-      note: "Rebased after the review: the reviewer re-checks the conflict resolution",
-      nudges: { ...nudges, recheck_sent: at },
-    };
-  });
-}
-
-/**
- * While checks are pending: nudge a reviewer that ended its turn without a verdict (or without
- * its re-check), and fail the review once it ends again without one and stays idle past the
- * grace period. A reviewer session that died is replaced, up to `MAX_REVIEWER_RESTARTS` times.
- */
-async function reviewerStalled(
-  ctx: FactoryContext,
-  project: Project,
-  loop: FactoryLoop,
-  item: FactoryItem,
-): Promise<FactoryLoop> {
-  const rechecking = Boolean(item.review && recheckOf(item) && item.nudges.recheck_sent);
-  if ((item.review && !rechecking) || !item.reviewerSessionId || item.nudges.rereview_pending)
-    return loop;
-  const s = ctx.repo.find(item.reviewerSessionId)?.session;
-  if (!s || !ENDED.has(s.status)) return loop;
-  if (s.status === "failed") return reviewerDied(ctx, loop, item);
-  if (s.status === "stopped") {
-    if (item.nudges.reviewer_restarted)
-      return failReview(ctx, project, loop, item, "The reviewer session stopped");
-    ctx.store.updateItem(item.id, (i) => ({
-      ...i,
-      reviewerSessionId: null,
-      nudges: { ...withoutRecheck(i.nudges), reviewer_restarted: ctx.now().toISOString() },
-      review: rechecking ? null : i.review,
-    }));
-    return loop;
-  }
-  const nudged = item.nudges.reviewer;
-  if (!nudged) {
-    const at = ctx.now().toISOString();
-    ctx.store.updateItem(item.id, (i) => ({ ...i, nudges: { ...i.nudges, reviewer: at } }));
-    await ctx.sessions.message(s.id, REVIEWER_NUDGE);
-    return loop;
-  }
-  if (stoppedSinceNudge(s, nudged, ctx.now(), loop.tuning)) {
-    return failReview(ctx, project, loop, item, "The reviewer ended without a verdict");
-  }
-  return loop;
-}
-
-/**
- * The reviewer session died (an error, not a verdict): a fresh reviewer takes over, without a
- * revise round. After `MAX_REVIEWER_RESTARTS` the item fails as an infrastructure failure.
- */
-function reviewerDied(ctx: FactoryContext, loop: FactoryLoop, item: FactoryItem): FactoryLoop {
-  let n = 0;
-  while (item.nudges[`reviewer_failed_${n + 1}`]) n++;
-  if (n >= MAX_REVIEWER_RESTARTS) {
-    return failItem(ctx, loop, item, `The reviewer session failed ${n + 1} times`, {
-      kind: "infrastructure",
-    });
-  }
-  const at = ctx.now().toISOString();
-  ctx.store.updateItem(item.id, (i) => ({
-    ...i,
-    reviewerSessionId: null,
-    // A re-check falls back to a whole review by the fresh reviewer.
-    review: recheckOf(i) ? null : i.review,
-    nudges: { ...withoutRecheck(i.nudges), [`reviewer_failed_${n + 1}`]: at },
-  }));
-  return loop;
 }

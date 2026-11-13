@@ -1,10 +1,11 @@
 import type { FactoryItem, FactoryLoop, GitHubPrRef, Project, Session } from "@codeden/contracts";
 import { errorMessage } from "../errors";
 import { isTransientRunnerError, isTurnRunningError } from "../sessions/outbox-holds";
+import { CI_KICK_NUDGE } from "./ci-kick";
 import type { FactoryContext } from "./context";
 import { markStuck } from "./outcomes";
 import { freeSlots } from "./policy";
-import { ciKickPrompt, continuePrompt } from "./prompts-integration";
+import { continuePrompt } from "./prompts-integration";
 import { prAgent } from "./rebase";
 import { isBusy } from "./sessions";
 import { ownsTurnRaceFailure } from "./turn-race";
@@ -68,7 +69,8 @@ function freshNudges(nudges: FactoryItem["nudges"], at: string): FactoryItem["nu
       k.startsWith(RECOVERED) ||
       k.startsWith("fix_") ||
       k.startsWith("rebase_") ||
-      k.startsWith("conflict_from_"),
+      k.startsWith("conflict_from_") ||
+      k.startsWith("supersede_"),
   );
   return {
     ...Object.fromEntries(keep),
@@ -136,18 +138,24 @@ async function recoverOne(
     sessionsArchivedAt: null,
   } as const;
   if (pr) {
-    const current = ctx.store.updateItem(item.id, (i) => ({
+    ctx.store.updateItem(item.id, (i) => ({
       ...i,
       ...base,
       stage: "verifying",
       pr,
+      // A builder that is gone is no PR agent any more: conflicts and CI go to an integrator.
+      builderSessionId: builder ? i.builderSessionId : null,
       reviewerSessionId: reviewerDead && !i.review ? null : i.reviewerSessionId,
       note: "Back in verification after a failure outside its code",
-      // A fresh CI clock: the head is timed again from now.
-      nudges: { ...freshNudges(i.nudges, at), verifying: at },
+      // A fresh CI clock: the head is timed again from now. CI that never started is started
+      // again by the verify step (`ci-kick.ts`).
+      nudges: {
+        ...freshNudges(i.nudges, at),
+        verifying: at,
+        ...(noCi ? { [CI_KICK_NUDGE]: at } : {}),
+      },
     }));
     ctx.log?.(`factory: ${item.id}: back in verification after an infrastructure failure`);
-    if (noCi) await kickCi(ctx, project, current, builder);
     return loop;
   }
   if (builder && builder.status !== "stopped")
@@ -221,33 +229,3 @@ async function resumeBuilder(
 
 const WAITING_FOR_AGENT =
   "Failed for a reason outside its code: its builder carries on when an agent is free";
-
-/**
- * CI never started on the PR's head although Actions can run: start it again. A PR behind the
- * default branch is brought up to date on GitHub (a new head, no agent); otherwise its agent
- * pushes an empty commit. A conflicting PR gets no CI anyway: the conflict flow rebases it.
- */
-async function kickCi(
-  ctx: FactoryContext,
-  project: Project,
-  item: FactoryItem,
-  agent: Session | undefined,
-): Promise<void> {
-  if (!item.pr) return;
-  const pr = await ctx.github.prDetails(project.id, item.pr.number);
-  if (pr.mergeable === "conflicting" || !pr.headSha) return;
-  if ((await ctx.github.behindBy(project.id, pr.ref.number, pr.headSha)) > 0) {
-    await ctx.github.updateBranch(project.id, pr.ref.number, pr.headSha);
-    ctx.store.updateItem(item.id, (i) => ({
-      ...i,
-      note: "CI never started: updating the branch with the default branch to start it",
-    }));
-    return;
-  }
-  if (!agent) return;
-  await ctx.sessions.message(agent.id, ciKickPrompt(item));
-  ctx.store.updateItem(item.id, (i) => ({
-    ...i,
-    note: "CI never started: the author pushes an empty commit to start it",
-  }));
-}

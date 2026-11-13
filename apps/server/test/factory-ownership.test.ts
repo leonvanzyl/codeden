@@ -1,5 +1,4 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { OWNED_RECHECK_MS } from "../src/services/factory/owned";
 import { MAX_RECOVERIES } from "../src/services/factory/recover";
 import { READY_RECHECK_MS } from "../src/services/factory/verify";
 import { createFactoryEnv, type FactoryEnv } from "./support/factory-env";
@@ -16,37 +15,20 @@ import type { FakePr } from "./support/fake-factory-github";
 
 let env: FactoryEnv;
 afterEach(() => env?.close());
-const { item, tick, later, lastMessageTo, enable, backlogItem, openPr, verifying, review } =
-  factorySteps(() => env);
-
-/** Mark the item failed, as after its revise rounds ran out. */
-function failed(id: string) {
-  env.factory.data.updateItem(id, (i) => ({
-    ...i,
-    stage: "failed",
-    reason: "review: request_changes: still has gaps",
-    failureKind: "checks",
-    finishedAt: new Date().toISOString(),
-  }));
-}
-
-/**
- * As if `OWNED_RECHECK_MS` had passed since the loop last read the item's PR (sessions stamp
- * real time, so the test clock isn't moved past the agent's turns).
- */
-function readAgainSoon(id: string) {
-  const at = new Date(Date.now() - OWNED_RECHECK_MS - 1).toISOString();
-  env.factory.data.updateItem(id, (i) => ({ ...i, nudges: { ...i.nudges, owned_checked: at } }));
-}
-
-/** Answer every rebase request with the conflicts still there, until the item leaves verification. */
-async function keepConflicting(id: string) {
-  for (let n = 0; n < 4 && item(id).stage === "verifying"; n++) {
-    const agent = item(id).builderSessionId as string;
-    await env.setStatus(agent, "idle");
-    await tick();
-  }
-}
+const {
+  item,
+  tick,
+  later,
+  lastMessageTo,
+  enable,
+  backlogItem,
+  openPr,
+  verifying,
+  review,
+  keepConflicting,
+  failed,
+  readAgainSoon,
+} = factorySteps(() => env);
 
 describe("PRs of failed and escalated items", () => {
   it("rebases a failed item's PR that became conflicting, restoring and re-archiving its builder (dark factory)", async () => {
