@@ -3,6 +3,7 @@ import { CODEDEN_CREDENTIAL_FILES } from "@codeden/contracts";
 import { isSecretPath } from "@codeden/providers";
 import { forbidden } from "./errors";
 import { realPathOf } from "./files/path-guard";
+import { safeFileName } from "./github/evidence";
 
 /** A file on its way out of the machine, by every name it goes by. */
 export interface OutgoingFile {
@@ -29,13 +30,22 @@ export function isCodedenCredentialFile(file: string, home: string): boolean {
  * CodeDen's own tools skip the risk classifier, so these tools check here: a file `isSecretPath`
  * matches by any of its names (`.env`, SSH keys, `.npmrc`, `*.pem`, ...), or one of CodeDen's
  * own credential files in `home`, is refused with `403 secret_file` at every permission level.
+ * Each name is also checked as evidence publishes it (`safeFileName`), so `-id_rsa` and
+ * `notes.p!em` can't go out as `id_rsa` and `notes.pem`. Evidence then only adds `-2` before
+ * the extension to tell files apart, which never turns a name into a secret's.
  */
 export function assertNotSecret(file: OutgoingFile, home: string | undefined): void {
   const names = [file.realPath, ...file.names].filter((name): name is string => !!name);
-  const secret = names.find((name) => isSecretPath(name));
-  if (secret) {
+  for (const name of names) {
+    const published = safeFileName(basename(name));
+    const label = isSecretPath(name)
+      ? basename(name)
+      : isSecretPath(published)
+        ? `${basename(name)} (published as ${published})`
+        : undefined;
+    if (!label) continue;
     throw forbidden(
-      `${basename(secret)} looks like a secrets file (.env, keys, credentials). CodeDen never attaches or shares those, because they would leak secrets. Leave it out and describe what you checked instead.`,
+      `${label} looks like a secrets file (.env, keys, credentials). CodeDen never attaches or shares those, because they would leak secrets. Leave it out and describe what you checked instead.`,
       "secret_file",
     );
   }
