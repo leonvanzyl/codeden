@@ -58,6 +58,14 @@ const SERVER_PROCESS_TESTS = [
 const DESKTOP_PROCESS_TESTS = ["test/relay-chromium.test.ts"];
 
 /**
+ * The longest real-runner suite, four factory pipelines in one file (over a minute on its own),
+ * starts with the fast suites instead of after them, where it alone would add its whole length
+ * to the run. One such suite beside the fast ones gets a fair share of the machine; its tests
+ * set their own 60-90 s timeouts.
+ */
+const STARTS_WITH_FAST_SUITES = ["test/factory-flow.test.ts"];
+
+/**
  * Server suites that start a real runner process with the Fake provider: they call
  * `startHarness` (`apps/server/test/support/harness.ts`) or `startServer` without
  * `runner: false`. Found by reading the test files, so a new suite lands here on its own.
@@ -67,6 +75,7 @@ const SERVER_RUNNER_TESTS = readdirSync(join(SERVER_ROOT, "test"))
   .filter((file) => file.endsWith(".test.ts"))
   .map((file) => `test/${file}`)
   .filter((file) => !SERVER_PROCESS_TESTS.includes(file))
+  .filter((file) => !STARTS_WITH_FAST_SUITES.includes(file))
   .filter((file) => {
     const source = readFileSync(join(SERVER_ROOT, file), "utf8");
     return (
