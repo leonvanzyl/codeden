@@ -15,14 +15,14 @@ let tokens: McpTokenStore;
 let launcher: SessionLauncher;
 /** The MCP token in each `session.start` the runner received. */
 let handed: string[];
-/** The runner refuses the next `session.start` (it already hosts the session). */
-let refuse: boolean;
+/** The error code `session.start` fails with; null: it starts the session. */
+let refuse: string | null;
 
 beforeEach(() => {
   env = createGithubEnv();
   tokens = new McpTokenStore(env.db.db);
   handed = [];
-  refuse = false;
+  refuse = null;
   const runner = {
     isConnected: () => true,
     runnerId: () => "r1",
@@ -35,9 +35,7 @@ beforeEach(() => {
       if (http?.transport === "http") {
         handed.push(http.headers?.Authorization?.replace(/^Bearer /, "") ?? "");
       }
-      if (refuse) {
-        throw new RunnerCommandError("session_exists", `Session ${command.sessionId} is running`);
-      }
+      if (refuse) throw new RunnerCommandError(refuse, `session.start failed: ${refuse}`);
       return { resumeToken: "resume-1" };
     }) as RunnerPort["request"],
   } as unknown as RunnerPort;
@@ -66,14 +64,36 @@ describe("MCP tokens when a session is reopened (#208)", () => {
     expect(tokens.verify(old)).toBeUndefined();
   });
 
-  it("leaves the running agent's token alone when the runner refuses a second open", async () => {
+  it("keeps the running agent's token when the runner refuses a second open", async () => {
     const session = env.addSession({ status: "running" });
     await launcher.resume(session);
     const live = handed[0];
-    // A second resume racing the first: the runner already hosts the session.
-    refuse = true;
-    await expect(launcher.resume(session)).rejects.toThrow(/is running/);
+    // A second resume racing the first: the runner already hosts (or is opening) the session.
+    refuse = "session_exists";
+    await expect(launcher.resume(session)).rejects.toThrow(/session_exists/);
     expect(handed).toHaveLength(2);
     expect(tokens.verify(live)).toBeDefined();
+    // The refused open's token was never put to use.
+    expect(tokens.verify(handed[1])).toBeUndefined();
+  });
+
+  it("revokes every token of a session the runner could not open", async () => {
+    const session = env.addSession({ status: "idle" });
+    const old = tokens.mint({ role: "agent", sessionId: session.id, projectId: session.projectId });
+    refuse = "open_failed";
+    await expect(launcher.resume(session)).rejects.toThrow(/open_failed/);
+    // Nothing of the session runs on the runner, so no process holds any of them.
+    expect(tokens.verify(old)).toBeUndefined();
+    expect(tokens.verify(handed[0])).toBeUndefined();
+  });
+
+  it("revokes nothing when it can't tell whether the session started", async () => {
+    const session = env.addSession({ status: "idle" });
+    const old = tokens.mint({ role: "agent", sessionId: session.id, projectId: session.projectId });
+    // The runner may still open it with the new token after the server gave up waiting.
+    refuse = "timeout";
+    await expect(launcher.resume(session)).rejects.toThrow(/timeout/);
+    expect(tokens.verify(handed[0])).toBeDefined();
+    expect(tokens.verify(old)).toBeDefined();
   });
 });

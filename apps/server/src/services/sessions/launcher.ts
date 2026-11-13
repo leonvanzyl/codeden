@@ -78,6 +78,11 @@ interface PreparedWorkspace {
 
 const PREPARE_TIMEOUT_MS = 10 * 60_000;
 const START_TIMEOUT_MS = 60_000;
+/**
+ * `session.start` refusals after which no provider process of the session runs on the runner:
+ * it was neither hosted nor being opened (those answer `session_exists`), and this open failed.
+ */
+const NOTHING_RUNS = new Set(["open_failed", "unknown_provider"]);
 
 /**
  * Starts sessions on their runner (the one in `sessions.runnerId`, else the home runner):
@@ -211,10 +216,14 @@ export class SessionLauncher {
   }
 
   /**
-   * Open the provider session on the runner (`session.start`) with a freshly minted MCP token.
-   * Only once the runner has started it are the session's other tokens revoked: their
-   * processes are gone. An open that fails revokes nothing, since the process opened before it
-   * may still be running with its token (a second resume racing the first after a restart).
+   * Open the provider session on the runner (`session.start`) with a freshly minted MCP token,
+   * then retire the tokens no running process holds (§8.3). Started: the session's other
+   * tokens (their processes are gone). Refused because the session already runs or is being
+   * opened (`session_exists`, a second resume racing the first after a restart): only the new
+   * token, since that process holds an earlier one. Could not be opened: all of them, nothing
+   * runs. Any other failure (a timeout, a lost connection, an error once the process ran)
+   * retires nothing: a process may hold the new token or an earlier one; the next open or the
+   * session's end retires them.
    */
   private async open(runner: RunnerPort, session: Session, input: UserInput | undefined) {
     const token = runner.mcpProxyUrl()
@@ -224,18 +233,25 @@ export class SessionLauncher {
           projectId: session.projectId,
         })
       : null;
-    const result = await runner.request(
-      {
-        name: "session.start",
-        sessionId: session.id,
-        providerId: session.provider,
-        options: this.sessionOptions(session, token),
-        input,
-      },
-      START_TIMEOUT_MS,
-    );
-    if (token) this.deps.tokens.revokeSession(session.id, token);
-    return result;
+    try {
+      const result = await runner.request(
+        {
+          name: "session.start",
+          sessionId: session.id,
+          providerId: session.provider,
+          options: this.sessionOptions(session, token),
+          input,
+        },
+        START_TIMEOUT_MS,
+      );
+      if (token) this.deps.tokens.revokeSession(session.id, token);
+      return result;
+    } catch (error) {
+      const code = runnerErrorCode(error);
+      if (token && code === "session_exists") this.deps.tokens.revoke(token);
+      if (token && NOTHING_RUNS.has(code ?? "")) this.deps.tokens.revokeSession(session.id);
+      throw error;
+    }
   }
 
   /**

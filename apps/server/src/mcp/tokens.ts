@@ -15,10 +15,10 @@ function hash(token: string): string {
  * Per-session MCP bearer tokens (§8.3, §15). A token encodes nothing itself: it is a random
  * secret whose SHA-256 hash maps to the claims (role, project, session), so it survives
  * restarts. Each provider process a session is opened with gets its own token. Minting
- * revokes nothing: once the runner has started the new process, the launcher revokes the
- * session's other tokens (`revokeSession` with `except`), so an open that fails never strands
- * a process still running with the previous one. Ending a session revokes them all. The
- * install token is never accepted here, and MCP tokens are never accepted by the HTTP API.
+ * revokes nothing: the launcher retires tokens once the runner has answered the open
+ * (`SessionLauncher`), so an open that fails never strands a process still running with an
+ * earlier one. Ending a session revokes them all. The install token is never accepted here,
+ * and MCP tokens are never accepted by the HTTP API.
  */
 export class McpTokenStore {
   constructor(private readonly db: Db) {}
@@ -56,6 +56,15 @@ export class McpTokenStore {
       projectId: row.projectId,
       jti: row.id,
     };
+  }
+
+  /** Revoke one token (the provider process it was minted for never started). */
+  revoke(token: string): void {
+    this.db
+      .update(mcpTokens)
+      .set({ revokedAt: new Date().toISOString() })
+      .where(and(eq(mcpTokens.tokenHash, hash(token)), isNull(mcpTokens.revokedAt)))
+      .run();
   }
 
   /**
