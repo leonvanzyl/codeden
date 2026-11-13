@@ -38,6 +38,26 @@ describe("runner protocol", () => {
       draining: false,
     });
     roundTrip(ServerToRunnerMessage, { type: "resume", lastAckedSeq: 0 });
+    // Where the runner runs: optional, so welcomes from older runners (above) still parse.
+    const placed = roundTrip(RunnerToServerMessage, {
+      type: "welcome",
+      protocolVersion: RUNNER_PROTOCOL_VERSION,
+      runnerId: "runner-2",
+      runnerVersion: "0.0.0",
+      pid: 7,
+      startedAt: ts,
+      capabilities: { pty: true, browser: true, git: true, mcpProxy: true },
+      providers: [],
+      sessions: [],
+      journal: { lastSeq: 3, unacked: 1 },
+      draining: false,
+      platform: "linux",
+      arch: "arm64",
+      home: "/home/codeden/.codeden",
+      backend: "docker",
+    });
+    expect(placed).toMatchObject({ platform: "linux", arch: "arm64", backend: "docker" });
+    expect(() => RunnerToServerMessage.parse({ ...placed, backend: "somewhere-else" })).toThrow();
     roundTrip(RunnerToServerMessage, {
       type: "reject",
       reason: "protocol_mismatch",
