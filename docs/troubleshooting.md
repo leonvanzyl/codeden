@@ -151,6 +151,16 @@ opencode upgrade
 
 While CodeDen waits for its runner, the sidebar says **Starting the runner…**. A slow start (security software scanning files, a busy or cold disk) is waited for; CodeDen only gives up on a runner that hasn't started after five minutes. If the runner process exits during start-up, the error (hover the status in the sidebar, or see the server log) ends with the last lines of `~/.codeden/logs/runner.log`. A native module that failed to load (`node-pty`) usually means a broken or partial install: run `npm cache clean --force`, then `npx codeden@latest`. Security software that blocks new processes can also cause it.
 
+### Tests, installs or builds behave differently in agent sessions
+
+Agent sessions run with `CI=true`, because an agent's shell can't answer prompts (such as pnpm's "The modules directory will be removed and reinstalled from scratch. Proceed?"). Your project's tools then behave as they do in CI:
+
+- **Playwright:** with `reuseExistingServer: !process.env.CI`, the agent's test run starts its own dev server and fails if yours is already running; `forbidOnly: !!process.env.CI` fails on a `test.only`; `retries: process.env.CI ? 2 : 0` retries failing tests without saying so.
+- **Installs:** `pnpm install` keeps the lockfile frozen, and Yarn Berry turns on `enableImmutableInstalls`, so `yarn install` fails after an agent edits `package.json` instead of updating `yarn.lock`.
+- **Builds and tests:** Create React App and similar builds fail on warnings, test runners don't write new snapshots, and other tools switch to CI reporters or skip interactive setup.
+
+To turn it off for one project, use **Settings → General → Agent environment** (or ask the orchestrator). Agent sessions opened after that get no `CI` from CodeDen; a session that's already running keeps its environment until it restarts. With it off, pnpm may ask again before reinstalling `node_modules`, so add `confirmModulesPurge: false` to the project's `pnpm-workspace.yaml`. To turn it off everywhere, set `CI=false` in the environment you start CodeDen from. Your own terminals never get `CI` from CodeDen.
+
 ### Agents keep running after I close the terminal
 
 That's by design: the runner outlives the server so agents survive restarts. `codeden stop` stops both.
