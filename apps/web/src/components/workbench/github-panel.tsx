@@ -7,10 +7,12 @@ import { GithubUnavailable, LabelChip } from "@/components/github/github-bits";
 import { PrDetailsView } from "@/components/github/pr-details";
 import { CheckRemoteButton } from "@/components/github/remote-check";
 import { Markdown } from "@/components/thread/markdown";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useClient } from "@/lib/api";
 import { platform } from "@/lib/platform";
 import { useProject, useSession } from "@/lib/queries";
+import { useAskForPullRequest, usePullRequestOffer } from "./open-pr";
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -72,6 +74,8 @@ export function GitHubPanel({ sessionId }: { sessionId: string }) {
     enabled: !localOnly,
     refetchInterval: 30_000,
   });
+  const offer = usePullRequestOffer(sessionId);
+  const askForPr = useAskForPullRequest(sessionId);
 
   if (project?.kind === "local") {
     return (
@@ -94,8 +98,20 @@ export function GitHubPanel({ sessionId }: { sessionId: string }) {
     return <GithubUnavailable connection={data.connection} className="m-4" />;
   if (!data?.issue && !data?.pr) {
     return (
-      <EmptyState icon={<GitPullRequest />} title="No issue or PR linked" className="h-full">
-        Sessions started from an issue link it here; the PR appears once the agent opens one.
+      <EmptyState
+        icon={<GitPullRequest />}
+        title="No issue or PR linked"
+        className="h-full"
+        action={
+          offer.canAsk && (
+            <Button size="sm" disabled={askForPr.isPending} onClick={() => askForPr.mutate()}>
+              <GitPullRequest /> Open pull request
+            </Button>
+          )
+        }
+      >
+        Sessions started from an issue link it here. When the work is ready, ask the agent to open a
+        pull request and it appears here.
       </EmptyState>
     );
   }

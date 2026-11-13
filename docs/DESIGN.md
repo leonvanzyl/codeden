@@ -699,7 +699,7 @@ The goal is to get from `npx codeden` to your first session in under a minute, w
 
    At least one agent provider is required; GitHub is recommended but optional (local-only projects work without it).
 4. **Optional extras,** skippable: voice (test the mic, choose read-aloud on or off, optional ElevenLabs key into the keychain) and notifications permission. A **"Use local Whisper for dictation"** card (§11.3) picks the local engine, starts downloading the runtime and the default model with live progress and offers the same five-second test as Settings. It is recommended when the browser has no working speech recognition, never blocks finishing setup, and the download carries on in the background when the user moves on.
-5. **First project.** Pick a local folder or clone a GitHub repo. CodeDen detects the package manager and suggests a worktree setup script.
+5. **First project.** Pick a local folder or clone a GitHub repo. CodeDen detects the package manager and suggests a worktree setup script, then opens the project's **New session** view, so the first session is one message away. Adding a project from the sidebar lands there too, and a project home with no sessions explains what a session is and offers **Start a session**.
 6. **Re-check on every launch,** silently. Warnings appear only when something changes, such as an expiring Claude login (`loginExpiresAt`), a logged-out CLI or a version too old for the adapter.
 
 ## 15. Security
