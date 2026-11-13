@@ -1,12 +1,15 @@
-import type {
-  InboxItem,
-  Item,
-  ItemDelta,
-  ItemOf,
-  ItemRecord,
-  JsonValue,
-  Session,
+import {
+  appendToolOutput,
+  type InboxItem,
+  type Item,
+  type ItemDelta,
+  type ItemOf,
+  type ItemRecord,
+  type JsonValue,
+  type Session,
+  STREAMED_OUTPUT_CHARS,
 } from "@codeden/contracts";
+import { isFactorySession } from "../../services/factory/starter";
 
 export type RequestItem = ItemOf<"approval_request"> | ItemOf<"user_question">;
 
@@ -34,14 +37,7 @@ export function applyDelta(item: Item, delta: ItemDelta): Item {
         : item;
     case "tool_output":
       if (item.kind !== "tool_call") return item;
-      return {
-        ...item,
-        output: {
-          ...item.output,
-          text: (item.output?.text ?? "") + delta.text,
-          truncated: item.output?.truncated ?? false,
-        },
-      };
+      return { ...item, output: appendToolOutput(item.output, delta.text, STREAMED_OUTPUT_CHARS) };
     case "tool_input":
       return item;
   }
@@ -65,6 +61,7 @@ export function inboxForRequest(
     kind: isApproval ? "approval" : "question",
     status: "open",
     priority: isApproval ? "high" : "normal",
+    notify: "needs_you",
     title: isApproval ? item.title : (item.questions[0]?.question ?? "Question"),
     body: isApproval ? requestBody(item) : questionBody(item),
     projectId: session.projectId,
@@ -123,7 +120,11 @@ export function closeInbox(
   return { ...inbox, status, resolution, resolvedAt: ts, updatedAt: ts };
 }
 
-/** Inbox item for a failed run (§11.1 "failed or stuck runs"). */
+/**
+ * Inbox item for a failed run (§11.1 "failed or stuck runs"). A factory session's failure is the
+ * factory's to handle (it fails or retries the item and pauses the loop when too many fail), so
+ * it notifies as factory activity; any other session's failure needs the user.
+ */
 export function runFailedInbox(
   session: Session,
   id: string,
@@ -136,6 +137,7 @@ export function runFailedInbox(
     kind: "run_failed",
     status: "open",
     priority: "normal",
+    notify: isFactorySession(session) ? "factory" : "failure",
     title: `Run failed: ${session.title ?? session.purpose}`,
     body: message,
     projectId: session.projectId,

@@ -4,13 +4,20 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   commandLineNamesInside,
+  endableForRemoval,
   type ProcessRow,
   pathIsInside,
   processesToEnd,
   startedByAgents,
+  withDescendants,
 } from "../src/process/inside";
 import { ProcessSupervisor } from "../src/process/supervisor";
-import { parseLsofCwds, parsePsTable, parseWindowsTable } from "../src/process/table";
+import {
+  parseLsofCwds,
+  parsePsTable,
+  parseWindowsCwds,
+  parseWindowsTable,
+} from "../src/process/table";
 import { endProcessesInside } from "../src/process/worktree-processes";
 import { removeWorkspace } from "../src/workspace/removal";
 import { emptyTrash } from "../src/workspace/trash";
@@ -85,7 +92,7 @@ describe("choosing which processes to end", () => {
   ];
 
   it("ends only what CodeDen's agents started inside the worktree", () => {
-    const allowed = startedByAgents(rows, RUNNER, 1500);
+    const allowed = startedByAgents(rows, RUNNER, 1500, true);
     expect([...allowed].sort((a, b) => a - b)).toEqual([30, 31, 40, 41, 60, 70]);
     const ended = processesToEnd({
       dir: WT,
@@ -134,7 +141,7 @@ describe("choosing which processes to end", () => {
       later(84, { exe: `${WT}\\node_modules\\electron\\dist\\electron.exe` }),
       later(85, { commandLine: `node ${WT}\\node_modules\\vite\\bin\\vite.js` }),
     ];
-    const allowed = startedByAgents(apps, RUNNER, 1500);
+    const allowed = startedByAgents(apps, RUNNER, 1500, true);
     expect([...allowed].sort((a, b) => a - b)).toEqual([80, 81, 82, 83, 84, 85]);
     const ended = processesToEnd({
       dir: WT,
@@ -144,6 +151,95 @@ describe("choosing which processes to end", () => {
       allowed,
     });
     expect(ended.sort((a, b) => a - b)).toEqual([84, 85]);
+  });
+
+  it("never ends what runs in a person's app, looking no further up than CodeDen (#109)", () => {
+    // An agent opened an editor on the worktree, and a person runs a dev server in its terminal.
+    const tree = (runner: Partial<ProcessRow>, app: string, dir: string): ProcessRow[] => [
+      row(5, 1, { exe: app }), // CodeDen was started from a terminal
+      row(RUNNER, 5, runner),
+      row(30, RUNNER, { commandLine: script, cwd: dir }), // an agent's dev server
+      row(40, RUNNER, { cwd: dir }), // the agent's shell that opened the editor
+      row(41, 40, { exe: "C:\\Code\\Code.exe", cwd: dir }),
+      row(42, 41, { commandLine: "pwsh.exe", cwd: dir }),
+      row(43, 42, { commandLine: script, cwd: dir }),
+    ];
+    const ended = (rows: ProcessRow[], dir: string, windows: boolean) => {
+      const allowed = new Set(rows.map((r) => r.pid));
+      const chosen = processesToEnd({ dir, rows, windows, protect: [RUNNER], allowed });
+      return [...withDescendants(chosen, rows)].sort((a, b) => a - b);
+    };
+    const terminal = "C:\\Program Files\\WindowsApps\\WindowsTerminal.exe";
+    expect(ended(tree({}, terminal, WT), WT, true)).toEqual([30]);
+    // The desktop app on macOS: the runner itself runs from an app bundle.
+    const mac = "/Users/me/.codeden/wt/demo/abcd1234";
+    const helper = "/Applications/CodeDen.app/Contents/Frameworks/CodeDen Helper.app";
+    const runner = { commandLine: `${helper}/Contents/MacOS/CodeDen Helper runner.js` };
+    expect(ended(tree(runner, "/usr/bin/xterm", mac), mac, false)).toEqual([30]);
+  });
+});
+
+describe("choosing which processes to end before deleting a worktree", () => {
+  const RUNNER = 10;
+  const SERVER = 20;
+  const script = `node ${WT}\\server.js`;
+  const terminal = "C:\\Program Files\\WindowsApps\\WindowsTerminal.exe";
+  const rows: ProcessRow[] = [
+    row(1, 0, { startedAt: 0 }),
+    row(5, 1, { exe: terminal, startedAt: 100 }), // the user's terminal
+    row(6, 5, { commandLine: "pwsh.exe", cwd: WT, startedAt: 200 }), // ... its shell there
+    row(7, 6, { commandLine: script, startedAt: 300 }), // ... and their dev server
+    row(19, 6, { commandLine: "node C:\\npm\\codeden\\cli.js", startedAt: 400 }), // CodeDen's CLI
+    row(SERVER, 19, { startedAt: 500 }),
+    row(RUNNER, SERVER, { startedAt: 600 }), // started from that terminal, through the CLI
+    row(30, RUNNER, { startedAt: 700 }), // an agent CLI
+    row(31, 30, { commandLine: script, startedAt: 800 }), // ... its dev server
+    row(40, 98, { cwd: `${WT}\\apps\\web`, startedAt: 50 }), // an earlier runner's agent shell
+    row(41, 40, { commandLine: script, startedAt: 50 }), // ... and its dev server
+    row(42, 5, { commandLine: script, startedAt: 90 }), // its parent's pid was reused since
+    row(50, SERVER, { commandLine: `git -C ${WT}\\ status`, cwd: WT, startedAt: 900 }), // the server's
+  ];
+
+  it("ends what agents left, now or before a restart, never a person's or CodeDen's", () => {
+    const allowed = endableForRemoval({
+      rows,
+      runnerPid: RUNNER,
+      protect: [RUNNER, SERVER],
+      dir: WT,
+      windows: true,
+    });
+    const ended = processesToEnd({
+      dir: WT,
+      rows,
+      windows: true,
+      protect: [RUNNER, SERVER],
+      allowed,
+    });
+    expect(ended.sort((a, b) => a - b)).toEqual([31, 40, 41, 42]);
+  });
+
+  it("never chooses a process whose tree a person's app or terminal runs in", () => {
+    // Orphaned shells in the worktree: one with an editor opened from it, one with a dev
+    // server, and one with a spared CodeDen terminal under it.
+    const tree: ProcessRow[] = [
+      row(RUNNER, 99, { startedAt: 50 }),
+      row(100, 999, { commandLine: "powershell.exe", cwd: WT, startedAt: 100 }),
+      row(101, 100, { exe: "C:\\Program Files\\Neovim\\bin\\nvim.exe", cwd: WT, startedAt: 101 }),
+      row(200, 998, { commandLine: "bash.exe", cwd: WT, startedAt: 200 }),
+      row(201, 200, { commandLine: script, startedAt: 201 }),
+      row(300, 997, { commandLine: "bash.exe", cwd: WT, startedAt: 300 }),
+      row(301, 300, { commandLine: "pwsh.exe", cwd: WT, startedAt: 301 }),
+    ];
+    const ended = processesToEnd({
+      dir: WT,
+      rows: tree,
+      windows: true,
+      protect: [RUNNER],
+      allowed: new Set(tree.map((r) => r.pid)),
+      spare: new Set([301]),
+    });
+    // What the tree kills end (`taskkill /T` follows parent pids the same way).
+    expect([...withDescendants(ended, tree)].sort((a, b) => a - b)).toEqual([200, 201]);
   });
 });
 
@@ -185,6 +281,14 @@ describe("reading the process table", () => {
       [1, "/"],
       [42, "/home/me/wt/a"],
     ]);
+    expect([
+      ...parseWindowsCwds(
+        "4\tC:\\WINDOWS\\system32\\\r\n900\tC:\\wt\\demo\\abcd 1234\\\r\nbad\r\n\r\n",
+      ),
+    ]).toEqual([
+      [4, "C:\\WINDOWS\\system32\\"],
+      [900, "C:\\wt\\demo\\abcd 1234\\"],
+    ]);
   });
 });
 
@@ -222,8 +326,8 @@ describe("removing a worktree an agent's dev server still runs in", { timeout: 3
     writeFileSync(join(sibling, "server.js"), hold);
     // Started outside the runner's tracking, working in the worktree (Windows then refuses
     // to move the folder).
-    const start = (cwd: string) => {
-      const child = spawn(process.execPath, [join(cwd, "server.js")], { cwd, stdio: "ignore" });
+    const start = (cwd: string, args = [join(cwd, "server.js")]) => {
+      const child = spawn(process.execPath, args, { cwd, stdio: "ignore" });
       const state = { exited: false };
       child.once("exit", () => {
         state.exited = true;
@@ -232,11 +336,14 @@ describe("removing a worktree an agent's dev server still runs in", { timeout: 3
     };
     const server = start(wt.cwd);
     const other = start(sibling);
+    // Only its working directory ties this one to the worktree (`node -e`, `node server.js`).
+    const inCwd = start(wt.cwd, ["-e", hold]);
     try {
       const ended = await endProcessesInside(wt.cwd, { home });
       expect(ended).toContain(server.child.pid);
+      expect(ended).toContain(inCwd.child.pid);
       expect(ended).not.toContain(other.child.pid);
-      await waitUntil(() => server.state.exited, 15_000);
+      await waitUntil(() => server.state.exited && inCwd.state.exited, 15_000);
       expect(other.state.exited).toBe(false);
 
       const removed = await removeWorkspace(
@@ -246,9 +353,8 @@ describe("removing a worktree an agent's dev server still runs in", { timeout: 3
       expect(removed).toMatchObject({ removed: true });
       expect(existsSync(wt.cwd)).toBe(false);
     } finally {
-      server.child.kill();
-      other.child.kill();
-      await waitUntil(() => server.state.exited && other.state.exited, 15_000);
+      for (const p of [server, other, inCwd]) p.child.kill();
+      await waitUntil(() => [server, other, inCwd].every((p) => p.state.exited), 15_000);
     }
   }, 60_000);
 });

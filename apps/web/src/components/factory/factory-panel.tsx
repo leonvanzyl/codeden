@@ -1,15 +1,7 @@
 import type { Project } from "@codeden/contracts";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import {
-  AlertTriangle,
-  Factory,
-  FileText,
-  Newspaper,
-  Play,
-  SlidersHorizontal,
-  StepForward,
-} from "lucide-react";
+import { AlertTriangle, Factory, FileText, Newspaper, Play, SlidersHorizontal } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -19,6 +11,7 @@ import { factoryKeys, useFactoryStatus } from "@/lib/factory";
 import { ago, compact, usd } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { AutonomyDialog, ExperimentalBadge } from "./autonomy-dialog";
+import { FactoryRunButtons } from "./factory-actions";
 import { ChecksColumn, IgnoredColumn, RecentColumn } from "./factory-columns";
 import { KillSwitchButton } from "./kill-switch";
 import { LOOP_LABEL, MODE_LABEL } from "./meta";
@@ -91,14 +84,6 @@ export function FactoryPanel({ project }: { project: Project }) {
     },
     onError: fail("Couldn't resume"),
   });
-  const tick = useMutation({
-    mutationFn: () => client.factory.tick(projectId),
-    onSuccess: (s) => {
-      queryClient.setQueryData(factoryKeys.status(projectId), s);
-      toast.success(`Ran one step: loop ${LOOP_LABEL[s.loopState].label.toLowerCase()}`);
-    },
-    onError: fail("Couldn't run a step"),
-  });
   const digest = useMutation({
     mutationFn: () => client.factory.digest(projectId),
     onSuccess: (d) => {
@@ -147,14 +132,7 @@ export function FactoryPanel({ project }: { project: Project }) {
               <Play /> Resume
             </Button>
           )}
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() => tick.mutate()}
-            disabled={tick.isPending || stopped}
-          >
-            <StepForward /> Run a step
-          </Button>
+          <FactoryRunButtons f={f} stopped={stopped} />
           <Button
             size="sm"
             variant="ghost"
@@ -272,7 +250,9 @@ export function FactoryPanel({ project }: { project: Project }) {
           {f.tuning.maxChangedLines !== null
             ? `up to ${f.tuning.maxChangedLines.toLocaleString()} changed lines`
             : "no size limit"}
-          {f.lastTickAt && ` · last step ${ago(f.lastTickAt)}`}
+          {/* As of the panel's last refresh: on factory events, every 30 s while work is in
+              flight, every 5 min while idle (`useFactoryStatus`). */}
+          {f.lastTickAt && ` · last check ${ago(f.lastTickAt)}`}
         </p>
       </div>
       <AutonomyDialog project={project} open={limitsOpen} onOpenChange={setLimitsOpen} />

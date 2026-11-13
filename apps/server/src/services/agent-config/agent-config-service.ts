@@ -6,18 +6,26 @@ import {
   type AgentConfigListResponse,
   type AgentConfigLocator,
   AgentConfigProvider,
+  type AgentSkill,
   agentConfigFeatures,
   type LoadedAgentConfig,
+  MCP_TEST_DEFAULT_TIMEOUT_MS,
   type McpServerDiffRequest,
   type McpServerEntry,
   type McpServerTarget,
+  type McpServerTestRequest,
+  type McpServerTestResult,
   type McpServerUpsertRequest,
   type McpServerWriteResponse,
+  type ProviderCommand,
+  type SlashCommand,
 } from "@codeden/contracts";
-import { badRequest } from "../errors";
+import { badRequest, ServiceError } from "../errors";
 import type { ProjectService } from "../projects/project-service";
+import { type RunnerPort, toServiceError } from "../runner-port";
 import type { SessionRepo } from "../sessions/repo";
 import {
+  type LoadedFiles,
   listClaudeProject,
   listClaudeUser,
   listCodexProject,
@@ -31,6 +39,8 @@ import { HookShelf } from "./hook-shelf";
 import { AgentConfigHooks } from "./hooks-service";
 import { applyChange, claudeProjectKey, diffChange, readServers, sourceFor } from "./mcp";
 import { claudeAutoMemoryDir, findGitRoot, mainRepoRoot, readJson } from "./paths";
+import { AgentConfigSkills } from "./skills-service";
+import { loadedClaudeCommands, mergeSlashCommands, skillCommand } from "./slash-commands";
 
 export interface AgentConfigServiceDeps {
   /** User home (`~`); tests point it at a temp folder. */
@@ -43,16 +53,24 @@ export interface AgentConfigServiceDeps {
   disabledHooksFile: string;
   /** CodeDen's own MCP endpoint as agents see it (the runner proxy). */
   mcpProxyUrl: () => string | null;
+  /** The runner, which runs MCP connection tests next to the code (§4.2). */
+  runner: Pick<RunnerPort, "request">;
+  /** The newest `/` command list a session's provider reported, or null (event log). */
+  reportedCommands: (sessionId: string) => ProviderCommand[] | null;
 }
+
+/** Extra time the server waits for the runner beyond the test's own timeout. */
+const MCP_TEST_SLACK_MS = 5_000;
 
 /**
  * Agent configuration (§12.4): discovery of each provider's memory files, skills, subagents,
- * MCP servers and hooks; edits in the native files with backups and diff previews; and the
- * "what's loaded" view of a session.
+ * MCP servers and hooks; edits in the native files with backups and diff previews; skill
+ * switches; and the "what's loaded" view of a session.
  */
 export class AgentConfigService {
   readonly files: AgentConfigFiles;
   readonly hooks: AgentConfigHooks;
+  readonly skills: AgentConfigSkills;
 
   constructor(private readonly deps: AgentConfigServiceDeps) {
     this.files = new AgentConfigFiles((l) => this.rootDir(l), deps.backupDir);
@@ -61,6 +79,12 @@ export class AgentConfigService {
       project: (id) => this.project(id),
       backup: (file) => this.files.backup(file),
       shelf: new HookShelf(deps.disabledHooksFile),
+    });
+    this.skills = new AgentConfigSkills({
+      home: deps.home,
+      project: (id) => this.project(id),
+      backup: (file) => this.files.backup(file),
+      resolve: (locator) => this.files.resolve(locator),
     });
   }
 
@@ -106,20 +130,46 @@ export class AgentConfigService {
     return diffChange(this.mcpSource(req), req.name, req.spec);
   }
 
+  /**
+   * Connection test in the runner: the request's (unsaved) spec, or the server saved at the
+   * target. stdio servers start in the project folder (`local`, `project`) or, for `user`
+   * scope, the runner's home; Claude's `${VAR}` placeholders are expanded there. A Codex stdio
+   * server gets only the variables Codex would give it.
+   */
+  async mcpTest(req: McpServerTestRequest): Promise<McpServerTestResult> {
+    const source = this.mcpSource(req);
+    const spec = req.spec ?? readServers(source).find((s) => s.name === req.name)?.spec;
+    if (!spec) {
+      throw new ServiceError(
+        404,
+        "server_not_found",
+        `No MCP server named ${req.name} in ${source.file}`,
+      );
+    }
+    const cwd =
+      req.scope !== "user" && req.projectId ? this.project(req.projectId).path : undefined;
+    try {
+      return await this.deps.runner.request(
+        {
+          name: "mcp.test",
+          spec,
+          expandEnv: req.provider === "claude",
+          stdioEnv: req.provider === "codex" ? "allowlist" : "inherit",
+          ...(cwd ? { cwd } : {}),
+        },
+        MCP_TEST_DEFAULT_TIMEOUT_MS + MCP_TEST_SLACK_MS,
+      );
+    } catch (error) {
+      throw toServiceError(error);
+    }
+  }
+
   // ------------------------------------------------------------------- what's loaded
 
   loaded(sessionId: string): LoadedAgentConfig {
-    const session = this.deps.repo.get(sessionId);
-    const project = session.projectId ? this.project(session.projectId) : null;
+    const { session, project, gitRoot, files } = this.discover(sessionId);
     const cwd = session.cwd;
-    const gitRoot = findGitRoot(cwd);
     const home = this.deps.home;
-    const files =
-      session.provider === "codex"
-        ? loadedCodex(home, cwd, gitRoot, project)
-        : session.provider === "claude"
-          ? loadedClaude(home, cwd, gitRoot, project)
-          : { memory: [], skills: [], subagents: [] };
     const mcpServers: McpServerEntry[] = [];
     const proxy = this.deps.mcpProxyUrl();
     if (proxy) {
@@ -146,7 +196,73 @@ export class AgentConfigService {
     return { sessionId, provider: session.provider, cwd, ...files, mcpServers, hooks };
   }
 
+  /**
+   * The composer's `/` menu for a session (§13): the skills that apply to its working folder
+   * (as What's loaded finds them, without those switched off) and its provider's custom
+   * command files; once the provider has reported a non-empty list of what it runs for the
+   * session (built-in ones included), that list (`mergeSlashCommands`).
+   * Role sessions get what applies to their own folder: the orchestrator, outside any
+   * project, only user-level entries.
+   */
+  slashCommands(sessionId: string): SlashCommand[] {
+    const { session, gitRoot, files } = this.discover(sessionId);
+    return mergeSlashCommands(
+      this.discoveredCommands(session.provider, session.cwd, gitRoot, files.skills),
+      this.deps.reportedCommands(sessionId),
+      session.provider,
+    );
+  }
+
+  /**
+   * The `/` menu of a session that does not exist yet (the New session draft): what `provider`
+   * would load in the project folder. No provider has reported a list, so the files are the list.
+   */
+  projectSlashCommands(projectId: string, provider: string): SlashCommand[] {
+    const project = this.project(projectId);
+    const { gitRoot, files } = this.discoverIn(provider, project.path, project);
+    return mergeSlashCommands(
+      this.discoveredCommands(provider, project.path, gitRoot, files.skills),
+      null,
+      provider,
+    );
+  }
+
   // ------------------------------------------------------------------- helpers
+
+  /** Skills that are switched on, then the provider's custom command files, in precedence order. */
+  private discoveredCommands(
+    provider: string,
+    cwd: string,
+    gitRoot: string | null,
+    skills: AgentSkill[],
+  ): SlashCommand[] {
+    const custom = provider === "claude" ? loadedClaudeCommands(this.deps.home, cwd, gitRoot) : [];
+    return [...skills.filter((s) => s.enabled).map(skillCommand), ...custom];
+  }
+
+  /**
+   * A session's working folder, project and the native files its provider loads there, with
+   * each skill's switch state for that folder.
+   */
+  private discover(sessionId: string) {
+    const session = this.deps.repo.get(sessionId);
+    const project = session.projectId ? this.project(session.projectId) : null;
+    return { session, project, ...this.discoverIn(session.provider, session.cwd, project) };
+  }
+
+  /** The native files `provider` loads in `cwd` (skills with their switch state), and the git root. */
+  private discoverIn(provider: string, cwd: string, project: ProjectRef | null) {
+    const gitRoot = findGitRoot(cwd);
+    const home = this.deps.home;
+    const found: LoadedFiles =
+      provider === "codex"
+        ? loadedCodex(home, cwd, gitRoot, project)
+        : provider === "claude"
+          ? loadedClaude(home, cwd, gitRoot, project)
+          : { memory: [], skills: [], subagents: [] };
+    const skills = this.skills.forSession(found.skills, cwd, gitRoot, project?.id ?? null);
+    return { gitRoot, files: { ...found, skills } };
+  }
 
   /** A project with its Claude auto-memory folder (keyed by the main repo root). */
   project(projectId: string): ProjectRef {

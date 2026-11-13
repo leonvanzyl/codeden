@@ -81,6 +81,7 @@ function ActionApprovalCard({
   }
 
   const busy = decide.isPending || decide.isSuccess;
+  const args = toolArguments(item);
   return (
     <div className="overflow-hidden rounded-xl border border-status-waiting/30 bg-card shadow-[0_0_0_4px] shadow-status-waiting/[0.06] animate-rise">
       <div className="flex items-center gap-2 border-b border-status-waiting/15 bg-status-waiting/[0.07] px-3.5 py-2">
@@ -105,6 +106,22 @@ function ActionApprovalCard({
         )}
         {item.paths && item.paths.length > 0 && (
           <div className="font-mono text-2xs text-muted-foreground">{item.paths.join(" · ")}</div>
+        )}
+        {item.url && (
+          // Only web links reach a card (the contract checks); the user opens it themselves.
+          <a
+            href={item.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="block truncate font-mono text-[12px] text-primary underline-offset-2 hover:underline"
+          >
+            {item.url}
+          </a>
+        )}
+        {!compact && args && (
+          <pre className="max-h-40 overflow-auto rounded-lg border border-border bg-surface px-3 py-2 font-mono text-[12px] text-foreground/90 scroll-thin">
+            {args}
+          </pre>
         )}
         <div className="flex flex-wrap items-center gap-2 pt-0.5">
           {item.options.includes("allow_once") && (
@@ -142,4 +159,12 @@ function ActionApprovalCard({
       </div>
     </div>
   );
+}
+
+/** The arguments of a tool approval (an MCP tool, say), when it has any. */
+function toolArguments(item: ItemOf<"approval_request">): string | undefined {
+  const input = item.toolInput;
+  if (item.action !== "tool" || input === undefined || input === null) return undefined;
+  if (typeof input === "object" && Object.keys(input).length === 0) return undefined;
+  return JSON.stringify(input, null, 2);
 }

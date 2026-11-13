@@ -60,6 +60,7 @@ export function reduceAgentEvent(
         status: "running",
         startedAt: d.getTurn(sessionId, event.turnId)?.startedAt ?? ts,
         completedAt: null,
+        forkPoint: null,
       });
       if (isRootThread(d, sessionId, event.threadId)) setStatus(d, sessionId, "running", ts);
       break;
@@ -135,6 +136,8 @@ function onTurnEnded(
     status,
     completedAt: ts,
     error,
+    // Where the conversation can be forked through this turn ("Fork from here", §9).
+    forkPoint: event.forkPoint ?? null,
   });
 
   // Requests left open by the turn can no longer be answered.

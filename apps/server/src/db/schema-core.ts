@@ -154,6 +154,8 @@ export const turns = sqliteTable(
     error: json<ErrorInfo>("error"),
     /** Usage reported for this turn (latest `usage.updated` with this turnId). */
     usage: json<Usage>("usage"),
+    /** The provider's fork point at the end of the turn (`forkPoint` on its end event, §9). */
+    forkPoint: text("fork_point"),
   },
   (t) => [primaryKey({ columns: [t.sessionId, t.id] })],
 );
@@ -185,6 +187,7 @@ export const inboxItems = sqliteTable(
     kind: text("kind").notNull(),
     status: text("status").notNull(),
     priority: text("priority").notNull().default("normal"),
+    notify: text("notify").notNull().default("needs_you"),
     title: text("title").notNull(),
     body: text("body"),
     projectId: text("project_id"),

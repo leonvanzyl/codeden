@@ -37,6 +37,7 @@ export async function writeDigest(
   raiseInbox(ctx, {
     id: `inbox:factory-digest:${project.id}:${day}`,
     kind: "automation_result",
+    notify: "factory",
     priority: "low",
     projectId: project.id,
     title: `Factory digest: ${project.name}, ${day} (${digest.shipped.length} shipped, ${digest.rejected.length} rejected, ${digest.waiting.length} waiting)`,

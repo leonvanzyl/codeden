@@ -50,6 +50,7 @@ function stubSdk() {
       },
       interrupt: async () => undefined,
       supportedModels: async () => [],
+      supportedCommands: async () => [],
       close: () => exit(),
     };
     return q as unknown as Query;

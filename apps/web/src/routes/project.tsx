@@ -15,7 +15,6 @@ import { AutonomyModeButton } from "@/components/factory/autonomy-dialog";
 import { FactoryPanel } from "@/components/factory/factory-panel";
 import { ProjectGithub } from "@/components/github/project-github";
 import { SessionsList } from "@/components/project/lists";
-import { NewSessionDialog } from "@/components/project/new-session-dialog";
 import { NowNext } from "@/components/project/now-next";
 import { ProjectTile } from "@/components/shell/sidebar/project-group";
 import { Button } from "@/components/ui/button";
@@ -28,17 +27,15 @@ import { PageHeader } from "./page-header";
 
 export type ProjectTab = "overview" | "github";
 
-type ProjectSearch = { newSession?: boolean; tab?: ProjectTab; archived?: boolean };
+type ProjectSearch = { tab?: ProjectTab; archived?: boolean };
 
 /** Project home: Now / Next, factory panel, sessions and automations, and GitHub (§8.4, §9). */
 export function ProjectPage({
   projectId,
-  newSession,
   tab,
   sessionView = "active",
 }: {
   projectId: string;
-  newSession: boolean;
   tab: ProjectTab;
   /** Active sessions, or the archived ones (the sidebar's "N archived" row opens these). */
   sessionView?: SessionView;
@@ -106,8 +103,10 @@ export function ProjectPage({
                 <Bot /> Talk to the PM
               </Link>
             </Button>
-            <Button size="sm" onClick={() => go({ ...tabSearch, newSession: true })}>
-              <MessageSquarePlus /> New session
+            <Button size="sm" asChild>
+              <Link to="/projects/$projectId/new" params={{ projectId }}>
+                <MessageSquarePlus /> New session
+              </Link>
             </Button>
           </>
         }
@@ -192,11 +191,6 @@ export function ProjectPage({
           )}
         </div>
       </div>
-      <NewSessionDialog
-        projectId={projectId}
-        open={newSession}
-        onOpenChange={(open) => go(open ? { ...tabSearch, newSession: true } : tabSearch)}
-      />
     </>
   );
 }

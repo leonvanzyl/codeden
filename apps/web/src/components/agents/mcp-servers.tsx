@@ -1,6 +1,6 @@
-import type { AgentConfigDiff, McpServerEntry } from "@codeden/contracts";
+import type { AgentConfigDiff, McpServerEntry, McpServerTarget } from "@codeden/contracts";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Pencil, Plug, Plus, Trash2 } from "lucide-react";
+import { Loader2, Pencil, Plug, PlugZap, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { EmptyState, ProviderMark } from "@/components/common/bits";
@@ -10,6 +10,7 @@ import { useClient } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { specSummary } from "./mcp-form";
 import { McpServerDialog } from "./mcp-server-dialog";
+import { McpTestResultView, useMcpTest } from "./mcp-test-result";
 import { PatchDialog } from "./patch-dialog";
 
 const scopeChip =
@@ -81,56 +82,14 @@ export function McpServers({ projectId }: { projectId: string | null }) {
           </EmptyState>
         )}
         {servers.map((s) => (
-          <div
-            key={entryKey(s)}
-            data-mcp={s.name}
-            className="flex items-center gap-3 border-b border-border px-4 py-3 last:border-0"
-          >
-            <Plug className="size-4 shrink-0 text-muted-foreground" />
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2 text-[13.5px] font-medium">
-                <span
-                  className={cn(s.spec.enabled === false && "text-muted-foreground line-through")}
-                >
-                  {s.name}
-                </span>
-                <span className="rounded bg-muted px-1.5 py-px font-mono text-3xs font-normal text-muted-foreground">
-                  {s.spec.type}
-                </span>
-                <span className={scopeChip}>{s.scope}</span>
-                {s.provider === "codeden" && <span className={scopeChip}>built in</span>}
-                {s.spec.enabled === false && <span className={scopeChip}>disabled</span>}
-              </div>
-              <div className="truncate font-mono text-3xs text-muted-foreground">
-                {specSummary(s.spec)}
-              </div>
-              <div className="truncate text-3xs text-muted-foreground/70">from {s.file}</div>
-            </div>
-            <span className="flex items-center gap-1.5 text-2xs text-muted-foreground">
-              <ProviderMark provider={s.provider} className="size-5" />
-              <span className="hidden lg:inline">{providerLabel[s.provider]}</span>
-            </span>
-            {s.provider !== "codeden" && (
-              <div className="flex gap-1">
-                <Button
-                  size="icon-sm"
-                  variant="ghost"
-                  aria-label={`Edit ${s.name}`}
-                  onClick={() => setDialog({ editing: s })}
-                >
-                  <Pencil />
-                </Button>
-                <Button
-                  size="icon-sm"
-                  variant="ghost"
-                  aria-label={`Remove ${s.name}`}
-                  onClick={() => void askRemove(s)}
-                >
-                  <Trash2 />
-                </Button>
-              </div>
-            )}
-          </div>
+          <McpServerRow
+            // A saved edit starts the row afresh, so no test result outlives its definition.
+            key={`${entryKey(s)}:${JSON.stringify(s.spec)}`}
+            server={s}
+            testTarget={target(s)}
+            onEdit={() => setDialog({ editing: s })}
+            onRemove={() => void askRemove(s)}
+          />
         ))}
       </div>
       <McpServerDialog
@@ -150,6 +109,79 @@ export function McpServers({ projectId }: { projectId: string | null }) {
         saving={remove.isPending}
         confirmLabel="Remove server"
       />
+    </div>
+  );
+}
+
+/** One configured server, with its connection test (not for CodeDen's own server). */
+function McpServerRow({
+  server: s,
+  testTarget,
+  onEdit,
+  onRemove,
+}: {
+  server: McpServerEntry;
+  /** Where the server is saved; the test runs the saved definition. */
+  testTarget: McpServerTarget;
+  onEdit: () => void;
+  onRemove: () => void;
+}) {
+  const test = useMcpTest();
+  const running = test.state?.status === "running";
+  return (
+    <div data-mcp={s.name} className="border-b border-border px-4 py-3 last:border-0">
+      <div className="flex items-center gap-3">
+        <Plug className="size-4 shrink-0 text-muted-foreground" />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 text-[13.5px] font-medium">
+            <span className={cn(s.spec.enabled === false && "text-muted-foreground line-through")}>
+              {s.name}
+            </span>
+            <span className="rounded bg-muted px-1.5 py-px font-mono text-3xs font-normal text-muted-foreground">
+              {s.spec.type}
+            </span>
+            <span className={scopeChip}>{s.scope}</span>
+            {s.provider === "codeden" && <span className={scopeChip}>built in</span>}
+            {s.spec.enabled === false && <span className={scopeChip}>disabled</span>}
+          </div>
+          <div className="truncate font-mono text-3xs text-muted-foreground">
+            {specSummary(s.spec)}
+          </div>
+          <div className="truncate text-3xs text-muted-foreground/70">from {s.file}</div>
+        </div>
+        <span className="flex items-center gap-1.5 text-2xs text-muted-foreground">
+          <ProviderMark provider={s.provider} className="size-5" />
+          <span className="hidden lg:inline">{providerLabel[s.provider]}</span>
+        </span>
+        {s.provider !== "codeden" && (
+          <div className="flex gap-1">
+            <Button
+              size="icon-sm"
+              variant="ghost"
+              aria-label={`Test ${s.name}`}
+              title="Test the connection"
+              disabled={running}
+              onClick={() => void test.run(testTarget)}
+            >
+              {running ? <Loader2 className="animate-spin" /> : <PlugZap />}
+            </Button>
+            <Button size="icon-sm" variant="ghost" aria-label={`Edit ${s.name}`} onClick={onEdit}>
+              <Pencil />
+            </Button>
+            <Button
+              size="icon-sm"
+              variant="ghost"
+              aria-label={`Remove ${s.name}`}
+              onClick={onRemove}
+            >
+              <Trash2 />
+            </Button>
+          </div>
+        )}
+      </div>
+      {test.state && (
+        <McpTestResultView state={test.state} onDismiss={test.reset} className="mt-2 ml-7" />
+      )}
     </div>
   );
 }

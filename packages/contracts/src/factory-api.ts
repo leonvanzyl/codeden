@@ -226,7 +226,10 @@ export const FactoryTuning = z.object({
   auditCommand: z.string().min(1).nullable().default(null),
   /** Revise rounds (failed review or merge checks) before an item fails. */
   maxFixAttempts: z.int().nonnegative().default(2),
-  /** Dark factory: the scout starts a round when fewer items than this wait for an agent. */
+  /**
+   * Dark factory: the scout starts a scheduled round only when fewer items than this wait to be
+   * classified or for an agent. 0 turns scheduled rounds off: only "Run scout now" starts one.
+   */
   minBacklog: z.int().nonnegative().default(2),
   /** Dark factory: minutes between the scout's review rounds. */
   discoveryIntervalMin: z.int().positive().default(360),
@@ -243,6 +246,13 @@ export const FactoryTuning = z.object({
   builderProvider: z.union([z.literal("auto"), ProviderId]).default("auto"),
   /** Minutes to wait for main CI after a merge before calling it done. */
   watchTimeoutMin: z.int().positive().default(120),
+  /**
+   * Minutes a builder or reviewer may stay idle, after it was reminded of its step (report,
+   * pull request or verdict) and ended its turn again, before the item fails. An agent waiting
+   * on its own background command ends its turn and is woken when the command exits, so a turn
+   * end alone doesn't mean it stopped working.
+   */
+  idleGraceMin: z.int().positive().default(10),
 });
 export type FactoryTuning = z.infer<typeof FactoryTuning>;
 
@@ -292,6 +302,10 @@ export const FactoryLoop = z.object({
   /** Main-branch commits whose failed checks already became items. */
   seenFailedShas: z.array(z.string()).default([]),
   tuning: FactoryTuning.prefault({}),
+  /**
+   * The last tick that changed the loop. A tick that changes nothing else saves nothing, so
+   * this can be older than the last tick (`FactoryStatus.lastTickAt` has that).
+   */
   lastTickAt: Timestamp.nullable(),
   updatedAt: Timestamp,
 });
@@ -418,6 +432,14 @@ export const SetAutonomyModeResponse = z.object({
 });
 export type SetAutonomyModeResponse = z.infer<typeof SetAutonomyModeResponse>;
 
+/**
+ * Error code of `POST /api/projects/:id/factory/scout` ("Run scout now", → `FactoryStatus`)
+ * when no round can start right now (409): not a dark factory, a kill switch is on, the loop is
+ * paused, a round is running or no agent slot is free. The message says which, as
+ * `ScoutStatus.runNowBlockedBy` does.
+ */
+export const SCOUT_UNAVAILABLE = "scout_unavailable";
+
 /** `POST /api/projects/:id/kill-switch` and `POST /api/factory/kill-switch`. */
 export const KillSwitchRequest = z.object({ on: z.boolean() });
 export type KillSwitchRequest = z.infer<typeof KillSwitchRequest>;
@@ -499,6 +521,10 @@ export const FactoryStatus = z.object({
   scout: ScoutStatus.nullable().default(null),
   visionExists: z.boolean(),
   lastDigest: FactoryDigest.nullable(),
+  /**
+   * When the loop last ticked (the panel's "last check"), changed or not. After a server
+   * restart, the last tick that changed the loop until the first tick runs.
+   */
   lastTickAt: Timestamp.nullable(),
 });
 export type FactoryStatus = z.infer<typeof FactoryStatus>;

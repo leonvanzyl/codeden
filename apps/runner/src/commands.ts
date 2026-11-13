@@ -1,5 +1,5 @@
 import type { RunnerCommand, RunnerCommandResult, RunnerEvent } from "@codeden/contracts";
-import { type ProviderRegistry, refreshProcessPath } from "@codeden/providers";
+import { FORK_POINT_MISSING, type ProviderRegistry, refreshProcessPath } from "@codeden/providers";
 import type { BrowserCommandHandlers } from "./browser";
 import { CommandError } from "./errors";
 import {
@@ -12,11 +12,9 @@ import * as gitOps from "./git/ops";
 import type { Journal } from "./journal";
 import { listPorts } from "./ports";
 import type { ProcessSupervisor } from "./process/supervisor";
-import { endProcessesInside } from "./process/worktree-processes";
 import type { TerminalHost } from "./pty/terminal-host";
 import type { SessionHost } from "./session-host";
-import { stopWithLeftovers } from "./workspace/leftover-processes";
-import { assertRemovable, removeWorkspace } from "./workspace/removal";
+import { removeWithLeftovers, stopWithLeftovers } from "./workspace/leftover-processes";
 import { prepareWorkspace } from "./workspace/worktree";
 
 /** Everything command handlers need; owned by `startRunner`. */
@@ -106,10 +104,16 @@ export async function executeCommand(core: RunnerCore, command: RunnerCommand): 
       try {
         const resumeToken = await adapter.forkConversation(command.resumeToken, {
           cwd: command.cwd,
+          ...(command.upTo ? { upTo: command.upTo } : {}),
         });
         return { resumeToken };
       } catch (error) {
-        throw new CommandError("fork_failed", (error as Error).message);
+        // The conversation no longer holds the fork point: say so, apart from other failures.
+        const missing = (error as { code?: unknown }).code === FORK_POINT_MISSING;
+        throw new CommandError(
+          missing ? FORK_POINT_MISSING : "fork_failed",
+          (error as Error).message,
+        );
       }
     }
 
@@ -120,17 +124,13 @@ export async function executeCommand(core: RunnerCore, command: RunnerCommand): 
         supervisor: core.supervisor,
         emit: core.emit,
       });
-    case "workspace.remove": {
-      // Refuse first, so a kept worktree's terminals and processes are left running.
-      const info = await assertRemovable(command, core.home);
-      await terminals.closeUnder(command.path);
-      await core.supervisor.killUnder(command.path);
-      // And what agents started that the runner doesn't track (it would keep the folder busy).
-      if (info.state !== "missing") {
-        await endProcessesInside(command.path, { home: core.home, log: core.log });
-      }
-      return removeWorkspace(command, core.home, core.log);
-    }
+    case "workspace.remove":
+      return removeWithLeftovers(command, {
+        home: core.home,
+        supervisor: core.supervisor,
+        terminals,
+        log: core.log,
+      });
 
     case "session.start":
       if (core.isDraining()) throw new CommandError("draining", "Runner is draining");
@@ -201,6 +201,20 @@ export async function executeCommand(core: RunnerCore, command: RunnerCommand): 
 
     case "ports.list":
       return { ports: await listPorts(command.probe) };
+
+    case "mcp.test": {
+      // Loaded on first use: the MCP client adds about 300 ms to every runner start otherwise.
+      const { testMcpServer } = await import("./mcp/server-test");
+      return testMcpServer({
+        spec: command.spec,
+        cwd: command.cwd,
+        expandEnv: command.expandEnv,
+        stdioEnv: command.stdioEnv,
+        timeoutMs: command.timeoutMs,
+        clientVersion: core.version,
+        supervisor: core.supervisor,
+      });
+    }
 
     default: {
       // Only `browser.*` commands reach here (checked by the type below).

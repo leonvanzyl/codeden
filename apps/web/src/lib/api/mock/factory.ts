@@ -88,6 +88,7 @@ export function mockFactoryApi(world: MockWorld): FactoryApi {
               lastRoundAt: null,
               nextRoundAt: null,
               rounds: 4,
+              runNowBlockedBy: "A scout round is already running.",
             }
           : null,
       mergeChecks: f.mergeChecks.map((c, i) => ({
@@ -209,6 +210,27 @@ export function mockFactoryApi(world: MockWorld): FactoryApi {
     },
     resume: (id) => delay(loop(id)),
     tick: (id) => delay(status(id)),
+    async runScout(projectId) {
+      const s = status(projectId);
+      const blocked =
+        s.scout?.runNowBlockedBy ?? (s.scout ? null : "Only a dark factory has a scout.");
+      if (blocked) throw new Error(blocked);
+      const next: FactoryStatus = {
+        ...s,
+        scout: s.scout && {
+          ...s.scout,
+          phase: "planning",
+          lenses: [],
+          findings: 0,
+          filed: 0,
+          rounds: s.scout.rounds + 1,
+          nextRoundAt: null,
+          runNowBlockedBy: "A scout round is already running.",
+        },
+      };
+      world.factory.set(projectId, next);
+      return delay(next);
+    },
     async digest(projectId) {
       return {
         id: `digest-${projectId}`,

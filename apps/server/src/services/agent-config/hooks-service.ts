@@ -235,9 +235,9 @@ export class AgentConfigHooks {
 
 /**
  * Refuse (403 `path_outside_root`) a settings file whose real path, following links on the file
- * and on every existing ancestor, leaves its scope's folder.
+ * and on every existing ancestor, leaves its scope's folder. Also used for skill switches.
  */
-function guard(f: HookFile): void {
+export function guard(f: Pick<HookFile, "root" | "file">): void {
   try {
     resolveInside(f.root, f.file);
   } catch {

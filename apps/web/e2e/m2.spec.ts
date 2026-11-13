@@ -50,7 +50,7 @@ test("orchestrator and PM chats reply, with the status digest folded away", asyn
   await test.step("the first message starts the orchestrator and gets a reply", async () => {
     await page.goto(`${env("CODEDEN_E2E_URL")}/`);
     await expect(page.getByText("What should we build?")).toBeVisible();
-    const composer = page.getByRole("textbox", { name: "Message" });
+    const composer = page.getByLabel("Message", { exact: true });
     await composer.fill("What's going on across my projects?");
     await composer.press("Enter");
     await expect(page.getByText(/^Echo: /).first()).toBeVisible({ timeout: 30_000 });
@@ -78,7 +78,7 @@ test("orchestrator and PM chats reply, with the status digest folded away", asyn
       if (await approve.isVisible()) await approve.click();
       await expect(page.getByRole("button", { name: "Stop" })).toHaveCount(0, { timeout: 1000 });
     }).toPass({ timeout: 30_000 });
-    const composer = page.getByRole("textbox", { name: "Message" });
+    const composer = page.getByLabel("Message", { exact: true });
     await composer.fill("And what is waiting on me?");
     await composer.press("Enter");
     await expect(
@@ -90,7 +90,7 @@ test("orchestrator and PM chats reply, with the status digest folded away", asyn
 
   await test.step("the PM chat works the same way", async () => {
     await page.goto(`${env("CODEDEN_E2E_URL")}/projects/${project}/pm`);
-    const composer = page.getByRole("textbox", { name: "Message" });
+    const composer = page.getByLabel("Message", { exact: true });
     await composer.fill("What's running?");
     await composer.press("Enter");
     await expect(page.getByText(/^Echo: /).first()).toBeVisible({ timeout: 30_000 });
@@ -112,17 +112,22 @@ test("conflict cards resolve inline and from the inbox", async ({ page }) => {
   expect(running.status).toBe("started");
 
   await test.step("starting duplicate work shows the conflict card inline", async () => {
+    // The old dialog link still opens the New session draft.
     await page.goto(`${env("CODEDEN_E2E_URL")}/projects/${project}?newSession=true`);
-    const dialog = page.getByRole("dialog");
-    await dialog.getByLabel("What should the agent do?").fill("Do the same thing again");
-    await dialog.getByLabel(/Work key/).fill(workKey);
-    await dialog.getByRole("button", { name: "Start session" }).click();
-    const card = dialog.getByTestId("conflict-card");
+    await expect(page).toHaveURL(new RegExp(`/projects/${project}/new$`));
+    const draft = page.getByTestId("new-session");
+    await draft.getByRole("button", { name: "Session options" }).click();
+    await page.getByLabel(/Work key/).fill(workKey);
+    await page.keyboard.press("Escape");
+    await expect(draft.getByTestId("work-key-chip")).toHaveText(workKey);
+    await draft.getByLabel("Message", { exact: true }).fill("Do the same thing again");
+    await draft.getByRole("button", { name: "Send" }).click();
+    const card = draft.getByTestId("conflict-card");
     await expect(card).toBeVisible();
     await expect(card).toContainText("Hold the work key");
     await card.getByRole("button", { name: /Skip/ }).click();
     await expect(page.getByText("Skipped")).toBeVisible();
-    await expect(dialog).toBeHidden();
+    await expect(page).toHaveURL(new RegExp(`/projects/${project}$`));
   });
 
   await test.step("a persisted conflict is listed in the inbox and forced with a reason", async () => {

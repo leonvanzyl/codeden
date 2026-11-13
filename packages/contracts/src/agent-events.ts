@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { ErrorInfo, Id } from "./common";
 import { Item, ItemDelta } from "./items";
+import { ProviderCommand } from "./slash-commands";
 
 /**
  * Token/cost/rate-limit usage. Providers fill in what they report; everything is optional.
@@ -55,6 +56,11 @@ export const SessionUpdatedEvent = z.object({
   title: z.string().optional(),
   /** The agent entered or left plan mode on its own, e.g. it left once its plan was approved. */
   planMode: z.boolean().optional(),
+  /**
+   * The full list of `/` commands the provider reports for this session (built-in, plugin,
+   * custom). Replaces any earlier list; absent when unchanged or not reported.
+   */
+  commands: z.array(ProviderCommand).optional(),
 });
 
 /** A thread came into existence. Emitted for the root thread and every subagent thread. */
@@ -65,17 +71,27 @@ export const ThreadStartedEvent = z.object({
 
 export const TurnStartedEvent = z.object({ type: z.literal("turn.started"), ...turnScoped });
 
+/**
+ * Where the provider's conversation stands at the end of a root turn, as an opaque position:
+ * `forkConversation(token, { upTo })` copies the conversation through this turn and no
+ * further (§9). Reported only by adapters whose `forkConversation` accepts it, and only when
+ * the adapter knows the position. Absent: the conversation can't be forked at this turn.
+ */
+const forkPoint = { forkPoint: z.string().min(1).optional() };
+
 export const TurnCompletedEvent = z.object({
   type: z.literal("turn.completed"),
   ...turnScoped,
   /** Provider stop reason, e.g. `end_turn`, `max_tokens`. */
   stopReason: z.string().optional(),
+  ...forkPoint,
 });
 
 export const TurnFailedEvent = z.object({
   type: z.literal("turn.failed"),
   ...turnScoped,
   error: ErrorInfo,
+  ...forkPoint,
 });
 
 export const TurnInterruptedEvent = z.object({
@@ -83,6 +99,7 @@ export const TurnInterruptedEvent = z.object({
   ...turnScoped,
   /** `user`: interrupt button; `runner_restart`: cut off by a runner drain/crash; `provider`: provider-side. */
   reason: z.enum(["user", "runner_restart", "provider"]),
+  ...forkPoint,
 });
 
 /** A new item appeared in a turn (possibly still in progress). */
@@ -147,3 +164,24 @@ export type AgentEventOf<T extends AgentEventType> = Extract<AgentEvent, { type:
 export const AGENT_EVENT_TYPES = AgentEvent.options.map(
   (o) => o.shape.type.value,
 ) as readonly AgentEventType[];
+
+/**
+ * Merge two consecutive `item.delta` events into one that appends both texts, when they
+ * extend the same item the same way: same thread, turn and item, same delta type and, for
+ * tool output, the same stream. Applying the result equals applying `a` then `b`. Returns
+ * `undefined` when they can't be merged.
+ */
+export function mergeItemDeltas(
+  a: AgentEventOf<"item.delta">,
+  b: AgentEventOf<"item.delta">,
+): AgentEventOf<"item.delta"> | undefined {
+  if (a.itemId !== b.itemId || a.turnId !== b.turnId || a.threadId !== b.threadId) return;
+  const x = a.delta;
+  const y = b.delta;
+  if (x.type === "tool_input" && y.type === "tool_input") {
+    return { ...b, delta: { ...y, partialJson: x.partialJson + y.partialJson } };
+  }
+  if (x.type === "tool_output" && y.type === "tool_output" && x.stream !== y.stream) return;
+  if (x.type !== y.type || x.type === "tool_input" || y.type === "tool_input") return;
+  return { ...b, delta: { ...y, text: x.text + y.text } };
+}

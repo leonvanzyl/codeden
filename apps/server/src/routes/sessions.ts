@@ -94,10 +94,13 @@ export function sessionRoutes(s: AppServices) {
         const { item } = record;
         if (item.kind !== "tool_call") throw badRequest("Only tool calls have output", "no_output");
         const text = item.output?.text ?? "";
+        const totalBytes = Buffer.byteLength(text, "utf8");
         const body: ToolOutputResponse = {
           itemId: item.id,
           text,
-          totalBytes: Buffer.byteLength(text, "utf8"),
+          totalBytes,
+          truncated: item.output?.truncated ?? false,
+          outputBytes: Math.max(totalBytes, item.output?.totalBytes ?? totalBytes),
         };
         return c.json(body);
       })

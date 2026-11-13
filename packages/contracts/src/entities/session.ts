@@ -47,6 +47,18 @@ export type SessionStatus = z.infer<typeof SessionStatus>;
 export const ForkOrigin = z.object({
   sessionId: Id,
   checkpoint: z.int().nonnegative().nullable(),
+  /**
+   * The source's turn the fork was taken at ("Fork from here"): its conversation ends with
+   * that turn and its code is that turn's checkpoint. Absent or null: the source's latest
+   * moment.
+   */
+  turnId: Id.nullable().optional(),
+  /**
+   * That turn's number among the source's own turns (1 is its first), counted when it was
+   * forked. Checkpoint numbers can differ from it (a checkpoint that failed to write takes no
+   * number), so this is what to show as "turn N". Absent when unknown.
+   */
+  turnNumber: z.int().positive().nullable().optional(),
 });
 export type ForkOrigin = z.infer<typeof ForkOrigin>;
 
@@ -128,6 +140,12 @@ export const Turn = z.object({
   startedAt: Timestamp,
   completedAt: Timestamp.nullable(),
   error: ErrorInfo.nullable(),
+  /**
+   * The provider's position at the end of this turn (`forkPoint` on its end event): the
+   * conversation can be forked through this turn. Absent or null when it can't, e.g. a turn
+   * recorded before CodeDen kept these, or a provider that doesn't report them.
+   */
+  forkPoint: z.string().nullable().optional(),
 });
 export type Turn = z.infer<typeof Turn>;
 

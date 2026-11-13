@@ -1,6 +1,15 @@
+import type { RunnerCommandOf, RunnerCommandResult } from "@codeden/contracts";
+import { CommandError } from "../errors";
 import type { ProcessSupervisor } from "../process/supervisor";
-import { endProcessesInside, runnerDescendants } from "../process/worktree-processes";
+import {
+  type EndProcessesOptions,
+  endProcessesInside,
+  processesStillInside,
+  runnerDescendants,
+} from "../process/worktree-processes";
+import type { TerminalHost } from "../pty/terminal-host";
 import { isInside } from "../util/paths";
+import { assertRemovable, removeWorkspace } from "./removal";
 import { isManagedWorktreePath } from "./trash";
 
 export interface LeftoverContext {
@@ -41,4 +50,42 @@ export async function stopWithLeftovers(
     spare: ctx.supervisor.list().map((p) => p.pid),
     log: ctx.log,
   });
+}
+
+export interface RemoveContext {
+  home: string;
+  supervisor: Pick<ProcessSupervisor, "killUnder">;
+  terminals: Pick<TerminalHost, "closeUnder">;
+  log?: (message: string) => void;
+  /** Reads the process table and ends process trees (tests). */
+  processes?: Pick<EndProcessesOptions, "table" | "kill">;
+}
+
+/**
+ * `workspace.remove` as the runner runs it. Refuses first, so a kept worktree's terminals and
+ * processes keep running. Then closes its terminals and ends what agents left running in it (on
+ * Windows, where that keeps the folder from being moved, also what an agent started before the
+ * runner restarted: `removing`), and deletes it.
+ * When something still holds the folder, the error names what runs there.
+ */
+export async function removeWithLeftovers(
+  cmd: RunnerCommandOf<"workspace.remove">,
+  ctx: RemoveContext,
+): Promise<RunnerCommandResult<"workspace.remove">> {
+  const info = await assertRemovable(cmd, ctx.home);
+  await ctx.terminals.closeUnder(cmd.path);
+  await ctx.supervisor.killUnder(cmd.path);
+  if (info.state !== "missing") {
+    const removing = { home: ctx.home, log: ctx.log, removing: true, ...ctx.processes };
+    await endProcessesInside(cmd.path, removing);
+  }
+  try {
+    return await removeWorkspace(cmd, ctx.home, ctx.log);
+  } catch (error) {
+    if (!(error instanceof CommandError) || error.code !== "worktree_in_use") throw error;
+    const holders = await processesStillInside(cmd.path, ctx.processes?.table);
+    if (holders.length === 0) throw error;
+    const named = holders.slice(0, 5).join(", ") + (holders.length > 5 ? ", ..." : "");
+    throw new CommandError(error.code, `${error.message} Still running there: ${named}.`);
+  }
 }

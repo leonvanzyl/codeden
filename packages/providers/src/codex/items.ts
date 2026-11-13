@@ -1,6 +1,8 @@
 import type { Attachment, FileChange, Item, ItemStatus, ToolCallItem } from "@codeden/contracts";
-import { shorten, toJson, toolOutput } from "../util/text";
+import { shorten, toJson, toolOutput, unixToIso } from "../util/text";
 import { type AgentNames, collabToolCall } from "./collab";
+import { saveImageResult } from "./image-result";
+import type { ImageGenerationItem } from "./protocol/ImageGenerationItem";
 import type { UserInput as CodexUserInput, FileUpdateChange, ThreadItem } from "./protocol/v2";
 
 /** Codex item status -> CodeDen item status. */
@@ -221,15 +223,7 @@ export function mapThreadItem(item: ThreadItem, names: AgentNames = noNames): It
         path: item.path,
       };
     case "imageGeneration":
-      return {
-        id: item.id,
-        kind: "tool_call",
-        toolKind: "other",
-        status: "completed",
-        toolName: "image_generation",
-        title: "Generate image",
-        input: toJson(item),
-      };
+      return imageGenerationItem(item);
     case "contextCompaction":
       return {
         id: item.id,
@@ -252,6 +246,52 @@ export function mapThreadItem(item: ThreadItem, names: AgentNames = noNames): It
     default:
       return undefined;
   }
+}
+
+/**
+ * Codex's built-in image generation. `result` holds the whole image base64-encoded (megabytes),
+ * so it never goes into the item: the image is the file Codex saved (`savedPath`), or a copy
+ * CodeDen writes when Codex saved none, which the server stores as an artifact and shows inline.
+ */
+function imageGenerationItem(item: ImageGenerationItem): ToolCallItem {
+  let failure = imageGenerationFailure(item);
+  let file = item.savedPath;
+  if (!failure && !file && item.status === "completed" && item.result) {
+    const saved = saveImageResult(item.id, item.result);
+    if ("path" in saved) file = saved.path;
+    else failure = saved.error;
+  }
+  const prompt = item.revisedPrompt?.trim();
+  return {
+    id: item.id,
+    kind: "tool_call",
+    toolKind: "other",
+    status: failure ? "failed" : itemStatus(item.status),
+    toolName: "image_generation",
+    title: "Generate image",
+    input: toJson({
+      revisedPrompt: item.revisedPrompt,
+      savedPath: file,
+      transparentBackground: item.transparentBackground,
+    }),
+    ...(failure ? { error: { message: failure } } : {}),
+    ...(!failure && file
+      ? { generatedImages: [{ path: file, ...(prompt ? { caption: prompt } : {}) }] }
+      : {}),
+  };
+}
+
+/** Why an image generation failed, or `undefined` when it didn't. */
+function imageGenerationFailure(item: ImageGenerationItem): string | undefined {
+  if (item.failure?.type === "usageLimitExceeded") {
+    const resets = unixToIso(item.failure.resetsAt);
+    return `Codex image generation limit reached${resets ? ` (resets ${resets})` : ""}`;
+  }
+  if (item.failure || item.status === "failed") return "Codex image generation failed";
+  if (item.status === "completed" && !item.result && !item.savedPath) {
+    return "Codex finished without an image";
+  }
+  return undefined;
 }
 
 function mcpResultText(content: unknown[]): string {

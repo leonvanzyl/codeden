@@ -1,4 +1,5 @@
 import type { GithubPr, InboxItem, RawEventEnvelope } from "@codeden/contracts";
+import { isFactorySession } from "../factory/starter";
 import type { InboxService } from "../inbox-service";
 import type { SessionRepo } from "../sessions/repo";
 
@@ -15,7 +16,9 @@ export function readyForReview(pr: GithubPr): boolean {
 /**
  * The user's PR review queue (§11.1): when a PR owned by a CodeDen session is ready for review,
  * a `pr_review` inbox item asks the user to look at it. The item is raised once per PR and is
- * resolved on its own when the PR is merged or closed.
+ * resolved on its own when the PR is merged or closed. A factory session's PR is the factory's
+ * to review and merge (it raises its own item when a person has to), so it notifies as factory
+ * activity.
  */
 export class PrReviewInbox {
   constructor(private readonly deps: { inbox: InboxService; repo: SessionRepo }) {}
@@ -47,6 +50,7 @@ export class PrReviewInbox {
       kind: "pr_review",
       status: "open",
       priority: "normal",
+      notify: session && isFactorySession(session) ? "factory" : "needs_you",
       title: `Ready for review: PR #${pr.number} ${pr.title}`,
       body: session ? (session.title ?? session.purpose) : null,
       projectId: pr.projectId,

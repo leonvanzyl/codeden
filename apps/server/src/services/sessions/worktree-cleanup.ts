@@ -23,6 +23,13 @@ export interface WorktreeCleanupDeps {
   stopSession: (id: string) => Promise<unknown>;
   /** Where a removal that keeps failing is reported (`cleanup_failed`). */
   inbox?: Pick<InboxService, "find" | "put" | "close">;
+  /**
+   * Waits before trying a removal that failed on a file in use again, one per retry (default
+   * `RETRY_DELAYS_MS`). Only once they are used up is the failure reported.
+   */
+  retryDelaysMs?: readonly number[];
+  /** Waits between attempts (tests). */
+  sleep?: (ms: number) => Promise<void>;
   now?: () => Date;
   /** How often the inactivity sweep runs (default hourly). */
   intervalMs?: number;
@@ -33,6 +40,14 @@ export interface WorktreeCleanupDeps {
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const REMOVE_TIMEOUT_MS = 2 * 60_000;
+/**
+ * Backoff between attempts at a removal that failed because something held a file: Windows
+ * releases files a moment after the process holding them ends, and each attempt ends what
+ * still runs in the worktree again.
+ */
+export const RETRY_DELAYS_MS: readonly number[] = [2_000, 6_000];
+/** Runner errors that a later attempt can get past (a file in use, a delete that failed). */
+const TRANSIENT = new Set(["worktree_in_use", "remove_failed"]);
 /** Sessions that may be using their worktree right now; never cleaned up. */
 const IN_USE: ReadonlySet<SessionStatus> = new Set([
   "created",
@@ -151,32 +166,63 @@ export class WorktreeCleanup {
   /**
    * Remove a session's worktree through the runner. Refuses while the session (or another live
    * session in the same folder) is in use, and keeps a worktree with uncommitted changes unless
-   * `force`. The runner also cleans up a folder an earlier removal left half-deleted.
+   * `force`. A removal that fails on a file in use is tried again after a short backoff
+   * (`retryDelaysMs`), and only a failure that outlasts it is reported (`cleanup_failed`). The
+   * runner also cleans up a folder an earlier removal left half-deleted.
    */
   async removeWorktree(id: string, opts: { force: boolean }): Promise<WorktreeCleanupOutcome> {
+    const delays = this.deps.retryDelaysMs ?? RETRY_DELAYS_MS;
+    for (let attempt = 0; ; attempt++) {
+      const result = await this.tryRemove(id, opts);
+      if (!result.failure) return result.outcome;
+      const { session, error } = result.failure;
+      const delay = delays[attempt];
+      if (delay !== undefined && TRANSIENT.has(runnerErrorCode(error) ?? "")) {
+        await this.sleep(delay);
+        continue;
+      }
+      const message = errorMessage(error);
+      this.deps.log?.(`worktree cleanup: could not remove ${session.worktreePath}: ${message}`);
+      this.reportFailure(session, message);
+      return result.outcome;
+    }
+  }
+
+  /** One attempt at `removeWorktree`; a runner error comes back as `failure`, unreported. */
+  private async tryRemove(
+    id: string,
+    opts: { force: boolean },
+  ): Promise<{
+    outcome: WorktreeCleanupOutcome;
+    failure?: { session: Session; error: unknown };
+  }> {
+    const done = (o: WorktreeCleanupOutcome) => ({ outcome: o });
     const session = this.deps.repo.get(id);
     if (!session.worktreePath || session.worktreeRemovedAt || !session.projectId) {
-      return outcome("none");
+      return done(outcome("none"));
     }
     if (IN_USE.has(session.status)) {
-      return outcome("failed", "The session is still working; stop it first");
+      return done(outcome("failed", "The session is still working; stop it first"));
     }
     if (this.sharedWithLiveSession(session)) {
-      return outcome("failed", "Another session is working in this worktree, so it was kept");
+      return done(outcome("failed", "Another session is working in this worktree, so it was kept"));
     }
     let repoPath: string;
     try {
       repoPath = this.deps.projects.get(session.projectId).path;
     } catch {
-      return outcome("none");
+      return done(outcome("none"));
     }
     if (!this.deps.runner.isConnected()) {
-      return outcome("failed", "The runner is not connected; cleanup will retry later");
+      return done(outcome("failed", "The runner is not connected; cleanup will retry later"));
     }
-    // The provider process runs in the worktree; detach it before the folder goes away.
-    await this.deps.runner
-      .request({ name: "session.stop", sessionId: id }, 15_000)
-      .catch(() => undefined);
+    // Provider processes run in the worktree (a reviewer's too, in its builder's): detach every
+    // session there before the folder goes away, also one whose status already says it ended.
+    for (const s of this.deps.repo.inFolder(session.worktreePath)) {
+      await this.deps.runner
+        .request({ name: "session.stop", sessionId: s.id }, 15_000)
+        .catch(() => undefined);
+    }
     let discarded = false;
     try {
       const result = await this.deps.runner.request(
@@ -187,18 +233,23 @@ export class WorktreeCleanup {
     } catch (error) {
       const message = errorMessage(error);
       if (runnerErrorCode(error) === "worktree_dirty" || /modified or untracked/.test(message)) {
-        return outcome("kept_changes", "The worktree has uncommitted changes, so it was kept");
+        return done(
+          outcome("kept_changes", "The worktree has uncommitted changes, so it was kept"),
+        );
       }
-      this.deps.log?.(`worktree cleanup: could not remove ${session.worktreePath}: ${message}`);
-      this.reportFailure(session, message);
-      return outcome("failed", message);
+      return { outcome: outcome("failed", message), failure: { session, error } };
     }
     this.deps.repo.update(id, (s) => ({ ...s, worktreeRemovedAt: this.now().toISOString() }));
     this.kept.delete(id);
     this.forced.delete(id);
     this.clearFailure(id);
     this.deps.log?.(`worktree cleanup: removed ${session.worktreePath}`);
-    return outcome("removed", discarded ? "Its uncommitted changes were discarded" : null);
+    return done(outcome("removed", discarded ? "Its uncommitted changes were discarded" : null));
+  }
+
+  private sleep(ms: number): Promise<void> {
+    if (this.deps.sleep) return this.deps.sleep(ms);
+    return new Promise((resolve) => setTimeout(resolve, ms).unref?.());
   }
 
   /**
@@ -281,6 +332,7 @@ export class WorktreeCleanup {
       kind: "cleanup_failed",
       status: "open",
       priority: "normal",
+      notify: "failure",
       title: `Couldn't remove the worktree: ${session.title ?? session.purpose}`,
       body,
       projectId: session.projectId,

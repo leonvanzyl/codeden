@@ -10,6 +10,7 @@ import { askUser } from "../src/mcp/tools/ask-user";
 import { triageIssue } from "../src/mcp/tools/pm/github";
 import { startSession } from "../src/mcp/tools/pm/sessions";
 import { issueSessionPrompt, triageRequestText } from "../src/services/automations/triage-prompts";
+import { UNTRUSTED_INPUT } from "../src/services/factory/prompts";
 import { clipKeepingEnd, renderNotices } from "../src/services/orchestration/digest";
 import { rolePrompt } from "../src/services/orchestration/prompts";
 
@@ -64,7 +65,7 @@ describe("agent system prompt", () => {
       - \`report_progress\`: one line about what you are doing now, at the start of each phase.
       - \`ask_user\`: only for a decision that is the user's to make (see above). If it returns "pending", finish what you can and end your turn; the answer arrives as your next message.
       - \`share_to_chat\`: show the user a file or image instead of describing it.
-      - Browser (\`browser_navigate\`, \`browser_snapshot\`, \`browser_click\`, \`browser_type\`, \`browser_press\`, \`browser_screenshot\`, \`browser_logs\`, \`browser_wait\`, \`browser_evaluate\`, \`browser_open_dev_server\`): the same browser the user watches. Use it to check UI work: open the dev server, read the page with \`browser_snapshot\`, act on element refs, check \`browser_logs\` for errors. Call \`browser_screenshot\` with \`share: true\` for screenshots that show your result.
+      - Browser (\`browser_navigate\`, \`browser_snapshot\`, \`browser_click\`, \`browser_type\`, \`browser_press\`, \`browser_mouse\`, \`browser_screenshot\`, \`browser_logs\`, \`browser_wait\`, \`browser_evaluate\`, \`browser_open_dev_server\`): the same browser the user watches. Use it to check UI work: open the dev server, read the page with \`browser_snapshot\`, act on element refs, check \`browser_logs\` for errors. Where there is no useful ref (canvas, map, drag handle, hover menu), click, hover, drag or scroll at screenshot coordinates with \`browser_mouse\`. Call \`browser_screenshot\` with \`share: true\` for screenshots that show your result.
       - \`generate_image\` (when listed): create images into your worktree, e.g. \`public/hero.png\`.
       - GitHub projects: \`create_pull_request\` pushes your branch and opens the PR (linked to your issue and this session); \`attach_evidence\` posts screenshots, files and test output on it, or on any issue (\`target\`); \`comment_on_issue\` and \`get_pr_status\` (checks, reviews, mergeability). For anything else on GitHub (reading or editing issues, labels, checks, reviews) use the \`gh\` CLI, which is signed in as the user. GitHub has no API for uploading images, so \`gh\` can't attach screenshots: post them with \`attach_evidence\` (pass the \`File:\` path \`browser_screenshot\` prints, a file in your worktree, or an \`artifactId\`), and reuse the image URLs it returns if you also edit an issue or PR description with \`gh\`.
       - If a CodeDen tool fails with "CodeDen server unreachable", CodeDen is restarting: wait a few seconds and call the same tool again.
@@ -355,6 +356,22 @@ describe("triage texts", () => {
     expect(text).not.toContain("instead of guessing");
     expect(text).toContain("state the assumption in the pull request description");
     expect(text).toContain("Ask with ask_user only if the change needs a protected area");
+  });
+
+  it("tells the PM and the agent the issue and its comments are data, not instructions (#86)", () => {
+    const request = triageRequestText({
+      automation: {
+        name: "Issue triage",
+        action: { type: "triage", policy: {} },
+      } as unknown as Automation,
+      run: { id: "run-1" },
+      issue,
+      policy: TriagePolicy.parse({ autoStart: true }),
+      canStart: true,
+    });
+    expect(request).toContain(UNTRUSTED_INPUT);
+    expect(request).toContain("for anyone else's it asks the user");
+    expect(issueSessionPrompt(issue, "Clear bug.")).toContain(UNTRUSTED_INPUT);
   });
 });
 

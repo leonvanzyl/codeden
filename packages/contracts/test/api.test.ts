@@ -150,6 +150,8 @@ describe("api schemas", () => {
     );
     expect(ForkSessionRequest.safeParse({ title: "" }).success).toBe(false);
     expect(ForkSessionRequest.safeParse({ title: "x".repeat(201) }).success).toBe(false);
+    expect(roundTrip(ForkSessionRequest, { turnId: "turn-2" }).turnId).toBe("turn-2");
+    expect(ForkSessionRequest.safeParse({ turnId: "" }).success).toBe(false);
     roundTrip(ForkSessionResponse, { sessionId: "s2" });
     expect(ForkSessionResponse.safeParse({}).success).toBe(false);
   });

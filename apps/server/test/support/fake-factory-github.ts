@@ -1,8 +1,15 @@
-import type { ChecksState, GitHubIssueRef, GitHubPrRef, GithubIssue } from "@codeden/contracts";
+import type {
+  ChecksState,
+  GitHubIssueRef,
+  GitHubPrRef,
+  GithubAuthorAssociation,
+  GithubIssue,
+} from "@codeden/contracts";
 import type {
   CommitChecks,
   FactoryGithub,
   FactoryPr,
+  IssueAuthor,
   PrEvidence,
 } from "../../src/services/factory/github-port";
 
@@ -33,10 +40,19 @@ export class FakeFactoryGithub implements FactoryGithub {
   canRevertViaApi = true;
   /** The account CodeDen uses on GitHub (always trusted); null: unknown. */
   viewer: string | null = "codeden";
+  /** Issue authors' relation to the repository by issue number (default `none`). */
+  associations = new Map<number, GithubAuthorAssociation>();
   private next = 100;
 
   async viewerLogin(): Promise<string | null> {
     return this.viewer;
+  }
+
+  async issueAuthor(projectId: string, number: number): Promise<IssueAuthor> {
+    return {
+      login: this.issue(projectId, number)?.author ?? null,
+      association: this.associations.get(number) ?? "none",
+    };
   }
 
   /** An issue opened on GitHub by `author` (what the sync would project). */

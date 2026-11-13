@@ -1,6 +1,0 @@
----
-section: fixed
----
-
-- **Your issues no longer wait behind the scout's.** In a dark factory, every issue the scout filed went ahead of every issue you filed, so your bugs could sit in the queue for an hour while agents worked only on the scout's features, and it looked as if everything went down the feature pipeline. Free agents now take a fix for a failing check on the default branch first, then the issues you and trusted authors filed (oldest first), then the scout's (by the priority it gave them). Work already queued is reordered on the next step; nothing to migrate.
-- **The scout gets its area reviewers.** In a dark factory, the scout's own turn counted against **Agents at once** when it asked for area reviewers, so with the default of 2 agents and one builder at work no reviewer ever started and the scout reviewed alone. The scout ends its turn right after it plans a round, so its slot now goes to an area reviewer. Builders and other factory work keep their slots, and the total stays within **Agents at once**. When a review area gets no reviewer, the scout is told why: not one of the project's review areas, asked for twice, over **Review areas per round**, or no free agent slot (with how many are in use and a hint to raise **Agents at once**).

@@ -18,6 +18,18 @@ export function tempDir(prefix: string): string {
   return mkdtempSync(join(tmpdir(), prefix));
 }
 
+/**
+ * Make `process.platform` read `platform`, to test a platform's rules on any host. Returns what
+ * puts the real one back.
+ */
+export function setPlatform(platform: NodeJS.Platform): () => void {
+  const real = Object.getOwnPropertyDescriptor(process, "platform");
+  Object.defineProperty(process, "platform", { value: platform, configurable: true });
+  return () => {
+    if (real) Object.defineProperty(process, "platform", real);
+  };
+}
+
 export function removeDir(dir: string): void {
   rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 }

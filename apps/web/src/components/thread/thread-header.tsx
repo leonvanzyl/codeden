@@ -280,9 +280,13 @@ export function ThreadHeader({ session, running }: { session: Session; running: 
                     <Archive /> Archive session
                   </DropdownMenuItem>
                 )}
-                <DropdownMenuItem variant="destructive" onSelect={actions.stop}>
-                  <X /> Stop session
-                </DropdownMenuItem>
+                {/* Only while a turn runs or a question is open, like the sidebar's row menu:
+                    stopping a finished session would overwrite its outcome. */}
+                {actions.canStop && (
+                  <DropdownMenuItem variant="destructive" onSelect={actions.stop}>
+                    <X /> Stop session
+                  </DropdownMenuItem>
+                )}
               </>
             )}
           </DropdownMenuContent>

@@ -7,15 +7,21 @@ import {
   HookChangeRequest,
   McpServerDiffRequest,
   McpServerTarget,
+  McpServerTestRequest,
   McpServerUpsertRequest,
+  type SkillSwitchDiff,
+  SkillSwitchRequest,
+  type SkillSwitchResponse,
+  type SlashCommandList,
 } from "@codeden/contracts";
 import { Hono } from "hono";
 import type { AppServices } from "../services/container";
 import { jsonBody, queryOf } from "./validate";
 
 /**
- * `/api/agent-config` (§12.4): provider memory files, skills, subagents, MCP servers and hooks
- * in their native files. Every overwrite and delete is backed up first; `diff` routes preview.
+ * `/api/agent-config` (§12.4): provider memory files, skills (and their switches), subagents,
+ * MCP servers and hooks in their native files. Every overwrite and delete is backed up first;
+ * `diff` routes preview.
  */
 export function agentConfigRoutes(s: AppServices) {
   const ac = s.agentConfig;
@@ -46,20 +52,35 @@ export function agentConfigRoutes(s: AppServices) {
     .post("/mcp/diff", jsonBody(McpServerDiffRequest), (c) =>
       c.json(ac.mcpDiff(c.req.valid("json"))),
     )
+    .post("/mcp/test", jsonBody(McpServerTestRequest), async (c) =>
+      c.json(await ac.mcpTest(c.req.valid("json"))),
+    )
     .get("/hooks", queryOf(AgentConfigListQuery.pick({ projectId: true })), (c) =>
       c.json(ac.hooks.list(c.req.valid("query").projectId)),
     )
     .post("/hooks/diff", jsonBody(HookChangeRequest), (c) =>
       c.json(ac.hooks.diff(c.req.valid("json"))),
     )
-    .post("/hooks", jsonBody(HookChangeRequest), (c) =>
-      c.json(ac.hooks.apply(c.req.valid("json"))),
+    .post("/hooks", jsonBody(HookChangeRequest), (c) => c.json(ac.hooks.apply(c.req.valid("json"))))
+    .get("/skills", queryOf(AgentConfigListQuery.pick({ projectId: true })), (c) =>
+      c.json({ skills: ac.skills.list(c.req.valid("query").projectId) }),
+    )
+    .post("/skills/diff", jsonBody(SkillSwitchRequest), (c) =>
+      c.json<SkillSwitchDiff>(ac.skills.diff(c.req.valid("json"))),
+    )
+    .post("/skills", jsonBody(SkillSwitchRequest), (c) =>
+      c.json<SkillSwitchResponse>(ac.skills.apply(c.req.valid("json"))),
     );
 }
 
-/** `GET /api/sessions/:id/agent-config/loaded`. */
+/**
+ * `GET /api/sessions/:id/agent-config/loaded` and `GET /api/sessions/:id/commands` (the
+ * composer's `/` menu: the session's commands and skills).
+ */
 export function sessionAgentConfigRoutes(s: AppServices) {
-  return new Hono().get("/:id/agent-config/loaded", (c) =>
-    c.json(s.agentConfig.loaded(c.req.param("id"))),
-  );
+  return new Hono()
+    .get("/:id/agent-config/loaded", (c) => c.json(s.agentConfig.loaded(c.req.param("id"))))
+    .get("/:id/commands", (c) =>
+      c.json<SlashCommandList>(s.agentConfig.slashCommands(c.req.param("id"))),
+    );
 }

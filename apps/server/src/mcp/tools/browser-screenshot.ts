@@ -59,9 +59,15 @@ export const browserScreenshot = defineTool({
       });
       if (input.share) postSharedArtifact(services, sessionId, artifact, input.caption);
       const file = services.artifacts.filePath(artifact);
+      const viewport = !input.fullPage && !input.ref;
       const text = [
         `Screenshot ${shot.width}x${shot.height} saved as artifact ${artifact.id}${input.share ? " and shared in the chat" : ""}.`,
         `File: ${file}`,
+        ...(viewport
+          ? [
+              `Viewport ${shot.width}x${shot.height} CSS pixels: use these image coordinates with browser_mouse.`,
+            ]
+          : []),
       ].join("\n");
       const inline = input.returnImage !== false && bytes.length <= MAX_INLINE_BYTES;
       return new ToolOutput(

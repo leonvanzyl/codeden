@@ -1,4 +1,4 @@
-import { Settings, type SettingsPatch } from "@codeden/contracts";
+import { Settings, type SettingsPatch, utf8ByteLength } from "@codeden/contracts";
 import type { CodeDenClient } from "../client";
 import { startAmbient } from "./ambient";
 import { mockAutomationsApi } from "./automations";
@@ -91,6 +91,15 @@ export function createMockClient(opts: MockClientOptions = {}): CodeDenClient {
         },
         60,
       ),
+    getToolOutput(sessionId, itemId) {
+      const item = world.item(sessionId, itemId);
+      if (item?.kind !== "tool_call") return Promise.reject(new Error("No such tool call"));
+      const text = item.output?.text ?? "";
+      const totalBytes = utf8ByteLength(text);
+      const truncated = item.output?.truncated ?? false;
+      const outputBytes = Math.max(totalBytes, item.output?.totalBytes ?? totalBytes);
+      return delay({ itemId, text, totalBytes, truncated, outputBytes }, 80);
+    },
 
     async sendMessage(sessionId, input, mode) {
       const active = running.get(sessionId);
@@ -176,6 +185,9 @@ export function createMockClient(opts: MockClientOptions = {}): CodeDenClient {
     async stopSession(sessionId) {
       queue.clear(sessionId);
       running.get(sessionId)?.cancel();
+      // Like the server: a session that already finished keeps its status.
+      const status = world.snapshot.sessions.find((s) => s.id === sessionId)?.status;
+      if (status === "completed" || status === "failed" || status === "stopped") return;
       world.updateSession(sessionId, { status: "stopped", endedAt: new Date().toISOString() });
     },
     async forkSession(sessionId, req) {
@@ -184,6 +196,11 @@ export function createMockClient(opts: MockClientOptions = {}): CodeDenClient {
       if (running.has(sessionId)) throw new Error("Wait for the running turn to finish");
       const id = uid("s");
       const project = world.snapshot.projects.find((p) => p.id === source.projectId);
+      // The named turn's number among the source's own turns, like the server records it.
+      const t = world.transcript(sessionId);
+      const turnNumber = req?.turnId
+        ? (t.threads[t.rootThreadId ?? ""]?.turnIds.indexOf(req.turnId) ?? -1) + 1
+        : 0;
       const session = makeSession({
         ...source,
         id,
@@ -198,7 +215,12 @@ export function createMockClient(opts: MockClientOptions = {}): CodeDenClient {
         worktreeRemovedAt: null,
         branch: `codeden/${id.slice(2, 10)}`,
         worktreePath: `~/.codeden/wt/${project?.slug ?? "project"}/${id.slice(2, 10)}`,
-        forkedFrom: { sessionId, checkpoint: null },
+        forkedFrom: {
+          sessionId,
+          checkpoint: null,
+          ...(req?.turnId ? { turnId: req.turnId } : {}),
+          ...(turnNumber > 0 ? { turnNumber } : {}),
+        },
         rootThreadId: `t-${id.slice(2)}`,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),

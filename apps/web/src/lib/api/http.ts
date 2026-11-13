@@ -10,11 +10,6 @@ export class ApiRequestError extends Error {
   }
 }
 
-/** True for errors from routes this server does not have yet (older or partial server). */
-export function isNotAvailable(error: unknown): boolean {
-  return error instanceof ApiRequestError && (error.status === 404 || error.status === 501);
-}
-
 export interface Fetcher {
   call<T>(method: string, path: string, body?: unknown, parse?: (v: unknown) => T): Promise<T>;
   get<T>(path: string, parse?: (v: unknown) => T): Promise<T>;

@@ -2,6 +2,7 @@ import type {
   AgentEvent,
   AutonomyLevel,
   Item,
+  ProviderCommand,
   RuntimeResponse,
   SessionOptions,
   TodoStatus,
@@ -14,6 +15,11 @@ import { fakeMcpInput, fakeMcpResult } from "./mcp-result";
 import { type FakeTurn, proposePlan } from "./plan";
 
 class Interrupted extends Error {}
+
+/** The `/` commands the Fake provider reports for its sessions (it echoes every message). */
+export const FAKE_COMMANDS: ProviderCommand[] = [
+  { name: "echo", description: "Reply with the message (Fake provider)", builtin: true },
+];
 
 type Todo = { text: string; status: TodoStatus };
 
@@ -41,7 +47,12 @@ export class FakeSession implements ProviderSession {
     this.token = opts.resumeToken ?? `fake-${opts.sessionId}`;
     this.rootThreadId = `${opts.sessionId}:thread-root`;
     this.events.push({ type: "thread.started", thread: { id: this.rootThreadId } });
-    this.events.push({ type: "session.updated", resumeToken: this.token, model: "fake-1" });
+    this.events.push({
+      type: "session.updated",
+      resumeToken: this.token,
+      model: "fake-1",
+      commands: FAKE_COMMANDS,
+    });
   }
 
   resumeToken(): string | undefined {
@@ -120,6 +131,8 @@ export class FakeSession implements ProviderSession {
 
   private async runTurn(turn: TurnState, input: UserInput): Promise<void> {
     const { threadId, turnId } = turn;
+    // A root turn's fork point is its own id: `forkConversation({ upTo })` names it.
+    const forkPoint = turnId;
     const prompt = input.text;
     try {
       this.emit({ type: "turn.started", threadId, turnId });
@@ -138,6 +151,7 @@ export class FakeSession implements ProviderSession {
           type: "turn.failed",
           threadId,
           turnId,
+          forkPoint,
           error: { code: "fake_failure", message: "Scripted failure", retryable: true },
         });
         return;
@@ -151,6 +165,7 @@ export class FakeSession implements ProviderSession {
           type: "turn.failed",
           threadId,
           turnId,
+          forkPoint,
           error: usage
             ? {
                 code: "usage_limit",
@@ -171,7 +186,13 @@ export class FakeSession implements ProviderSession {
 
       if (this.planMode) {
         if (!(await proposePlan(this.planTurn(turn), prompt))) {
-          this.emit({ type: "turn.completed", threadId, turnId, stopReason: "end_turn" });
+          this.emit({
+            type: "turn.completed",
+            threadId,
+            turnId,
+            forkPoint,
+            stopReason: "end_turn",
+          });
           return;
         }
         this.planMode = false;
@@ -208,14 +229,14 @@ export class FakeSession implements ProviderSession {
         turnId,
         usage: { inputTokens: prompt.length, outputTokens: 42, costUsd: 0 },
       });
-      this.emit({ type: "turn.completed", threadId, turnId, stopReason: "end_turn" });
+      this.emit({ type: "turn.completed", threadId, turnId, forkPoint, stopReason: "end_turn" });
     } catch (error) {
       if (error instanceof Interrupted) {
-        this.emit({ type: "turn.interrupted", threadId, turnId, reason: "user" });
+        this.emit({ type: "turn.interrupted", threadId, turnId, forkPoint, reason: "user" });
         return;
       }
       const message = error instanceof Error ? error.message : String(error);
-      this.emit({ type: "turn.failed", threadId, turnId, error: { message } });
+      this.emit({ type: "turn.failed", threadId, turnId, forkPoint, error: { message } });
     }
   }
 

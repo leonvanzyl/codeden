@@ -219,6 +219,9 @@ describe("the dark factory's scout (§10.1)", () => {
     expect(scoutDue(recent as FactoryLoop, 0, now)).toBe(false);
     const old = { ...base, scout: { round: null, lastRoundAt: "2026-11-11T10:30:00Z" } };
     expect(scoutDue(old as FactoryLoop, 0, now)).toBe(true);
+    // A threshold of 0 turns scheduled rounds off, even with an empty queue.
+    const off = { ...base, tuning: { minBacklog: 0, discoveryIntervalMin: 60 } } as FactoryLoop;
+    expect(scoutDue(off, 0, now)).toBe(false);
   });
 
   it("keeps its tools to the scout and its lenses", async () => {

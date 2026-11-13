@@ -3,13 +3,19 @@ import type { ItemCtx } from "../approvals";
 import { shorten } from "../util/text";
 import { type CollabItem, FINAL_AGENT_STATUSES } from "./collab";
 import type { ServerNotification } from "./protocol";
-import type { CollabAgentState, CollabAgentStatus, RateLimitSnapshot } from "./protocol/v2";
+import type {
+  CollabAgentState,
+  CollabAgentStatus,
+  RateLimitSnapshot,
+  ThreadTokenUsage,
+} from "./protocol/v2";
 import {
   type AgentItem,
   CodexThreadMapper,
   type ThreadLinks,
   type TurnOutcome,
 } from "./thread-mapper";
+import { subagentUsage } from "./usage";
 
 /**
  * Notifications held for a thread no spawn has claimed yet, and how many such threads are held
@@ -30,7 +36,10 @@ interface Run {
   turns: number;
   /** Tool calls it started or finished (a turn cut short closes started ones for it). */
   toolCalls: Set<string>;
-  totalTokens?: number;
+  /** The agent thread's latest token report (running total). */
+  tokens?: ThreadTokenUsage;
+  /** The model its spawn asked for; absent when it runs the session's. */
+  model?: string;
   /** When the card last closed, for its duration. */
   endedAt?: number;
   /** The agent's last message in its current turn: the card's summary. */
@@ -118,6 +127,7 @@ export class CodexSubagents implements ThreadLinks {
       return false;
     }
     const run = this.claim(from, turnId, item.id, spawnDetails(item));
+    if (item.model) run.model ??= item.model;
     const child = item.receiverThreadIds[0];
     if (child) this.bind(run, child);
     if (phase !== "completed") return true;
@@ -257,8 +267,8 @@ export class CodexSubagents implements ThreadLinks {
         else if (item.kind === "user_message" && !run.item.prompt && item.input.text)
           run.item = { ...run.item, prompt: item.input.text };
       },
-      onTokens: (total) => {
-        run.totalTokens = total;
+      onTokens: (usage) => {
+        run.tokens = usage;
       },
     });
     run.thread = thread;
@@ -357,11 +367,11 @@ export class CodexSubagents implements ThreadLinks {
   private stats(run: Run): SubagentStats {
     const end = run.endedAt ?? this.o.now();
     return {
-      ...(run.totalTokens !== undefined
-        ? { totalTokens: Math.max(0, Math.round(run.totalTokens)) }
-        : {}),
+      ...(run.tokens ? { totalTokens: Math.max(0, Math.round(run.tokens.total.totalTokens)) } : {}),
       toolUses: run.toolCalls.size,
       durationMs: Math.max(0, Math.round(end - run.startedAt)),
+      // Its tokens by category, for the card's cost (§7.3).
+      ...(run.tokens ? { usage: [subagentUsage(run.tokens, run.model)] } : {}),
     };
   }
 }

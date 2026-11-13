@@ -9,6 +9,9 @@ import type {
 } from "@codeden/contracts";
 import { frontMatter, toRelative } from "./paths";
 
+/** A skill as found on disk, before its provider's switch setting is read (`skills-service.ts`). */
+export type DiscoveredSkill = Omit<AgentSkill, "enabled" | "visibility" | "setIn">;
+
 /** A folder files are addressed relative to (`AgentConfigLocator.root`). */
 export interface ConfigRoot {
   root: AgentConfigFile["root"];
@@ -94,7 +97,7 @@ export function skillsIn(
   dir: string,
   provider: AgentConfigProvider,
   scope: AgentConfigScope,
-): AgentSkill[] {
+): DiscoveredSkill[] {
   let names: string[];
   try {
     names = readdirSync(dir, { withFileTypes: true })

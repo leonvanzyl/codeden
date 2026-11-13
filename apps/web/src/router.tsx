@@ -6,9 +6,9 @@ import {
   redirect,
 } from "@tanstack/react-router";
 import { AppShell } from "@/components/shell/app-shell";
+import { AppToaster } from "@/components/shell/app-toaster";
 import { SignInScreen } from "@/components/shell/sign-in";
 import { UnauthorizedScreen } from "@/components/shell/unauthorized";
-import { Toaster } from "@/components/ui/sonner";
 import { AGENT_TABS, AgentsPage, type AgentTab } from "@/routes/agents";
 import { AutomationPage } from "@/routes/automation";
 import { NewAutomationPage } from "@/routes/automation-new";
@@ -16,6 +16,7 @@ import { AutomationsPage, type AutomationsTab } from "@/routes/automations";
 import { FactoryItemPage } from "@/routes/factory-item";
 import { HomePage } from "@/routes/home";
 import { InboxPage } from "@/routes/inbox";
+import { NewSessionPage } from "@/routes/new-session";
 import { PmPage } from "@/routes/pm";
 import { ProjectPage, type ProjectTab } from "@/routes/project";
 import { ReportsPage } from "@/routes/reports";
@@ -25,18 +26,15 @@ import { SettingsPage } from "@/routes/settings";
 import { SetupPage } from "@/routes/setup";
 import { VisionPage } from "@/routes/vision";
 import { useConnectionStore } from "@/stores/connection";
-import { useUiStore } from "@/stores/ui";
 
 function Root() {
   const auth = useConnectionStore((s) => s.auth);
-  // A native browser view paints over the page, toasts included: keep them on the other side.
-  const nativeShown = useUiStore((s) => s.nativeBrowserShown);
   if (auth === "unauthorized") return <UnauthorizedScreen />;
   if (auth === "signin") return <SignInScreen />;
   return (
     <>
       <Outlet />
-      <Toaster position={nativeShown ? "bottom-left" : "bottom-right"} />
+      <AppToaster />
     </>
   );
 }
@@ -82,18 +80,32 @@ const projectRoute = createRoute({
     // The sessions list shows archived sessions (from the sidebar's "N archived" row).
     ...(s.archived ? { archived: true } : {}),
   }),
+  // `?newSession=true` opened the old New session dialog; links to it open the draft now.
+  beforeLoad: ({ search, params }) => {
+    if (search.newSession) {
+      throw redirect({ to: "/projects/$projectId/new", params, replace: true });
+    }
+  },
   component: function Project() {
     const { projectId } = projectRoute.useParams();
-    const { newSession, tab, archived } = projectRoute.useSearch();
+    const { tab, archived } = projectRoute.useSearch();
     return (
       <ProjectPage
         key={projectId}
         projectId={projectId}
-        newSession={Boolean(newSession)}
         tab={tab ?? "overview"}
         sessionView={archived ? "archived" : "active"}
       />
     );
+  },
+});
+
+const newSessionRoute = createRoute({
+  getParentRoute: () => shell,
+  path: "/projects/$projectId/new",
+  component: function NewSession() {
+    const { projectId } = newSessionRoute.useParams();
+    return <NewSessionPage key={projectId} projectId={projectId} />;
   },
 });
 
@@ -192,6 +204,18 @@ const agentsRoute = createRoute({
   },
 });
 
+const inboxRoute = createRoute({
+  getParentRoute: () => shell,
+  path: "/inbox",
+  // `?item=` scrolls that item into view (a toast's Open).
+  validateSearch: (s: Record<string, unknown>): { item?: string } =>
+    typeof s.item === "string" && s.item ? { item: s.item } : {},
+  component: function Inbox() {
+    const { item } = inboxRoute.useSearch();
+    return <InboxPage focusItemId={item} />;
+  },
+});
+
 const reportsRoute = createRoute({
   getParentRoute: () => shell,
   path: "/reports",
@@ -206,11 +230,12 @@ const reportsRoute = createRoute({
 const routeTree = rootRoute.addChildren([
   shell.addChildren([
     createRoute({ getParentRoute: () => shell, path: "/", component: HomePage }),
-    createRoute({ getParentRoute: () => shell, path: "/inbox", component: InboxPage }),
+    inboxRoute,
     reportsRoute,
     searchRoute,
     sessionRoute,
     projectRoute,
+    newSessionRoute,
     pmRoute,
     automationsRoute,
     newAutomationRoute,

@@ -1,19 +1,24 @@
-import { useEffect, useRef } from "react";
+import { type ReactNode, useEffect, useRef } from "react";
 import { cn } from "@/lib/utils";
 
-/** Live command output: monospace, capped height, pinned to the bottom while streaming. */
+/**
+ * Live command output: monospace, capped height, pinned to the bottom while streaming.
+ * `notice` (output was cut, see `useShownOutput`) sits between the command and its output.
+ */
 export function CommandOutput({
   command,
   output,
   running,
   exitCode,
   cwd,
+  notice,
 }: {
   command: string;
   output: string;
   running: boolean;
   exitCode?: number | null;
   cwd?: string;
+  notice?: ReactNode;
 }) {
   const ref = useRef<HTMLPreElement>(null);
   const pinned = useRef(true);
@@ -45,6 +50,7 @@ export function CommandOutput({
           </span>
         )}
       </div>
+      {notice && <div className="border-b border-border bg-muted/30 px-3 py-0.5">{notice}</div>}
       {output ? (
         <pre
           ref={ref}

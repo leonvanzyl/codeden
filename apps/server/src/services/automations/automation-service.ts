@@ -34,7 +34,7 @@ import { lastTurnStatus, RunStore } from "./runs";
 import { ScheduleStore } from "./schedule-store";
 import { CronScheduler, type SchedulePair } from "./scheduler";
 import { AutomationSources } from "./sources";
-import { TriageService } from "./triage";
+import { type TriageGithub, TriageService } from "./triage";
 
 export interface AutomationServiceDeps {
   db: Db;
@@ -46,6 +46,8 @@ export interface AutomationServiceDeps {
   inbox: InboxService;
   /** Resolved lazily: orchestration is created after this service. */
   orchestration: () => OrchestrationService;
+  /** Issue authors and the account CodeDen uses on GitHub, for triage's trust check. */
+  github: TriageGithub;
   /** `~/.codeden` (global automation files live in `automations/`). */
   home: string;
   templatesDir?: string;
@@ -112,6 +114,7 @@ export class AutomationService implements AutomationPort {
       sessions: deps.sessions,
       projects: deps.projects,
       orchestration: deps.orchestration,
+      github: deps.github,
       triageAutomation: (projectId) => this.triageAutomation(projectId),
       reported: (projectId, issueNumber, decision) =>
         this.executor.completeTriage(projectId, issueNumber, decision),

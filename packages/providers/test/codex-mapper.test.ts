@@ -267,6 +267,22 @@ describe("CodexEventMapper", () => {
     });
   });
 
+  it("reports a root turn Codex ended as its own fork point, never one CodeDen closed", () => {
+    const { events, feed, mapper } = setup();
+    feed("turn/started", { turn: turn("inProgress") });
+    feed("turn/completed", { turn: turn("completed") });
+    expect(events.at(-1)).toMatchObject({ type: "turn.completed", turnId: TURN, forkPoint: TURN });
+    feed("turn/started", { turn: turn("inProgress") });
+    feed("turn/completed", { turn: turn("interrupted") });
+    expect(events.at(-1)).toMatchObject({ type: "turn.interrupted", forkPoint: TURN });
+
+    // The process died mid-turn: Codex may not have finished it, so it can't be forked at.
+    feed("turn/started", { turn: turn("inProgress") });
+    mapper.endAll({ type: "failed", message: "codex app-server exited" });
+    expect(events.at(-1)?.type).toBe("turn.failed");
+    expect(events.at(-1)).not.toHaveProperty("forkPoint");
+  });
+
   it("maps rate limits", () => {
     const { events, feed } = setup();
     feed("account/rateLimits/updated", {

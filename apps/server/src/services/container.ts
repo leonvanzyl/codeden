@@ -10,6 +10,7 @@ import { allTools } from "../mcp/tools";
 import type { HomePaths } from "../paths";
 import type { SettingsStore } from "../settings-store";
 import { AgentConfigService } from "./agent-config/agent-config-service";
+import { reportedCommands } from "./agent-config/slash-commands";
 import { ArtifactService } from "./artifacts";
 import { AutomationService, type AutomationServiceDeps } from "./automations/automation-service";
 import { BrowserService } from "./browser/browser-service";
@@ -32,6 +33,7 @@ import { ProjectRedetector } from "./projects/redetector";
 import { type RunnerPort, redetectProviders } from "./runner-port";
 import type { SecretStore } from "./secrets";
 import { AutoRetry, type AutoRetryDeps } from "./sessions/auto-retry";
+import { GeneratedImages } from "./sessions/generated-images";
 import { SessionLauncher } from "./sessions/launcher";
 import { SessionLifecycle } from "./sessions/lifecycle";
 import { Outbox } from "./sessions/outbox";
@@ -160,6 +162,8 @@ export interface AppServices {
   worktreeCleanup: WorktreeCleanup;
   /** Denies approvals nobody is there to answer, so unattended work never waits forever. */
   unwatchedApprovals: UnwatchedApprovals;
+  /** Images made with a provider's own tools: stored as artifacts and shown inline. */
+  generatedImages: GeneratedImages;
   /** CI failures, requested changes and conflicts sent to user-started sessions' agents (§9). */
   prFeedback: PrFeedbackService;
   /** Continues agent sessions after transient failures and usage limits. */
@@ -220,6 +224,7 @@ export function createServices(opts: ServicesOptions): AppServices {
     launcher,
     outbox,
     questions,
+    tokens: mcpTokens,
   });
   const queue = new QueueService({
     outbox,
@@ -251,6 +256,8 @@ export function createServices(opts: ServicesOptions): AppServices {
     ...opts.github,
     log: opts.log,
   });
+  // The factory and issue triage share it, so both trust the same issue authors.
+  const factoryGithub = opts.factory?.github ?? new GithubFactoryPort(github);
   const trustedAuthors = projectTrustedAuthors(projects);
   const redetector = new ProjectRedetector({
     projects,
@@ -286,6 +293,7 @@ export function createServices(opts: ServicesOptions): AppServices {
     repo: sessionRepo,
     inbox,
     orchestration: () => services.orchestration,
+    github: factoryGithub,
     home: opts.paths.home,
     ...opts.automations,
     log: opts.log,
@@ -333,7 +341,7 @@ export function createServices(opts: ServicesOptions): AppServices {
     notify: (draft, wake) => orchestration.notify(draft, wake),
     settings: opts.settings,
     exec,
-    github: opts.factory?.github ?? new GithubFactoryPort(github),
+    github: factoryGithub,
     complete: (job, system, prompt) => utility.complete(job, system, prompt),
     archiveSession: (id) => worktreeCleanup.archive(id),
     options: opts.factory,
@@ -400,6 +408,13 @@ export function createServices(opts: ServicesOptions): AppServices {
     factory,
     worktreeCleanup,
     unwatchedApprovals,
+    generatedImages: new GeneratedImages({
+      db: opts.db,
+      store: opts.store,
+      repo: sessionRepo,
+      artifacts,
+      log: opts.log,
+    }),
     prFeedback: new PrFeedbackService({
       store: opts.store,
       repo: sessionRepo,
@@ -430,6 +445,8 @@ export function createServices(opts: ServicesOptions): AppServices {
       backupDir: join(opts.paths.backups, "agent-config"),
       disabledHooksFile: opts.paths.disabledHooks,
       mcpProxyUrl: () => opts.runner.mcpProxyUrl(),
+      runner: opts.runner,
+      reportedCommands: (sessionId) => reportedCommands(opts.db, sessionId),
     }),
     github,
     orchestration,

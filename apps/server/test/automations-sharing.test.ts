@@ -12,6 +12,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { automationRoutes } from "../src/routes/automations";
 import { collectImportFiles, previewFile } from "../src/services/automations/import";
 import { automationToMarkdown, exportFileName } from "../src/services/automations/markdown";
+import { pmChangeInboxId } from "../src/services/automations/pm-change-notice";
 import { findTemplatesDir, readAutomationDir } from "../src/services/automations/templates";
 import { type Harness, startHarness, waitUntil } from "./support/harness";
 
@@ -177,6 +178,14 @@ describe("automations API: create, duplicate, export and import", () => {
     AutomationListResponse.parse(
       (await h.api("GET", `/automations?projectId=${h.projectId}`)).body,
     );
+  const pmTool = async (name: string, args: unknown) =>
+    h.server.services.tools.call(name, args, {
+      role: "pm",
+      sessionId: "pm-test",
+      projectId: h.projectId,
+      caller: "mcp",
+      signal: new AbortController().signal,
+    });
 
   it("creates from scratch off, validates, and updates any field", async () => {
     const res = await h.api("POST", "/automations", {
@@ -301,14 +310,6 @@ describe("automations API: create, duplicate, export and import", () => {
   });
 
   it("lets the PM create and update automations, created off and marked", async () => {
-    const pmTool = async (name: string, args: unknown) =>
-      h.server.services.tools.call(name, args, {
-        role: "pm",
-        sessionId: "pm-test",
-        projectId: h.projectId,
-        caller: "mcp",
-        signal: new AbortController().signal,
-      });
     const res = await pmTool("create_automation", {
       name: "Nightly lint report",
       trigger: { type: "cron", expression: "0 2 * * *" },
@@ -344,5 +345,83 @@ describe("automations API: create, duplicate, export and import", () => {
       name: "Renamed",
     });
     expect(readOnly.isError).toBe(true);
+  });
+
+  // #132: a PM must not change what an automation a person switched on does and leave it running.
+  // Run by hand only, so nothing these tests leave switched on ever fires in the harness.
+  const userAutomation = {
+    name: "Dependency updates",
+    trigger: { type: "manual" as const },
+    action: {
+      type: "start_session" as const,
+      prompt: "Update dependencies",
+      autonomy: "auto" as const,
+    },
+    enabled: true,
+  };
+  const rewrite = {
+    trigger: { type: "cron", expression: "*/5 * * * *" },
+    action: { type: "start_session", prompt: "Something else entirely", autonomy: "full" },
+  };
+  const defs = () => h.server.services.automations.definitions;
+  const notice = (id: string) => h.server.services.inbox.find(pmChangeInboxId(id));
+
+  it("switches off an automation that was on when the PM changes what it does", async () => {
+    const on = defs().create({ ...userAutomation, projectId: h.projectId });
+    const res = await pmTool("update_automation", { automationId: on.id, ...rewrite });
+    expect(res.isError).toBeFalsy();
+    const result = JSON.parse(res.text) as { updated: { enabled: boolean }; note: string };
+    expect(result.updated.enabled).toBe(false);
+    expect(result.note).toMatch(/switches it on again/);
+    expect(defs().get(on.id)).toMatchObject({ enabled: false, action: rewrite.action });
+    const item = notice(on.id);
+    expect(item).toMatchObject({
+      kind: "message",
+      status: "open",
+      notify: "needs_you",
+      projectId: h.projectId,
+      sessionId: "pm-test",
+    });
+    expect(item?.body).toContain('action.autonomy: "auto" → "full"');
+    expect(item?.body).toContain('trigger.expression: none → "*/5 * * * *"');
+
+    const guarded = defs().create({ ...userAutomation, projectId: h.projectId });
+    await pmTool("update_automation", { automationId: guarded.id, guards: { maxPerDay: 50 } });
+    expect(defs().get(guarded.id).enabled).toBe(false);
+  });
+
+  it("keeps it on for a new name or description, and off when it was off", async () => {
+    const on = defs().create({ ...userAutomation, projectId: h.projectId });
+    const renamed = await pmTool("update_automation", {
+      automationId: on.id,
+      name: "Dependency bumps",
+      description: "Weekly",
+      action: userAutomation.action,
+    });
+    expect(renamed.isError).toBeFalsy();
+    expect(defs().get(on.id)).toMatchObject({ enabled: true, name: "Dependency bumps" });
+    expect(notice(on.id)).toBeUndefined();
+
+    const off = defs().create({ ...userAutomation, projectId: h.projectId, enabled: false });
+    const res = await pmTool("update_automation", { automationId: off.id, ...rewrite });
+    expect(JSON.parse(res.text)).not.toHaveProperty("note");
+    expect(defs().get(off.id)).toMatchObject({ enabled: false, action: rewrite.action });
+    expect(notice(off.id)).toBeUndefined();
+  });
+
+  it("refuses the PM's changes to an automation for all projects", async () => {
+    const global = defs().create(userAutomation);
+    expect(global.target).toEqual({ type: "all_projects" });
+    const res = await pmTool("update_automation", { automationId: global.id, name: "Renamed" });
+    expect(res.isError).toBe(true);
+    expect(res.text).toMatch(/only the user/);
+    expect(defs().get(global.id)).toMatchObject({ enabled: true, name: userAutomation.name });
+  });
+
+  it("leaves the user's own changes in Automations on", async () => {
+    const on = defs().create({ ...userAutomation, projectId: h.projectId });
+    const patched = await h.api("PATCH", `/automations/${on.id}`, { action: rewrite.action });
+    expect(patched.status).toBe(200);
+    expect(defs().get(on.id)).toMatchObject({ enabled: true, action: rewrite.action });
   });
 });

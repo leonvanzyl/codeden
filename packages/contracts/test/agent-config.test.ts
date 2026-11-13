@@ -2,13 +2,20 @@ import { describe, expect, it } from "vitest";
 import {
   AgentConfigFile,
   AgentConfigLocator,
+  AgentSkill,
+  AgentSkillListResponse,
   HookChangeRequest,
   HookListResponse,
   HookWriteResponse,
   LoadedAgentConfig,
   McpServerSpec,
+  McpServerTestRequest,
+  McpServerTestResult,
   McpServerUpsertRequest,
   providersWith,
+  SkillSwitchDiff,
+  SkillSwitchRequest,
+  SkillSwitchResponse,
 } from "../src";
 
 const roundTrip = <T>(schema: { parse: (v: unknown) => T }, value: T) =>
@@ -46,7 +53,14 @@ describe("agent configuration contracts", () => {
       cwd: "C:/repo",
       memory: [file],
       skills: [
-        { provider: "claude", scope: "user", name: "deploy", file: { ...file, kind: "skill" } },
+        {
+          provider: "claude",
+          scope: "user",
+          name: "deploy",
+          file: { ...file, kind: "skill" },
+          enabled: false,
+          setIn: "C:/repo/.claude/settings.local.json",
+        },
       ],
       subagents: [],
       mcpServers: [
@@ -188,6 +202,46 @@ describe("agent configuration contracts", () => {
     expect(ok({ type: "command", command: "x" }, "Stop2")).toBe(false);
   });
 
+  it("round-trips skill states and switches", () => {
+    const skill = {
+      provider: "claude",
+      scope: "project",
+      name: "deploy",
+      description: "Ship it",
+      file: { ...file, kind: "skill", path: ".claude/skills/deploy/SKILL.md", name: "deploy" },
+      enabled: true,
+      visibility: "user-invocable-only",
+      setIn: null,
+    } as const;
+    roundTrip(AgentSkillListResponse, { skills: [skill] });
+    // The state is part of the contract: a skill without it is refused, not defaulted.
+    const { enabled: _, ...withoutState } = skill;
+    expect(AgentSkill.safeParse(withoutState).success).toBe(false);
+    expect(AgentSkill.safeParse({ ...skill, visibility: "off" }).success).toBe(false);
+    const req = {
+      root: "project",
+      projectId: "p1",
+      path: ".claude/skills/deploy/SKILL.md",
+      provider: "claude",
+      enabled: false,
+      listProjectId: "p1",
+    } as const;
+    roundTrip(SkillSwitchRequest, req);
+    expect(SkillSwitchRequest.safeParse({ ...req, enabled: "off" }).success).toBe(false);
+    roundTrip(SkillSwitchDiff, {
+      absolutePath: "C:/Users/me/.claude/settings.json",
+      exists: true,
+      patch: "--- a/settings.json\n+++ b/settings.json\n",
+      additions: 3,
+      deletions: 0,
+      changed: true,
+      scope: "user",
+    });
+    roundTrip(SkillSwitchResponse, { file: null, backupPath: null, skills: [skill] });
+    expect(SkillSwitchResponse.safeParse({ file: null, backupPath: null }).success).toBe(false);
+    expect(providersWith("skillSwitches")).toEqual(["claude", "codex"]);
+  });
+
   it("validates locators and server names", () => {
     expect(AgentConfigLocator.safeParse({ root: "elsewhere", path: "x" }).success).toBe(false);
     const bad = {
@@ -197,5 +251,60 @@ describe("agent configuration contracts", () => {
       spec: { type: "stdio", command: "x" },
     };
     expect(McpServerUpsertRequest.safeParse(bad).success).toBe(false);
+  });
+
+  it("round-trips MCP connection test requests and results", () => {
+    roundTrip(McpServerTestRequest, { provider: "claude", scope: "user", name: "fs" });
+    roundTrip(McpServerTestRequest, {
+      provider: "claude",
+      scope: "project",
+      projectId: "p1",
+      name: "fs",
+      spec: { type: "stdio", command: "npx", args: ["-y", "x"] },
+    });
+    roundTrip(McpServerTestResult, {
+      ok: true,
+      durationMs: 840,
+      server: { name: "fs", version: "1.2.0", title: "Files" },
+      protocolVersion: "2025-06-18",
+      toolCount: 2,
+      morePages: false,
+      tools: [{ name: "read_file", description: "Reads a file" }, { name: "write_file" }],
+    });
+    // A paged list cut off at the page cap says so: its count is a lower bound.
+    const partial = {
+      ok: true,
+      durationMs: 9,
+      server: { name: "big", version: "1" },
+      protocolVersion: null,
+      toolCount: 5000,
+      tools: [],
+    };
+    expect(McpServerTestResult.safeParse(partial).success).toBe(false);
+    roundTrip(McpServerTestResult, { ...partial, ok: true as const, morePages: true });
+    roundTrip(McpServerTestResult, {
+      ok: false,
+      durationMs: 12,
+      stage: "start",
+      error: "spawn nope ENOENT",
+      timedOut: false,
+      stderrTail: "command not found",
+    });
+    roundTrip(McpServerTestResult, {
+      ok: false,
+      durationMs: 30,
+      stage: "connect",
+      error: "MCP error -32000: Connection closed",
+      timedOut: false,
+      stderrTail: "GITHUB_TOKEN is not set",
+      note: "Codex starts a stdio server with only a few variables from your environment",
+    });
+    const failed = { ok: false, durationMs: 1, stage: "connect", timedOut: true };
+    expect(McpServerTestResult.safeParse({ ...failed, error: "x".repeat(2001) }).success).toBe(
+      false,
+    );
+    expect(McpServerTestResult.safeParse({ ...failed, stage: "other", error: "x" }).success).toBe(
+      false,
+    );
   });
 });

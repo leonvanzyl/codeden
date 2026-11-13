@@ -94,6 +94,18 @@ describe("answerProviderQuestion", () => {
     });
   });
 
+  it("never sends the guidance to an MCP server as form data", async () => {
+    // UnwatchedApprovals withdraws the form instead (./unwatched-approvals.test.ts).
+    const respond = vi.fn(async () => undefined);
+    const answered = await answerProviderQuestion(
+      ctx(factoryAgent, "dark_factory") as never,
+      respond,
+      question({ mcpServer: "deploy" }),
+    );
+    expect(answered).toBe(false);
+    expect(respond).not.toHaveBeenCalled();
+  });
+
   it("leaves attended sessions, ask_user questions and other items alone", async () => {
     const respond = vi.fn(async () => undefined);
     expect(

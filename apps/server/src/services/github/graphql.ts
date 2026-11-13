@@ -211,8 +211,11 @@ const REVIEW_STATES: Record<string, GithubReview["state"]> = {
   PENDING: "pending",
 };
 
-/** GitHub's `CommentAuthorAssociation`; a value this build doesn't know counts as `none`. */
-function authorAssociation(value: string | undefined): GithubAuthorAssociation {
+/**
+ * GitHub's `CommentAuthorAssociation` (GraphQL) or `author_association` (REST); a value this
+ * build doesn't know counts as `none`.
+ */
+export function authorAssociation(value: string | null | undefined): GithubAuthorAssociation {
   const parsed = GithubAuthorAssociation.safeParse(value?.toLowerCase());
   return parsed.success ? parsed.data : "none";
 }

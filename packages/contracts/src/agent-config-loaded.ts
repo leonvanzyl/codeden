@@ -1,11 +1,7 @@
 import { z } from "zod";
-import {
-  AgentConfigFile,
-  AgentConfigProvider,
-  AgentConfigScope,
-  McpServerEntry,
-} from "./agent-config";
+import { AgentConfigFile, McpServerEntry } from "./agent-config";
 import { HookEntry, HookSource } from "./agent-config-hooks";
+import { AgentSkill } from "./agent-config-skills";
 import { Id } from "./common";
 
 /**
@@ -13,16 +9,6 @@ import { Id } from "./common";
  * hooks its provider takes from its working directory. Computed from each provider's discovery
  * rules (not reported by the provider).
  */
-
-/** A skill folder (its `SKILL.md`). */
-export const AgentSkill = z.object({
-  provider: AgentConfigProvider,
-  scope: AgentConfigScope,
-  name: z.string(),
-  description: z.string().optional(),
-  file: AgentConfigFile,
-});
-export type AgentSkill = z.infer<typeof AgentSkill>;
 
 /**
  * The hooks that apply to a session's working folder. For Claude Code: `~/.claude/settings.json`,
@@ -53,6 +39,7 @@ export const LoadedAgentConfig = z.object({
   cwd: z.string(),
   /** Memory, rule and auto-memory files that exist, broadest scope first. */
   memory: z.array(AgentConfigFile),
+  /** Skills found from the working directory, switched-off ones included (`enabled: false`). */
   skills: z.array(AgentSkill),
   subagents: z.array(AgentConfigFile),
   /** Enabled MCP servers, including CodeDen's own. */

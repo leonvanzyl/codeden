@@ -9,13 +9,22 @@ import { Badge } from "./node-badge";
  * The dark factory's scout on the pipeline diagram (§10.1): its round and its review areas (one
  * long-lived area reviewer each).
  */
-export function ScoutNode({ scout }: { scout: ScoutStatus }) {
+export function ScoutNode({
+  scout,
+  scheduled = true,
+}: {
+  scout: ScoutStatus;
+  /** False when scheduled rounds are off (`minBacklog` 0): it only runs when started. */
+  scheduled?: boolean;
+}) {
   const navigate = useNavigate();
   const phase =
     scout.phase === "idle"
-      ? scout.nextRoundAt
-        ? "Resting"
-        : "Waiting for a round"
+      ? !scheduled
+        ? "On demand"
+        : scout.nextRoundAt
+          ? "Resting"
+          : "Waiting for a round"
       : scout.phase === "planning"
         ? "Planning"
         : scout.phase === "reviewing"

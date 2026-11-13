@@ -56,9 +56,93 @@ export function parseWindowsTable(json: string): ProcessRow[] {
   });
 }
 
+/**
+ * PowerShell: `pid<TAB>cwd` for every process whose working directory can be read. Windows
+ * doesn't report it, so it is read from the process's own parameters block (64-bit and 32-bit
+ * processes of the same user; others are skipped).
+ */
+const WINDOWS_CWDS = `[Console]::OutputEncoding = [Text.Encoding]::UTF8
+Add-Type -TypeDefinition @'
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Runtime.InteropServices;
+using System.Text;
+public static class CodedenCwd {
+  [StructLayout(LayoutKind.Sequential)]
+  struct Basic { public IntPtr Exit; public IntPtr Peb; public IntPtr Mask; public IntPtr Priority; public IntPtr Id; public IntPtr Parent; }
+  [DllImport("ntdll.dll")] static extern int NtQueryInformationProcess(IntPtr h, int c, ref Basic b, int l, out int r);
+  [DllImport("ntdll.dll")] static extern int NtQueryInformationProcess(IntPtr h, int c, out IntPtr w, int l, out int r);
+  [DllImport("kernel32.dll")] static extern IntPtr OpenProcess(int a, bool i, int p);
+  [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr h);
+  [DllImport("kernel32.dll")] static extern bool ReadProcessMemory(IntPtr h, IntPtr a, byte[] b, IntPtr n, out IntPtr r);
+  static byte[] Read(IntPtr h, long at, int n) {
+    byte[] b = new byte[n]; IntPtr r;
+    return ReadProcessMemory(h, new IntPtr(at), b, new IntPtr(n), out r) && r.ToInt64() == n ? b : null;
+  }
+  static string Cwd(int pid) {
+    IntPtr h = OpenProcess(0x1010, false, pid);
+    if (h == IntPtr.Zero) return null;
+    try {
+      IntPtr wow; int r; int len; long buf;
+      if (NtQueryInformationProcess(h, 26, out wow, IntPtr.Size, out r) != 0) return null;
+      if (wow != IntPtr.Zero) {
+        byte[] p = Read(h, wow.ToInt64() + 0x10, 4); if (p == null) return null;
+        byte[] s = Read(h, BitConverter.ToUInt32(p, 0) + 0x24L, 8); if (s == null) return null;
+        len = BitConverter.ToUInt16(s, 0); buf = BitConverter.ToUInt32(s, 4);
+      } else {
+        Basic b = new Basic();
+        if (NtQueryInformationProcess(h, 0, ref b, Marshal.SizeOf(b), out r) != 0) return null;
+        byte[] p = Read(h, b.Peb.ToInt64() + 0x20, 8); if (p == null) return null;
+        byte[] s = Read(h, BitConverter.ToInt64(p, 0) + 0x38, 16); if (s == null) return null;
+        len = BitConverter.ToUInt16(s, 0); buf = BitConverter.ToInt64(s, 8);
+      }
+      if (len == 0 || len % 2 != 0) return null;
+      byte[] t = Read(h, buf, len);
+      return t == null ? null : Encoding.Unicode.GetString(t);
+    } finally { CloseHandle(h); }
+  }
+  public static string[] All() {
+    List<string> o = new List<string>();
+    if (IntPtr.Size != 8) return o.ToArray();
+    foreach (Process p in Process.GetProcesses()) {
+      try { string d = Cwd(p.Id); if (d != null) o.Add(p.Id + "\\t" + d); } catch { } finally { p.Dispose(); }
+    }
+    return o.ToArray();
+  }
+}
+'@
+[CodedenCwd]::All()`;
+
+/** Parse the `pid<TAB>cwd` lines `WINDOWS_CWDS` prints into pid -> cwd. */
+export function parseWindowsCwds(output: string): Map<number, string> {
+  const cwds = new Map<number, string>();
+  for (const line of output.split(/\r?\n/)) {
+    const tab = line.indexOf("\t");
+    const pid = Number(line.slice(0, tab));
+    const cwd = line.slice(tab + 1);
+    if (tab > 0 && Number.isInteger(pid) && cwd) cwds.set(pid, cwd);
+  }
+  return cwds;
+}
+
+/** PowerShell arguments that run `script` as is (no quoting to get wrong). */
+function powershell(script: string): string[] {
+  const encoded = Buffer.from(script, "utf16le").toString("base64");
+  return ["-NoProfile", "-NonInteractive", "-EncodedCommand", encoded];
+}
+
 async function windowsTable(): Promise<ProcessRow[]> {
   const args = ["-NoProfile", "-NonInteractive", "-Command", WINDOWS_QUERY];
-  return parseWindowsTable(await run("powershell.exe", args));
+  const [rows, cwds] = await Promise.all([
+    run("powershell.exe", args).then(parseWindowsTable),
+    // Best effort, like lsof: without them processes are still matched by executable and
+    // command line.
+    run("powershell.exe", powershell(WINDOWS_CWDS))
+      .then(parseWindowsCwds)
+      .catch(() => new Map<number, string>()),
+  ]);
+  return rows.map((r) => ({ ...r, cwd: cwds.get(r.pid) ?? null }));
 }
 
 /** Linux: everything from /proc (entries of other users' processes may be unreadable). */

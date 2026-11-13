@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import {
   type FactoryDigest,
   type FactoryItem,
@@ -41,6 +42,9 @@ export const DONE_STAGES: FactoryItemStage[] = [
  * writes append `factory.*` events (projected in the same transaction).
  */
 export class FactoryStore {
+  /** When each project's loop last ticked (see `saveTick`); not persisted. */
+  private readonly lastTicks = new Map<string, string>();
+
   constructor(
     private readonly db: Db,
     private readonly events: EventStore,
@@ -79,12 +83,33 @@ export class FactoryStore {
     );
   }
 
+  /**
+   * Save the loop; writes only when something besides its stamps (`lastTickAt`, `updatedAt`)
+   * changed. The log is never pruned (§6) and every loop event refreshes the open factory
+   * panels, while an idle factory ticks every 30 s.
+   */
   saveLoop(loop: FactoryLoop): FactoryLoop {
+    const current = this.loop(loop.projectId);
+    if (current && sameLoop(current, loop)) return { ...loop, updatedAt: current.updatedAt };
     const next = { ...loop, updatedAt: new Date().toISOString() };
     this.events.append([
       { type: "factory.loop.updated", sessionId: null, payload: { loop: next } },
     ]);
     return next;
+  }
+
+  /**
+   * End a tick: remember when it ran and save the loop if the tick changed it. A tick that
+   * changed nothing saves nothing, so the time is kept in memory for the panel's "last check".
+   */
+  saveTick(loop: FactoryLoop, at: string): FactoryLoop {
+    this.lastTicks.set(loop.projectId, at);
+    return this.saveLoop({ ...loop, lastTickAt: at });
+  }
+
+  /** When the project's loop last ticked in this process (none yet after a restart). */
+  lastTick(projectId: string): string | undefined {
+    return this.lastTicks.get(projectId);
   }
 
   item(id: string): FactoryItem | undefined {
@@ -226,6 +251,13 @@ const ITEM_DEFAULTS = {
 /** An item as read from the projection, with the fields newer versions added. */
 export function withItemDefaults(item: FactoryItem): FactoryItem {
   return { ...ITEM_DEFAULTS, ...item };
+}
+
+/** Same loop apart from the stamps a save sets; key order and `undefined` fields don't count. */
+function sameLoop(a: FactoryLoop, b: FactoryLoop): boolean {
+  const content = ({ lastTickAt: _tick, updatedAt: _saved, ...rest }: FactoryLoop) =>
+    JSON.parse(JSON.stringify(rest)) as unknown;
+  return isDeepStrictEqual(content(a), content(b));
 }
 
 const TUNING_DEFAULTS = FactoryTuning.parse({});

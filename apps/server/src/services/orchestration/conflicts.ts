@@ -65,6 +65,7 @@ export class ConflictService {
       kind: "conflict",
       status: "open",
       priority: "normal",
+      notify: "needs_you",
       title: `Already running: ${purpose}`,
       body: first
         ? `${first.workKey} (${first.status}) ${first.purpose}${first.progress ? ` · ${first.progress.text}` : ""}`

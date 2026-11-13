@@ -145,9 +145,8 @@ export function ProjectGroup({
               <House className="size-3.5" />
             </Link>
             <Link
-              to="/projects/$projectId"
+              to="/projects/$projectId/new"
               params={{ projectId: project.id }}
-              search={{ newSession: true }}
               className="flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-sidebar-border hover:text-foreground"
               title="New session"
             >

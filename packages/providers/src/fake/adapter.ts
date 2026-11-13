@@ -4,7 +4,12 @@ import type {
   ProviderStatus,
   SessionOptions,
 } from "@codeden/contracts";
-import { type ProviderAdapter, type ProviderSession, withFork } from "../adapter";
+import {
+  type ForkConversationOptions,
+  type ProviderAdapter,
+  type ProviderSession,
+  withFork,
+} from "../adapter";
 import { FakeSession } from "./session";
 
 /** Options for the scripted Fake provider. */
@@ -81,10 +86,13 @@ export class FakeProvider implements ProviderAdapter {
     return new FakeSession(await withFork(this, opts), this.options);
   }
 
-  /** A fork gets a conversation of its own, named after the one it copies. */
-  async forkConversation(resumeToken: string): Promise<string> {
+  /**
+   * A fork gets a conversation of its own, named after the one it copies and, with `upTo`,
+   * the turn it ends with (`<token>:fork-<n>@<turn>`).
+   */
+  async forkConversation(resumeToken: string, opts?: ForkConversationOptions): Promise<string> {
     this.forks += 1;
-    return `${resumeToken}:fork-${this.forks}`;
+    return `${resumeToken}:fork-${this.forks}${opts?.upTo ? `@${opts.upTo}` : ""}`;
   }
 
   private forks = 0;

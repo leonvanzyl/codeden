@@ -57,7 +57,7 @@ The app uses the same data folder as `npx codeden`: `~/.codeden` (or `CODEDEN_HO
 
 Then the window opens on the UI, already signed in. A first launch shows the same setup checklist as the browser; it reports Node.js as "built into the app".
 
-The app's server and runner keep running between windows, so they may have started before you installed or fixed a CLI. You don't need to restart anything. **Re-check** on the setup checklist looks again: on Windows it first adds new folders from your user and system `Path`, and it always looks in the installers' own folders, such as `%USERPROFILE%\.local\bin` for the native Claude Code installer. A copy that is found but doesn't run shows as **installed but broken**, with its path. See [Troubleshooting](troubleshooting.md#claude-code-or-codex-is-installed-but-broken).
+The app's server and runner keep running between windows, so they may have started before you installed or fixed a CLI. You don't need to restart anything. **Re-check** on the setup checklist looks again: on Windows it first adds new folders from your user and system `Path`, and it always looks in the installers' own folders, such as `%USERPROFILE%\.local\bin` for the native Claude Code installer. A copy that is found but doesn't run shows as **installed but broken**, with its path. See [Troubleshooting](troubleshooting.md#claude-code-codex-or-opencode-is-installed-but-broken).
 
 ## The window and the tray
 
@@ -65,7 +65,7 @@ The app's server and runner keep running between windows, so they may have start
 - **The tray** shows how many agents are running and how many are waiting on you, plus the inbox count, and has **Open the inbox**, the next update step when there is one, and **Quit CodeDen**.
 - **Quit** really quits: it closes the window and the server. Like stopping `codeden` with Ctrl+C, the **runner keeps running**, so agents in the middle of a turn finish it, and the next launch picks everything up again. Open session browsers move to the runner's own browser first (see [The session browser](#the-session-browser)). To stop the agents too, run `npx codeden stop` (or stop the sessions first).
 - **Badge.** The number of things waiting on you appears on the app icon (the dock on macOS, a dot on the taskbar button on Windows, the launcher on Linux desktops that support it).
-- **Notifications** are the system's own (Settings > Notifications > System notifications). Clicking one brings the window to the front on the right page.
+- **Notifications** are the system's own (Settings > Notifications > System notifications). Clicking one brings the window to the front on the right page. A burst of updates is one notification that updates in place rather than a stack.
 - **Keep awake.** While an agent is running, CodeDen keeps the computer from going to sleep (the screen can still turn off). Settings > App > Keep the computer awake.
 - **Open at login** (Windows, macOS): Settings > App > Open at login starts CodeDen in the tray when you log in.
 - **Adding a project** uses the system folder picker. "Browse folders in CodeDen instead" opens the in-app browser if you prefer it.

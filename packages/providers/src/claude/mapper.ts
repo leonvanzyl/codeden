@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { AgentEvent, ErrorInfo, Item, Usage } from "@codeden/contracts";
 import { str } from "../util/text";
+import { toProviderCommands } from "./commands";
 import { rejectedResetsAt, resultError, type TurnErrorSignals } from "./errors";
 import { apiRetryNotice, compactedNotice, compactFailedNotice, compactingNotice } from "./notices";
 import { StreamAssembler } from "./stream";
@@ -26,6 +27,11 @@ export interface MapperOptions {
   cwd: string;
   emit: (event: AgentEvent) => void;
   newId?: () => string;
+  /**
+   * A subagent finished with tokens counted from its streamed messages, whose output figures
+   * are not final: the session can read its transcript and pass it to `correctSubagentUsage`.
+   */
+  onSubagentFinished?: (toolUseId: string, agentId: string) => void;
 }
 
 /**
@@ -56,13 +62,25 @@ export class ClaudeEventMapper {
   private retryNoticeId: string | undefined;
   /** What the current turn said about a failure, for classifying it (`errors.ts`). */
   private signals: TurnErrorSignals = {};
+  /**
+   * The `uuid` of the current root turn's last main-chain transcript message (an `assistant`
+   * or `user` message without `parent_tool_use_id`): the turn's fork point, where
+   * `forkSession({ upToMessageId })` ends a copy that keeps this turn and no later one.
+   */
+  private lastChainUuid: string | undefined;
+  /** The `/` command list last reported, so an unchanged list isn't sent again. */
+  private commandsKey: string | undefined;
 
   constructor(opts: MapperOptions) {
     this.rootThreadId = `${opts.sessionId}:thread-root`;
     this.emit = opts.emit;
     this.newId = opts.newId ?? randomUUID;
-    this.subagents = new SubagentTracker(opts.sessionId, this.emit, this.newId, (ctx, ok) =>
-      this.tools.finishTurn(ctx, ok),
+    this.subagents = new SubagentTracker(
+      opts.sessionId,
+      this.emit,
+      this.newId,
+      (ctx, ok) => this.tools.finishTurn(ctx, ok),
+      opts.onSubagentFinished,
     );
     this.tools = new ToolTracker(
       opts.cwd,
@@ -87,6 +105,18 @@ export class ClaudeEventMapper {
     return this.claudeSessionId;
   }
 
+  /**
+   * Report the session's `/` commands (from `supportedCommands()` or a `commands_changed`
+   * push) as `session.updated { commands }`, when they differ from the last list reported.
+   */
+  reportCommands(commands: unknown): void {
+    const list = toProviderCommands(commands);
+    const key = JSON.stringify(list);
+    if (key === this.commandsKey) return;
+    this.commandsKey = key;
+    this.emit({ type: "session.updated", commands: list });
+  }
+
   /** Emit `thread.started` for the root thread (once, at session open). */
   start(resumeToken?: string): void {
     this.emit({ type: "thread.started", thread: { id: this.rootThreadId } });
@@ -103,6 +133,7 @@ export class ClaudeEventMapper {
     this.rootTurnId = turnId;
     this.turnBaseline = this.queryTotal;
     this.signals = {};
+    this.lastChainUuid = undefined;
     this.emit({ type: "turn.started", threadId: this.rootThreadId, turnId });
     return turnId;
   }
@@ -126,6 +157,14 @@ export class ClaudeEventMapper {
     return this.tools.ctx(toolUseId) ?? this.rootCtx();
   }
 
+  /**
+   * A finished subagent's transcript (`getSubagentMessages`): its calls' final token counts
+   * replace the streamed ones, and the card is sent again when that changes it.
+   */
+  correctSubagentUsage(toolUseId: string, transcript: readonly unknown[]): void {
+    this.subagents.correctUsage(toolUseId, transcript);
+  }
+
   /** Emit an item event in a context. */
   item(
     ctx: ThreadCtx,
@@ -144,9 +183,11 @@ export class ClaudeEventMapper {
         return;
       case "assistant":
         this.onAssistant(msg);
+        this.noteChainMessage(msg);
         return;
       case "user":
         this.onUser(msg);
+        this.noteChainMessage(msg);
         return;
       case "system":
         this.onSystem(msg);
@@ -175,6 +216,17 @@ export class ClaudeEventMapper {
 
   // ------------------------------------------------------------ full messages
 
+  /**
+   * Keep a root turn's latest main-chain message as its fork point. Subagents' messages don't
+   * count, nor do meta or synthetic ones, which the transcript read that confirms a fork point
+   * (`getSessionMessages`) may leave out.
+   */
+  private noteChainMessage(msg: Raw): void {
+    if (msg.parent_tool_use_id || !this.rootTurnId || msg.isMeta || msg.isSynthetic) return;
+    const uuid = str(msg, "uuid");
+    if (uuid) this.lastChainUuid = uuid;
+  }
+
   private onAssistant(msg: Raw): void {
     const message = (msg.message ?? {}) as Raw;
     const ctx = this.ctxFor(msg.parent_tool_use_id);
@@ -182,6 +234,8 @@ export class ClaudeEventMapper {
     const messageId = str(message, "id") ?? this.newId();
     if (isRoot)
       this.contextTokens = contextTokensFromMessageUsage(message.usage) ?? this.contextTokens;
+    else if (typeof msg.parent_tool_use_id === "string")
+      this.subagents.onAssistant(msg.parent_tool_use_id, msg);
     const content = Array.isArray(message.content) ? (message.content as Block[]) : [];
     for (const block of content) {
       if (
@@ -279,6 +333,8 @@ export class ClaudeEventMapper {
           model: this.model,
         });
       }
+    } else if (msg.subtype === "commands_changed") {
+      this.reportCommands(msg.commands);
     } else if (msg.subtype === "task_started") {
       this.subagents.onTaskStarted(msg);
     } else if (msg.subtype === "task_notification") {
@@ -348,12 +404,14 @@ export class ClaudeEventMapper {
     this.tools.finishTurn(ctx, outcome.type === "completed");
     this.rootTurnId = undefined;
     this.interruptRequested = false;
+    const end = { ...ctx, ...(this.lastChainUuid ? { forkPoint: this.lastChainUuid } : {}) };
+    this.lastChainUuid = undefined;
     if (outcome.type === "completed") {
-      this.emit({ type: "turn.completed", ...ctx, stopReason: outcome.stopReason });
+      this.emit({ type: "turn.completed", ...end, stopReason: outcome.stopReason });
     } else if (outcome.type === "failed") {
-      this.emit({ type: "turn.failed", ...ctx, error: outcome.error });
+      this.emit({ type: "turn.failed", ...end, error: outcome.error });
     } else {
-      this.emit({ type: "turn.interrupted", ...ctx, reason: outcome.reason });
+      this.emit({ type: "turn.interrupted", ...end, reason: outcome.reason });
     }
   }
 

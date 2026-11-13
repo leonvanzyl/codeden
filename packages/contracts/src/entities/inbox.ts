@@ -23,12 +23,29 @@ export type InboxItemKind = z.infer<typeof InboxItemKind>;
 export const InboxItemStatus = z.enum(["open", "resolved", "dismissed"]);
 export type InboxItemStatus = z.infer<typeof InboxItemStatus>;
 
+/**
+ * Who an inbox item is for, set by the server when it raises the item (§11.1). Settings →
+ * Notifications chooses which categories raise a toast and a desktop notification; every item
+ * lands in the inbox either way.
+ * - `needs_you`: the user should act: approvals and questions, a PR only a person merges, a
+ *   factory decision flagged `needsHuman`, a start conflict, a budget alert.
+ * - `failure`: something broke and needs a person: a failed run of a session the factory doesn't
+ *   look after, a paused factory loop, a regression, a worktree that couldn't be removed.
+ * - `factory`: the factory's own activity, which it handles itself: its decisions, PRs it
+ *   reviews and merges, its sessions' failures, stopped items, the daily digest.
+ * - `automation`: automation results and triage decisions.
+ */
+export const InboxNotify = z.enum(["needs_you", "failure", "factory", "automation"]);
+export type InboxNotify = z.infer<typeof InboxNotify>;
+
 /** One thing waiting on the user. Links to its session, issue and PR and is answerable in place. */
 export const InboxItem = z.object({
   id: Id,
   kind: InboxItemKind,
   status: InboxItemStatus,
   priority: z.enum(["low", "normal", "high"]).default("normal"),
+  /** Which notification category it raises (items stored before it existed read as `needs_you`). */
+  notify: InboxNotify.default("needs_you"),
   title: z.string(),
   body: z.string().nullable(),
   projectId: Id.nullable(),

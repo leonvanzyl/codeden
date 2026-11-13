@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { SessionsList } from "@/components/project/lists";
 import type { RowMenuAction, RowMenuEntry } from "@/components/shell/sidebar/row-menu";
 import { sessionMenuEntries } from "@/components/shell/sidebar/session-menu";
+import { forkableTurn } from "@/components/thread/fork-from-here";
 import { createMockClient } from "@/lib/api/mock";
 import { sessions as fixtureSessions } from "@/lib/api/mock/fixtures/sessions";
 import {
@@ -12,6 +13,7 @@ import {
   forkSupported,
   type SessionActions,
   sessionLink,
+  useForkSession,
   useSessionActions,
 } from "@/lib/session-actions";
 import { sessionCounts, sessionsInView } from "@/lib/session-filter";
@@ -36,6 +38,18 @@ const session = (id: string) => {
 /** Renders the hook and reports its actions. */
 function Probe({ target, onActions }: { target: Session; onActions: (a: SessionActions) => void }) {
   onActions(useSessionActions(target));
+  return <span>ready</span>;
+}
+
+/** Renders `useForkSession` and reports its `fork`. */
+function ForkProbe({
+  target,
+  onFork,
+}: {
+  target: Session;
+  onFork: (fork: (turnId?: string) => void) => void;
+}) {
+  onFork(useForkSession(target).fork);
   return <span>ready</span>;
 }
 
@@ -197,6 +211,58 @@ describe("useSessionActions", () => {
         expect.objectContaining({ id: "loading-1" }),
       ),
     );
+  });
+
+  it("forks from a turn, saying the copy ends with it", async () => {
+    toast.success.mockClear();
+    const client = createMockClient();
+    const fork = vi.spyOn(client, "forkSession");
+    let fromTurn: ((turnId?: string) => void) | undefined;
+    renderWithClient(
+      <ForkProbe
+        target={session("s-search")}
+        onFork={(f) => {
+          fromTurn = f;
+        }}
+      />,
+      client,
+      { withRouter: true },
+    );
+    await screen.findByText("ready");
+    fromTurn?.("turn-2");
+    await waitFor(() => expect(fork).toHaveBeenCalledWith("s-search", { turnId: "turn-2" }));
+    await waitFor(() =>
+      expect(toast.success).toHaveBeenCalledWith(
+        "Forked into a new session",
+        expect.objectContaining({ description: expect.stringMatching(/after that turn/) }),
+      ),
+    );
+  });
+
+  it("offers Fork from here on root turns that are the latest or recorded a fork point", () => {
+    const s = { ...session("s-search"), rootThreadId: "t-root" };
+    const row = (patch: { threadId?: string; forkPoint?: string | null; latest?: boolean }) =>
+      ({
+        key: "end:u1",
+        type: "turn-end",
+        filesChanged: 0,
+        durationMs: null,
+        latest: patch.latest ?? false,
+        turn: {
+          id: "u1",
+          threadId: patch.threadId ?? "t-root",
+          status: "completed",
+          startedAt: "2026-11-12T10:00:00.000Z",
+          completedAt: "2026-11-12T10:01:00.000Z",
+          error: null,
+          forkPoint: patch.forkPoint ?? null,
+        },
+      }) as const;
+    expect(forkableTurn(s, row({ forkPoint: "fp-1" }))).toBe(true);
+    expect(forkableTurn(s, row({ latest: true }))).toBe(true);
+    // An earlier turn without a fork point, and a subagent's turn, can't be forked from.
+    expect(forkableTurn(s, row({}))).toBe(false);
+    expect(forkableTurn(s, row({ threadId: "t-child", forkPoint: "fp-1" }))).toBe(false);
   });
 
   it("stops only sessions that are working or waiting", () => {

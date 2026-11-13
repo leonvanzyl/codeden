@@ -9,6 +9,7 @@ import { QuestionCard } from "./cards/question-card";
 import { SharedArtifactCard, sharedArtifactOf } from "./cards/shared-artifact-card";
 import { ErrorCard, NoticeCard, PlanCard, TodoCard } from "./cards/simple-cards";
 import { SubagentCard } from "./cards/subagent-card";
+import { ForkFromHere } from "./fork-from-here";
 import { AssistantMessage, UserMessage } from "./messages";
 import { WorkGroup } from "./work/work-group";
 
@@ -50,7 +51,7 @@ function TurnFooter({
   if (row.filesChanged > 0) parts.push(`${plural(row.filesChanged, "file")} changed`);
   if (cost) parts.push(cost);
   return (
-    <div className="flex items-center gap-3 py-1 text-3xs text-muted-foreground/70">
+    <div className="group relative flex items-center gap-3 py-1 text-3xs text-muted-foreground/70">
       <div className="h-px flex-1 bg-border/70" />
       {turn.status === "failed" ? (
         <span className="flex items-center gap-1 text-status-failed">
@@ -64,6 +65,7 @@ function TurnFooter({
         <span>{parts.join(" · ") || "Done"}</span>
       )}
       <div className="h-px flex-1 bg-border/70" />
+      <ForkFromHere sessionId={sessionId} row={row} />
     </div>
   );
 }
@@ -84,7 +86,14 @@ export function TimelineRowView({
     case "assistant":
       return <AssistantMessage item={row.item} streaming={row.streaming} />;
     case "work":
-      return <WorkGroup entries={row.entries} live={row.live} focusItemId={focusItemId} />;
+      return (
+        <WorkGroup
+          sessionId={sessionId}
+          entries={row.entries}
+          live={row.live}
+          focusItemId={focusItemId}
+        />
+      );
     case "working":
       return <Working startedAt={row.turn.startedAt} />;
     case "turn-end":

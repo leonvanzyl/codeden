@@ -34,10 +34,12 @@ import type {
   Settings,
   SettingsPatch,
   SetupStatus,
+  SlashCommand,
   Snapshot,
   SpeechSummaryResponse,
   StartSessionRequestInit,
   StartSessionResponse,
+  ToolOutputResponse,
   TranscriptMessage,
   TranscriptSearchResponse,
   UiServerMessage,
@@ -59,7 +61,7 @@ import type {
 } from "./feature-apis";
 import type { AuthApi, NetworkApi } from "./network-api";
 import type { QueueApi } from "./queue-api";
-import type { MentionCandidate, OpenTerminalOptions, SlashCommand, TerminalChannel } from "./types";
+import type { MentionCandidate, OpenTerminalOptions, TerminalChannel } from "./types";
 import type { UpdatesApi } from "./updates-api";
 
 /** How a message is delivered while a turn is running. */
@@ -113,6 +115,11 @@ export interface CodeDenClient {
 
   // Sessions and turns.
   getSessionDetail(sessionId: string): Promise<SessionDetail>;
+  /**
+   * The output the server stored for a tool call, for when the transcript's copy was cut
+   * (`output.truncated`): large outputs are fetched on demand, not pushed (§6).
+   */
+  getToolOutput(sessionId: string, itemId: string): Promise<ToolOutputResponse>;
   sendMessage(sessionId: string, input: UserInputInit, mode: SendMode): Promise<void>;
   interrupt(sessionId: string): Promise<void>;
   respond(sessionId: string, requestId: string, response: RuntimeResponse): Promise<void>;
@@ -195,7 +202,12 @@ export interface CodeDenClient {
   listFiles(sessionId: string): Promise<SessionFileList>;
   readFile(sessionId: string, path: string): Promise<SessionFileContent>;
   searchMentions(sessionId: string, query: string): Promise<MentionCandidate[]>;
+  /** The session's `/` commands and skills for the composer, sorted by name. */
   listSlashCommands(sessionId: string): Promise<SlashCommand[]>;
+  /** `@` mention candidates from the project folder, for the New session draft. */
+  searchProjectMentions(projectId: string, query: string): Promise<MentionCandidate[]>;
+  /** The `/` commands and skills `provider` would load in the project (the New session draft). */
+  listProjectSlashCommands(projectId: string, provider: string): Promise<SlashCommand[]>;
   openTerminal(opts: OpenTerminalOptions): TerminalChannel;
   /** The session browser: live viewer socket, tabs, navigation, dev servers (§12.2). */
   readonly browser: BrowserApi;

@@ -16,7 +16,7 @@ Everything an agent touches sits next to its chat. Open the right panel with **C
 - Streaming Markdown with syntax-highlighted code.
 - Tool calls are grouped into collapsible **work blocks** ("Ran 2 commands and called 1 tool") with live command output.
 - **Plans and todos**, **subagents**, **approvals** and **questions** get their own cards. Approvals and questions are answered right in the card (or from the inbox).
-- **Subagents** run as child threads. Their card shows live status and, once the subagent finishes, the tokens, tool calls and time it used (e.g. `48.2k tokens · 23 tool calls · 1m 12s`) when the provider reports them; click it to open the child thread in a side panel. Approvals raised inside a subagent surface in the parent and in the inbox.
+- **Subagents** run as child threads. Their card shows live status and, once the subagent finishes, what it cost and the tokens, tool calls and time it used (e.g. `≈ $0.42 · 48.2k tokens · 23 tool calls · 1m 12s`) when the provider reports them. Hover the figures for the cost per model, split into input, output, cache reads and cache writes. The cost is priced like the session's: `≈` marks an estimate from list prices, and with a subscription login it is the API-equivalent cost. It is part of the turn's cost, not added on top. Click the card to open the child thread in a side panel. Approvals raised inside a subagent surface in the parent and in the inbox.
 - Each turn's footer shows how long it worked and, where available, its cost and tokens. The session header shows the running total.
 
 ## The composer
@@ -24,7 +24,7 @@ Everything an agent touches sits next to its chat. Open the right panel with **C
 - Text, pasted images and file attachments.
 - `@` to mention files, `/` for commands and skills.
 - Pickers for **provider**, **model** and **reasoning effort**, plus the session's **Permissions** (Read-only, Supervised, Auto or Full; see [Security](security.md#permissions)). Model and effort can be changed mid-session; they apply from the next turn. Permissions can be changed too: the level is saved on the session and applies from the next tool call where the provider allows (Claude), otherwise from the next turn (Codex).
-- **Plan** (agent sessions, on providers with a plan mode: Claude Code today): the agent explores and proposes a plan before it changes anything. Turn it on in the new-session dialog or the composer. The plan arrives as a card: **Approve plan** and the agent implements it with the session's permissions, or **Keep planning** with a note on what to change. While it plans, edits and writing commands are refused (see [Security](security.md#plan-mode)).
+- **Plan** (agent sessions, on providers with a plan mode: Claude Code today): the agent explores and proposes a plan before it changes anything. Turn it on in the composer, in a new session before its first message or any time after. The plan arrives as a card: **Approve plan** and the agent implements it with the session's permissions, or **Keep planning** with a note on what to change. While it plans, edits and writing commands are refused (see [Security](security.md#plan-mode)).
 - **Your own models in the picker:** star models to pin them to Favourites, hide the ones you never use, and add **custom model ids** a provider doesn't list yet (Settings › Providers › Custom models). A custom id is marked *Custom*, gets the effort levels of the provider's default model, and is sent to the provider unchanged; if the provider doesn't know it, the turn fails with the provider's error.
 - **While a turn runs:** Enter **queues** your message for when it ends. With providers that support it, you can **steer** instead, injecting the message into the running turn.
 - **Stop** the running turn with **Ctrl/Cmd+.**.
@@ -47,6 +47,17 @@ At the end of every turn the runner snapshots the worktree into a hidden ref, `r
 
 The **git bar** at the top shows the branch, ahead/behind and the uncommitted count, with **Commit** and **Push**.
 
+### Comment on lines
+
+Review the agent's changes line by line and send your notes back in one go:
+
+1. **Hover a line** in the Diff panel and click the **+** by its line number. To comment on several lines, drag the **+** over them, or pick them by their line numbers first (Shift+click extends the range) and then click **+**.
+2. **Write the comment** in the box that opens under the lines, then click **Comment** (or press **Ctrl/Cmd+Enter**). **Esc** cancels. Saved comments stay under their lines with **Edit** and **Delete**.
+3. **Collect as many as you like**, across files. The bar under the toolbar counts them. They stay while you switch to another panel tab or session, and only go when you send or discard them. A comment shows in the diff view you wrote it in (all changes, uncommitted or one turn); the count covers every view.
+4. **Send to agent** turns them into one message: for each comment, the file, the side and lines ("new lines 37–39" in the changed file, "old line 12" in the file before the change), the quoted diff lines and your text. It's sent right away, or queued behind the running turn like any message (you can still edit it in the queue). While it's on its way, the comments in it read **Sending…** and can't be changed, even if you leave the panel; comments you start meanwhile stay for your next review. **Discard** throws the drafts away.
+
+Drafts are kept in the app's memory, like the composer's draft, so reloading the page clears them.
+
 ## Fork a session
 
 Want to try a second approach without losing the first? Open the session's **⋯** menu and choose **Fork session**, or use **Fork this session** in the command palette (**Ctrl/Cmd+K**). CodeDen starts a new session in the same project:
@@ -58,6 +69,15 @@ Want to try a second approach without losing the first? Open the session's **⋯
 - **Original unchanged.** Nothing about the original session changes. Both can carry on side by side.
 
 The fork's header shows **Fork of …** with a link back, and **Details** shows where it was forked from. Fork is offered when the provider supports it (Claude and Codex do). It's available once the session has had a turn and while no turn is running; while a turn runs, the menu says why it's disabled.
+
+### Fork from an earlier turn
+
+Did the agent go the wrong way a few turns ago? Hover the line under that turn's last message (where it says how long the turn took) and choose **Fork from here**. On a touch screen it's always shown. The new session is like any fork, except that:
+
+- **The conversation ends with that turn.** The agent remembers everything up to and including it, and none of the turns after it.
+- **The code is as it was right after that turn**, uncommitted changes included, in a new worktree and branch.
+
+The original session is unchanged. The fork's empty transcript and **Details** say which turn it was forked from. You can fork from turns that ran in this version of CodeDen or later; for older turns, only the latest one offers it, and forking from it is the same as **Fork session**. If the agent's own record of the conversation changed since that turn (it was replaced or deleted), CodeDen says it can't fork from there and creates nothing, rather than copying the whole conversation.
 
 ## Files
 
@@ -93,7 +113,8 @@ The runner launches one Chromium (your installed **Edge** or **Chrome**; Edge fi
 |---|---|
 | `browser_navigate` | Open a URL (starts the browser on first use) |
 | `browser_snapshot` | An accessibility snapshot with element refs |
-| `browser_click`, `browser_type`, `browser_press` | Act on a ref, or press a key or chord |
+| `browser_click`, `browser_type`, `browser_press` | Act on a ref, or press a key or chord. Without a ref, `browser_type` types into whatever has focus |
+| `browser_mouse` | Click, hover, drag or scroll at a point, for canvases, maps, drag handles, sliders and hover menus that have no useful ref. Points are the page's CSS pixels from the top-left corner of the visible area: the pixels of a viewport `browser_screenshot`, not of a `fullPage` or element (`ref`) one. Points outside the visible area are refused |
 | `browser_screenshot` | Viewport, full page or one element; `share: true` posts it to the chat |
 | `browser_logs` | Console and network entries |
 | `browser_wait` | For a selector, text or network idle |

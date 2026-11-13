@@ -2,6 +2,7 @@ import {
   type ChecksState,
   type GitHubIssueRef,
   type GitHubPrRef,
+  type GithubAuthorAssociation,
   type GithubIssue,
   githubPrId,
   type Mergeable,
@@ -9,6 +10,7 @@ import {
 import { errorMessage } from "../errors";
 import { EVIDENCE_HEADING } from "../github/evidence";
 import type { GithubService } from "../github/github-service";
+import { authorAssociation } from "../github/graphql";
 
 /** A pull request as the merge checks read it. */
 export interface FactoryPr {
@@ -43,6 +45,13 @@ export interface PrEvidence {
   testOutput: boolean;
 }
 
+/** Who opened an issue, fresh from GitHub. */
+export interface IssueAuthor {
+  login: string | null;
+  /** Their relation to the repository (`owner`, `member` and `collaborator` have write access). */
+  association: GithubAuthorAssociation;
+}
+
 /**
  * What the factory needs from GitHub (§9), as a port so tests can run the loop against a
  * scripted GitHub. `GithubFactoryPort` implements it over `GithubService`.
@@ -51,6 +60,8 @@ export interface FactoryGithub {
   isGithubProject(projectId: string): boolean;
   /** The login of the account CodeDen uses on GitHub (always trusted); null when unknown. */
   viewerLogin(): Promise<string | null>;
+  /** An issue's author and their association with the repository (one API call). */
+  issueAuthor(projectId: string, number: number): Promise<IssueAuthor>;
   createIssue(
     projectId: string,
     req: { title: string; body: string; labels: string[] },
@@ -113,6 +124,19 @@ export class GithubFactoryPort implements FactoryGithub {
     // Remember a failure only briefly, so trust comes back as soon as GitHub does.
     this.login = { value, at: value ? Date.now() : Date.now() - LOGIN_TTL_MS + 30_000 };
     return value;
+  }
+
+  async issueAuthor(projectId: string, number: number): Promise<IssueAuthor> {
+    const repo = this.github.githubRepo(projectId);
+    const data = await this.github.client.run(
+      async (o) =>
+        (await o.rest.issues.get({ owner: repo.owner, repo: repo.repo, issue_number: number }))
+          .data,
+    );
+    return {
+      login: data.user?.login ?? null,
+      association: authorAssociation(data.author_association),
+    };
   }
 
   isGithubProject(projectId: string): boolean {

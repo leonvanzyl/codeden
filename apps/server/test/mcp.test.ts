@@ -80,6 +80,7 @@ describe("CodeDen MCP endpoint", () => {
       "browser_click",
       "browser_type",
       "browser_press",
+      "browser_mouse",
       "browser_screenshot",
       "browser_logs",
       "browser_wait",
@@ -87,6 +88,11 @@ describe("CodeDen MCP endpoint", () => {
       "browser_open_dev_server",
     ]);
     expect(tools[0]?._meta).toEqual({ "anthropic/alwaysLoad": true });
+    // A flat object schema, so every provider accepts it (no top-level anyOf/oneOf).
+    const mouse = tools.find((t) => t.name === "browser_mouse")?.inputSchema;
+    expect(mouse).toMatchObject({ type: "object", required: ["action", "x", "y"] });
+    expect(mouse).not.toHaveProperty("anyOf");
+    expect(mouse).not.toHaveProperty("oneOf");
     await client.close();
 
     const pmToken = h.server.services.mcpTokens.mint({
@@ -159,6 +165,35 @@ describe("CodeDen MCP endpoint", () => {
     expect(d.followups?.suggestions.map((s) => s.prompt)).toEqual(["Add docs", "Run the linter"]);
     const artifacts = h.server.services.artifacts.list({ sessionId });
     expect(artifacts[0]).toMatchObject({ kind: "image", mediaType: "image/png" });
+  });
+
+  it("checks browser_mouse fields per action, then sends valid calls to the session browser", async () => {
+    const client = await connect(token);
+    const call = (args: Record<string, unknown>) =>
+      client.callTool({ name: "browser_mouse", arguments: args });
+    const refused = [
+      { action: "drag", x: 1, y: 1, toX: 5 }, // no toY
+      { action: "scroll", x: 1, y: 1 }, // no delta
+      { action: "hover", x: 1, y: 1, clickCount: 2 }, // a click field
+      { action: "click", x: -1, y: 1 },
+    ];
+    for (const args of refused) {
+      const result = await call(args);
+      expect(result.isError, JSON.stringify(args)).toBe(true);
+      expect(text(result)).not.toMatch(/No browser for session/);
+    }
+    // A valid call reaches the runner, which has no browser open for this session.
+    const valid = await call({ action: "click", x: 10, y: 20 });
+    expect(valid.isError).toBe(true);
+    expect(text(valid)).toMatch(/No browser for session/);
+    // Typing without a ref is capped; with a ref it is not.
+    const long = await client.callTool({
+      name: "browser_type",
+      arguments: { text: "x".repeat(2_001) },
+    });
+    expect(long.isError).toBe(true);
+    expect(text(long)).toMatch(/at most 2000 characters/);
+    await client.close();
   });
 
   it("asks the user and returns the answer given within the wait", async () => {

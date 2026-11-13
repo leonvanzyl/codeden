@@ -6,7 +6,7 @@ export interface ProcessRow {
   exe: string | null;
   /** The full command line, when readable. */
   commandLine: string | null;
-  /** Working directory (POSIX only; Windows doesn't expose it to other processes). */
+  /** Working directory, when readable (on Windows, read from the process's memory). */
   cwd: string | null;
   /** When the process started (ms since the epoch), where the platform reports it. */
   startedAt: number | null;
@@ -61,8 +61,8 @@ export function commandLineNamesInside(
 }
 
 /**
- * Whether a process runs from or in `dir`: its executable is inside, its working directory
- * (POSIX) is the folder or inside it, or its command line names something inside it.
+ * Whether a process runs from or in `dir`: its executable is inside, its working directory is
+ * the folder or inside it, or its command line names something inside it.
  */
 export function runsInside(dir: string, row: ProcessRow, windows: boolean): boolean {
   if (row.exe && pathIsInside(dir, row.exe, windows)) return true;
@@ -100,28 +100,90 @@ export function withDescendants(roots: Iterable<number>, rows: readonly ProcessR
 }
 
 /**
- * Processes CodeDen's agents (or terminals) started: the runner's descendants, plus whatever
- * descends from a process that lost its parent after the runner started, such as the shell an
- * agent ran a dev server in, left behind when the agent exited. Only rows with start times can
- * be judged orphaned (a parent missing, or younger than its child: a reused pid), so a user's
- * own long-running programs, whose parents went away before the runner started, never count.
+ * Processes CodeDen's agents (or terminals) started: the runner's descendants. On Windows, also
+ * whatever descends from a process that lost its parent after the runner started, such as the
+ * shell an agent ran a dev server in, left behind when the agent exited (a process there keeps
+ * the pid of a parent that exited). Only rows with start times can be judged orphaned (a parent
+ * missing, or younger than its child: a reused pid), so a user's own long-running programs,
+ * whose parents went away before the runner started, never count.
+ *
+ * Linux and macOS give an orphan a new parent (init, or the closest subreaper), so there a
+ * parent missing from the table is one the runner can't see, not one that exited: a person's
+ * SSH login under root's sshd (`/proc` mounted with `hidepid`), or a `docker exec` shell (its
+ * parent is outside the container). Only the runner's descendants count there; what an agent
+ * started is remembered before it stops (`runnerDescendants`).
  */
 export function startedByAgents(
   rows: readonly ProcessRow[],
   runnerPid: number,
   runnerStartedAt: number,
+  windows: boolean,
 ): Set<number> {
   const byPid = new Map(rows.map((r) => [r.pid, r]));
   const roots = [runnerPid];
-  for (const r of rows) {
-    if (r.startedAt === null || r.startedAt < runnerStartedAt) continue;
-    const parent = byPid.get(r.ppid);
-    const orphaned = !parent || (parent.startedAt !== null && parent.startedAt > r.startedAt);
-    if (orphaned) roots.push(r.pid);
+  if (windows) {
+    for (const r of rows) {
+      if (r.startedAt === null || r.startedAt < runnerStartedAt) continue;
+      const parent = byPid.get(r.ppid);
+      const orphaned = !parent || (parent.startedAt !== null && parent.startedAt > r.startedAt);
+      if (orphaned) roots.push(r.pid);
+    }
   }
   const out = withDescendants(roots, rows);
   out.delete(runnerPid);
   return out;
+}
+
+export interface RemovalOptions {
+  rows: readonly ProcessRow[];
+  runnerPid: number;
+  /** CodeDen's own processes (the runner, the server); see `SelectOptions.protect`. */
+  protect: readonly number[];
+  /** The folder being deleted (an app run from inside it is not a user app). */
+  dir: string;
+  windows: boolean;
+}
+
+/**
+ * Processes that may be ended so a folder can be deleted, whenever they started: everything
+ * but CodeDen's own processes and what a person started from an app they work in. Each one's
+ * ancestry is followed up to the first process that decides:
+ * - the runner: an agent started it;
+ * - CodeDen or one of its ancestors (the server, the CLI, the desktop app): CodeDen's own;
+ * - an app a person works in (`isUserApp`): the person's, like a dev server in their terminal;
+ * - a parent that is gone, or younger than its child (a reused pid): whoever started it is
+ *   gone, like a dev server an agent started before the runner restarted.
+ */
+export function endableForRemoval(opts: RemovalOptions): Set<number> {
+  const byPid = new Map(opts.rows.map((r) => [r.pid, r]));
+  const codeden = new Set<number>();
+  for (const pid of opts.protect) for (const p of withAncestors(pid, opts.rows)) codeden.add(p);
+  const verdicts = new Map<number, boolean>();
+  const endable = (row: ProcessRow): boolean => {
+    const chain = new Set<number>();
+    let verdict = true;
+    for (let current: ProcessRow | undefined = row; current; ) {
+      const known = verdicts.get(current.pid);
+      if (known !== undefined) {
+        verdict = known;
+        break;
+      }
+      if (current.pid === opts.runnerPid) break;
+      if (codeden.has(current.pid) || isUserApp(current, opts.dir, opts.windows)) {
+        verdict = false;
+        break;
+      }
+      chain.add(current.pid);
+      const parent = byPid.get(current.ppid);
+      if (!parent || chain.has(parent.pid)) break;
+      const { startedAt } = current;
+      if (parent.startedAt !== null && startedAt !== null && parent.startedAt > startedAt) break;
+      current = parent;
+    }
+    for (const pid of chain) verdicts.set(pid, verdict);
+    return verdict;
+  };
+  return new Set(opts.rows.filter(endable).map((r) => r.pid));
 }
 
 export interface SelectOptions {
@@ -140,16 +202,59 @@ export interface SelectOptions {
   spare?: ReadonlySet<number>;
 }
 
-/** The processes inside `dir` that may be ended, by pid. */
+/**
+ * The processes inside `dir` that may be ended, by pid. Each is ended with its whole tree
+ * (`killTree`), so a process is never chosen when anything that must survive runs under it: it
+ * is an ancestor of CodeDen (`protect`), of an app a person works in (an editor opened from a
+ * shell in the folder), or of a spared terminal. Nor is one that runs under such an app, even
+ * one an agent opened: a shell a person works in there, and what they run in it, are theirs
+ * (`runsUnderApp`). Ancestry is followed by parent pid, as tree kills do.
+ */
 export function processesToEnd(opts: SelectOptions): number[] {
+  const apps = new Set(
+    opts.rows.filter((r) => isUserApp(r, opts.dir, opts.windows)).map((r) => r.pid),
+  );
   const safe = new Set<number>();
-  for (const pid of opts.protect) for (const p of withAncestors(pid, opts.rows)) safe.add(p);
+  for (const pid of [...opts.protect, ...apps, ...(opts.spare ?? [])]) {
+    for (const p of withAncestors(pid, opts.rows)) safe.add(p);
+  }
+  const codeden = new Set<number>();
+  for (const pid of opts.protect) for (const p of withAncestors(pid, opts.rows)) codeden.add(p);
+  const byPid = new Map(opts.rows.map((r) => [r.pid, r]));
   return opts.rows
     .filter((r) => r.pid > 0 && !safe.has(r.pid))
-    .filter((r) => opts.allowed.has(r.pid) && !opts.spare?.has(r.pid))
-    .filter((r) => !isUserApp(r, opts.dir, opts.windows))
+    .filter((r) => opts.allowed.has(r.pid))
     .filter((r) => runsInside(opts.dir, r, opts.windows))
+    .filter((r) => !runsUnderApp(r, byPid, apps, codeden))
     .map((r) => r.pid);
+}
+
+/**
+ * Whether one of `apps` (apps a person works in) is an ancestor of `row`, below CodeDen: the
+ * walk up stops at the runner, the server or one of their ancestors (`codeden`), so neither the
+ * terminal CodeDen was started from nor the desktop app's bundle (macOS) makes every agent's
+ * process a person's. It stops too at a parent that is gone, or younger than its child (a
+ * reused pid).
+ */
+function runsUnderApp(
+  row: ProcessRow,
+  byPid: ReadonlyMap<number, ProcessRow>,
+  apps: ReadonlySet<number>,
+  codeden: ReadonlySet<number>,
+): boolean {
+  const visited = new Set([row.pid]);
+  for (let current = row; ; ) {
+    const parent = byPid.get(current.ppid);
+    if (!parent || visited.has(parent.pid)) return false;
+    const { startedAt } = current;
+    if (parent.startedAt !== null && startedAt !== null && parent.startedAt > startedAt) {
+      return false;
+    }
+    if (codeden.has(parent.pid)) return false;
+    if (apps.has(parent.pid)) return true;
+    visited.add(parent.pid);
+    current = parent;
+  }
 }
 
 /**
@@ -197,6 +302,11 @@ const USER_APPS = new Set([
   "explorer",
   "windowsterminal",
   "wt",
+  "mintty",
+  "conemu",
+  "conemu64",
+  "tabby",
+  "hyper",
   "alacritty",
   "wezterm",
   "wezterm-gui",
@@ -212,14 +322,25 @@ const USER_APPS = new Set([
   "screen",
 ]);
 
-/** The program a process runs (its executable, else the command line's first word). */
+/**
+ * An unquoted command line that runs a program from a macOS app bundle, whose path may have
+ * spaces (`/Applications/Visual Studio Code.app/Contents/MacOS/Electron --type=gpu`): an absolute
+ * path up to the bundle's `Contents/MacOS/`, where no space comes before what reads as an
+ * argument (another path, an option or a quote). Matches that folder.
+ */
+const BUNDLE_PROGRAM = /^\/(?:[^\s"']|\s(?![/"']|-\S))*?\.app\/Contents\/MacOS\//;
+
+/**
+ * The program a process runs: its executable, else the command line's (quoted) first word. Only
+ * the command line is known on macOS, so a line running a program from an app bundle, whose path
+ * may have spaces, yields the bundle's `Contents/MacOS/` folder instead (`BUNDLE_PROGRAM`).
+ */
 function programPath(row: ProcessRow): string | null {
   if (row.exe) return row.exe;
   const line = row.commandLine?.trim();
   if (!line) return null;
-  return line.startsWith('"')
-    ? line.slice(1, line.indexOf('"', 1))
-    : (line.split(/\s+/)[0] ?? null);
+  if (line.startsWith('"')) return line.slice(1, line.indexOf('"', 1));
+  return BUNDLE_PROGRAM.exec(line)?.[0] ?? line.split(/\s+/)[0] ?? null;
 }
 
 /** Whether `row` is an app a person works in (see `USER_APPS`), outside the worktree. */

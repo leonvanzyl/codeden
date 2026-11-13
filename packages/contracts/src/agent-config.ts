@@ -15,6 +15,11 @@ export type AgentConfigProvider = z.infer<typeof AgentConfigProvider>;
 export interface AgentConfigFeatures {
   /** CodeDen lists and edits this provider's hooks (`/api/agent-config/hooks`). */
   hooks: boolean;
+  /**
+   * The provider's native config can switch a skill off, and CodeDen writes that setting
+   * (`/api/agent-config/skills`, `agent-config-skills.ts`).
+   */
+  skillSwitches: boolean;
 }
 
 /**
@@ -22,8 +27,8 @@ export interface AgentConfigFeatures {
  * tabs and choices to offer, and never branches on a provider id (Principle 5).
  */
 export const agentConfigFeatures: Record<AgentConfigProvider, AgentConfigFeatures> = {
-  claude: { hooks: true },
-  codex: { hooks: false },
+  claude: { hooks: true, skillSwitches: true },
+  codex: { hooks: false, skillSwitches: true },
 };
 
 /** The providers that have a given agent-config feature. */

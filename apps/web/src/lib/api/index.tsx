@@ -5,7 +5,7 @@ import { createHttpClient } from "./http-client";
 import { createMockClient } from "./mock";
 
 export type { CodeDenClient, InboxResolution, SendMode } from "./client";
-export { ApiRequestError, isNotAvailable } from "./http";
+export { ApiRequestError } from "./http";
 
 /**
  * Mock mode only when `VITE_CODEDEN_MOCK=1` is set explicitly (UI work without a server).

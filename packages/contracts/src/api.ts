@@ -190,6 +190,11 @@ export type StartSessionResponse = z.infer<typeof StartSessionResponse>;
 export const ForkSessionRequest = z.object({
   /** Defaults to the source's title followed by "(fork)". */
   title: z.string().trim().min(1).max(200).optional(),
+  /**
+   * Fork from this finished turn of the source's root thread ("Fork from here"): the
+   * conversation ends with it and the code is its checkpoint. Omitted: the latest moment.
+   */
+  turnId: Id.optional(),
 });
 export type ForkSessionRequest = z.infer<typeof ForkSessionRequest>;
 
@@ -276,11 +281,20 @@ export const ThreadItemsPage = z.object({
 });
 export type ThreadItemsPage = z.infer<typeof ThreadItemsPage>;
 
-/** `GET /api/sessions/:id/items/:itemId/output`: the full output of a tool call. */
+/**
+ * `GET /api/sessions/:id/items/:itemId/output`: the output the server stored for a tool call, as
+ * of the request. Long output may itself be stored cut (the latest part of a stream, or what the
+ * provider kept), which `truncated` says.
+ */
 export const ToolOutputResponse = z.object({
   itemId: Id,
   text: z.string(),
+  /** UTF-8 size of `text`. */
   totalBytes: z.int().nonnegative(),
+  /** The stored copy is cut: part of the output was never kept, so `text` isn't all of it. */
+  truncated: z.boolean(),
+  /** UTF-8 size of the tool's whole output when the request was answered (≥ `totalBytes`). */
+  outputBytes: z.int().nonnegative(),
 });
 export type ToolOutputResponse = z.infer<typeof ToolOutputResponse>;
 

@@ -17,6 +17,8 @@ export type TimelineRow =
       turn: TurnState;
       filesChanged: number;
       durationMs: number | null;
+      /** The thread's latest turn (forking from it copies the whole conversation, §9). */
+      latest: boolean;
     }
   | { key: string; type: "working"; turn: TurnState };
 
@@ -78,6 +80,7 @@ export function buildTimeline(state: TranscriptState, threadId: string): Timelin
       turn,
       filesChanged: filesByTurn.get(turnId)?.size ?? 0,
       durationMs: duration,
+      latest: state.threads[threadId]?.turnIds.at(-1) === turnId,
     });
   };
 

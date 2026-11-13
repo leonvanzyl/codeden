@@ -5,6 +5,8 @@
 export * from "./agent-config";
 export * from "./agent-config-hooks";
 export * from "./agent-config-loaded";
+export * from "./agent-config-mcp-test";
+export * from "./agent-config-skills";
 export * from "./agent-events";
 export * from "./api";
 export * from "./automations-api";
@@ -39,6 +41,8 @@ export * from "./search";
 export * from "./search-text";
 export * from "./session-files";
 export * from "./settings";
+export * from "./slash-commands";
+export * from "./tool-output";
 export * from "./tools";
 export * from "./updates";
 export * from "./usage";

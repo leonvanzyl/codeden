@@ -243,6 +243,9 @@ async function execute(sid, text) {
     running.delete(sid);
     s.history = [...(s.history ?? []), text];
     save();
+    // A steer no step took (it came after the last step boundary) runs next as an execution of
+    // its own, which no prompt from CodeDen opened.
+    if (run.steers.length) setTimeout(() => execute(sid, run.steers.join("\n")), 5);
   }
 }
 

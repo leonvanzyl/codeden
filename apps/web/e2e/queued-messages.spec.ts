@@ -30,7 +30,7 @@ async function projectId(page: Page): Promise<string> {
   return created.project.id;
 }
 
-const composer = (page: Page) => page.getByRole("textbox", { name: "Message" });
+const composer = (page: Page) => page.getByLabel("Message", { exact: true });
 const tray = (page: Page) => page.getByRole("region", { name: "Queued messages" });
 const approve = (page: Page) => page.getByRole("button", { name: "Approve", exact: true });
 

@@ -76,7 +76,9 @@ export function unattendedAnswers(item: ItemOf<"user_question">): Record<string,
 
 /**
  * A question the provider asked through its own tool (not `ask_user`) in an unattended
- * session: answer it straight away with {@link UNATTENDED_ANSWER}, so the turn never waits.
+ * session: answer it straight away with {@link UNATTENDED_ANSWER}, so the turn never waits. An
+ * MCP server's form is left alone: its answers would go to the server as data, so
+ * `UnwatchedApprovals` withdraws it instead, as it denies approvals.
  */
 export async function answerProviderQuestion(
   ctx: Pick<FactoryContext, "repo" | "projects" | "log">,
@@ -88,7 +90,7 @@ export async function answerProviderQuestion(
   if (item?.kind !== "user_question" || item.deferred || item.status !== "in_progress") {
     return false;
   }
-  if (!unattendedSession(ctx, e.sessionId)) return false;
+  if (item.mcpServer || !unattendedSession(ctx, e.sessionId)) return false;
   try {
     await respond(e.sessionId, {
       requestId: item.requestId,
@@ -117,6 +119,8 @@ export function recordDecision(
   raiseInbox(ctx, {
     id,
     kind: "message",
+    // Only a flagged decision needs the user; the rest are for the inbox and the digest.
+    notify: req.needsHuman ? "needs_you" : "factory",
     priority: req.needsHuman ? "high" : "low",
     projectId: by.projectId,
     sessionId: by.sessionId,

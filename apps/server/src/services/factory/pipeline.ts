@@ -62,6 +62,7 @@ async function stopAfterInvestigation(
   raiseInbox(ctx, {
     id: `inbox:factory-stopped:${item.id}`,
     kind: "automation_result",
+    notify: "factory",
     priority: "low",
     projectId: item.projectId,
     sessionId: item.builderSessionId,

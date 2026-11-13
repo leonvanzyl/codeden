@@ -1,7 +1,7 @@
 import { defaultSettings, type EventEnvelope } from "@codeden/contracts";
 import { describe, expect, it } from "vitest";
 import { describeTrigger } from "@/components/automations/meta";
-import { applyTrigger, detectTrigger } from "@/components/composer/trigger";
+import { applyTrigger, detectTrigger, rankCommands } from "@/components/composer/trigger";
 import { countLines, normalizePatch } from "@/lib/api/mock/fixtures/patches";
 import { inboxItems } from "@/lib/api/mock/fixtures/sessions";
 import { MockWorld } from "@/lib/api/mock/world";
@@ -42,6 +42,25 @@ describe("composer triggers", () => {
   it("detects / commands only at the start", () => {
     expect(detectTrigger("/pl", 3)).toEqual({ kind: "command", query: "pl", start: 0 });
     expect(detectTrigger("a /pl", 5)).toBeNull();
+    // Plugin commands are namespaced with a colon.
+    expect(detectTrigger("/code-review:re", 15)).toEqual({
+      kind: "command",
+      query: "code-review:re",
+      start: 0,
+    });
+    expect(detectTrigger("/fix now", 8)).toBeNull();
+  });
+  it("lists commands that start with the query first, and inserts `/<name> `", () => {
+    const names = (q: string) =>
+      rankCommands([{ name: "compact" }, { name: "discord" }, { name: "context" }], q).map(
+        (c) => c.name,
+      );
+    expect(names("co")).toEqual(["compact", "context", "discord"]);
+    expect(names("CON")).toEqual(["context"]);
+    expect(names("")).toEqual(["compact", "discord", "context"]);
+    const t = detectTrigger("/com", 4);
+    if (!t) throw new Error("expected trigger");
+    expect(applyTrigger("/com", 4, t, "/compact")).toEqual({ text: "/compact ", caret: 9 });
   });
   it("replaces the trigger and moves the caret", () => {
     const t = detectTrigger("see @us", 7);

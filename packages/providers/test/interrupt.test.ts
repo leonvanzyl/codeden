@@ -46,6 +46,7 @@ function stubSdk(onInterrupt: (prompts: SDKUserMessage[]) => Promise<unknown>) {
         return onInterrupt(prompts);
       },
       supportedModels: async () => [],
+      supportedCommands: async () => [],
       close: () => finish(),
     };
     return q as unknown as Query;

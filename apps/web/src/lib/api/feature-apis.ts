@@ -8,6 +8,7 @@ import type {
   AgentConfigLocator,
   AgentConfigWriteRequest,
   AgentConfigWriteResponse,
+  AgentSkillListResponse,
   BrowserHistoryRequest,
   BrowserInput,
   BrowserNavigateResponse,
@@ -36,6 +37,8 @@ import type {
   McpServerDiffRequest,
   McpServerListResponse,
   McpServerTarget,
+  McpServerTestRequest,
+  McpServerTestResult,
   McpServerUpsertRequest,
   McpServerWriteResponse,
   MergePrRequest,
@@ -48,6 +51,9 @@ import type {
   SecretsStatus,
   Session,
   SessionGithubResponse,
+  SkillSwitchDiff,
+  SkillSwitchRequest,
+  SkillSwitchResponse,
   SttQuery,
   SttResponse,
   TriageIssueRequest,
@@ -138,11 +144,18 @@ export interface AgentConfigApi {
   removeMcp(target: McpServerTarget): Promise<McpServerWriteResponse>;
   /** Preview an upsert (with `spec`) or a removal (without). */
   diffMcp(req: McpServerDiffRequest): Promise<AgentConfigDiff>;
+  /** Connect to a server (the saved one, or `spec` unsaved) and list its tools. */
+  testMcp(req: McpServerTestRequest): Promise<McpServerTestResult>;
   /** Hooks in the settings files of providers that have them (user, plus the project's). */
   listHooks(projectId: string | null): Promise<HookListResponse>;
   /** Preview a hook change as a diff of its settings file. */
   diffHook(req: HookChangeRequest): Promise<AgentConfigDiff>;
   changeHook(req: HookChangeRequest): Promise<HookWriteResponse>;
+  /** User skills, plus the project's, each with whether its provider's setting switches it off. */
+  listSkills(projectId: string | null): Promise<AgentSkillListResponse>;
+  /** Preview switching a skill on or off as a diff of the native file it writes. */
+  diffSkillSwitch(req: SkillSwitchRequest): Promise<SkillSwitchDiff>;
+  switchSkill(req: SkillSwitchRequest): Promise<SkillSwitchResponse>;
   /** What a session's provider loads from its working directory. */
   loaded(sessionId: string): Promise<LoadedAgentConfig>;
 }

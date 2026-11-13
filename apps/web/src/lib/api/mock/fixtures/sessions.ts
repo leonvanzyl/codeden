@@ -207,6 +207,7 @@ function inbox(i: Partial<InboxItem> & Pick<InboxItem, "id" | "kind" | "title">)
   return {
     status: "open",
     priority: "normal",
+    notify: "needs_you",
     body: null,
     projectId: null,
     sessionId: null,
@@ -265,6 +266,7 @@ export const inboxItems: InboxItem[] = [
     id: "ib-failed",
     kind: "run_failed",
     priority: "high",
+    notify: "failure",
     title: "Dependency updates failed",
     body: "pnpm install hit a peer conflict: @tanstack/react-query@6 needs react@^19.2.",
     projectId: "p-storefront",
@@ -275,6 +277,7 @@ export const inboxItems: InboxItem[] = [
   inbox({
     id: "ib-triage",
     kind: "triage",
+    notify: "automation",
     title: "Should I take on #151 “Dark mode for the storefront”?",
     body: "Ready: clear acceptance criteria, touches only theme tokens and 6 components. Estimated one session.",
     projectId: "p-storefront",
@@ -285,6 +288,7 @@ export const inboxItems: InboxItem[] = [
     id: "ib-audit",
     kind: "automation_result",
     priority: "low",
+    notify: "automation",
     title: "Security audit (Billing API) flagged 2 medium findings",
     body: "Missing rate limit on POST /refunds; verbose error body on invoice lookup.",
     projectId: "p-billing",

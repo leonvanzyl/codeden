@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { type CodeDenClient, useClient } from "@/lib/api";
 import { ago } from "@/lib/format";
+import { LOCAL_CONFLICT_PREFIX } from "@/lib/new-session";
 
 const startedBy = {
   user: "You",
@@ -28,9 +29,6 @@ const doneText: Record<ConflictDecision["resolution"], string> = {
   join: "Sent to the running session",
   force: "Started anyway",
 };
-
-/** Conflicts not persisted by the server (no `conflictId`) are retried with a fresh start. */
-export const LOCAL_CONFLICT_PREFIX = "local:";
 
 async function decide(
   client: CodeDenClient,
@@ -53,15 +51,19 @@ export interface ConflictOutcome {
  * A start request that matched running work (§8.4). The same four choices the agents get:
  * wait (queue behind), skip, join (send as a follow-up) or force (with a recorded reason).
  * `decideWith` retries something other than a session start (an automation's run now).
+ * `replace` opens the resulting session in place of the current history entry (the New session
+ * draft becomes that session, so Back doesn't return to an emptied draft).
  */
 export function ConflictCard({
   conflict,
   onResolved,
   decideWith,
+  replace = false,
 }: {
   conflict: ConflictRecord;
   onResolved?: (result: ConflictOutcome) => void;
   decideWith?: (decision: ConflictDecision) => Promise<ConflictOutcome>;
+  replace?: boolean;
 }) {
   const client = useClient();
   const queryClient = useQueryClient();
@@ -78,7 +80,11 @@ export function ConflictCard({
       onResolved?.(result);
       const moved = ["started", "joined", "queued"].includes(result.status);
       if (moved && result.sessionId)
-        void navigate({ to: "/sessions/$sessionId", params: { sessionId: result.sessionId } });
+        void navigate({
+          to: "/sessions/$sessionId",
+          params: { sessionId: result.sessionId },
+          replace,
+        });
     },
     onError: (e) => toast.error("Couldn't resolve the conflict", { description: e.message }),
   });

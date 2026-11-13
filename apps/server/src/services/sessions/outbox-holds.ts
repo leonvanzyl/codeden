@@ -6,6 +6,22 @@ export function isTransientRunnerError(error: unknown): boolean {
   return code === "runner_unavailable" || code === "timeout";
 }
 
+/** The provider's words when it refuses a turn because one is running. */
+export const TURN_RUNNING_TEXT = /turn is already running/i;
+
+/**
+ * The runner refused a new turn because the provider is still running one, which the server
+ * had not seen yet. Not a failure: the message waits for that turn to end. Runners before
+ * `turn_running` report it as `command_failed` with the provider's message.
+ */
+export function isTurnRunningError(error: unknown): boolean {
+  const code = runnerErrorCode(error);
+  if (code === "turn_running") return true;
+  return (
+    code === "command_failed" && error instanceof Error && TURN_RUNNING_TEXT.test(error.message)
+  );
+}
+
 /**
  * Sessions whose queued-message delivery failed. The message went back in its place and
  * delivery pauses, so a failing send never loops on the status change it causes. It resumes

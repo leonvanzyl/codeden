@@ -196,6 +196,30 @@ describe("buildTimeline", () => {
     expect(keys).toEqual(["a", "end:u1", "b", "c", "working:u2"]);
   });
 
+  it("marks the thread's latest turn and keeps each turn's fork point", () => {
+    const say = (turnId: string): AgentEvent => ({
+      type: "item.completed",
+      threadId: T,
+      turnId,
+      item: { id: `m-${turnId}`, kind: "assistant_message", status: "completed", text: turnId },
+    });
+    const s = run([
+      { type: "turn.started", threadId: T, turnId: "u1" },
+      say("u1"),
+      { type: "turn.completed", threadId: T, turnId: "u1", forkPoint: "fp-1" },
+      { type: "turn.started", threadId: T, turnId: "u2" },
+      say("u2"),
+      { type: "turn.interrupted", threadId: T, turnId: "u2", reason: "user" },
+    ]);
+    const ends = buildTimeline(s, T).flatMap((r) =>
+      r.type === "turn-end" ? [[r.turn.id, r.latest, r.turn.forkPoint]] : [],
+    );
+    expect(ends).toEqual([
+      ["u1", false, "fp-1"],
+      ["u2", true, null],
+    ]);
+  });
+
   it("only offers follow-ups when the last turn completed", () => {
     expect(latestFollowups(t, "t-checkout")).toBeNull();
     const a11y = world.transcript("s-a11y");

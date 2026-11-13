@@ -1,7 +1,4 @@
-import type { ItemRecord } from "@codeden/contracts";
-
-/** Tool output kept in transcript pages and live updates; the rest is fetched on demand (§6). */
-export const OUTPUT_PREVIEW_CHARS = 16_000;
+import { type ItemRecord, OUTPUT_PREVIEW_CHARS } from "@codeden/contracts";
 
 /**
  * Trim large tool outputs to their last `max` characters (the end of command output is the

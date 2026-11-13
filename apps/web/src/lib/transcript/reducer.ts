@@ -1,11 +1,13 @@
-import type {
-  AgentEvent,
-  ErrorInfo,
-  Item,
-  ItemDelta,
-  SessionSnapshot,
-  TurnStatus,
-  Usage,
+import {
+  type AgentEvent,
+  appendToolOutput,
+  type ErrorInfo,
+  type Item,
+  type ItemDelta,
+  OUTPUT_PREVIEW_CHARS,
+  type SessionSnapshot,
+  type TurnStatus,
+  type Usage,
 } from "@codeden/contracts";
 
 export interface TurnState {
@@ -15,6 +17,8 @@ export interface TurnState {
   startedAt: string;
   completedAt: string | null;
   error: ErrorInfo | null;
+  /** Set when the conversation can be forked through this turn ("Fork from here", §9). */
+  forkPoint?: string | null;
 }
 
 export interface ThreadState {
@@ -131,9 +135,10 @@ function applyDelta(item: Item, delta: ItemDelta): Item {
       if (item.kind === "reasoning") return { ...item, summary: (item.summary ?? "") + delta.text };
       return item;
     case "tool_output":
+      // Live output keeps the same bounded tail the server previews, so a long command never
+      // grows the tab; the rest is fetched on demand ("Show full output").
       if (item.kind === "tool_call") {
-        const prev = item.output ?? { text: "", truncated: false };
-        return { ...item, output: { ...prev, text: prev.text + delta.text } };
+        return { ...item, output: appendToolOutput(item.output, delta.text, OUTPUT_PREVIEW_CHARS) };
       }
       return item;
     case "tool_input":
@@ -227,6 +232,7 @@ export function applyAgentEvent(
         status,
         completedAt: ts,
         error: event.type === "turn.failed" ? event.error : (turn?.error ?? null),
+        forkPoint: event.forkPoint ?? null,
       };
       break;
     }

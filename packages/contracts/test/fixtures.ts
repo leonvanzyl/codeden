@@ -119,7 +119,28 @@ export const sampleAgentEvents: AgentEvent[] = [
       childThreadId: "t2",
       agentType: "reviewer",
       summary: "Looks good",
-      stats: { totalTokens: 48213, toolUses: 23, durationMs: 72000 },
+      stats: {
+        totalTokens: 48213,
+        toolUses: 23,
+        durationMs: 72000,
+        usage: [
+          {
+            model: "claude-haiku-5-5",
+            inputTokens: 12,
+            outputTokens: 900,
+            cacheReadTokens: 410_000,
+            cacheWriteTokens: 38_000,
+            reasoningTokens: 120,
+          },
+          {
+            inputTokens: 5,
+            outputTokens: 40,
+            cacheReadTokens: 0,
+            cacheWriteTokens: 0,
+            costUsd: 0.01,
+          },
+        ],
+      },
     },
   },
   {
@@ -146,7 +167,9 @@ export const sampleAgentEvents: AgentEvent[] = [
     },
   },
   { type: "turn.completed", threadId: "t1", turnId: "u1", stopReason: "end_turn" },
+  { type: "turn.completed", threadId: "t1", turnId: "u5", forkPoint: "msg-uuid-5" },
   { type: "turn.failed", threadId: "t1", turnId: "u2", error: { message: "boom" } },
+  { type: "turn.interrupted", threadId: "t1", turnId: "u6", reason: "user", forkPoint: "u6" },
   {
     type: "turn.failed",
     threadId: "t1",
@@ -235,6 +258,7 @@ export const sampleInboxItem: InboxItem = {
   kind: "approval",
   status: "open",
   priority: "high",
+  notify: "needs_you",
   title: "Force push?",
   body: null,
   projectId: "p1",

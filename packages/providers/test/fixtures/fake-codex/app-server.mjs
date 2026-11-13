@@ -119,12 +119,35 @@ createInterface({ input: process.stdin }).on("line", (line) => {
     case "thread/start":
     case "thread/resume":
       return send({ id: msg.id, result: { thread: { id: "thread-1" }, model: "gpt-configured" } });
-    // A thread id of "missing" has nothing to fork, like a thread deleted from disk.
-    case "thread/fork":
-      if (msg.params?.threadId === "missing") {
-        return send({ id: msg.id, error: { code: -32600, message: "thread not found" } });
+    // "thread-source" holds turn-1 to turn-3, listed two per page (newest first); "old-codex"
+    // stands for an app-server without the method. Any other thread answers like Codex 0.160
+    // does for a thread a short-lived app-server hasn't loaded.
+    case "thread/turns/list": {
+      const threadId = msg.params?.threadId;
+      if (threadId === "old-codex") {
+        return send({ id: msg.id, error: { code: -32601, message: "method not found" } });
+      }
+      if (threadId !== "thread-source") {
+        return send({ id: msg.id, error: { code: -32600, message: `thread not loaded: ${threadId}` } });
+      }
+      const all = ["turn-3", "turn-2", "turn-1"];
+      const from = Number(msg.params?.cursor ?? 0);
+      const data = all.slice(from, from + 2).map((id) => ({ id, items: [], status: "completed" }));
+      const next = from + 2 < all.length ? String(from + 2) : null;
+      return send({ id: msg.id, result: { data, nextCursor: next, backwardsCursor: null } });
+    }
+    // Codex 0.160's answers: "missing" is a thread deleted from disk, "turn-gone" a turn the
+    // thread doesn't hold, "turn-running" a turn still in progress.
+    case "thread/fork": {
+      const { threadId, lastTurnId } = msg.params ?? {};
+      const fail = (message) => send({ id: msg.id, error: { code: -32600, message } });
+      if (threadId === "missing") return fail(`no rollout found for thread id ${threadId}`);
+      if (lastTurnId === "turn-gone") return fail(`turn not found: ${lastTurnId}`);
+      if (lastTurnId === "turn-running") {
+        return fail(`lastTurnId '${lastTurnId}' identifies an in-progress turn`);
       }
       return send({ id: msg.id, result: { thread: { id: "thread-fork-1" }, model: "gpt-configured" } });
+    }
     case "model/list":
       return modelList(msg);
     case "turn/start": {

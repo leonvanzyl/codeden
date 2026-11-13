@@ -12,6 +12,7 @@ import { mockBrowserApi } from "./browser";
 import { configContents, configFiles, mcpServers } from "./fixtures/config";
 import { mockHooksApi } from "./hooks";
 import { mockLocalStt } from "./local-stt";
+import { mockSkillsApi } from "./skills";
 import type { MockWorld } from "./world";
 
 const delay = <T>(value: T, ms = 120): Promise<T> =>
@@ -57,6 +58,7 @@ const key = (l: AgentConfigLocator) => `cfg:${l.root}:${l.projectId ?? ""}:${l.p
 function mockAgentConfig(world: MockWorld): AgentConfigApi {
   let servers: McpServerEntry[] = structuredClone(mcpServers);
   const hooksApi = mockHooksApi(naiveDiff);
+  const { skills, ...skillsApi } = mockSkillsApi(naiveDiff);
   const content = (l: AgentConfigLocator) =>
     world.files.get(key(l)) ?? configContents[l.path] ?? "";
   const read = (l: AgentConfigLocator): AgentConfigFileContent => {
@@ -115,7 +117,56 @@ function mockAgentConfig(world: MockWorld): AgentConfigApi {
       const show = (v: unknown) => (v ? JSON.stringify({ [req.name]: v }, null, 2) : "");
       return delay(naiveDiff("mcp", show(before?.spec), show(req.spec)));
     },
+    testMcp: (req) => {
+      const spec =
+        req.spec ?? servers.find((s) => s.name === req.name && s.provider === req.provider)?.spec;
+      // A command or URL containing "fail" shows the failed result.
+      const target = spec?.type === "stdio" ? spec.command : (spec?.url ?? "");
+      if (!spec || target.includes("fail")) {
+        const codexStdio = req.provider === "codex" && spec?.type === "stdio";
+        return delay(
+          {
+            ok: false as const,
+            durationMs: 1840,
+            stage: "connect" as const,
+            error: "MCP error -32000: Connection closed. The server stopped before it answered",
+            timedOut: false,
+            stderrTail: codexStdio
+              ? "Error: GITHUB_TOKEN is not set"
+              : "npm error 404 Not Found - GET https://registry.npmjs.org/@acme%2fmcp",
+            ...(codexStdio
+              ? {
+                  note:
+                    "Codex starts a stdio server with only a few variables from your environment " +
+                    "(PATH, HOME or USERPROFILE, the temp folder and the like), the names listed " +
+                    "in its env_vars and its env table. If the server needs another variable, " +
+                    "such as a token, add its name to the server's env_vars in ~/.codex/config.toml.",
+                }
+              : {}),
+          },
+          900,
+        );
+      }
+      return delay(
+        {
+          ok: true as const,
+          durationMs: 842,
+          server: { name: req.name, version: "1.4.0" },
+          protocolVersion: "2025-06-18",
+          toolCount: 4,
+          morePages: false,
+          tools: [
+            { name: "browser_navigate", description: "Navigate to a URL" },
+            { name: "browser_click", description: "Click an element" },
+            { name: "browser_snapshot", description: "Accessibility snapshot of the page" },
+            { name: "browser_take_screenshot" },
+          ],
+        },
+        900,
+      );
+    },
     ...hooksApi,
+    ...skillsApi,
     loaded: async (sessionId) => {
       const files = configFiles.filter((f) => f.exists);
       // The storefront project's hooks; the disabled ones (on the shelf) don't run.
@@ -125,15 +176,7 @@ function mockAgentConfig(world: MockWorld): AgentConfigApi {
         provider: "claude",
         cwd: "C:\\Users\\you\\.codeden\\wt\\storefront\\fix-checkout-flake",
         memory: files.filter((f) => f.kind === "memory" || f.kind === "rule"),
-        skills: files
-          .filter((f) => f.kind === "skill")
-          .map((f) => ({
-            provider: f.provider,
-            scope: f.scope,
-            name: f.name,
-            description: f.description,
-            file: f,
-          })),
+        skills: skills().filter((s) => s.file.exists),
         subagents: files.filter((f) => f.kind === "subagent"),
         mcpServers: servers.filter((s) => s.provider !== "codex"),
         hooks: {

@@ -69,6 +69,7 @@ export function escalate(
   raiseInbox(ctx, {
     id: `inbox:factory-escalated:${item.id}`,
     kind: "pr_review",
+    notify: "needs_you",
     priority: "high",
     projectId: item.projectId,
     sessionId: item.builderSessionId,

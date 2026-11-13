@@ -53,6 +53,8 @@ export function applyTranscriptMessage(
       startedAt: turn.startedAt,
       completedAt: turn.completedAt,
       error: turn.error,
+      // Where the conversation can be forked through this turn ("Fork from here", §9).
+      forkPoint: turn.forkPoint ?? null,
     };
     const t = thread(turn.threadId);
     if (!t.turnIds.includes(turn.id)) t.turnIds.push(turn.id);

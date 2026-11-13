@@ -1,0 +1,1 @@
+ALTER TABLE `inbox_items` ADD `notify` text DEFAULT 'needs_you' NOT NULL;

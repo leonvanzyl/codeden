@@ -217,16 +217,53 @@ describe("runner protocol", () => {
       { name: "checkpoint.list", cwd: "/repo", sessionId: "s1" },
       { name: "checkpoint.list", cwd: "/repo", sessionId: "s1", settled: true },
       { name: "provider.fork", providerId: "claude", resumeToken: "claude-1", cwd: "/repo" },
+      {
+        name: "provider.fork",
+        providerId: "codex",
+        resumeToken: "thread-1",
+        cwd: "/repo",
+        upTo: "turn-3",
+      },
       { name: "checkpoint.diff", cwd: "/repo", sessionId: "s1", from: 0, to: 2 },
       { name: "checkpoint.restoreFiles", cwd: "/repo", sessionId: "s1", index: 1 },
       { name: "pty.attach", ptyId: "p1" },
       { name: "ports.list", probe: [5173] },
+      {
+        name: "mcp.test",
+        spec: { type: "stdio", command: "npx", args: ["-y", "x"], env: { A: "1" } },
+        cwd: "/repo",
+        expandEnv: true,
+        timeoutMs: 30_000,
+      },
+      {
+        name: "mcp.test",
+        spec: { type: "http", url: "https://example.com/mcp", headers: { A: "b" } },
+        expandEnv: false,
+      },
+      {
+        name: "mcp.test",
+        spec: { type: "stdio", command: "gh-mcp", extra: { env_vars: ["GITHUB_TOKEN"] } },
+        expandEnv: false,
+        stdioEnv: "allowlist",
+      },
     ];
     for (const command of commands) roundTrip(RunnerCommand, command);
     expect(
       RunnerCommand.safeParse({ name: "checkpoint.diff", cwd: "/r", sessionId: "s", from: -1 })
         .success,
     ).toBe(false);
+    const mcpTest = { name: "mcp.test", spec: { type: "http", url: "http://x" }, expandEnv: true };
+    expect(RunnerCommand.safeParse({ ...mcpTest, timeoutMs: 120_001 }).success).toBe(false);
+    expect(RunnerCommand.safeParse({ ...mcpTest, stdioEnv: "none" }).success).toBe(false);
+    roundTrip(RunnerCommandResults["mcp.test"], {
+      ok: true,
+      durationMs: 5,
+      server: { name: "s", version: "1" },
+      protocolVersion: null,
+      toolCount: 0,
+      morePages: false,
+      tools: [],
+    });
     expect(
       RunnerCommand.safeParse({
         name: "workspace.prepare",
@@ -247,6 +284,15 @@ describe("runner protocol", () => {
     expect(
       RunnerCommand.safeParse({ name: "provider.fork", providerId: "claude", cwd: "/repo" })
         .success,
+    ).toBe(false);
+    expect(
+      RunnerCommand.safeParse({
+        name: "provider.fork",
+        providerId: "claude",
+        resumeToken: "c",
+        cwd: "/repo",
+        upTo: "",
+      }).success,
     ).toBe(false);
     roundTrip(RunnerCommandResults["workspace.remove"], { removed: true, discardedChanges: true });
     roundTrip(RunnerCommandResults["workspace.remove"], { removed: true });

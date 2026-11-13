@@ -226,6 +226,8 @@ export async function startServer(opts: StartServerOptions): Promise<RunningServ
   services.factory.start();
   services.worktreeCleanup.start();
   services.unwatchedApprovals.start();
+  // Also shows the images of tool calls stored while the server stopped mid-copy.
+  void services.generatedImages.start();
   services.prFeedback.start();
   services.autoRetry.start();
   const stopUpdateEvents = services.updates.onChange((status) => hub.broadcastUpdate(status));
@@ -376,6 +378,7 @@ export async function startServer(opts: StartServerOptions): Promise<RunningServ
       services.factory.stop();
       services.worktreeCleanup.stop();
       services.unwatchedApprovals.stop();
+      services.generatedImages.stop();
       services.prFeedback.stop();
       services.autoRetry.stop();
       services.updates.stop();

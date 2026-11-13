@@ -14,6 +14,8 @@ import {
   REVIEW_SUMMARY_TRUNCATED,
   ReviewVerdict,
   ReviewVerdictSubmission,
+  SCOUT_UNAVAILABLE,
+  ScoutStatus,
   SetAutonomyModeRequest,
   truncateReviewSummary,
 } from "../src";
@@ -135,6 +137,8 @@ describe("factory API contracts (§10.1)", () => {
     expect(loop.tuning.maxChangedLines).toBe(5_000);
     expect(loop.tuning.maxChangedFiles).toBeNull();
     expect(loop.tuning.areas).toContain("security");
+    // Loops saved before the idle grace existed get its default.
+    expect(loop.tuning.idleGraceMin).toBe(10);
     expect(loop.seenFailedShas).toEqual([]);
     expect(loop.scout).toEqual({
       sessionId: null,
@@ -172,6 +176,13 @@ describe("factory API contracts (§10.1)", () => {
     ).toEqual({ maxChangedLines: null });
     expect(
       SetAutonomyModeRequest.safeParse({ mode: "dark_factory", tuning: { maxChangedLines: 0 } })
+        .success,
+    ).toBe(false);
+    expect(
+      SetAutonomyModeRequest.parse({ mode: "dark_factory", tuning: { idleGraceMin: 30 } }).tuning,
+    ).toEqual({ idleGraceMin: 30 });
+    expect(
+      SetAutonomyModeRequest.safeParse({ mode: "dark_factory", tuning: { idleGraceMin: 0 } })
         .success,
     ).toBe(false);
     expect(
@@ -267,6 +278,29 @@ describe("factory API contracts (§10.1)", () => {
       lastTickAt: null,
     });
     expect(status.tuning.requireCi).toBe(true);
+    // The scout: a status from before "Run scout now" still parses; the reason round-trips.
+    const scout = {
+      phase: "idle",
+      sessionId: null,
+      lenses: [],
+      findings: 0,
+      filed: 0,
+      lastRoundAt: null,
+      nextRoundAt: null,
+      rounds: 0,
+    } as const;
+    expect(ScoutStatus.parse(scout).runNowBlockedBy).toBeNull();
+    const blocked = ScoutStatus.parse({ ...scout, runNowBlockedBy: "A round is already running" });
+    expect(ScoutStatus.parse(JSON.parse(JSON.stringify(blocked)))).toEqual(blocked);
+    expect(SCOUT_UNAVAILABLE).toBe("scout_unavailable");
+    // Setting the backlog threshold alone carries nothing else; 0 is allowed, negatives aren't.
+    expect(
+      SetAutonomyModeRequest.parse({ mode: "dark_factory", tuning: { minBacklog: 0 } }).tuning,
+    ).toEqual({ minBacklog: 0 });
+    expect(
+      SetAutonomyModeRequest.safeParse({ mode: "dark_factory", tuning: { minBacklog: -1 } })
+        .success,
+    ).toBe(false);
     const notice = Notice.parse({
       id: "n1",
       type: "factory.update",

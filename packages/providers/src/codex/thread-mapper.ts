@@ -3,7 +3,7 @@ import type { AgentNames } from "./collab";
 import { classifyCodexError, codexErrorCode, usageLimitResetsAt } from "./errors";
 import { mapThreadItem, startedItem } from "./items";
 import type { ServerNotification } from "./protocol";
-import type { RateLimitSnapshot, ThreadItem, Turn } from "./protocol/v2";
+import type { RateLimitSnapshot, ThreadItem, ThreadTokenUsage, Turn } from "./protocol/v2";
 import { CodexTurnUsage } from "./usage";
 
 type Todo = ItemOf<"todo_list">["todos"][number];
@@ -64,8 +64,8 @@ export interface ThreadMapperOptions {
   onItemStarted?: (item: Item) => void;
   /** Every completed item of this thread. */
   onItemCompleted?: (item: Item) => void;
-  /** The thread's running token total, as Codex reports it. */
-  onTokens?: (totalTokens: number) => void;
+  /** The thread's token usage report (its running `total` and `last` request), as Codex sent it. */
+  onTokens?: (usage: ThreadTokenUsage) => void;
 }
 
 /**
@@ -157,7 +157,7 @@ export class CodexThreadMapper {
         this.updatePlan(n.params.turnId, n.params.plan);
         return;
       case "thread/tokenUsage/updated": {
-        this.o.onTokens?.(n.params.tokenUsage.total.totalTokens);
+        this.o.onTokens?.(n.params.tokenUsage);
         const usage = this.turnUsage.add(n.params.turnId, n.params.tokenUsage);
         // The context meter is the session's own agent's: a sub-agent's context is not it.
         if (!this.o.root) {
@@ -254,10 +254,17 @@ export class CodexThreadMapper {
     }
   }
 
+  /**
+   * Codex ended a turn. On the session's own thread the turn's id is its fork point:
+   * `thread/fork { lastTurnId }` keeps it and drops later turns. Turns CodeDen closes itself
+   * (the process died, the session closed) report none, as Codex may not have finished them.
+   */
   private completeTurn(turn: Turn): void {
     this.beginTurn(turn.id);
-    if (turn.status === "completed") this.endTurn({ type: "completed" }, turn.id);
-    else if (turn.status === "interrupted") this.endTurn({ type: "interrupted" }, turn.id);
+    const forkPoint = this.o.root ? turn.id : undefined;
+    if (turn.status === "completed") this.endTurn({ type: "completed" }, turn.id, forkPoint);
+    else if (turn.status === "interrupted")
+      this.endTurn({ type: "interrupted" }, turn.id, forkPoint);
     else {
       const info = turn.error?.codexErrorInfo;
       const kind = classifyCodexError(info);
@@ -272,14 +279,16 @@ export class CodexThreadMapper {
           retryAt,
         },
         turn.id,
+        forkPoint,
       );
     }
   }
 
   /** Close the running turn (also used when the process dies or the session closes). */
-  endTurn(outcome: TurnOutcome, turnId = this.current): void {
+  endTurn(outcome: TurnOutcome, turnId = this.current, forkPoint?: string): void {
     if (!turnId || turnId !== this.current) return;
     const ctx = this.ctx(turnId);
+    const end = { ...ctx, ...(forkPoint ? { forkPoint } : {}) };
     const ok = outcome.type === "completed";
     for (const item of this.open.values()) {
       this.o.emit({
@@ -304,13 +313,13 @@ export class CodexThreadMapper {
     }
     this.current = undefined;
     if (outcome.type === "completed")
-      this.o.emit({ type: "turn.completed", ...ctx, stopReason: "end_turn" });
+      this.o.emit({ type: "turn.completed", ...end, stopReason: "end_turn" });
     else if (outcome.type === "interrupted")
-      this.o.emit({ type: "turn.interrupted", ...ctx, reason: "user" });
+      this.o.emit({ type: "turn.interrupted", ...end, reason: "user" });
     else {
       this.o.emit({
         type: "turn.failed",
-        ...ctx,
+        ...end,
         error: {
           code: outcome.code ?? "turn_failed",
           message: outcome.message,

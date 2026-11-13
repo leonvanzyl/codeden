@@ -219,6 +219,20 @@ export const Settings = z.object({
       browser: z.boolean().default(false),
       /** A short chime when an agent is blocked on the user (an approval or a question). */
       sound: z.boolean().default(true),
+      /**
+       * Which inbox categories (`InboxItem.notify`) raise a toast and a desktop notification.
+       * Approvals and questions always do while `toasts` / `browser` is on; switched-off
+       * categories still land in the inbox. The factory looks after its own activity, so that
+       * category is off by default.
+       */
+      categories: z
+        .object({
+          needs_you: z.boolean().default(true),
+          failure: z.boolean().default(true),
+          factory: z.boolean().default(false),
+          automation: z.boolean().default(true),
+        })
+        .prefault({}),
     })
     .prefault({}),
   /** Global factory controls (§10.1). */

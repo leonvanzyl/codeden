@@ -110,7 +110,7 @@ async function clearTarget(
   }
   if (info.state === "orphan" && isManagedWorktreePath(ctx.home, path) && !info.containsOther) {
     await ctx.supervisor.killUnder(path);
-    await endProcessesInside(path, { home: ctx.home });
+    await endProcessesInside(path, { home: ctx.home, removing: true });
     await discardFolder(ctx.home, path);
   } else if (info.state !== "missing" && !isEmptyDir(path)) {
     throw new CommandError("path_exists", `${path} exists and is not a worktree`);

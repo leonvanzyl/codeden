@@ -1,9 +1,11 @@
 import type { AgentConfigScope, LoadedHooks } from "@codeden/contracts";
+import { EditorView } from "@codemirror/view";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { formToHandler } from "@/components/agents/hook-form";
 import { HooksList } from "@/components/agents/hooks-list";
 import { McpServers } from "@/components/agents/mcp-servers";
+import { MemoryEditor, SkillsView } from "@/components/agents/memory-editor";
 import { PatchView } from "@/components/agents/patch-dialog";
 import { LoadedConfig } from "@/components/workbench/loaded-config";
 import { createMockClient } from "@/lib/api/mock";
@@ -131,7 +133,113 @@ describe("HooksList", () => {
   });
 });
 
+describe("SkillsView", () => {
+  it("switches a skill off after a diff preview and shows it as off", async () => {
+    const client = createMockClient();
+    const diffSkillSwitch = vi.spyOn(client.agentConfig, "diffSkillSwitch");
+    const switchSkill = vi.spyOn(client.agentConfig, "switchSkill");
+    const { queryClient } = renderWithClient(<SkillsView projectId="p-storefront" />, client, {
+      withRouter: true,
+    });
+    // A session's `/` menu cached before the switch (the composer keeps it for a minute).
+    const menu = ["commands", "s-checkout"];
+    queryClient.setQueryData(menu, [
+      { name: "playwright-e2e", description: "", kind: "skill", provider: "claude" },
+    ]);
+    const toggle = await screen.findByRole("switch", { name: "playwright-e2e: on" });
+    // A partial Claude state shows its native name; the skill stays switched on.
+    expect(screen.getByText("name-only")).toBeTruthy();
+    expect(screen.getByRole("switch", { name: "frontend-design: on" })).toBeTruthy();
+
+    fireEvent.click(toggle);
+    await waitFor(() =>
+      expect(diffSkillSwitch).toHaveBeenCalledWith({
+        root: "project",
+        projectId: "p-storefront",
+        path: ".claude/skills/playwright-e2e/SKILL.md",
+        provider: "claude",
+        enabled: false,
+        listProjectId: "p-storefront",
+      }),
+    );
+    expect(await screen.findByText(/applies in every project/)).toBeTruthy();
+    const confirm = (await screen.findByRole("button", {
+      name: "Switch off",
+    })) as HTMLButtonElement;
+    await waitFor(() => expect(confirm.disabled).toBe(false));
+    expect(screen.getByTestId("patch-view").textContent).toContain('"playwright-e2e": "off"');
+    fireEvent.click(confirm);
+    await waitFor(() => expect(switchSkill).toHaveBeenCalled());
+    expect(await screen.findByRole("switch", { name: "playwright-e2e: off" })).toBeTruthy();
+    expect(screen.getByText("off")).toBeTruthy();
+    const row = screen.getByText("playwright-e2e").closest("[data-muted]");
+    expect(row?.getAttribute("data-muted")).toBe("true");
+    // The cached menu is marked stale, so the composer asks again before offering the skill.
+    expect(queryClient.getQueryState(menu)?.isInvalidated).toBe(true);
+  });
+});
+
+describe("ConfigFilesView on a phone", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("opens a file in the list's place and keeps its draft across Back", async () => {
+    vi.spyOn(window, "matchMedia").mockImplementation(
+      (query: string) =>
+        ({
+          matches: query === "(max-width: 767.98px)",
+          media: query,
+          onchange: null,
+          addListener: () => {},
+          removeListener: () => {},
+          addEventListener: () => {},
+          removeEventListener: () => {},
+          dispatchEvent: () => false,
+        }) as MediaQueryList,
+    );
+    renderWithClient(<MemoryEditor projectId="p-storefront" />, createMockClient());
+    const rowName = /^\.claude\/rules\/testing\.md/;
+    // The list comes first: no file is open.
+    const row = await screen.findByRole("button", { name: rowName });
+    expect(screen.queryByRole("button", { name: "Back to files" })).toBeNull();
+    fireEvent.click(row);
+    const back = await screen.findByRole("button", { name: "Back to files" });
+    expect(screen.queryByRole("button", { name: rowName })).toBeNull();
+
+    // Edit the open file, go back to the list and open it again: the draft is still there.
+    const editor = screen.getByTestId("config-file-editor");
+    await waitFor(() => expect(editor.querySelector(".cm-editor")).toBeTruthy());
+    const view = EditorView.findFromDOM(editor.querySelector(".cm-editor") as HTMLElement);
+    view?.dispatch({ changes: { from: 0, insert: "- Run the tests first.\n" } });
+    const save = screen.getByRole("button", { name: "Review & save" }) as HTMLButtonElement;
+    await waitFor(() => expect(save.disabled).toBe(false));
+    fireEvent.click(back);
+    expect(screen.queryByRole("button", { name: "Review & save" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: rowName }));
+    expect(
+      (screen.getByRole("button", { name: "Review & save" }) as HTMLButtonElement).disabled,
+    ).toBe(false);
+  });
+});
+
 describe("LoadedConfig", () => {
+  it("marks skills that are switched off for the session", async () => {
+    const client = createMockClient();
+    const base = await client.agentConfig.loaded("s1");
+    const [first, ...rest] = base.skills;
+    if (!first) throw new Error("the mock world has skills");
+    vi.spyOn(client.agentConfig, "loaded").mockResolvedValue({
+      ...base,
+      skills: [{ ...first, enabled: false, visibility: undefined }, ...rest],
+    });
+    renderWithClient(<LoadedConfig sessionId="s1" projectId="p-storefront" />, client, {
+      withRouter: true,
+    });
+    const skills = within(await screen.findByTestId("loaded-skills"));
+    expect(await skills.findByText(`${first.scope} · off`)).toBeTruthy();
+    const link = skills.getByRole("link", { name: "Switch skills" }) as HTMLAnchorElement;
+    expect(link.getAttribute("href")).toContain("tab=skills");
+  });
+
   it("shows memory, skills, subagents and MCP servers for a session", async () => {
     renderWithClient(<LoadedConfig sessionId="s1" projectId="p-storefront" />, createMockClient(), {
       withRouter: true,

@@ -44,10 +44,12 @@ function GeneratedImages({ entries }: { entries: WorkEntry[] }) {
  * Opens by itself when `focusItemId` (a search hit) is one of its steps.
  */
 export function WorkGroup({
+  sessionId,
   entries,
   live,
   focusItemId,
 }: {
+  sessionId: string;
   entries: WorkEntry[];
   live: boolean;
   focusItemId?: string;
@@ -60,7 +62,7 @@ export function WorkGroup({
   if (entries.length === 1 && entries[0]) {
     return (
       <div>
-        <ToolRow entry={entries[0]} />
+        <ToolRow sessionId={sessionId} entry={entries[0]} />
         <GeneratedImages entries={entries} />
       </div>
     );
@@ -105,7 +107,7 @@ export function WorkGroup({
       {open ? (
         <div className="relative mt-0.5 ml-[13px] border-l border-border pl-2.5">
           {entries.map((e) => (
-            <ToolRow key={e.id} entry={e} />
+            <ToolRow key={e.id} sessionId={sessionId} entry={e} />
           ))}
         </div>
       ) : (
@@ -114,7 +116,7 @@ export function WorkGroup({
             className="relative mt-0.5 ml-[13px] border-l border-border pl-2.5"
             title={`Now: ${entryLabel(current).verb}`}
           >
-            <ToolRow entry={current} />
+            <ToolRow sessionId={sessionId} entry={current} />
           </div>
         )
       )}

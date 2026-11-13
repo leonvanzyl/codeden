@@ -232,9 +232,8 @@ export function CommandPalette() {
                 () =>
                   data?.projects[0] &&
                   navigate({
-                    to: "/projects/$projectId",
+                    to: "/projects/$projectId/new",
                     params: { projectId: data.projects[0].id },
-                    search: { newSession: true },
                   }),
               )}
             />

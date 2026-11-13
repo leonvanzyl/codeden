@@ -45,7 +45,7 @@ The first screen checks, in parallel:
 
 Anything that passes is never asked about. Anything missing gets one fix: the install command, or a **Sign in** button that runs the tool's own login (`claude auth login`, `codex login`, `opencode auth login`, `gh auth login`) in a terminal right on the page, so the provider's normal browser login handles it. **Sign in** runs the exact copy CodeDen found, by its full path.
 
-CodeDen looks for Claude Code, Codex, OpenCode and the GitHub CLI on your PATH, then in their installers' own folders, such as `~/.local/bin`, where the native Claude Code installer puts `claude` even when that folder isn't on your PATH. A copy that doesn't run (for example an npm shim left behind after its package was removed) is skipped and shown as **installed but broken**, with its path; see [Troubleshooting](troubleshooting.md#claude-code-or-codex-is-installed-but-broken). **Re-check** also picks up PATH changes you made after starting CodeDen.
+CodeDen looks for Claude Code, Codex, OpenCode and the GitHub CLI on your PATH, then in their installers' own folders, such as `~/.local/bin`, where the native Claude Code installer puts `claude` even when that folder isn't on your PATH. A copy that doesn't run (for example an npm shim left behind after its package was removed) is skipped and shown as **installed but broken**, with its path; see [Troubleshooting](troubleshooting.md#claude-code-codex-or-opencode-is-installed-but-broken). **Re-check** also picks up PATH changes you made after starting CodeDen.
 
 ![The first-run setup checklist](images/setup.png)
 
@@ -84,7 +84,7 @@ Commit this file to tell CodeDen how to prepare a fresh worktree:
 
 ## 5. Start your first session
 
-Open the project and click **New session**. Describe the task ("Add a README section describing this project and a tiny test for src/math.js"), pick the provider, model and effort if you want something other than the defaults, and start it.
+Open the project and click **New session** (or the **+** next to the project in the sidebar). A new session opens with the message box you use in every session: describe the task ("Add a README section describing this project and a tiny test for src/math.js"), attach or paste screenshots and files if they help, pick the provider, model, effort, permissions or **Plan** under the message box if you want something other than the defaults, and send. Nothing is created until you send: the first message starts the session, and the view becomes that session. A draft you leave is kept in the browser for when you come back.
 
 What happens next:
 
@@ -116,7 +116,7 @@ Open **Settings** (**Ctrl/Cmd+,**):
 | Voice | Dictation engine, push-to-talk, read-aloud |
 | Image generation | Engine, default size and quality, daily cap, API keys, a test button |
 | Utility model | The small model for follow-ups, read-aloud summaries and session titles |
-| Notifications | Toasts, the chime when an agent needs you (with a test button), browser notifications |
+| Notifications | Toasts, which inbox categories notify you (needs you, failures, factory activity, automations), the chime when an agent needs you (with a test button), browser notifications |
 | Keyboard shortcuts | The full list (also **Shift+?**) |
 
 ## Stopping CodeDen

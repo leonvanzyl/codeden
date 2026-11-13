@@ -1,8 +1,9 @@
 import { basename, join } from "node:path";
-import type { AgentConfigFile, AgentSkill } from "@codeden/contracts";
+import type { AgentConfigFile } from "@codeden/contracts";
 import { isInside } from "../files/path-guard";
 import {
   type ConfigRoot,
+  type DiscoveredSkill,
   existing,
   fileEntry,
   filesUnder,
@@ -136,7 +137,7 @@ export function listCodexProject(p: ProjectRef): AgentConfigFile[] {
   ];
 }
 
-function codexUserSkills(home: string): AgentSkill[] {
+function codexUserSkills(home: string): DiscoveredSkill[] {
   const r = homeRoot(home);
   return [
     ...skillsIn(r, join(home, ".codex", "skills"), "codex", "user"),
@@ -144,11 +145,26 @@ function codexUserSkills(home: string): AgentSkill[] {
   ];
 }
 
+/** Every provider's user skills, plus the project's (the Skills tab's switches). */
+export function listSkills(home: string, project: ProjectRef | null): DiscoveredSkill[] {
+  const r = project ? projectRoot(project) : null;
+  return [
+    ...skillsIn(homeRoot(home), join(home, ".claude", "skills"), "claude", "user"),
+    ...codexUserSkills(home),
+    ...(project && r
+      ? [
+          ...skillsIn(r, join(project.path, ".claude", "skills"), "claude", "project"),
+          ...skillsIn(r, join(project.path, ".agents", "skills"), "codex", "project"),
+        ]
+      : []),
+  ];
+}
+
 // ------------------------------------------------------------------------------ loaded
 
 export interface LoadedFiles {
   memory: AgentConfigFile[];
-  skills: AgentSkill[];
+  skills: DiscoveredSkill[];
   subagents: AgentConfigFile[];
 }
 

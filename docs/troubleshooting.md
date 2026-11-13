@@ -169,7 +169,7 @@ Open the factory panel. A **paused** loop shows its reason (budget reached, repe
 
 CodeDen is tested on Windows first. Things worth knowing:
 
-- **Install the CLIs normally.** The native Claude Code installer (`claude.exe`) and the npm `claude.cmd` / `codex.cmd` shims all work; CodeDen unwraps npm shims itself, so no shell is involved. The native installer's `%USERPROFILE%\.local\bin` is found even when it isn't on your PATH, and a PATH you change while CodeDen runs is picked up on **Re-check** (see [installed but broken](#claude-code-or-codex-is-installed-but-broken)).
+- **Install the CLIs normally.** The native Claude Code installer (`claude.exe`) and the npm `claude.cmd` / `codex.cmd` shims all work; CodeDen unwraps npm shims itself, so no shell is involved. The native installer's `%USERPROFILE%\.local\bin` is found even when it isn't on your PATH, and a PATH you change while CodeDen runs is picked up on **Re-check** (see [installed but broken](#claude-code-codex-or-opencode-is-installed-but-broken)).
 - **Terminal shell.** Terminals open **PowerShell** (`powershell.exe`). To use PowerShell 7 or Git Bash, set `CODEDEN_SHELL` before starting, for example in PowerShell:
 
   ```powershell
