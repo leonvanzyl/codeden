@@ -99,6 +99,25 @@ describe("browser panel contracts", () => {
     roundTrip(BrowserViewportRequest, { width: 390, height: 844 });
   });
 
+  it("round-trips page dialogs and a viewer's answer", () => {
+    const dialog = { tabId: "t1", type: "prompt" as const, message: "Name?", defaultValue: "a" };
+    roundTrip(BrowserTabsResponse, { open: true, tabs: [tab], dialogs: [dialog] });
+    roundTrip(BrowserServerMessage, { type: "dialogs", dialogs: [dialog] });
+    roundTrip(BrowserServerMessage, {
+      type: "dialogs",
+      dialogs: [],
+      closed: { ...dialog, by: "viewer", accepted: true },
+    });
+    roundTrip(BrowserClientMessage, { type: "dialog", tabId: "t1", accept: false });
+    roundTrip(BrowserClientMessage, {
+      type: "dialog",
+      tabId: "t1",
+      accept: true,
+      promptText: "Renamed",
+    });
+    expect(BrowserClientMessage.safeParse({ type: "dialog", accept: true }).success).toBe(false);
+  });
+
   it("coerces numeric query parameters", () => {
     expect(BrowserWsQuery.parse({ sessionId: "s", open: "1", maxFps: "12" })).toEqual({
       sessionId: "s",

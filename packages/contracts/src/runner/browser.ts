@@ -165,6 +165,56 @@ export const BrowserHandoffTab = z.object({
 });
 export type BrowserHandoffTab = z.infer<typeof BrowserHandoffTab>;
 
+/** Longest dialog text (message or default prompt text) passed on; the runner cuts the rest. */
+export const MAX_DIALOG_TEXT = 10_000;
+
+/** A page dialog nobody answers is dismissed after this long, so a page never waits forever. */
+export const DIALOG_TIMEOUT_MS = 120_000;
+
+/**
+ * A page's JavaScript dialog: `alert()`, `confirm()`, `prompt()`, or the "Leave site?" of a
+ * `beforeunload` handler.
+ */
+export const BrowserDialogType = z.enum(["alert", "confirm", "prompt", "beforeunload"]);
+export type BrowserDialogType = z.infer<typeof BrowserDialogType>;
+
+/**
+ * A page dialog waiting for an answer (§12.2). The page is paused until a viewer (the panel) or
+ * an agent (`browser.dialog`) answers it, or `DIALOG_TIMEOUT_MS` passes and it is dismissed. A
+ * tab shows at most one at a time.
+ */
+export const BrowserDialog = z.object({
+  tabId: BrowserTabId,
+  type: BrowserDialogType,
+  /** What the page says or asks (cut to `MAX_DIALOG_TEXT`). */
+  message: z.string().max(MAX_DIALOG_TEXT),
+  /** `prompt` only: the text its field starts with. */
+  defaultValue: z.string().max(MAX_DIALOG_TEXT).optional(),
+});
+export type BrowserDialog = z.infer<typeof BrowserDialog>;
+
+/**
+ * Who closed a page dialog: an `agent` or a `viewer` answered it, nobody did in time
+ * (`timeout`), or the `browser` closed it (the tab closed or navigated away, or the dialog was
+ * answered in the desktop app's own dialog box).
+ */
+export const BrowserDialogCloser = z.enum(["agent", "viewer", "timeout", "browser"]);
+export type BrowserDialogCloser = z.infer<typeof BrowserDialogCloser>;
+
+/** A page dialog that just closed, and how: `accepted` is OK (Leave), otherwise Cancel. */
+export const BrowserDialogClosed = BrowserDialog.extend({
+  by: BrowserDialogCloser,
+  accepted: z.boolean(),
+});
+export type BrowserDialogClosed = z.infer<typeof BrowserDialogClosed>;
+
+/**
+ * The result of an agent action (click, type, press, pointer action). `dialog`: the action opened
+ * a page dialog, which now waits for an answer (`browser.dialog`); the action finishes once it is
+ * answered.
+ */
+const ActionResult = z.object({ dialog: BrowserDialog.optional() });
+
 /** A key held down during an agent pointer action (`browser.mouse`). */
 export const BrowserModifierKey = z.enum(["Alt", "Control", "Meta", "Shift"]);
 export type BrowserModifierKey = z.infer<typeof BrowserModifierKey>;
@@ -406,6 +456,19 @@ export const BrowserCommands = [
     networkIdle: z.boolean().optional(),
     timeoutMs: z.int().min(1).max(120_000).optional(),
   }),
+  /**
+   * Answer the page dialog open on a tab (default: the active tab's, else the only one open).
+   * `accept` is OK (Leave, for `beforeunload`), otherwise Cancel; `promptText` is what a prompt
+   * returns (default: its own default text). `by` tells viewers who answered (default `agent`).
+   * Fails with `no_dialog` when there is none.
+   */
+  z.object({
+    name: z.literal("browser.dialog"),
+    ...TabTarget,
+    accept: z.boolean(),
+    promptText: z.string().max(MAX_DIALOG_TEXT).optional(),
+    by: z.enum(["agent", "viewer"]).optional(),
+  }),
 ] as const;
 
 const Empty = z.object({});
@@ -429,7 +492,12 @@ export const BrowserCommandResults = {
   }),
   "browser.close": Empty,
   "browser.history": z.object({ url: z.string() }),
-  "browser.tabs.list": z.object({ tabs: z.array(BrowserTab), engine: BrowserEngine.optional() }),
+  /** `dialogs`: page dialogs waiting for an answer (absent from older runners). */
+  "browser.tabs.list": z.object({
+    tabs: z.array(BrowserTab),
+    engine: BrowserEngine.optional(),
+    dialogs: z.array(BrowserDialog).optional(),
+  }),
   "browser.tabs.open": TabResult,
   "browser.tabs.close": Empty,
   "browser.tabs.activate": Empty,
@@ -447,17 +515,22 @@ export const BrowserCommandResults = {
   "browser.screencast": z.object({ viewers: z.int().nonnegative() }),
   "browser.input": Empty,
   "browser.devServer": TabResult,
+  /**
+   * `dialog`: a page dialog is open on the tab. The page is paused until it is answered, so
+   * `snapshot` is empty then.
+   */
   "browser.snapshot": z.object({
     tabId: BrowserTabId,
     url: z.string(),
     title: z.string(),
     snapshot: z.string(),
     truncated: z.boolean(),
+    dialog: BrowserDialog.optional(),
   }),
-  "browser.click": Empty,
-  "browser.type": Empty,
-  "browser.press": Empty,
-  "browser.mouse": Empty,
+  "browser.click": ActionResult,
+  "browser.type": ActionResult,
+  "browser.press": ActionResult,
+  "browser.mouse": ActionResult,
   "browser.screenshot": z.object({
     path: z.string(),
     width: z.int().positive(),
@@ -471,4 +544,6 @@ export const BrowserCommandResults = {
   /** JSON-serialized result (truncated to the size cap). */
   "browser.evaluate": z.object({ json: z.string(), truncated: z.boolean() }),
   "browser.wait": z.object({ matched: z.boolean() }),
+  /** The dialog that was answered. */
+  "browser.dialog": z.object({ dialog: BrowserDialog }),
 };

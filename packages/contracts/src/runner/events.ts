@@ -1,7 +1,14 @@
 import { z } from "zod";
 import { AgentEvent } from "../agent-events";
 import { ErrorInfo, Id } from "../common";
-import { BrowserEngine, BrowserFrameMetadata, BrowserTab, BrowserTabId } from "./browser";
+import {
+  BrowserDialog,
+  BrowserDialogClosed,
+  BrowserEngine,
+  BrowserFrameMetadata,
+  BrowserTab,
+  BrowserTabId,
+} from "./browser";
 import { CheckpointIndex, PtyId } from "./commands";
 
 /**
@@ -79,6 +86,16 @@ export const RunnerStream = z.discriminatedUnion("kind", [
     sessionId: Id,
     tabs: z.array(BrowserTab),
     engine: BrowserEngine.optional(),
+  }),
+  /**
+   * The session's page dialogs changed: one opened, or `closed` just closed. `dialogs` is every
+   * dialog still waiting for an answer (at most one per tab).
+   */
+  z.object({
+    kind: z.literal("browser.dialogs"),
+    sessionId: Id,
+    dialogs: z.array(BrowserDialog),
+    closed: BrowserDialogClosed.optional(),
   }),
 ]);
 export type RunnerStream = z.infer<typeof RunnerStream>;
