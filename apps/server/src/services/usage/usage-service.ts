@@ -17,8 +17,10 @@ import type { Db } from "../../db/client";
 import { automations, githubPrs, inboxItems, projects, sessions } from "../../db/schema";
 import { rateLimitWindows, usageLedger } from "../../db/schema-usage";
 import type { EventStore } from "../../events/store";
-import { readJsonFile, writeJsonFile } from "../../json-file";
+import { writeJsonFile } from "../../json-file";
+import { loadUserJsonFile } from "../../user-json-file";
 import { badRequest } from "../errors";
+import { reportFileReset } from "../file-reset-notice";
 import {
   addDays,
   dayKey,
@@ -80,8 +82,13 @@ export class UsageService {
 
   settings(): UsageSettings {
     if (!this.cachedSettings) {
-      const parsed = UsageSettings.safeParse(readJsonFile(this.opts.settingsFile) ?? {});
-      this.cachedSettings = parsed.success ? parsed.data : UsageSettings.parse({});
+      // A broken file is kept as a copy before the next save can overwrite the user's budgets.
+      const { value, reset } = loadUserJsonFile(this.opts.settingsFile, UsageSettings);
+      if (reset) {
+        const notice = { what: "Usage settings", where: "on the Usage page" };
+        reportFileReset(reset, notice, { store: this.opts.store, log: this.opts.log });
+      }
+      this.cachedSettings = value;
     }
     return this.cachedSettings;
   }
