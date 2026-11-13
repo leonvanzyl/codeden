@@ -45,7 +45,10 @@ export type ListConflictsQuery = z.infer<typeof ListConflictsQuery>;
 /**
  * `POST /api/conflicts/:id/resolve`: the decision (wait, skip, join or force with a reason).
  * `start` replaces the request saved with the conflict: the New session draft as it is when the
- * card is answered, so edits made after the first send are what starts. Same project only.
+ * card is answered, so edits made after the first send are what starts. Same project only. It
+ * starts under the conflict's work key (edited text never derives another one); for wait, join
+ * or force, a `start` that names a different `workKey` is refused with `work_key_changed`: send
+ * it again instead, so it is checked for running work.
  */
 export const ResolveConflictRequest = ConflictDecision.and(
   z.object({ start: StartSessionRequest.optional() }),

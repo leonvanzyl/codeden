@@ -50,8 +50,9 @@ const isPersisted = (record: ConflictRecord) => !record.id.startsWith(LOCAL_CONF
  * on a duplicate-work conflict the card shows above the composer; on a failure the draft stays.
  *
  * The composer stays usable under the card, so the card follows the draft: Wait, Join and Force
- * start the draft as it is when clicked, and wait while it is empty (`startBlocked`). Sending
- * again checks the new draft; the server closes the conflict it replaces (`replacesConflict`).
+ * start the draft as it is when clicked, under the conflict's work key, and wait while it is
+ * empty or its typed work key changed (`startBlocked`). Sending again checks the new draft; the
+ * server closes the conflict it replaces (`replacesConflict`).
  */
 export function useStartDraft(projectId: string, resolved: ResolvedDraft, workKey: string) {
   const client = useClient();
@@ -128,14 +129,25 @@ export function useStartDraft(projectId: string, resolved: ResolvedDraft, workKe
   });
 
   /**
-   * The card's decision, applied to the draft as it is now: a persisted conflict is resolved
+   * The work key field changed since the send that conflicted: the decision was about other
+   * work, so the draft has to be sent again to check the new key.
+   */
+  const keyChanged = Boolean(conflict) && (conflict?.request.workKey ?? "") !== workKey.trim();
+
+  /**
+   * The card's decision, applied to the draft as it is now, under the work key that conflicted
+   * (edited text without a typed key would derive another one): a persisted conflict is resolved
    * with that request in place of the saved one, a local one retries the start with it.
    */
   const decide = async (decision: ConflictDecision): Promise<StartSessionResponse> => {
     if (!conflict) throw new Error("No conflict to resolve");
     const { record } = conflict;
+    const skip = decision.resolution === "skip";
+    if (!skip && keyChanged) throw new Error("The work key changed: send the draft again");
     // Skip starts nothing, so the saved request is all it needs.
-    const request = decision.resolution === "skip" ? conflict.request : currentRequest();
+    const request = skip
+      ? conflict.request
+      : { ...currentRequest(), workKey: record.request.workKey };
     decidedInput.current = request.input;
     if (!isPersisted(record)) return client.startSession({ ...request, conflict: decision });
     const replacement = decision.resolution === "skip" ? {} : { start: request };
@@ -182,7 +194,11 @@ export function useStartDraft(projectId: string, resolved: ResolvedDraft, workKe
     },
     sending: start.isPending,
     conflict: shown,
-    startBlocked: canStart ? null : "The composer is empty: write the task to start it, or skip",
+    startBlocked: !canStart
+      ? "The composer is empty: write the task to start it, or skip"
+      : keyChanged
+        ? "The work key changed: send the draft again to check it"
+        : null,
     decide,
     onConflictResolved,
   };
