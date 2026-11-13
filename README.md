@@ -111,7 +111,7 @@ Everything an agent touches, next to the chat:
 - **Plan mode** (Claude Code). The agent explores and proposes a plan, and only starts changing code once you approve it. [Plan mode](docs/security.md#plan-mode).
 - **Files.** A file tree and a syntax-highlighted viewer for the session's worktree.
 - **Terminal.** Real PTY terminals owned by the runner, so they survive server restarts.
-- **Browser.** A Chromium the agents drive (navigate, snapshot, click, type, screenshot, console and network logs), streamed edge to edge into the panel at the panel's own size. Click, type and scroll in it at any time.
+- **Browser.** A Chromium the agents drive (navigate, snapshot, click, type, screenshot, console and network logs, plus click, hover, drag and scroll at screenshot coordinates for canvases, maps and other things without an element to pick), streamed edge to edge into the panel at the panel's own size. Click, type and scroll in it at any time.
 - **Subagents** open as child threads, and the composer queues or steers while a turn runs.
 
 ![The browser panel filling the right side, with the page laid out at the panel's size](docs/images/browser-panel.png)
