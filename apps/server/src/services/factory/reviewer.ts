@@ -113,7 +113,7 @@ function reviewSlot(
   wake?: Session,
 ): boolean {
   if (wake && isBusy(wake)) return true;
-  return claimSlot(ctx, project, reviewTier(item.checks), `review:${item.id}`, wake?.id);
+  return claimSlot(ctx, project, reviewTier(item.checks), `review:${item.id}`, { wake: wake?.id });
 }
 
 /**

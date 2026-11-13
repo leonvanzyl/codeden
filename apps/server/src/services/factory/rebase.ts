@@ -131,7 +131,7 @@ export function repairSlot(
   agent: Session,
 ): boolean {
   if (isBusy(agent)) return true;
-  return claimSlot(ctx, project, "repair", `repair:${item.id}`, agent.id);
+  return claimSlot(ctx, project, "repair", `repair:${item.id}`, { wake: agent.id });
 }
 
 /** The session that answers for the item's PR (its builder or integrator), while it exists. */

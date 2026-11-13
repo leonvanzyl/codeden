@@ -26,11 +26,16 @@ export class PrFiles {
 }
 
 const URL = /\b[a-z][a-z0-9+.-]*:\/\/\S+/gi;
-/** Two or more path segments: `apps/web/src/`, `docs/DESIGN.md`, `factory/loop.ts`. */
-const PATH = /[\w.@-]+(?:\/[\w.@-]+)+\/?/g;
+/** Path-like words: `apps/web/src/`, `docs/DESIGN.md`, `factory/loop.ts`, `README.md`. */
+const PATH = /[\w.@-]+(?:\/[\w.@-]+)*\/?/g;
 const EXTENSION = /\.[a-z0-9]{1,8}$/i;
+/** A file named on its own: an extension that starts with a letter (`README.md`, not `3.5`). */
+const FILE_NAME = /^[\w@-][\w.@-]*\.[a-z][a-z0-9]{0,7}$/i;
 
-/** Paths named in some text: files (with an extension) and directories (two or more segments). */
+/**
+ * Paths named in some text: directories and files of two or more segments, and file names on
+ * their own (with an extension).
+ */
 export function namedPaths(text: string): string[] {
   const found = new Set<string>();
   for (const match of text.replace(URL, " ").matchAll(PATH)) {
@@ -38,7 +43,7 @@ export function namedPaths(text: string): string[] {
       .replace(/^(\.{1,2}\/)+/, "")
       .replace(/\.+$/, "")
       .replace(/\/+$/, "");
-    if (path.split("/").filter(Boolean).length >= 2) found.add(path);
+    if (path.split("/").filter(Boolean).length >= 2 || FILE_NAME.test(path)) found.add(path);
   }
   return [...found];
 }

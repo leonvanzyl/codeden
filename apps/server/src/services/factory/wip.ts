@@ -10,7 +10,8 @@ import { recoverable } from "./recover";
  * machine). At or above the limit the factory finishes open work before it starts more: no new
  * build starts from the queue, the scout files nothing, and free agents go to reviews, fixes and
  * rebases. PRs of failed or escalated work wait for a person and don't count, so a PR nobody
- * looks at can't stop the factory.
+ * looks at can't stop the factory; work that failed for a reason outside its code goes back by
+ * itself, so its PR does count, and so does a queued rebuild's PR until its replacement opens.
  */
 
 /** The limit in force: `maxOpenPrs`, or the agent limit when that is unset. */

@@ -295,6 +295,17 @@ export const ScoutRound = z.object({
   lenses: z.array(ScoutLensRun).default([]),
   findings: z.array(ScoutFinding).max(60).default([]),
   filed: z.int().nonnegative().default(0),
+  /**
+   * When the round began waiting to file: its reviewing is done, and it waits for the
+   * work-in-progress limit (`maxOpenPrs`) to let go or for a free agent; nothing of it runs
+   * meanwhile. Null while it isn't held.
+   */
+  heldSince: Timestamp.nullable().default(null),
+  /**
+   * Milliseconds the round spent held in earlier holds. Held time doesn't count against the
+   * round's timeout, so a long hold never closes it before it files.
+   */
+  heldMs: z.int().nonnegative().default(0),
 });
 export type ScoutRound = z.infer<typeof ScoutRound>;
 

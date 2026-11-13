@@ -91,7 +91,7 @@ function freshNudges(nudges: FactoryItem["nudges"], at: string): FactoryItem["nu
  * `resume` off, which only moves items (back to verification or to the queue, no agent turn),
  * so the verify step sees them in the same tick; then, after reviews, fixes and rebases had
  * their turn at the free agents, with `resume` on and `only` the items that were failed when
- * the tick began, which tells their builders to carry on (a build in the slot order,
+ * the tick began, which tells their builders to carry on (`resume` in the slot order,
  * `slots.ts`). Work that fails during a tick goes back on the next one.
  */
 export async function recoverInfraFailures(
@@ -211,8 +211,8 @@ async function resumeBuilder(
   item: FactoryItem,
   builder: Session,
 ): Promise<FactoryLoop> {
-  // A build: after the reviews, fixes and rebases waiting for an agent (`slots.ts`).
-  if (!claimSlot(ctx, project, "build", `build:${item.id}`, builder.id)) {
+  // After the reviews, fixes and rebases waiting for an agent, before new builds (`slots.ts`).
+  if (!claimSlot(ctx, project, "resume", `build:${item.id}`, { wake: builder.id })) {
     ctx.store.updateItem(item.id, (i) => ({ ...i, note: WAITING_FOR_AGENT }), { touch: false });
     return loop;
   }

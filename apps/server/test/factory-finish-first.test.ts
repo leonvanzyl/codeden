@@ -1,6 +1,7 @@
 import type { FactoryLimits } from "@codeden/contracts";
 import { afterEach, describe, expect, it } from "vitest";
 import { covers, namedPaths } from "../src/services/factory/overlap";
+import { ROUND_TIMEOUT_MS } from "../src/services/factory/scout";
 import { SlotBoard } from "../src/services/factory/slots";
 import { createFactoryEnv, type FactoryEnv } from "./support/factory-env";
 import { APPROVE, factorySteps } from "./support/factory-steps";
@@ -65,6 +66,19 @@ describe("slot priority (§10.1)", () => {
     // ...which stops counting once it doesn't ask again (its item moved on).
     board.beginTick("p");
     expect(board.claim("p", "scout", "scout", 1)).toBe(true);
+  });
+
+  it("lets the queue claim in its own order, with builders carrying on ahead of it", () => {
+    const board = new SlotBoard();
+    board.beginTick("p");
+    expect(board.claim("p", "build", "build:old", 0, true)).toBe(false);
+    // A repair of main queued at the head takes the free slot before the build that waited.
+    board.beginTick("p");
+    expect(board.claim("p", "build", "build:repair", 1, true)).toBe(true);
+    expect(board.claim("p", "build", "build:old", 0, true)).toBe(false);
+    // A builder carrying on after a failure goes before the queued build still waiting.
+    board.beginTick("p");
+    expect(board.claim("p", "resume", "build:resumed", 1)).toBe(true);
   });
 
   it("gives a freed agent to the waiting review, then the resumed builder, then the queued build", async () => {
@@ -149,7 +163,7 @@ describe("slot priority (§10.1)", () => {
 
 describe("the work-in-progress limit (maxOpenPrs)", () => {
   it("starts no new build and files nothing at the limit, and builds again once a PR merges", async () => {
-    env = createFactoryEnv({ limits: { maxConcurrentSessions: 3 } });
+    env = createFactoryEnv({ limits: { maxConcurrentSessions: 4 } });
     await enable("dark_factory", {
       tuning: { maxOpenPrs: 2, minBacklog: 3, discoveryPerRound: 0 },
     });
@@ -163,8 +177,11 @@ describe("the work-in-progress limit (maxOpenPrs)", () => {
     const b = await verifying("success", "Add a timer", 4);
     expect((await status()).wip).toEqual({ openPrs: 2, limit: 2, holding: true });
 
-    // The scout files nothing while open work is being finished.
-    await env.factory.planRound(scout, { lenses: [] });
+    // The scout plans no area reviewers: it is told to end its turn, and it files nothing.
+    const plan = await env.factory.planRound(scout, { lenses: [] });
+    expect(plan.next).toMatch(
+      /Finishing open work \(2 of 2 PRs open\).*End your turn now without reviewing/,
+    );
     const issue = {
       title: "Archive finished sessions",
       summary: "Worktrees pile up",
@@ -176,11 +193,10 @@ describe("the work-in-progress limit (maxOpenPrs)", () => {
       /Finishing open work \(2 of 2 PRs open\)/,
     );
     expect(env.gh.issues).toEqual([]);
-    // Its round ends; the next one is due but doesn't start at the limit.
+    // Its review waits for the limit; the round isn't closed.
     await env.setStatus(scout.id, "idle");
     await tick();
-    expect(loop().scout.round).toBeNull();
-    later(loop().tuning.discoveryIntervalMin * 60_000 + 1);
+    expect(loop().scout.round).toMatchObject({ phase: "reviewing", heldSince: expect.any(String) });
 
     // A queued issue waits; a repair of the default branch still starts (every PR waits on it).
     const queued = backlogItem("Add a clock", 5);
@@ -202,12 +218,12 @@ describe("the work-in-progress limit (maxOpenPrs)", () => {
       note: "Waiting: finishing open work (2 of 2 PRs open)",
     });
     expect(item(repair.id).stage).toBe("building");
-    expect(loop().scout.round).toBeNull();
+    expect(loop().scout.round?.phase).toBe("reviewing");
     const held = await status();
-    expect(held.scout?.runNowBlockedBy).toMatch(/^Finishing open work \(2 of 2 PRs open\)/);
     expect(held.backlog.find((w) => w.id === queued.id)?.note).toMatch(/finishing open work/);
 
-    // A's PR merges: one PR open, so the queued issue gets the free agent.
+    // A's PR merges: one PR open, so the queued issue gets a free agent, and then the scout
+    // reviews by itself and files.
     await review(a.id);
     await env.setStatus(reviewerOf(a.id), "idle");
     await tick();
@@ -215,6 +231,72 @@ describe("the work-in-progress limit (maxOpenPrs)", () => {
     expect(item(queued.id)).toMatchObject({ stage: "building", note: null });
     expect((await status()).wip).toEqual({ openPrs: 1, limit: 2, holding: false });
     expect(item(b.id).stage).toBe("verifying");
+    expect(lastMessageTo(scout.id)).toMatch(/\*\*Review by yourself now\*\*/);
+    expect(loop().scout.round).toMatchObject({ phase: "filing", heldSince: null });
+  });
+
+  it("keeps a held round's findings past the round timeout and files them once a PR merges", async () => {
+    env = createFactoryEnv({ limits: { maxConcurrentSessions: 4 } });
+    await enable("dark_factory", {
+      tuning: { maxOpenPrs: 2, minBacklog: 3, discoveryPerRound: 1 },
+    });
+    await tick();
+    const scout = env.repo.get(loop().scout.sessionId as string);
+    const { lenses } = await env.factory.planRound(scout, {
+      lenses: [{ area: "ux", focus: "The counter's empty state" }],
+    });
+    await env.setStatus(scout.id, "idle");
+    const lens = env.repo.get(lenses[0]?.sessionId as string);
+
+    // Two PRs open while the area reviewer works; it reports, and filing waits for the limit.
+    const a = await verifying("success", "Add a counter", 3);
+    await verifying("success", "Add a timer", 4);
+    env.factory.reportFindings(lens, [
+      {
+        title: "Empty counter shows NaN",
+        summary: "A new counter renders NaN until clicked",
+        type: "bug",
+        severity: "medium",
+        acceptanceCriteria: ["A new counter shows 0"],
+      },
+    ]);
+    await env.setStatus(lens.id, "idle");
+    await tick();
+    expect(loop().scout.round).toMatchObject({ phase: "reviewing", heldSince: expect.any(String) });
+
+    // Held for longer than a round may run: it isn't closed and keeps its findings.
+    later(ROUND_TIMEOUT_MS + 1);
+    await tick();
+    expect(loop().scout.round?.findings).toHaveLength(1);
+
+    // A's PR merges: the scout gets the findings to file.
+    await review(a.id);
+    await env.setStatus(reviewerOf(a.id), "idle");
+    await tick();
+    expect(item(a.id).stage).toBe("watching");
+    expect(lastMessageTo(scout.id)).toMatch(/Empty counter shows NaN/);
+    expect(loop().scout.round).toMatchObject({ phase: "filing", heldSince: null });
+    expect(loop().scout.round?.heldMs).toBeGreaterThan(ROUND_TIMEOUT_MS);
+  });
+
+  it("starts no scout round at the limit, and Run scout now says why", async () => {
+    env = createFactoryEnv({ limits: { maxConcurrentSessions: 3 } });
+    await enable("dark_factory", { tuning: { maxOpenPrs: 1 } });
+    const { id } = await verifying();
+    // Scheduled rounds on, and one is due: the open PR holds it.
+    await enable("dark_factory", { tuning: { maxOpenPrs: 1, minBacklog: 3 } });
+    await tick();
+    expect(loop().scout.round).toBeNull();
+    expect((await status()).scout?.runNowBlockedBy).toMatch(
+      /^Finishing open work \(1 of 1 PRs open\)/,
+    );
+    await expect(env.factory.runScout(env.project.id)).rejects.toThrow(/Finishing open work/);
+
+    // The PR merges: the round starts.
+    await review(id);
+    await env.setStatus(reviewerOf(id), "idle");
+    await tick();
+    expect(loop().scout.round?.phase).toBe("planning");
   });
 
   it("follows Agents at once until it is set, and counts PRs waiting for a person to merge", async () => {
@@ -281,5 +363,12 @@ describe("overlap-aware scheduling", () => {
     expect(covers("src/loop.ts", "src/loop.tsx")).toBe(false);
     expect(covers("apps/web", "apps/website/index.ts")).toBe(false);
     expect(covers("and/or", "src/counter.ts")).toBe(false);
+    // A file named on its own counts; version numbers and plain words don't.
+    expect(namedPaths("Update README.md and package.json for v1.2 (3.5 times faster).")).toEqual([
+      "README.md",
+      "package.json",
+    ]);
+    expect(covers("package.json", "apps/web/package.json")).toBe(true);
+    expect(covers("README.md", "docs/README.mdx")).toBe(false);
   });
 });

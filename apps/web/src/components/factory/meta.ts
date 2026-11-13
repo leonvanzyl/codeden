@@ -261,7 +261,7 @@ export function checkNowHelp(dark: boolean): string {
 
 /** The work-in-progress limit (`maxOpenPrs`). */
 export const WIP_HELP =
-  "The work-in-progress limit. With this many factory pull requests open, the factory finishes them before it starts more: no new build starts from the queue, the scout files nothing, and free agents go to reviews, fixes and rebases until one merges or closes. Fixes for failing checks on the default branch still start. Pull requests of failed or escalated work, which wait for you, don't count. Fewer open PRs means fewer merge conflicts between them.";
+  "The work-in-progress limit. With this many factory pull requests open, the factory finishes them before it starts more: no new build starts from the queue, the scout files nothing, and free agents go to reviews, fixes and rebases until one merges or closes. Fixes for failing checks on the default branch still start. Pull requests of failed or escalated work, which wait for you, don't count (work that failed for a reason outside its code goes back by itself, so its pull request does). Fewer open PRs means fewer merge conflicts between them.";
 
 /** Who gets a free agent first. */
 export const SLOT_ORDER_HELP =

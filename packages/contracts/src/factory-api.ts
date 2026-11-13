@@ -254,11 +254,12 @@ export const FactoryTuning = z.object({
   maxFixAttempts: z.int().nonnegative().default(2),
   /**
    * The work-in-progress limit: most open, unmerged factory pull requests (being built on,
-   * checked, reviewed, revised or rebased, or waiting to be merged) before the factory starts
-   * no new work. At or above it, no new build starts from the queue (repairs of the default
-   * branch excepted), the dark factory's scout files nothing, and free agents go to reviews,
-   * fixes and rebases until a PR merges or closes. PRs of failed or escalated work, which wait
-   * for a person, don't count. `null` (the default): the agent limit (`maxConcurrentSessions`).
+   * checked, reviewed, revised or rebased, rebuilt, or waiting to be merged) before the factory
+   * starts no new work. At or above it, no new build starts from the queue (repairs of the
+   * default branch excepted), the dark factory's scout files nothing, and free agents go to
+   * reviews, fixes and rebases until a PR merges or closes. PRs of work that failed or was
+   * escalated and waits for a person don't count; one that failed for a reason outside its code
+   * (it goes back by itself) does. `null` (the default): the agent limit (`maxConcurrentSessions`).
    */
   maxOpenPrs: z.int().positive().nullable().default(null),
   /**
@@ -590,7 +591,11 @@ export type FactoryMergeChecks = z.infer<typeof FactoryMergeChecks>;
  * factory finishes open work ("Finishing open work (N of M PRs open)") instead of starting more.
  */
 export const FactoryWip = z.object({
-  /** Open, unmerged factory PRs the loop is still taking to a merge (failed or escalated work's excepted). */
+  /**
+   * Open, unmerged factory PRs the loop is still taking to a merge: those of work in the queue
+   * (a rebuild), building or verifying, or back by itself after a failure outside its code. Not
+   * those of failed or escalated work waiting for a person.
+   */
   openPrs: z.int().nonnegative().default(0),
   /** The limit in force: `maxOpenPrs`, or the agent limit when that is unset. */
   limit: z.int().positive().default(2),

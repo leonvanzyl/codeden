@@ -101,6 +101,20 @@ export function scoutFilePrompt(opts: {
     .join("\n");
 }
 
+/**
+ * A round planned without area reviewers while the work-in-progress limit held: a pull request
+ * has merged since, so the scout now reviews by itself and files.
+ */
+export function scoutSelfReviewPrompt(opts: { maxIssues: number; known: readonly string[] }) {
+  return [
+    "Open work has been finished: the factory takes on new work again. This round has no area reviewers.",
+    knownList(opts.known),
+    `**Review by yourself now** against the vision, and file at most ${opts.maxIssues} with \`factory_file_issue\`: only what is worth doing now, outside protected areas, small enough for one pull request and not already covered. Then end your turn with a one-line summary.`,
+  ]
+    .filter((l) => l !== "")
+    .join("\n");
+}
+
 /** An area reviewer's brief for this round (the whole context on its first round). */
 export function lensPrompt(opts: {
   area: DiscoveryArea;

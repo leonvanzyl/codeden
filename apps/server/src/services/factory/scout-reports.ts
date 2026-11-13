@@ -143,6 +143,9 @@ export async function planRound(
     slots,
   });
   const at = ctx.now().toISOString();
+  // At the work-in-progress limit nothing gets filed: a round without area reviewers waits to
+  // review until a PR merges (`advanceRound` holds it like one waiting on its reviewers' findings).
+  const wip = wipOf(ctx, project, loop);
   const lensSessions = { ...loop.scout.lensSessions };
   const started: ScoutLensRun[] = [];
   for (const lens of picked) {
@@ -189,7 +192,7 @@ export async function planRound(
       lensSessions,
       round: {
         ...round,
-        phase: started.length > 0 ? "reviewing" : "filing",
+        phase: started.length > 0 || wip.holding ? "reviewing" : "filing",
         lenses: started,
         sentAt: at,
       },
@@ -201,12 +204,15 @@ export async function planRound(
     slots,
     maxConcurrent: project.factoryLimits.maxConcurrentSessions,
   });
+  const alone = wip.holding
+    ? `No area reviewers this round.${note} ${wipText(wip)}: the factory files no new issues until open pull requests merge. End your turn now without reviewing: CodeDen asks you to review and file once one has merged.`
+    : `No area reviewers this round.${note} Review by yourself now and file at most ${loop.tuning.maxIssuesPerRound} issues with \`factory_file_issue\`, then end your turn.`;
   return {
     lenses: started.map((l) => ({ area: l.area, sessionId: l.sessionId })),
     next:
       started.length > 0
         ? `Started ${started.map((l) => l.area).join(", ")}.${note} End your turn now: CodeDen sends you their findings when they are done.`
-        : `No area reviewers this round.${note} Review by yourself now and file at most ${loop.tuning.maxIssuesPerRound} issues with \`factory_file_issue\`, then end your turn.`,
+        : alone,
   };
 }
 
@@ -274,6 +280,14 @@ export async function fileIssue(
   const { loop, projectId } = scoutRound(ctx, session);
   const round = loop.scout.round;
   if (!round) throw conflict("No scout round is running", "no_round");
+  // At the work-in-progress limit the factory finishes open work before it takes on more.
+  const wip = wipOf(ctx, ctx.projects.get(projectId), loop);
+  if (wip.holding) {
+    throw conflict(
+      `${wipText(wip)}: the factory files no new issues until open pull requests merge; end your turn`,
+      "wip_limit",
+    );
+  }
   if (round.phase === "reviewing") {
     throw conflict(
       "The area reviewers are still reviewing; end your turn and wait for their findings",
@@ -284,14 +298,6 @@ export async function fileIssue(
     throw conflict(
       `This round's limit of ${loop.tuning.maxIssuesPerRound} issues is reached; end your turn`,
       "round_limit",
-    );
-  }
-  // At the work-in-progress limit the factory finishes open work before it takes on more.
-  const wip = wipOf(ctx, ctx.projects.get(projectId), loop);
-  if (wip.holding) {
-    throw conflict(
-      `${wipText(wip)}: the factory files no new issues until open pull requests merge; end your turn`,
-      "wip_limit",
     );
   }
   const slug = slugify(req.title);

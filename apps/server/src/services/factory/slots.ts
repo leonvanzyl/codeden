@@ -13,10 +13,14 @@ import { isBusy } from "./sessions";
  * - `repair`: a rebase or conflict resolution (a request to the PR's agent, an integrator) or a
  *   builder's revise round;
  * - `review_early`: a reviewer for a PR whose CI is still running;
- * - `build`: a builder resumed after a failure outside its code, then new builds from the queue;
+ * - `resume`: a builder carrying on after a failure outside its code (a message race included);
+ * - `build`: a new build from the queue;
  * - `scout`: the dark factory's scout and its area reviewers.
+ *
+ * Within a tier, work that waited longer goes first, except where the caller claims in an order
+ * of its own (`ordered`: the queue, which is sorted by who asked and priority).
  */
-export const SLOT_TIERS = ["review", "repair", "review_early", "build", "scout"] as const;
+export const SLOT_TIERS = ["review", "repair", "review_early", "resume", "build", "scout"] as const;
 export type SlotTier = (typeof SLOT_TIERS)[number];
 
 const rank = (tier: SlotTier) => SLOT_TIERS.indexOf(tier);
@@ -72,11 +76,12 @@ export class SlotBoard {
    * Waiting claims that go before work of `tier` named `key`: those of a higher tier (this
    * tick's, and the last tick's that haven't asked again yet) and, for work that didn't ask on
    * the last tick, those of its own tier that waited then (within a tier, what waited longer
-   * goes first).
+   * goes first). `ordered`: the caller claims its tier in an order of its own, so only higher
+   * tiers count.
    */
-  ahead(projectId: string, tier: SlotTier, key?: string): number {
+  ahead(projectId: string, tier: SlotTier, key?: string, ordered = false): number {
     const b = this.board(projectId);
-    const newcomer = key === undefined || !b.askedBefore.has(key);
+    const newcomer = !ordered && (key === undefined || !b.askedBefore.has(key));
     let n = 0;
     for (const [k, t] of b.waiting) if (k !== key && rank(t) < rank(tier)) n++;
     for (const [k, t] of b.waited) {
@@ -90,9 +95,9 @@ export class SlotBoard {
    * Take a slot for work of `tier` when one is left after the higher tiers' waiting work, or
    * wait. `free` is the number of free slots now.
    */
-  claim(projectId: string, tier: SlotTier, key: string, free: number): boolean {
+  claim(projectId: string, tier: SlotTier, key: string, free: number, ordered = false): boolean {
     const b = this.board(projectId);
-    const granted = free > this.ahead(projectId, tier, key);
+    const granted = free > this.ahead(projectId, tier, key, ordered);
     b.asked.add(key);
     if (granted) b.waiting.delete(key);
     else b.waiting.set(key, tier);
@@ -119,19 +124,20 @@ export function busySlots(ctx: FactoryContext, projectId: string, except?: strin
 }
 
 /**
- * Claim an agent slot for work of `tier` (`key` names the work, e.g. `review:<item>`). With
- * `wake`, the session that takes it is an idle one a message wakes: it counts as busy at once.
+ * Claim an agent slot for work of `tier` (`key` names the work, e.g. `review:<item>`).
+ * - `wake`: the session that takes it is an idle one a message wakes; it counts as busy at once.
+ * - `ordered`: the caller claims its tier in its own order (the queue), not who waited longest.
  */
 export function claimSlot(
   ctx: FactoryContext,
   project: Project,
   tier: SlotTier,
   key: string,
-  wake?: string,
+  opts: { wake?: string; ordered?: boolean } = {},
 ): boolean {
   const free = freeSlots(busySlots(ctx, project.id), project.factoryLimits);
-  const granted = ctx.slots.claim(project.id, tier, key, free);
-  if (granted && wake) ctx.slots.woke(project.id, wake);
+  const granted = ctx.slots.claim(project.id, tier, key, free, opts.ordered);
+  if (granted && opts.wake) ctx.slots.woke(project.id, opts.wake);
   return granted;
 }
 

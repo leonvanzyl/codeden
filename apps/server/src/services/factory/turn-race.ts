@@ -51,7 +51,7 @@ export function turnRaceFailure(ctx: FactoryContext, session: Session): InboxIte
 
 /**
  * Whether a builder may be told to carry on now: the loop runs and an agent is free, after the
- * reviews, fixes and rebases waiting for one (a build, `slots.ts`).
+ * reviews, fixes and rebases waiting for one, ahead of new builds (`resume`, `slots.ts`).
  */
 function mayResume(
   ctx: FactoryContext,
@@ -61,7 +61,7 @@ function mayResume(
   s: Session,
 ): boolean {
   if (loop.state === "paused") return false;
-  return claimSlot(ctx, project, "build", `build:${item.id}`, s.id);
+  return claimSlot(ctx, project, "resume", `build:${item.id}`, { wake: s.id });
 }
 
 /**

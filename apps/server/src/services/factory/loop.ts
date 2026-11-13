@@ -211,7 +211,7 @@ async function assignAgents(ctx: FactoryContext, project: Project, loop: Factory
       continue;
     }
     if (!full && underMergeCap(ctx, project, loop, item)) {
-      if (claimSlot(ctx, project, "build", `build:${item.id}`)) {
+      if (claimSlot(ctx, project, "build", `build:${item.id}`, { ordered: true })) {
         await startBuilder(ctx, project, item, vision, loop);
         continue;
       }
