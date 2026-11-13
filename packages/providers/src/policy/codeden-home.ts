@@ -1,13 +1,18 @@
-import { CODEDEN_CREDENTIAL_FILES } from "@codeden/contracts";
+import { CODEDEN_CREDENTIAL_FILES, INVALID_COPY_SUFFIX } from "@codeden/contracts";
 import type { RiskAssessment } from "./assessment";
 import { isWin, type PathContext, pathApi, resolveAgainst, samePath } from "./paths";
+import { WILDCARD, wildcardMatchesNumbered, wildcardPattern } from "./wildcard";
+
+export { wildcardPattern } from "./wildcard";
 
 /**
  * CodeDen's own credential files (§15): the install token, the runner lock and the remote
- * access store in its data directory. An agent holding the install token or the runner's token
- * could drive CodeDen itself and approve its own requests, so touching one asks at every level,
- * Full included, and is refused for read-only sessions (§11.2). The data directory comes from
- * the session (`SessionOptions.codedenHome`); without it, this rule is off.
+ * access store in its data directory, and the copies CodeDen keeps of one it found damaged
+ * (`<file>.invalid-<timestamp>`, with the same secrets in it). An agent holding the install
+ * token or the runner's token could drive CodeDen itself and approve its own requests, so
+ * touching one asks at every level, Full included, and is refused for read-only sessions
+ * (§11.2). The data directory comes from the session (`SessionOptions.codedenHome`); without
+ * it, this rule is off.
  */
 
 /** A risky verdict on CodeDen's own credentials, which every level asks about. */
@@ -23,6 +28,15 @@ export function codedenCredentialFiles(ctx: PathContext): string[] {
   return CODEDEN_CREDENTIAL_FILES.map((file) => p.join(home, file));
 }
 
+/**
+ * Where copies of the credential files go, as absolute paths: `<file>.invalid-`, followed on
+ * disk by a timestamp. A path next to the file whose name starts so is guarded like the file,
+ * and so is a wildcard or a search's name filter that matches the start and some number.
+ */
+export function codedenCredentialCopies(ctx: PathContext): string[] {
+  return codedenCredentialFiles(ctx).map((file) => `${file}${INVALID_COPY_SUFFIX}`);
+}
+
 /** The credential files, then the folders that hold them. */
 function guardedPaths(ctx: PathContext): string[] {
   const files = codedenCredentialFiles(ctx);
@@ -30,49 +44,15 @@ function guardedPaths(ctx: PathContext): string[] {
   return [...files, ...new Set(files.map((file) => p.dirname(file)))];
 }
 
-const WILDCARD = /[*?[]/;
-
-/** `c` matched as itself in a regular expression. */
-const literalChar = (c: string) => c.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
-/**
- * A shell wildcard (`*`, `?`, `[...]`, and `**`, which before a slash stands for zero or more
- * folders) over a `/`-separated path as a regular expression. Its first `literal` characters
- * match as themselves. Undefined when malformed.
- */
-export function wildcardPattern(
-  pattern: string,
-  ignoreCase: boolean,
-  literal = 0,
-): RegExp | undefined {
-  let source = pattern.slice(0, literal).replace(/[\s\S]/g, literalChar);
-  for (let i = literal; i < pattern.length; i += 1) {
-    const c = pattern[i] as string;
-    if (c === "*" && pattern[i + 1] === "*") {
-      const folders = pattern[i + 2] === "/";
-      source += folders ? "(?:.*/)?" : ".*";
-      i += folders ? 2 : 1;
-    } else if (c === "*") {
-      source += "[^/]*";
-    } else if (c === "?") {
-      source += "[^/]";
-    } else if (c === "[" && pattern.indexOf("]", i + 2) > 0) {
-      const end = pattern.indexOf("]", i + 2);
-      const body = pattern
-        .slice(i + 1, end)
-        .replace(/^!/, "^")
-        .replace(/\\/g, "\\\\");
-      source += `[${body}]`;
-      i = end;
-    } else {
-      source += literalChar(c);
-    }
-  }
-  try {
-    return new RegExp(`^${source}$`, ignoreCase ? "i" : "");
-  } catch {
-    return undefined;
-  }
+/** True when `abs` (an absolute path, no wildcards) is a copy of a credential file. */
+function isCredentialCopy(abs: string, ctx: PathContext): boolean {
+  const p = pathApi(ctx);
+  const fold = (name: string) => (isWin(ctx) ? name.toLowerCase() : name);
+  return codedenCredentialCopies(ctx).some(
+    (copy) =>
+      fold(p.basename(abs)).startsWith(fold(p.basename(copy))) &&
+      samePath(p.dirname(abs), p.dirname(copy), ctx),
+  );
 }
 
 /** `/`-separated, for wildcard matching; Windows paths match in any case. */
@@ -127,10 +107,11 @@ export function agentPattern(abs: string, ctx: PathContext): RegExp | undefined 
 }
 
 /**
- * True when `target` reaches one of CodeDen's credential files: the file itself, a folder that
- * holds one (`<home>`, `<home>/runner`: copying or searching it reads them), or a wildcard that
- * matches either. `~`, `$HOME`, `$CODEDEN_HOME` (and its PowerShell and cmd forms) and relative
- * paths resolve as in the shell. The home itself is always compared literally.
+ * True when `target` reaches one of CodeDen's credential files: the file itself or a copy of
+ * it, a folder that holds one (`<home>`, `<home>/runner`: copying or searching it reads them),
+ * or a wildcard that matches any of them. `~`, `$HOME`, `$CODEDEN_HOME` (and its PowerShell
+ * and cmd forms) and relative paths resolve as in the shell. The home itself is always compared
+ * literally.
  */
 export function touchesCodedenCredentials(target: string, ctx: PathContext): boolean {
   if (!ctx.codedenHome || !target.trim()) return false;
@@ -138,5 +119,12 @@ export function touchesCodedenCredentials(target: string, ctx: PathContext): boo
   const guarded = guardedPaths(ctx);
   if (guarded.some((p) => samePath(p, abs, ctx))) return true;
   const pattern = agentPattern(abs, ctx);
-  return pattern !== undefined && guarded.some((p) => pattern.test(slashes(p, ctx)));
+  if (pattern === undefined) return isCredentialCopy(abs, ctx);
+  if (guarded.some((p) => pattern.test(slashes(p, ctx)))) return true;
+  // Copies are numbered: a wildcard reaches them when it matches the start and some number.
+  const glob = slashes(abs, ctx);
+  const literal = literalPrefix(abs, ctx);
+  return codedenCredentialCopies(ctx).some(
+    (copy) => wildcardMatchesNumbered(glob, slashes(copy, ctx), isWin(ctx), literal) === true,
+  );
 }

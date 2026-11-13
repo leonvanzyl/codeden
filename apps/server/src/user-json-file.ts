@@ -1,4 +1,5 @@
 import { chmodSync, copyFileSync, existsSync, readFileSync } from "node:fs";
+import { INVALID_COPY_SUFFIX } from "@codeden/contracts";
 import type { z } from "zod";
 import { writeJsonFile } from "./json-file";
 
@@ -47,7 +48,8 @@ export function loadUserJsonFile<S extends z.ZodType>(
   } catch (error) {
     reason = readProblem(error);
   }
-  const copy = `${file}.invalid-${(opts.now ?? Date.now)()}`;
+  // The agents' policy guards copies of CodeDen's credential files by this name.
+  const copy = `${file}${INVALID_COPY_SUFFIX}${(opts.now ?? Date.now)()}`;
   copyFileSync(file, copy);
   if (opts.mode !== undefined) chmodSync(copy, opts.mode);
   const value = defaults();

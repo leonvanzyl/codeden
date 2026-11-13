@@ -1,10 +1,10 @@
 import {
   agentPattern,
+  codedenCredentialCopies,
   codedenCredentialFiles,
   resolvePattern,
   slashes,
   touchesCodedenCredentials,
-  wildcardPattern,
 } from "./codeden-home";
 import { isInside, type PathContext, pathApi, samePath } from "./paths";
 import {
@@ -16,6 +16,7 @@ import {
 } from "./search-words";
 import { braceAlternatives, DATA } from "./secrets";
 import type { WordPaths } from "./shell";
+import { wildcardMatchesNumbered, wildcardPattern } from "./wildcard";
 
 /**
  * Searches and listings that reach CodeDen's credential files from a folder above them
@@ -149,8 +150,12 @@ function holds(dir: string, folder: string, recursive: boolean, ctx: PathContext
   }
 }
 
-/** True when `file`, found under `root`, passes one of the name filters (or there are none). */
-function keeps(names: string[], file: string, root: string, ctx: PathContext): boolean {
+/**
+ * True when `file`, found under `root`, passes one of the name filters (or there are none).
+ * With `copies`, `file` is where copies of a credential file start (`<file>.invalid-`): true
+ * when a filter lets any of them through.
+ */
+function keeps(names: string[], file: string, root: string, ctx: PathContext, copies = false) {
   if (names.length === 0) return true;
   const p = pathApi(ctx);
   const base = p.basename(file);
@@ -158,24 +163,27 @@ function keeps(names: string[], file: string, root: string, ctx: PathContext): b
   return names
     .flatMap((name) => braceAlternatives(name.trim().replace(/^\.[\\/]/, "")))
     .some((name) => {
-      const pattern = wildcardPattern(slashes(name, ctx), true);
-      if (!pattern) return true;
-      return /[\\/]/.test(name) ? pattern.test(below) : pattern.test(base);
+      const glob = slashes(name, ctx);
+      const target = /[\\/]/.test(name) ? below : base;
+      if (copies) return wildcardMatchesNumbered(glob, target, true) ?? true;
+      const pattern = wildcardPattern(glob, true);
+      return pattern ? pattern.test(target) : true;
     });
 }
 
-/** The root of `walk` from which it reaches a credential file, if any. */
+/** The root of `walk` from which it reaches a credential file or a copy of one, if any. */
 function walkReaches(walk: Walk, ctx: PathContext): string | undefined {
   const files = codedenCredentialFiles(ctx);
+  const copies = codedenCredentialCopies(ctx);
   const p = pathApi(ctx);
+  const reaches = (dir: string, file: string, copy: boolean) =>
+    holds(dir, p.dirname(file), walk.recursive, ctx) && keeps(walk.names, file, dir, ctx, copy);
   for (const root of walk.roots.length ? walk.roots : ["."]) {
     for (const alt of braceAlternatives(root)) {
       const dir = resolvePattern(alt, ctx);
-      const found = files.some(
-        (file) =>
-          holds(dir, p.dirname(file), walk.recursive, ctx) && keeps(walk.names, file, dir, ctx),
-      );
-      if (found) return root;
+      if (files.some((f) => reaches(dir, f, false)) || copies.some((c) => reaches(dir, c, true))) {
+        return root;
+      }
     }
   }
   return undefined;

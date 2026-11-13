@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   AutonomyLevel,
   CODEDEN_CREDENTIAL_FILES,
+  INVALID_COPY_SUFFIX,
   ProviderCapabilities,
   SessionOptions,
 } from "../src";
@@ -46,6 +47,8 @@ describe("permission levels (§11.2)", () => {
       "runner/runner.json",
       "remote-access.json",
     ]);
+    // Copies of a damaged file are named with it; the policy guards credential copies by it.
+    expect(INVALID_COPY_SUFFIX).toBe(".invalid-");
   });
 
   it("treats the readOnly capability as optional", () => {

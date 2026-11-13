@@ -164,6 +164,13 @@ export const CODEDEN_CREDENTIAL_FILES = [
   "remote-access.json",
 ] as const;
 
+/**
+ * Marks the copy CodeDen keeps of a data-folder file it could not read before resetting it to
+ * defaults: `<file>.invalid-<timestamp>`, next to the file. A copy of a credential file holds the
+ * same secrets, so `<credential file>.invalid-*` is guarded like the file itself (§11.2).
+ */
+export const INVALID_COPY_SUFFIX = ".invalid-";
+
 /** Options for `ProviderAdapter.openSession`. */
 export const SessionOptions = z.object({
   /** CodeDen session id. */
