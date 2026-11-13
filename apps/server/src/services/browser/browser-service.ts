@@ -11,13 +11,12 @@ import type {
   Settings,
 } from "@codeden/contracts";
 import { errorMessage, ServiceError } from "../errors";
-import { type RunnerPort, runnerErrorCode, toServiceError } from "../runner-port";
+import { type RunnerDeps, runnerErrorCode, runnerForSession, toServiceError } from "../runner-port";
 import type { SessionRepo } from "../sessions/repo";
 import { AgentActivity } from "./agent-activity";
 import { BrowserHostLink } from "./browser-host";
 
-export interface BrowserServiceDeps {
-  runner: RunnerPort;
+export interface BrowserServiceDeps extends RunnerDeps {
   repo: SessionRepo;
   /** Current settings (`desktop.nativeBrowser`); native views are off without it. */
   settings?: () => Settings;
@@ -96,14 +95,18 @@ export class BrowserService {
     });
   }
 
-  /** Send a `browser.*` command for an existing session, mapping runner failures. */
+  /**
+   * Send a `browser.*` command for an existing session to its runner (each session's browser
+   * runs next to its code), mapping runner failures.
+   */
   async command<N extends Extract<RunnerCommandName, `browser.${string}`>>(
     command: RunnerCommandOf<N>,
     timeoutMs = BROWSER_TIMEOUT_MS,
   ): Promise<RunnerCommandResult<N>> {
-    this.deps.repo.get((command as { sessionId: string }).sessionId);
+    const { sessionId } = command as { sessionId: string };
+    this.deps.repo.get(sessionId);
     try {
-      return await this.deps.runner.request(command, timeoutMs);
+      return await runnerForSession(this.deps, sessionId).request(command, timeoutMs);
     } catch (error) {
       if (runnerErrorCode(error) === "not_found") {
         throw new ServiceError(
@@ -143,7 +146,7 @@ export class BrowserService {
     return this.command({ name: "browser.navigate", sessionId, url, tabId });
   }
 
-  /** Local dev servers the runner can see (its own descendants plus probed ports). */
+  /** Local dev servers the home runner can see (its own descendants plus probed ports). */
   async devServers(probe?: number[]): Promise<DevServer[]> {
     try {
       const { ports } = await this.deps.runner.request({ name: "ports.list", probe }, 20_000);
@@ -178,7 +181,7 @@ export class BrowserService {
       sessions.map(async ({ sessionId, tabs, cookies }) => {
         try {
           if (!this.deps.repo.find(sessionId)) throw new Error("no such session");
-          await this.deps.runner.request(
+          await runnerForSession(this.deps, sessionId).request(
             { name: "browser.handoff", sessionId, tabs, cookies },
             BROWSER_TIMEOUT_MS,
           );

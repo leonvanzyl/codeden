@@ -63,7 +63,8 @@ export class OutboxHolds {
     this.held.delete(sessionId);
   }
 
-  releaseAll(): void {
-    for (const id of [...this.held.keys()]) this.release(id);
+  /** Release every hold, or only those of the sessions `which` picks. */
+  releaseAll(which?: (sessionId: string) => boolean): void {
+    for (const id of [...this.held.keys()]) if (!which || which(id)) this.release(id);
   }
 }

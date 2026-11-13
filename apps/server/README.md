@@ -1,6 +1,14 @@
 # @codeden/server
 
-The long-lived CodeDen server (design §4.1): Hono HTTP API and UI WebSocket, the SQLite event log and projections, the runner client, and the internal MCP endpoint.
+The long-lived CodeDen server (design §4.1): Hono HTTP API and UI WebSocket, the SQLite event log and projections, the runner hub, and the internal MCP endpoint.
+
+## Runners (§4.2, `docs/remote-runners.md` §8)
+
+`RunnerHub` (`src/runner/hub.ts`) holds one `RunnerClient` per runner. The local runner is registered at start as the home runner (record id `home`, backend `local`). Each runner is a row of `runners`, projected from `runner.registered`, `runner.connected`, `runner.disconnected` and `runner.deleted`; acks stay in `runner_state`, keyed by the runner's journal id.
+
+- **Routing.** Services ask `runners.forSession(id)` for a session's runner: the one whose journal id is in `sessions.runnerId`. A session with no runner id, or one no record carries (sessions from before records existed, a home runner whose journal was reset), goes to the home runner. A session whose own runner is disconnected or deleted fails with `runner_unavailable` naming that runner.
+- **Home runner only:** provider detection and model refresh, utility jobs, setup re-checks, `mcp.test`, `ports.list`, the worktree sweep, and new sessions (placement comes with the execution backends).
+- **Status.** The snapshot's `runner` is the home runner's connection, as before; `runners` lists every runner with its live state. The `runner` WebSocket message carries both.
 
 ## Internal MCP endpoint (§4.4, §8.3)
 

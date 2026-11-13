@@ -23,6 +23,7 @@ import { FACTORY_EVENT_PAYLOADS } from "./factory-api";
 import { GITHUB_EVENT_PAYLOADS } from "./github";
 import { ConflictRecord, Notice } from "./orchestration";
 import { PtyId } from "./runner/commands";
+import { RunnerDeletedPayload, RunnerRecordRef, RunnerRegisteredPayload } from "./runners";
 import { Settings } from "./settings";
 import { Checkpoint, QueuedMessage, SetupStep } from "./workbench";
 
@@ -101,13 +102,33 @@ export const EventEnvelope = z.discriminatedUnion("type", [
   ),
   globalEvent("artifact.created", z.object({ artifact: Artifact })),
   globalEvent("settings.updated", z.object({ settings: Settings })),
+  /**
+   * The server added a runner, or re-registered one with new details (projected into
+   * `runners`). The home runner is registered on every start.
+   */
+  globalEvent("runner.registered", RunnerRegisteredPayload),
+  /** A runner's sandbox is gone; its record stays with state `deleted`. */
+  globalEvent("runner.deleted", RunnerDeletedPayload),
+  /** The server connected to a runner. `id` is its record id (none: the home runner). */
   globalEvent(
     "runner.connected",
-    z.object({ runnerId: z.string(), version: z.string(), protocolVersion: z.int() }),
+    z.object({
+      ...RunnerRecordRef,
+      runnerId: z.string(),
+      version: z.string(),
+      protocolVersion: z.int(),
+    }),
   ),
-  globalEvent("runner.disconnected", z.object({ runnerId: z.string(), reason: z.string() })),
+  /** The server lost its connection to a runner. `id` is its record id (none: home). */
+  globalEvent(
+    "runner.disconnected",
+    z.object({ ...RunnerRecordRef, runnerId: z.string(), reason: z.string() }),
+  ),
   /** The runner started draining (upgrade or shutdown); its sessions resume afterwards. */
-  globalEvent("runner.draining", z.object({ runnerId: z.string(), reason: z.string() })),
+  globalEvent(
+    "runner.draining",
+    z.object({ ...RunnerRecordRef, runnerId: z.string(), reason: z.string() }),
+  ),
   /** Progress of a worktree setup command (projected into the session's start metadata). */
   globalEvent("session.setup", z.object({ sessionId: Id, step: SetupStep })),
   /** A turn checkpoint was written (projected into `checkpoints`, used for diffs). */

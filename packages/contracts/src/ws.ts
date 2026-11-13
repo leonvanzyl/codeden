@@ -7,6 +7,7 @@ import { ItemRecord, Session, Thread, Turn } from "./entities/session";
 import { RawEventEnvelope } from "./events";
 import { RoleSessionsRef } from "./orchestration";
 import { ProviderInfo } from "./provider";
+import { RunnerRecord } from "./runners";
 import { Settings } from "./settings";
 import { UpdateStatus } from "./updates";
 import { ScheduledRun } from "./work";
@@ -45,7 +46,10 @@ export const Snapshot = z.object({
   scheduled: z.array(ScheduledRun).default([]),
   /** The orchestrator and PM sessions (§8.1), also present in `sessions`. */
   roleSessions: RoleSessionsRef.optional(),
+  /** The home runner's connection, the one the shell shows (§4.2). */
   runner: RunnerConnectionStatus,
+  /** Every runner the server drives, the home runner first, with its live state. */
+  runners: z.array(RunnerRecord).default([]),
 });
 export type Snapshot = z.infer<typeof Snapshot>;
 
@@ -97,8 +101,15 @@ export const ServerToClientMessage = z.discriminatedUnion("type", [
     reason: z.enum(["gap", "too_far_behind", "server_restarted"]),
     seq: z.int().nonnegative(),
   }),
-  /** Runner connection changed (ephemeral; not in the event log). */
-  z.object({ type: z.literal("runner"), runner: RunnerConnectionStatus }),
+  /**
+   * A runner's connection changed (ephemeral; not in the event log). `runner` is the home
+   * runner's status; `runners` lists every runner with its live state.
+   */
+  z.object({
+    type: z.literal("runner"),
+    runner: RunnerConnectionStatus,
+    runners: z.array(RunnerRecord).optional(),
+  }),
   /** Update check or self-update progress changed (ephemeral; not in the event log, §16). */
   z.object({ type: z.literal("update"), update: UpdateStatus }),
   z.object({ type: z.literal("pong"), id: z.string() }),

@@ -12,11 +12,15 @@ import { reduceProcessEvent } from "./reducer/process";
 import type { ProjectionReader } from "./reducer/types";
 import type { EventStore } from "./store";
 
-/** Server events produced by one durable runner event (pure apart from the reader). */
+/**
+ * Server events produced by one durable runner event (pure apart from the reader). `recordId`
+ * is the runner's `runners` record (omitted for the home runner).
+ */
 export function runnerEventToNewEvents(
   reader: ProjectionReader,
   msg: RunnerEventMessage,
   runnerId: string,
+  recordId?: string,
 ): NewEvent[] {
   const event = msg.event;
   switch (event.kind) {
@@ -69,7 +73,11 @@ export function runnerEventToNewEvents(
       ];
     case "runner.draining":
       return [
-        { type: "runner.draining", sessionId: null, payload: { runnerId, reason: event.reason } },
+        {
+          type: "runner.draining",
+          sessionId: null,
+          payload: { ...(recordId ? { id: recordId } : {}), runnerId, reason: event.reason },
+        },
       ];
   }
 }
@@ -99,13 +107,14 @@ export function ingestRunnerEvent(
   store: EventStore,
   runnerId: string,
   msg: RunnerEventMessage,
+  recordId?: string,
 ): IngestResult {
   if (msg.seq <= lastAckedSeq(db, runnerId)) {
     return { stored: false, events: [], ackSeq: msg.seq };
   }
   const now = new Date().toISOString();
   const events = store.appendFrom(
-    (reader) => runnerEventToNewEvents(reader, msg, runnerId),
+    (reader) => runnerEventToNewEvents(reader, msg, runnerId, recordId),
     (tx) => {
       tx.insert(runnerState)
         .values({ runnerId, lastAckedSeq: msg.seq, updatedAt: now })

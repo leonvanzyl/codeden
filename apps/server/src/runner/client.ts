@@ -25,6 +25,13 @@ import { type RunnerLaunchConfig, type RunnerStartTimeouts, startRunnerProcess }
 import { isProcessAlive, probeRunnerLock, readLiveRunnerLock } from "./lock";
 
 export interface RunnerClientOptions {
+  /**
+   * The runner's record id (`runners.id`), stamped on its `runner.*` events. Omitted: the home
+   * runner, as in event logs from before several runners existed.
+   */
+  recordId?: string;
+  /** Names a runner other than the home runner in its errors, e.g. "Runner rn-1 (docker)". */
+  name?: string;
   home: string;
   lockFile: string;
   db: Db;
@@ -129,7 +136,7 @@ export class RunnerClient {
   ): Promise<RunnerCommandResult<N>> {
     const ws = this.ws;
     if (!ws || this.current.state !== "connected") {
-      throw new RunnerCommandError("runner_unavailable", "Runner is not connected");
+      throw this.unavailable("is not connected");
     }
     const id = randomUUID();
     const result = new Promise<unknown>((resolve, reject) => {
@@ -156,7 +163,7 @@ export class RunnerClient {
         setTimeout(resolve, 1000).unref();
       });
     }
-    this.failPending("Runner client stopped");
+    this.failPending("client stopped");
   }
 
   /** Ask the runner process to exit, then disconnect. */
@@ -254,11 +261,15 @@ export class RunnerClient {
             {
               type: "runner.disconnected",
               sessionId: null,
-              payload: { runnerId: this.runnerId, reason: "connection closed" },
+              payload: {
+                ...this.recordRef(),
+                runnerId: this.runnerId,
+                reason: "connection closed",
+              },
             },
           ]);
         }
-        this.failPending("Runner connection closed");
+        this.failPending("connection closed");
         if (this.current.state !== "incompatible") {
           this.setStatus({ ...this.current, state: "disconnected" });
         }
@@ -321,6 +332,7 @@ export class RunnerClient {
         type: "runner.connected",
         sessionId: null,
         payload: {
+          ...this.recordRef(),
           runnerId: msg.runnerId,
           version: msg.runnerVersion,
           protocolVersion: msg.protocolVersion,
@@ -380,7 +392,7 @@ export class RunnerClient {
     if (!runnerId) return;
     if (msg.seq > this.lastAckedSeq) {
       try {
-        ingestRunnerEvent(this.opts.db, this.opts.store, runnerId, msg);
+        ingestRunnerEvent(this.opts.db, this.opts.store, runnerId, msg, this.opts.recordId);
       } catch (error) {
         // Not acked: the runner keeps it journaled and redelivers it after a reconnect.
         this.opts.log?.(`runner: failed to store event ${msg.seq}: ${String(error)}`);
@@ -398,9 +410,22 @@ export class RunnerClient {
   private failPending(reason: string): void {
     for (const [id, pending] of this.pending) {
       clearTimeout(pending.timer);
-      pending.reject(new RunnerCommandError("runner_unavailable", reason));
+      pending.reject(this.unavailable(reason));
       this.pending.delete(id);
     }
+  }
+
+  /**
+   * `runner_unavailable`: "Runner is not connected" for the home runner, "Runner rn-1 (docker)
+   * is not connected" for another one.
+   */
+  private unavailable(what: string): RunnerCommandError {
+    return new RunnerCommandError("runner_unavailable", `${this.opts.name ?? "Runner"} ${what}`);
+  }
+
+  /** The record id for this runner's `runner.*` events (none for the home runner's default). */
+  private recordRef(): { id?: string } {
+    return this.opts.recordId ? { id: this.opts.recordId } : {};
   }
 
   private setStatus(status: RunnerConnectionStatus): void {

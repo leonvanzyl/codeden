@@ -20,6 +20,7 @@ import { indexUnfinishedItems } from "../services/search/index-writer";
 import { applyUsageReport } from "../services/usage/ledger";
 import { applyMutations, DbProjectionReader, derivedEvents, type Tx } from "./projection-db";
 import { reduceAgentEvent } from "./reducer/agent";
+import { applyRunnerProjection } from "./runner-projection";
 import { applyWorkbenchProjection } from "./workbench-projection";
 
 export type { Tx } from "./projection-db";
@@ -130,10 +131,14 @@ export function applyProjection(tx: Tx, e: EventEnvelope): NewEvent[] {
     case "factory.digest.created":
       applyFactoryProjection(tx, e);
       return [];
-    case "settings.updated":
-    case "automation.updated":
+    case "runner.registered":
+    case "runner.deleted":
     case "runner.connected":
     case "runner.disconnected":
+      applyRunnerProjection(tx, e);
+      return [];
+    case "settings.updated":
+    case "automation.updated":
     case "runner.draining":
     case "pty.exited":
       return [];

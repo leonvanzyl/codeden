@@ -54,6 +54,7 @@ function expectFullSchema(file: string): void {
         "factory_loops",
         "factory_items",
         "factory_digests",
+        "runners",
       ]),
     );
     expect(columns(database.client, "automations")).toContain("work_key");
@@ -65,6 +66,21 @@ function expectFullSchema(file: string): void {
     );
     expect(columns(database.client, "notices")).toContain("not_before");
     expect(tables).toEqual(expect.arrayContaining(["item_search", "item_search_fts"]));
+    expect(columns(database.client, "runners")).toEqual([
+      "id",
+      "backend",
+      "is_home",
+      "runner_id",
+      "sandbox_ref",
+      "project_id",
+      "session_id",
+      "state",
+      "version",
+      "image_version",
+      "created_at",
+      "last_seen_at",
+      "last_error",
+    ]);
     const applied = (
       database.client.prepare("SELECT name FROM __drizzle_migrations").all() as { name: string }[]
     ).map((m) => m.name);
@@ -208,6 +224,34 @@ describe("migrations", { timeout: 30_000 }, () => {
       );
     } finally {
       reopened.close();
+    }
+  });
+
+  it("add the runners table to a database from before several runners, keeping its data", () => {
+    const file = join(tempDir(), "one-runner.db");
+    const old = openDatabase(
+      file,
+      partialMigrations((n) => !n.endsWith("_runners")),
+    );
+    old.client
+      .prepare(
+        "INSERT INTO runner_state (runner_id, last_acked_seq, updated_at) VALUES ('r1', 7, 'x')",
+      )
+      .run();
+    old.close();
+    expectFullSchema(file);
+    const database = openDatabase(file, all);
+    try {
+      expect(database.client.prepare("SELECT * FROM runner_state").all()).toEqual([
+        { runner_id: "r1", last_acked_seq: 7, updated_at: "x" },
+      ]);
+      expect(database.client.prepare("SELECT * FROM runners").all()).toEqual([]);
+      const index = database.client
+        .prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'runners'")
+        .all();
+      expect(index).toEqual(expect.arrayContaining([{ name: "runners_runner_id" }]));
+    } finally {
+      database.close();
     }
   });
 

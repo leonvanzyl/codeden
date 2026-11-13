@@ -10,13 +10,12 @@ import type { EventStore } from "../../events/store";
 import { badRequest, errorMessage } from "../errors";
 import type { InboxService } from "../inbox-service";
 import type { ProjectService } from "../projects/project-service";
-import { type RunnerPort, runnerErrorCode } from "../runner-port";
+import { type RunnerDeps, runnerErrorCode, runnerForSession } from "../runner-port";
 import type { SessionRepo } from "./repo";
 
-export interface WorktreeCleanupDeps {
+export interface WorktreeCleanupDeps extends RunnerDeps {
   repo: SessionRepo;
   projects: ProjectService;
-  runner: RunnerPort;
   store: EventStore;
   settings: () => Settings;
   /** Stops a session (provider turn, queued messages, open approvals) before it is archived. */
@@ -213,19 +212,22 @@ export class WorktreeCleanup {
     } catch {
       return done(outcome("none"));
     }
-    if (!this.deps.runner.isConnected()) {
-      return done(outcome("failed", "The runner is not connected; cleanup will retry later"));
+    // The worktree lives with the runner that made it: the session's own.
+    const runner = runnerForSession(this.deps, id);
+    if (!runner.isConnected()) {
+      const name = runner.describe?.() ?? "The runner";
+      return done(outcome("failed", `${name} is not connected; cleanup will retry later`));
     }
     // Provider processes run in the worktree (a reviewer's too, in its builder's): detach every
     // session there before the folder goes away, also one whose status already says it ended.
     for (const s of this.deps.repo.inFolder(session.worktreePath)) {
-      await this.deps.runner
+      await runnerForSession(this.deps, s.id)
         .request({ name: "session.stop", sessionId: s.id }, 15_000)
         .catch(() => undefined);
     }
     let discarded = false;
     try {
-      const result = await this.deps.runner.request(
+      const result = await runner.request(
         { name: "workspace.remove", repoPath, path: session.worktreePath, force: opts.force },
         REMOVE_TIMEOUT_MS,
       );

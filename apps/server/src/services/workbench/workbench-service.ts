@@ -15,7 +15,7 @@ import { asc, eq } from "drizzle-orm";
 import type { Db } from "../../db/client";
 import { checkpoints } from "../../db/schema";
 import { badRequest, conflict, notFound } from "../errors";
-import { type RunnerPort, toServiceError } from "../runner-port";
+import { type RunnerDeps, type RunnerPort, runnerForSession, toServiceError } from "../runner-port";
 import type { SessionRepo } from "../sessions/repo";
 import { sessionWorkdir } from "../sessions/workdir";
 import { statsFromPatch, toDiffFiles } from "./diff-files";
@@ -27,12 +27,17 @@ function rethrow(error: unknown): never {
 }
 
 /**
- * Checkpoints, diffs and git for a session's worktree (§9, §12.3), backed by the runner's
- * `checkpoint.*` and `git.*` commands. Turn diffs compare consecutive checkpoints; the
- * session diff compares the baseline with the live working tree.
+ * Checkpoints, diffs and git for a session's worktree (§9, §12.3), backed by the `checkpoint.*`
+ * and `git.*` commands of the runner that hosts it. Turn diffs compare consecutive
+ * checkpoints; the session diff compares the baseline with the live working tree.
  */
 export class WorkbenchService {
-  constructor(private readonly deps: { db: Db; repo: SessionRepo; runner: RunnerPort }) {}
+  constructor(private readonly deps: RunnerDeps & { db: Db; repo: SessionRepo }) {}
+
+  /** The runner that hosts the session's worktree. */
+  private runner(sessionId: string): RunnerPort {
+    return runnerForSession(this.deps, sessionId);
+  }
 
   checkpoints(sessionId: string): Checkpoint[] {
     this.deps.repo.get(sessionId);
@@ -58,7 +63,7 @@ export class WorkbenchService {
       }));
 
     if (scope.kind === "uncommitted") {
-      const result = await this.deps.runner
+      const result = await this.runner(sessionId)
         .request({ name: "git.diff", cwd, fromRef: "HEAD" }, GIT_TIMEOUT_MS)
         .catch(rethrow);
       return {
@@ -81,7 +86,7 @@ export class WorkbenchService {
       from = previous?.index ?? target.index;
       to = target.index;
     }
-    const result = await this.deps.runner
+    const result = await this.runner(sessionId)
       .request({ name: "checkpoint.diff", cwd, sessionId, from, to }, GIT_TIMEOUT_MS)
       .catch(rethrow);
     return { scope, turns, files: toDiffFiles(result.diff, result.files) };
@@ -99,7 +104,7 @@ export class WorkbenchService {
       if (index === undefined) throw badRequest("No checkpoint before that turn", "no_baseline");
     }
     if (index === undefined) throw badRequest("Pass turnId or index");
-    const result = await this.deps.runner
+    const result = await this.runner(sessionId)
       .request(
         {
           name: "checkpoint.restoreFiles",
@@ -116,7 +121,7 @@ export class WorkbenchService {
 
   async status(sessionId: string): Promise<GitStatusResponse> {
     const session = this.deps.repo.get(sessionId);
-    const result = await this.deps.runner
+    const result = await this.runner(sessionId)
       .request({ name: "git.status", cwd: workdir(session) }, GIT_TIMEOUT_MS)
       .catch(rethrow);
     return { ...result, baseBranch: session.baseBranch };
@@ -124,14 +129,14 @@ export class WorkbenchService {
 
   async commit(sessionId: string, req: GitCommitRequest): Promise<GitCommitResponse> {
     const session = this.deps.repo.get(sessionId);
-    return this.deps.runner
+    return this.runner(sessionId)
       .request({ name: "git.commit", cwd: workdir(session), ...req }, GIT_TIMEOUT_MS)
       .catch(rethrow);
   }
 
   async push(sessionId: string, req: GitPushRequest): Promise<GitPushResponse> {
     const session = this.deps.repo.get(sessionId);
-    return this.deps.runner
+    return this.runner(sessionId)
       .request(
         {
           name: "git.push",

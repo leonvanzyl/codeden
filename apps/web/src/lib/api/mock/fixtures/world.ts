@@ -4,9 +4,11 @@ import {
   type AutomationTrigger,
   defaultSettings,
   FactoryLimits,
+  HOME_RUNNER_ID,
   type Project,
   type ProviderInfo,
   type RunnerConnectionStatus,
+  type RunnerRecord,
   type ScheduledRun,
 } from "@codeden/contracts";
 import { ago, ahead } from "./helpers";
@@ -439,6 +441,25 @@ export const runner: RunnerConnectionStatus = {
   providers,
   lastError: null,
 };
+
+/** The runners list: only the home runner, as on a machine without sandboxes. */
+export const runners: RunnerRecord[] = [
+  {
+    id: HOME_RUNNER_ID,
+    backend: "local",
+    home: true,
+    runnerId: "runner-local",
+    sandboxRef: null,
+    projectId: null,
+    sessionId: null,
+    state: "connected",
+    version: "0.1.0",
+    imageVersion: null,
+    createdAt: "2026-11-01T08:00:00.000Z",
+    lastSeenAt: "2026-11-01T08:00:00.000Z",
+    lastError: null,
+  },
+];
 
 export const settings = (() => {
   const s = defaultSettings();

@@ -93,10 +93,10 @@ export function startRealtime(client: CodeDenClient, queryClient: QueryClient): 
     unsubscribe = client.subscribe(fromSeq, (msg) => {
       switch (msg.type) {
         case "runner":
-          conn().setRunner(msg.runner);
+          conn().setRunner(msg.runner, msg.runners);
           // Pickers read providers and their models from the snapshot: keep it current.
           queryClient.setQueryData(snapshotKey, (s: Snapshot | undefined) =>
-            s ? { ...s, runner: msg.runner } : s,
+            s ? { ...s, runner: msg.runner, runners: msg.runners ?? s.runners } : s,
           );
           break;
         case "update":
@@ -125,7 +125,7 @@ export function startRealtime(client: CodeDenClient, queryClient: QueryClient): 
       if (stopped) return;
       conn().setAuth("ok");
       conn().setSeq(snap.seq);
-      conn().setRunner(snap.runner);
+      conn().setRunner(snap.runner, snap.runners);
       connect(snap.seq);
     })
     .catch(() => conn().setSocket("closed"));

@@ -23,7 +23,7 @@ import {
   pmStorefrontTranscript,
   webhooksTranscript,
 } from "./fixtures/transcripts-b";
-import { automations, projects, runner, scheduled, settings } from "./fixtures/world";
+import { automations, projects, runner, runners, scheduled, settings } from "./fixtures/world";
 
 type Listener = (msg: ServerToClientMessage) => void;
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
@@ -59,6 +59,7 @@ export class MockWorld {
       automations: structuredClone(automations),
       scheduled: structuredClone(scheduled),
       runner,
+      runners: structuredClone(runners),
     };
     const fixtures = [
       orchestratorTranscript,
@@ -96,7 +97,7 @@ export class MockWorld {
     this.listeners.add(listener);
     queueMicrotask(() => {
       listener({ type: "hello", protocolVersion: 1, serverVersion: "0.1.0", seq: this.seq });
-      listener({ type: "runner", runner: this.snapshot.runner });
+      listener({ type: "runner", runner: this.snapshot.runner, runners: this.snapshot.runners });
       const missed = this.log.filter((e) => e.seq > fromSeq);
       if (missed.length > 0) listener({ type: "events", events: missed });
     });
