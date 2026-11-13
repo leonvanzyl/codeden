@@ -16,7 +16,7 @@ import {
 } from "./paths";
 import { pipesDownloadIntoInterpreter } from "./remote-scripts";
 import { braceAlternatives, dumpsEnvironment, secretArgument, toolOutputs } from "./secrets";
-import { parseShell, type ShellDialect, type SimpleCommand } from "./shell";
+import { parseShell, type ShellDialect, type SimpleCommand, withListElements } from "./shell";
 
 /**
  * Risky-action classifier for the `auto` and `full` autonomy levels (§11.2). Provider-neutral:
@@ -121,9 +121,10 @@ function credentialCommand(
   const given = (cmd.input ?? []).find((word) => touchesCodedenCredentials(word, ctx));
   if (given) return credentialsRisk(`Passes CodeDen's own credentials: ${given}`);
   if (CD.has(bin)) return undefined;
-  const touched = secretArgument(bin, args, [], (a) => touchesCodedenCredentials(a, ctx));
+  const words = withListElements(cmd, args);
+  const touched = secretArgument(bin, words, [], (a) => touchesCodedenCredentials(a, ctx));
   if (touched) return credentialsRisk(`Accesses CodeDen's own credentials: ${touched}`);
-  const through = reachesThroughFolder(bin, args, ctx, feeds);
+  const through = reachesThroughFolder(bin, words, ctx, feeds);
   return through ? credentialsRisk(`Reaches CodeDen's own credentials from ${through}`) : undefined;
 }
 
@@ -249,8 +250,8 @@ function classifySimple(cmd: SimpleCommand, ctx: RiskContext, depth: number): Ri
     if (write.risky) return write;
   }
 
-  // Secrets: any argument that reads a credentials file.
-  const secret = secretArgument(bin, args, written);
+  // Secrets: any argument (or element of a PowerShell list) that reads a credentials file.
+  const secret = secretArgument(bin, withListElements(cmd, args), written);
   if (secret) return risky("secrets", `Accesses the secrets file ${secret}`);
 
   if (dumpsEnvironment(bin, args)) return risky("secrets", "Dumps environment variables");

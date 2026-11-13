@@ -21,6 +21,21 @@ export interface SimpleCommand {
   input?: string[];
   /** True when the command reads the output of the one before it (`a | b`, `a |& b`). */
   piped?: boolean;
+  /**
+   * PowerShell list arguments (`a,b`: unquoted commas, outside POSIX shells), each word with its
+   * elements. A comma inside quotes or escaped is part of the name.
+   */
+  lists?: Map<string, string[]>;
+}
+
+/**
+ * `words` with each PowerShell list argument followed by its elements (`a,b` -> `a,b`, `a`, `b`),
+ * so every path in a list is checked on its own. The whole word stays: when the shell is unknown
+ * it may be one name, or a brace expansion (`{a,b}`).
+ */
+export function withListElements(cmd: SimpleCommand, words: string[]): string[] {
+  const { lists } = cmd;
+  return lists ? words.flatMap((w) => [w, ...(lists.get(w) ?? [])]) : words;
 }
 
 /** Parse a command line into its simple commands. */
@@ -42,6 +57,8 @@ class Builder {
   target: Target = "word";
   heredocStrip = false;
   readonly heredocs: Array<{ delim: string; strip: boolean }> = [];
+  /** Where the word's unquoted commas are: a PowerShell list's element boundaries. */
+  private commas: number[] = [];
 
   constructor(private readonly out: SimpleCommand[]) {}
 
@@ -50,17 +67,37 @@ class Builder {
     this.inWord = true;
   }
 
+  /** An unquoted comma, which separates a PowerShell list's elements (`a,b`). */
+  addComma(): void {
+    this.commas.push(this.word.length);
+    this.add(",");
+  }
+
   endWord(): void {
     if (!this.inWord) return;
     if (this.target === "write") this.cmd.writes.push(this.word);
     else if (this.target === "heredoc") {
       // `<<\EOF` and `<<'EOF'` both end at a line reading `EOF`.
       this.heredocs.push({ delim: this.word.replace(/\\/g, ""), strip: this.heredocStrip });
-    } else if (this.target === "word") this.cmd.words.push(this.word);
-    else if (this.target === "skip") this.cmd.input = [...(this.cmd.input ?? []), this.word];
+    } else if (this.target === "word") {
+      this.cmd.words.push(this.word);
+      if (this.commas.length) this.addList();
+    } else if (this.target === "skip") this.cmd.input = [...(this.cmd.input ?? []), this.word];
     this.target = "word";
     this.word = "";
     this.inWord = false;
+    this.commas = [];
+  }
+
+  /** Note the current word's list elements, split at its unquoted commas. */
+  private addList(): void {
+    const bounds = [-1, ...this.commas, this.word.length];
+    const elements = bounds
+      .slice(1)
+      .map((end, k) => this.word.slice((bounds[k] as number) + 1, end))
+      .filter(Boolean);
+    this.cmd.lists ??= new Map();
+    this.cmd.lists.set(this.word, elements);
   }
 
   endCommand(): void {
@@ -146,6 +183,10 @@ class Lexer {
         this.i += 1;
         b.cmd.nested.push(this.list(")"));
         b.add(src.slice(start, this.i));
+      } else if (c === "," && this.dialect !== "posix") {
+        // PowerShell passes `a,b` as a list of two paths; a POSIX shell, as one name.
+        b.addComma();
+        this.i += 1;
       } else {
         b.add(c);
         this.i += 1;

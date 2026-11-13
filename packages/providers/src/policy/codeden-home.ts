@@ -30,15 +30,23 @@ function guardedPaths(ctx: PathContext): string[] {
   return [...files, ...new Set(files.map((file) => p.dirname(file)))];
 }
 
-export const WILDCARD = /[*?[]/;
+const WILDCARD = /[*?[]/;
+
+/** `c` matched as itself in a regular expression. */
+const literalChar = (c: string) => c.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /**
  * A shell wildcard (`*`, `?`, `[...]`, and `**`, which before a slash stands for zero or more
- * folders) over a `/`-separated path as a regular expression. Undefined when malformed.
+ * folders) over a `/`-separated path as a regular expression. Its first `literal` characters
+ * match as themselves. Undefined when malformed.
  */
-export function wildcardPattern(pattern: string, ignoreCase: boolean): RegExp | undefined {
-  let source = "";
-  for (let i = 0; i < pattern.length; i += 1) {
+export function wildcardPattern(
+  pattern: string,
+  ignoreCase: boolean,
+  literal = 0,
+): RegExp | undefined {
+  let source = pattern.slice(0, literal).replace(/[\s\S]/g, literalChar);
+  for (let i = literal; i < pattern.length; i += 1) {
     const c = pattern[i] as string;
     if (c === "*" && pattern[i + 1] === "*") {
       const folders = pattern[i + 2] === "/";
@@ -57,7 +65,7 @@ export function wildcardPattern(pattern: string, ignoreCase: boolean): RegExp | 
       source += `[${body}]`;
       i = end;
     } else {
-      source += c.replace(/[.+^${}()|[\]\\]/g, "\\$&");
+      source += literalChar(c);
     }
   }
   try {
@@ -78,22 +86,57 @@ export function slashes(value: string, ctx: PathContext): string {
  */
 const PATH_VARIABLE = /\$\{\w+\}|\$env:\w+|\$\w+|%\w+%/gi;
 
-/** `target` as an absolute path, its unknown variables as wildcards. */
+/**
+ * How many leading characters of `abs` are CodeDen's home or a folder above it, at a folder
+ * boundary. That part comes from the session (`$CODEDEN_HOME`, `~`, the working directory), so it
+ * is always literal: `[`, `*`, `?` or `$` in the home's own path (`CodeDen [dev]`) are never a
+ * pattern. Compared like `samePath`, in any case on Windows.
+ */
+function literalPrefix(abs: string, ctx: PathContext): number {
+  const home = ctx.codedenHome;
+  if (!home) return 0;
+  const p = pathApi(ctx);
+  const value = slashes(abs, ctx);
+  const fold = (s: string) => (isWin(ctx) ? s.toLowerCase() : s);
+  for (let dir = p.resolve(home); ; dir = p.dirname(dir)) {
+    const prefix = slashes(dir, ctx).replace(/\/$/, "");
+    const n = prefix.length;
+    const atBoundary = value.length === n || value[n] === "/";
+    if (n > 0 && atBoundary && fold(value.slice(0, n)) === fold(prefix)) return n;
+    if (p.dirname(dir) === dir) return 0;
+  }
+}
+
+/** `target` as an absolute path, the unknown variables it adds as wildcards. */
 export function resolvePattern(target: string, ctx: PathContext): string {
-  return resolveAgainst(target, ctx).replace(PATH_VARIABLE, "*");
+  const abs = resolveAgainst(target, ctx);
+  const literal = literalPrefix(abs, ctx);
+  return abs.slice(0, literal) + abs.slice(literal).replace(PATH_VARIABLE, "*");
+}
+
+/**
+ * The wildcards in `abs` (from `resolvePattern`) as a regular expression over `/`-separated
+ * paths, or undefined when it has none (or is malformed). Only the agent's part can be a pattern:
+ * CodeDen's home, and the folders above it, match literally (`literalPrefix`).
+ */
+export function agentPattern(abs: string, ctx: PathContext): RegExp | undefined {
+  const value = slashes(abs, ctx);
+  const literal = literalPrefix(abs, ctx);
+  if (!WILDCARD.test(value.slice(literal))) return undefined;
+  return wildcardPattern(value, isWin(ctx), literal);
 }
 
 /**
  * True when `target` reaches one of CodeDen's credential files: the file itself, a folder that
  * holds one (`<home>`, `<home>/runner`: copying or searching it reads them), or a wildcard that
  * matches either. `~`, `$HOME`, `$CODEDEN_HOME` (and its PowerShell and cmd forms) and relative
- * paths resolve as in the shell.
+ * paths resolve as in the shell. The home itself is always compared literally.
  */
 export function touchesCodedenCredentials(target: string, ctx: PathContext): boolean {
   if (!ctx.codedenHome || !target.trim()) return false;
   const abs = resolvePattern(target, ctx);
   const guarded = guardedPaths(ctx);
-  if (!WILDCARD.test(abs)) return guarded.some((p) => samePath(p, abs, ctx));
-  const pattern = wildcardPattern(slashes(abs, ctx), isWin(ctx));
+  if (guarded.some((p) => samePath(p, abs, ctx))) return true;
+  const pattern = agentPattern(abs, ctx);
   return pattern !== undefined && guarded.some((p) => pattern.test(slashes(p, ctx)));
 }

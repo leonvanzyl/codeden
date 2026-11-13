@@ -1,13 +1,13 @@
 import {
+  agentPattern,
   codedenCredentialFiles,
   resolvePattern,
   slashes,
   touchesCodedenCredentials,
-  WILDCARD,
   wildcardPattern,
 } from "./codeden-home";
-import { isInside, isWin, type PathContext, pathApi, samePath } from "./paths";
-import { braceAlternatives, DATA, SEARCHES, searchOperands } from "./secrets";
+import { isInside, type PathContext, pathApi, samePath } from "./paths";
+import { braceAlternatives, DATA, SEARCHES, searchArgs, searchOperands } from "./secrets";
 
 /**
  * Searches and listings that reach CodeDen's credential files from a folder above them
@@ -57,7 +57,9 @@ function grepRecursive(args: string[]): boolean {
 }
 
 /** The folders a search reads recursively, with its name filters. */
-function searchWalks(bin: string, args: string[], ctx: PathContext): Walk[] {
+function searchWalks(bin: string, words: string[], ctx: PathContext): Walk[] {
+  // `grep -re. ~` is `grep -r -e . ~`: take clustered options apart before reading roles.
+  const args = searchArgs(bin, words);
   if (bin === "rg" || bin === "ag" || bin === "ack") {
     // Only ripgrep's globs narrow; `!glob` excludes, and other filters are regexes or types.
     const names =
@@ -122,12 +124,13 @@ function listingWalk(bin: string, args: string[]): Walk | undefined {
   };
 }
 
-/** True when listing `dir` (and, recursively, its subfolders) reaches `folder`. */
+/**
+ * True when listing `dir` (and, recursively, its subfolders) reaches `folder`: by its path, or
+ * through the wildcards the agent wrote in it (never ones in CodeDen's home path).
+ */
 function holds(dir: string, folder: string, recursive: boolean, ctx: PathContext): boolean {
-  if (!WILDCARD.test(dir)) {
-    return recursive ? isInside(folder, dir, ctx) : samePath(dir, folder, ctx);
-  }
-  const pattern = wildcardPattern(slashes(dir, ctx), isWin(ctx));
+  if (recursive ? isInside(folder, dir, ctx) : samePath(dir, folder, ctx)) return true;
+  const pattern = agentPattern(dir, ctx);
   if (!pattern) return false;
   const p = pathApi(ctx);
   for (let at = folder; ; at = p.dirname(at)) {
