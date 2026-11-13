@@ -20,7 +20,7 @@ import {
   redetectProviders,
   refreshProviderModels,
 } from "../src/services/runner-port";
-import { waitUntil } from "./support/harness";
+import { RUNNER_REQUEST_TIMEOUT_FLOOR_MS, waitUntil } from "./support/harness";
 import { removeTree } from "./support/remove-tree";
 
 const TOKEN = "e".repeat(64);
@@ -94,6 +94,7 @@ describe("provider lists from the runner", () => {
       userHome: home,
       exec: nothingInstalled,
       realtimeFlushMs: 10,
+      runnerRequestTimeoutFloorMs: RUNNER_REQUEST_TIMEOUT_FLOOR_MS,
     });
   });
 

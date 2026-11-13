@@ -24,7 +24,7 @@ afterAll(async () => {
 
 const archive = async (id: string, body: unknown = {}) => {
   const res = await h.api("POST", `/sessions/${id}/archive`, body);
-  expect(res.status).toBe(200);
+  expect(res.status, JSON.stringify(res.body)).toBe(200);
   return ArchiveSessionResponse.parse(res.body);
 };
 const branches = () =>

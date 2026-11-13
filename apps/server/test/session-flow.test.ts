@@ -14,7 +14,7 @@ import {
 } from "@codeden/contracts";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { isProcessAlive, type RunningServer, readLiveRunnerLock, startServer } from "../src";
-import { waitUntil } from "./support/harness";
+import { RUNNER_REQUEST_TIMEOUT_FLOOR_MS, waitUntil } from "./support/harness";
 import { removeTree } from "./support/remove-tree";
 import { TestWsClient } from "./support/ws-client";
 
@@ -70,6 +70,7 @@ beforeAll(async () => {
     checkSetupOnStart: false,
     userHome: home,
     realtimeFlushMs: 10,
+    runnerRequestTimeoutFloorMs: RUNNER_REQUEST_TIMEOUT_FLOOR_MS,
   });
   ws = await TestWsClient.connect(server.url, TOKEN);
 });

@@ -50,6 +50,8 @@ export interface RunnerHubOptions {
   /** A current runner connected and is configured; `runnerId` is its journal id. */
   onReady?: (runnerId: string) => void;
   drainTimeoutMs?: number;
+  /** No command to any runner gives up sooner than this (`RunnerClientOptions`). */
+  requestTimeoutFloorMs?: number;
   log?: (message: string) => void;
 }
 
@@ -140,6 +142,7 @@ export class RunnerHub implements RunnerRouter {
       mcpUpstreamUrl: this.opts.mcpUpstreamUrl?.(),
       startTimeouts: spec.startTimeouts,
       drainTimeoutMs: this.opts.drainTimeoutMs,
+      requestTimeoutFloorMs: this.opts.requestTimeoutFloorMs,
       onStatus: () => this.opts.onStatus?.(),
       onStream: (stream) => this.opts.onStream?.(stream),
       onReady: (runnerId) => this.opts.onReady?.(runnerId),

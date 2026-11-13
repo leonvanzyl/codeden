@@ -14,6 +14,13 @@ import { removeTree } from "./remove-tree";
 
 export const TOKEN = "d".repeat(64);
 
+/**
+ * The shortest deadline of any server-to-runner command in tests (`runnerRequestTimeoutFloorMs`):
+ * on a busy machine the runner can take longer than the product's 5-30 s to stop a session or
+ * answer a status. Below the 60 s test timeout, so a command that never answers says so.
+ */
+export const RUNNER_REQUEST_TIMEOUT_FLOOR_MS = 45_000;
+
 /** A server with a real runner (Fake provider) and a local git repo as a project. */
 export interface Harness {
   home: string;
@@ -75,6 +82,7 @@ export async function startHarness(
     checkSetupOnStart: false,
     userHome: home,
     realtimeFlushMs: 10,
+    runnerRequestTimeoutFloorMs: RUNNER_REQUEST_TIMEOUT_FLOOR_MS,
     ...extra,
   });
   const api = async (method: string, path: string, body?: unknown) => {
