@@ -168,12 +168,25 @@ export function ProjectPage({
                 </div>
                 {listed.length > 0 ? (
                   <SessionsList sessions={listed} />
-                ) : (
+                ) : showArchived ? (
                   <p className="rounded-xl border border-dashed border-border px-4 py-6 text-center text-xs text-muted-foreground">
-                    {showArchived
-                      ? "No archived sessions. Archive one from its menu to tidy the sidebar."
-                      : "No active sessions."}
+                    No archived sessions. Archive one from its menu to tidy the sidebar.
                   </p>
+                ) : (
+                  <div
+                    className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-border px-4 py-6 text-center text-xs text-muted-foreground"
+                    data-testid="sessions-empty"
+                  >
+                    <p>
+                      No active sessions. A session is one agent working on one task, in its own
+                      worktree and branch.
+                    </p>
+                    <Button size="sm" asChild>
+                      <Link to="/projects/$projectId/new" params={{ projectId }}>
+                        <MessageSquarePlus /> Start a session
+                      </Link>
+                    </Button>
+                  </div>
                 )}
               </section>
               <section id="automations">

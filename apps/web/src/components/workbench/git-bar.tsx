@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowUp, GitBranch, GitCommitHorizontal } from "lucide-react";
+import { ArrowUp, GitBranch, GitCommitHorizontal, GitPullRequest } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -12,13 +12,21 @@ import {
 } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { useClient } from "@/lib/api";
+import { useLayoutStore } from "@/stores/layout";
+import { useAskForPullRequest, usePullRequestOffer } from "./open-pr";
 
-/** Branch, ahead/behind and uncommitted count for the session worktree, with commit and push (§9). */
+/**
+ * Branch, ahead/behind and uncommitted count for the session worktree, with commit, push and
+ * **Open PR** (asks the agent) or the session's open PR (§9).
+ */
 export function GitBar({ sessionId, title }: { sessionId: string; title: string }) {
   const client = useClient();
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const [message, setMessage] = useState("");
+  const offer = usePullRequestOffer(sessionId);
+  const askForPr = useAskForPullRequest(sessionId);
+  const openTab = useLayoutStore((s) => s.openRightTab);
   const status = useQuery({
     queryKey: ["git-status", sessionId],
     queryFn: () => client.gitStatus(sessionId),
@@ -42,7 +50,13 @@ export function GitBar({ sessionId, title }: { sessionId: string; title: string 
   const push = useMutation({
     mutationFn: () => client.gitPush(sessionId, {}),
     onSuccess: (r) => {
-      toast.success(`Pushed ${r.branch} to ${r.remote}`);
+      toast.success(`Pushed ${r.branch} to ${r.remote}`, {
+        action: offer.canAsk
+          ? { label: "Open PR", onClick: () => askForPr.mutate() }
+          : offer.pr
+            ? { label: `View PR #${offer.pr.number}`, onClick: () => openTab("github") }
+            : undefined,
+      });
       refresh();
     },
     onError: (e) => toast.error("Push failed", { description: e.message }),
@@ -83,6 +97,28 @@ export function GitBar({ sessionId, title }: { sessionId: string; title: string 
         >
           <ArrowUp /> {push.isPending ? "Pushing…" : "Push"}
         </Button>
+        {offer.pr ? (
+          <Button
+            size="xs"
+            variant="ghost"
+            title={offer.pr.title ?? `Pull request #${offer.pr.number}`}
+            onClick={() => openTab("github")}
+          >
+            <GitPullRequest /> PR #{offer.pr.number}
+          </Button>
+        ) : (
+          offer.canAsk && (
+            <Button
+              size="xs"
+              variant="ghost"
+              title="Ask the agent to open a pull request for this work"
+              disabled={askForPr.isPending}
+              onClick={() => askForPr.mutate()}
+            >
+              <GitPullRequest /> Open PR
+            </Button>
+          )
+        )}
       </div>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="sm:max-w-lg">

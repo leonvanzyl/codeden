@@ -32,7 +32,7 @@ const session = { id: sid, role: "agent", status: "idle", title: "Cart totals" }
 function renderPanel() {
   const client = {
     ...createMockClient(),
-    getSnapshot: async () => ({ sessions: [session] }) as unknown as Snapshot,
+    getSnapshot: async () => ({ sessions: [session], projects: [] }) as unknown as Snapshot,
     gitStatus: async () => ({ branch: "b", baseBranch: "main", ahead: 0, behind: 0, files: [] }),
     getDiff: async (_id: string, scope: DiffResult["scope"]): Promise<DiffResult> => ({
       scope,

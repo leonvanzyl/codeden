@@ -16,6 +16,15 @@ function upsertProject(list: Project[], project: Project): Project[] {
 }
 
 /**
+ * Add a project the UI just created, unless its `project.created` event got there first (that
+ * copy is the server's latest). The event still applies when it arrives: the seq is unchanged.
+ */
+export function withCreatedProject(snap: Snapshot, project: Project): Snapshot {
+  if (snap.projects.some((p) => p.id === project.id)) return snap;
+  return { ...snap, projects: upsertProject(snap.projects, project) };
+}
+
+/**
  * Apply a domain event (project/session/inbox/automation/settings) to the app snapshot.
  * Agent events are ignored here; they go to the transcript store.
  */

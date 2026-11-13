@@ -1,5 +1,5 @@
-import type { CreateProjectRequest } from "@codeden/contracts";
-import { useMutation } from "@tanstack/react-query";
+import type { CreateProjectRequest, Snapshot } from "@codeden/contracts";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { FolderOpen, GitBranch } from "lucide-react";
 import { useState } from "react";
@@ -16,6 +16,8 @@ import {
 import { Input } from "@/components/ui/input";
 import { useClient } from "@/lib/api";
 import { platform } from "@/lib/platform";
+import { snapshotKey } from "@/lib/queries";
+import { withCreatedProject } from "@/lib/snapshot-reducer";
 import { cn } from "@/lib/utils";
 import { useUiStore } from "@/stores/ui";
 import { FolderBrowser } from "./folder-browser";
@@ -30,12 +32,17 @@ export function ProjectSourcePicker({
   submitLabel?: string;
 }) {
   const client = useClient();
+  const queryClient = useQueryClient();
   const [source, setSource] = useState<"folder" | "clone">("folder");
   const [folder, setFolder] = useState<string | null>(null);
   const [url, setUrl] = useState("");
   const create = useMutation({
     mutationFn: (input: CreateProjectRequest) => client.createProject(input),
     onSuccess: ({ project, detected }) => {
+      // Known before its live event arrives, so the page `onCreated` opens never says "not found".
+      queryClient.setQueryData<Snapshot>(snapshotKey, (s) =>
+        s ? withCreatedProject(s, project) : s,
+      );
       const facts = [
         detected.github ? `GitHub ${detected.github.owner}/${detected.github.repo}` : null,
         detected.packageManager ? `Detected ${detected.packageManager}` : null,
@@ -145,7 +152,8 @@ export function AddProjectDialog() {
         <ProjectSourcePicker
           onCreated={(projectId) => {
             setOpen(false);
-            void navigate({ to: "/projects/$projectId", params: { projectId } });
+            // A new project's next step is a session: open its New session view.
+            void navigate({ to: "/projects/$projectId/new", params: { projectId } });
           }}
         />
         <DialogFooter className="hidden" />
