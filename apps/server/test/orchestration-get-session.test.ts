@@ -19,7 +19,7 @@ describe("get_session and session id prefixes", () => {
 
   beforeAll(async () => {
     h = await startHarness({ askUserWaitMs: 60_000 });
-  }, 60_000);
+  });
   afterAll(async () => {
     await h?.close();
   });
@@ -82,7 +82,7 @@ describe("get_session and session id prefixes", () => {
       h.projectId,
     );
     expect(sent.isError).toBe(false);
-  }, 40_000);
+  });
 
   it("refuses an ambiguous prefix, a short one, and other projects' sessions", async () => {
     const twin = (suffix: string): Session => ({

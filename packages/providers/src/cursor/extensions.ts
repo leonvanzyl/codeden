@@ -1,11 +1,23 @@
+import { existsSync } from "node:fs";
+import path from "node:path";
 import type { ItemOf, RuntimeResponse, UserQuestion } from "@codeden/contracts";
 import type { AcpExtensionHost, AcpExtensions } from "../acp/extensions";
 import { type Todo, todoStatus } from "../acp/mapper";
-import { shorten } from "../util/text";
+import { agentTypeOf } from "../acp/subagents";
+import { num, shorten, str, toJson } from "../util/text";
 
 /** Told to Cursor when the user declines its plan without a note. */
 export const KEEP_PLANNING =
   "The user wants you to keep planning. Revise the plan and present it again.";
+
+/**
+ * What CodeDen advertises to Cursor in `initialize`: subagents as child sessions (Cursor
+ * 2026.09.15 and later). Cursor reads the `_meta` flag; the top-level one is ACP's own.
+ */
+export const CURSOR_CLIENT_CAPABILITIES: Record<string, unknown> = {
+  subagents: {},
+  _meta: { subagents: {} },
+};
 
 type Params = Record<string, unknown>;
 
@@ -20,30 +32,102 @@ const CANCELLED = { outcome: { outcome: "cancelled" } };
 
 /**
  * Cursor's ACP extension methods, mapped onto CodeDen's own features:
- * - `cursor/ask_question` -> a question card; answers go back as the chosen option ids
- * - `cursor/create_plan`  -> the plan and its todos, then plan mode's plan approval
- * - `cursor/update_todos` -> the turn's todo list
- * Subagents (`cursor/task`) and image generation (`cursor/generate_image`) are not wired up
- * yet: their requests are refused ("method not found"), so Cursor falls back on its own.
+ * - `cursor/ask_question`    -> a question card; answers go back as the chosen option ids
+ * - `cursor/create_plan`     -> the plan and its todos, then plan mode's plan approval
+ * - `cursor/update_todos`    -> the turn's todo list
+ * - `cursor/task`            -> a subagent card, for CLIs that don't run subagents as child
+ *                               sessions (those that do get child threads from `AcpSubagents`)
+ * - `cursor/generate_image`  -> a tool call with the image Cursor wrote (`generatedImages`)
+ * The last three arrive as requests or as notifications, depending on the CLI's version.
  */
 export const cursorExtensions: AcpExtensions = {
+  clientCapabilities: CURSOR_CLIENT_CAPABILITIES,
   request(method, params, host) {
+    const p = (params ?? {}) as Params;
     switch (method) {
       case "cursor/ask_question":
-        return askQuestion((params ?? {}) as Params, host);
+        return askQuestion(p, host);
       case "cursor/create_plan":
-        return createPlan((params ?? {}) as Params, host);
+        return createPlan(p, host);
       case "cursor/update_todos":
-        updateTodos((params ?? {}) as Params, host);
+        updateTodos(p, host);
         return Promise.resolve({ outcome: { outcome: "accepted" } });
+      case "cursor/task":
+        return Promise.resolve(task(p, host));
+      case "cursor/generate_image": {
+        // A file that isn't there: refused, so Cursor falls back on its own.
+        const answer = generateImage(p, host, true);
+        return answer ? Promise.resolve(answer) : undefined;
+      }
       default:
         return undefined;
     }
   },
   notification(method, params, host) {
-    if (method === "cursor/update_todos") updateTodos((params ?? {}) as Params, host);
+    const p = (params ?? {}) as Params;
+    if (method === "cursor/update_todos") updateTodos(p, host);
+    else if (method === "cursor/task") task(p, host);
+    else if (method === "cursor/generate_image") generateImage(p, host, false);
   },
 };
+
+/**
+ * Cursor's report of a subagent task. When Cursor runs subagents as child sessions they
+ * already have their cards, and the report only fills in what a card lacks; otherwise the
+ * task becomes a card of its own, with a thread holding its prompt and result.
+ */
+function task(params: Params, host: AcpExtensionHost): unknown {
+  const toolCallId = str(params, "toolCallId");
+  const description = str(params, "description")?.trim();
+  const prompt = str(params, "prompt")?.trim();
+  const agentType = agentTypeOf(params.subagentType);
+  const durationMs = num(params, "durationMs");
+  host.subagents.report(
+    {
+      ...(toolCallId ? { toolCallId } : {}),
+      ...(description ? { description } : {}),
+      ...(prompt ? { prompt } : {}),
+      ...(agentType ? { agentType } : {}),
+      ...(durationMs !== undefined && durationMs >= 0 ? { durationMs } : {}),
+    },
+    host.mapper,
+    !host.childSessions,
+  );
+  const agentId = str(params, "agentId");
+  return {
+    outcome: {
+      outcome: "completed",
+      ...(agentId ? { agentId } : {}),
+      ...(durationMs !== undefined ? { durationMs } : {}),
+    },
+  };
+}
+
+/**
+ * An image Cursor generated, at `filePath`: shown as a tool call whose `generatedImages`
+ * the server stores as an artifact. A request is answered `generated` only when the file
+ * exists (undefined otherwise: refused); a notification is shown as reported.
+ */
+function generateImage(params: Params, host: AcpExtensionHost, request: boolean): unknown {
+  const reported = str(params, "filePath")?.trim();
+  if (!reported) return undefined;
+  const filePath = path.resolve(host.cwd, reported);
+  if (request && !existsSync(filePath)) return undefined;
+  const description = str(params, "description")?.trim();
+  const toolCallId = str(params, "toolCallId") || "image";
+  host.mapper.imagesCreated(
+    toolCallId,
+    [{ path: filePath, ...(description ? { caption: description } : {}) }],
+    toJson({
+      ...(description ? { description } : {}),
+      filePath,
+      ...(Array.isArray(params.referenceImagePaths)
+        ? { referenceImagePaths: params.referenceImagePaths }
+        : {}),
+    }),
+  );
+  return { outcome: { outcome: "generated", filePath } };
+}
 
 /** Cursor todos as CodeDen todos. */
 export function cursorTodos(value: unknown): Todo[] {

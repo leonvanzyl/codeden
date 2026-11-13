@@ -69,7 +69,7 @@ describe("automations (§10): scheduler, guards, runs, PM tools, files", () => {
       },
       { ".codeden/automations/notes-reminder.md": NOTES_FILE },
     );
-  }, 60_000);
+  });
   afterAll(async () => {
     await h?.close();
   });

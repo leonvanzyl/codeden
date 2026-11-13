@@ -31,4 +31,22 @@ describe("OpenCode turn errors", () => {
     );
     expect(classifyOpenCodeError(undefined, NOW).kind).toBe("fatal");
   });
+
+  // Issue #218: an expired OpenAI login behind an `openai/*` model fails the turn with only the
+  // status in the message, and the factory kept starting reviewers on OpenCode.
+  it("classifies a 401 or 403 that is only in the message as a sign-in problem", () => {
+    expect(classifyOpenCodeError(err("unknown", "Request failed: 401"), NOW)).toEqual({
+      kind: "auth",
+    });
+    expect(classifyOpenCodeError(err("unknown", "Request failed: 403"), NOW)).toEqual({
+      kind: "auth",
+    });
+    // Other statuses in the message count like the field; a stray number is not a status.
+    expect(classifyOpenCodeError(err("unknown", "Request failed: 503"), NOW).kind).toBe(
+      "transient",
+    );
+    expect(classifyOpenCodeError(err("tool.execution", "No line 401 in file"), NOW).kind).toBe(
+      "fatal",
+    );
+  });
 });

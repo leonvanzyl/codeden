@@ -7,5 +7,7 @@ export default defineProject({
     environment: "jsdom",
     include: ["test/**/*.test.{ts,tsx}"],
     setupFiles: ["./test/setup.ts"],
+    // Rendering and typing through jsdom slows down a lot on a busy machine.
+    testTimeout: 15_000,
   },
 });

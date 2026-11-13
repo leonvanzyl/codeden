@@ -127,6 +127,12 @@ describe("rebuilds and integrators", () => {
     });
     // The old PR stays open until the new one is.
     expect(env.gh.closed).toEqual([]);
+    // The replaced PR's reviewer ends its turn, so its agent slot is free again: requests to
+    // rebase wake an agent and wait for a free one like any other turn (§10.1, Slot priority).
+    const oldReviewer = env.repo
+      .list({ projectId: env.project.id, role: "agent" })
+      .find((s) => s.workKey === `factory:review:${pr.ref.number}`);
+    await env.setStatus(oldReviewer?.id as string, "idle");
 
     const { pr: next } = await openPr(id, "pending");
     await tick();

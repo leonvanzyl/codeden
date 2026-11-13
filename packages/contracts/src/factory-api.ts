@@ -266,6 +266,16 @@ export const FactoryTuning = z.object({
   /** Revise rounds (failed review or merge checks) before an item fails. */
   maxFixAttempts: z.int().nonnegative().default(2),
   /**
+   * The work-in-progress limit: most open, unmerged factory pull requests (being built on,
+   * checked, reviewed, revised or rebased, rebuilt, or waiting to be merged) before the factory
+   * starts no new work. At or above it, no new build starts from the queue (repairs of the
+   * default branch excepted), the dark factory's scout files nothing, and free agents go to
+   * reviews, fixes and rebases until a PR merges or closes. PRs of work that failed or was
+   * escalated and waits for a person don't count; one that failed for a reason outside its code
+   * (it goes back by itself) does. `null` (the default): the agent limit (`maxConcurrentSessions`).
+   */
+  maxOpenPrs: z.int().positive().nullable().default(null),
+  /**
    * Dark factory: the scout starts a scheduled round only when fewer items than this wait to be
    * classified or for an agent. 0 turns scheduled rounds off: only "Run scout now" starts one.
    */
@@ -589,6 +599,24 @@ export const FactoryMergeChecks = z.object({
 });
 export type FactoryMergeChecks = z.infer<typeof FactoryMergeChecks>;
 
+/**
+ * The work-in-progress limit right now (`FactoryTuning.maxOpenPrs`): while `holding`, the
+ * factory finishes open work ("Finishing open work (N of M PRs open)") instead of starting more.
+ */
+export const FactoryWip = z.object({
+  /**
+   * Open, unmerged factory PRs the loop is still taking to a merge: those of work in the queue
+   * (a rebuild), building or verifying, or back by itself after a failure outside its code. Not
+   * those of failed or escalated work waiting for a person.
+   */
+  openPrs: z.int().nonnegative().default(0),
+  /** The limit in force: `maxOpenPrs`, or the agent limit when that is unset. */
+  limit: z.int().positive().default(2),
+  /** At or above the limit: no new build starts from the queue and the scout files nothing. */
+  holding: z.boolean().default(false),
+});
+export type FactoryWip = z.infer<typeof FactoryWip>;
+
 /** `GET /api/projects/:id/factory`: everything the factory panel shows. */
 export const FactoryStatus = z.object({
   projectId: Id,
@@ -607,6 +635,8 @@ export const FactoryStatus = z.object({
   stats: FactoryStats.prefault({}),
   consecutiveFailures: z.int().nonnegative(),
   activeSessions: z.int().nonnegative(),
+  /** The work-in-progress limit and how close the factory is to it. */
+  wip: FactoryWip.prefault({}),
   /** Waiting: being classified (`candidate`) or for a free agent (`backlog`). */
   backlog: z.array(FactoryWorkItem),
   inProgress: z.array(FactoryWorkItem),

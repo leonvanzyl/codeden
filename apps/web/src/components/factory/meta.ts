@@ -214,7 +214,7 @@ export function stepHelp(step: PipelineStep, type: WorkType | null, autoMerge: b
     case "intake":
       return "One quick model call reads each new issue and sorts it into the Bug, Feature or Documentation lane (a type label on the issue decides it instead). It then waits for a free agent.";
     case "queued":
-      return "Waiting for a free agent. Items are picked by priority, then age, within the number of agents allowed at once.";
+      return "Waiting for a free agent. Reviews, revise rounds and rebases of open pull requests get free agents first; then items are picked by priority, then age. At the open pull request limit nothing new starts until one merges, and an item likely to touch the files of an open pull request waits behind items that don't.";
     case "reproduce":
       return "An agent writes a failing test or probe that shows the bug. Once it's reproduced, the same agent moves on to the fix; if it can't be, the work stops and the issue asks for more information.";
     case "analyze":
@@ -257,6 +257,19 @@ export const ROUND_HELP =
 /** "Check now" on the factory panel: one run of the loop's regular check. */
 export function checkNowHelp(dark: boolean): string {
   return `Runs the factory's regular check immediately (it runs every 30 seconds): moves work in progress, picks up new issues, starts free agents${dark ? ", and starts the scout if it's due" : ""}.`;
+}
+
+/** The work-in-progress limit (`maxOpenPrs`). */
+export const WIP_HELP =
+  "The work-in-progress limit. With this many factory pull requests open, the factory finishes them before it starts more: no new build starts from the queue, the scout files nothing, and free agents go to reviews, fixes and rebases until one merges or closes. Fixes for failing checks on the default branch still start. Pull requests of failed or escalated work, which wait for you, don't count (work that failed for a reason outside its code goes back by itself, so its pull request does). Fewer open PRs means fewer merge conflicts between them.";
+
+/** Who gets a free agent first. */
+export const SLOT_ORDER_HELP =
+  "A free agent goes to reviews first (PRs whose CI passed, then rebases and revise rounds, then PRs whose CI still runs), then to builds, and to the scout last. Work in progress is never interrupted.";
+
+/** "Finishing open work (2 of 2 PRs open)". */
+export function wipLabel(wip: { openPrs: number; limit: number }): string {
+  return `Finishing open work (${wip.openPrs} of ${wip.limit} PRs open)`;
 }
 
 /** The scout's review areas (one long-lived reviewer agent per area). */

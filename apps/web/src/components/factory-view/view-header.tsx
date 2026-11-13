@@ -17,6 +17,7 @@ import { ExperimentalBadge } from "@/components/factory/autonomy-dialog";
 import { FactoryRunButtons } from "@/components/factory/factory-actions";
 import { KillSwitchButton } from "@/components/factory/kill-switch";
 import { LOOP_LABEL, MODE_LABEL } from "@/components/factory/meta";
+import { WipChip } from "@/components/factory/wip-chip";
 import { Button } from "@/components/ui/button";
 import { useClient } from "@/lib/api";
 import { factoryKeys } from "@/lib/factory";
@@ -144,6 +145,7 @@ export function ViewHeader({
         </div>
       </div>
       <LoopChip f={f} />
+      <WipChip f={f} />
       <div className="flex items-center gap-1.5">
         <Count
           n={needsPerson}

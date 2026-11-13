@@ -5,6 +5,7 @@ import { type FactoryContext, factoryNotice } from "./context";
 import { failItem, markStuck } from "./outcomes";
 import { fixPrompt, tooLargePrompt } from "./prompts";
 import { MERGE_QUEUED } from "./queue";
+import { repairSlot } from "./rebase";
 
 /**
  * Failed merge checks (§10.1, Review and revise): a revise round when one is allowed, the
@@ -54,6 +55,21 @@ export async function handleFailure(
     builder.status !== "stopped" &&
     item.review?.verdict !== "reject";
   if (fixable && builder) {
+    // The round wakes a builder between turns: it waits for a free agent, after the reviews
+    // (`slots.ts`), staying in verification with its failed checks until then.
+    if (!repairSlot(ctx, project, item, builder)) {
+      const names = failed.map((c) => c.name).join(", ");
+      const waiting = `Revise round ${item.attempts + 1} (${names}): waiting for a free agent`;
+      ctx.store.updateItem(
+        item.id,
+        (i) => {
+          const { ready: _ready, [MERGE_QUEUED]: _queued, ...nudges } = i.nudges;
+          return { ...i, note: waiting, nudges };
+        },
+        { touch: false },
+      );
+      return loop;
+    }
     const at = ctx.now().toISOString();
     ctx.store.updateItem(item.id, (i) => {
       const { ready: _ready, [MERGE_QUEUED]: _queued, ...nudges } = i.nudges;

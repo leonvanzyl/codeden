@@ -1,8 +1,10 @@
 import { randomUUID } from "node:crypto";
 import {
   type FactoryLoop,
+  type FactoryWip,
   type Project,
   SCOUT_UNAVAILABLE,
+  type ScoutRound,
   type ScoutState,
   type ScoutStatus,
   type Session,
@@ -10,9 +12,17 @@ import {
 import { conflict, errorMessage } from "../errors";
 import { budgetSpend, type FactoryContext, visionOf } from "./context";
 import { budgetExceeded, freeSlots, localDay } from "./policy";
-import { LENS_NUDGE, SCOUT_PLAN_NUDGE, scoutFilePrompt, scoutPlanPrompt } from "./prompts-scout";
+import {
+  LENS_NUDGE,
+  SCOUT_PLAN_NUDGE,
+  scoutFilePrompt,
+  scoutPlanPrompt,
+  scoutSelfReviewPrompt,
+} from "./prompts-scout";
 import { isBusy } from "./sessions";
+import { busySlots, claimSlot } from "./slots";
 import { ACTIVE_STAGES, WAITING_STAGES } from "./store";
+import { wipOf, wipText } from "./wip";
 
 /**
  * The dark factory's scout (§10.1). When the queue runs low (fewer than `minBacklog` items
@@ -26,12 +36,17 @@ import { ACTIVE_STAGES, WAITING_STAGES } from "./store";
  * 3. filing: the scout files at most `maxIssuesPerRound` issues with `factory_file_issue`,
  *    which enter the pipelines like any trusted issue.
  *
- * The scout and its lenses hold agent slots like builders, and builders come first: a round
- * only starts with a free slot, and lenses only get the slots that are free.
+ * The scout and its lenses hold agent slots like builders, and everything else comes first
+ * (`slots.ts`): a round only starts with a free slot no review, fix, rebase or build is waiting
+ * for, and lenses only get the slots that are left. At the work-in-progress limit (`wip.ts`) no
+ * round starts, and a running round's filing waits until a PR merges.
  *
  * `minBacklog` 0 turns scheduled rounds off. "Run scout now" (`runScoutNow`) starts a round on
  * demand, skipping the interval and the backlog threshold but nothing else.
  */
+
+/** The scout's claim on an agent slot (`slots.ts`): its rounds and their area reviewers. */
+export const SCOUT_SLOT = "scout";
 
 /** A round that runs longer than this is closed (a stuck scout or lens). */
 export const ROUND_TIMEOUT_MS = 3 * 3_600_000;
@@ -66,7 +81,11 @@ export async function advanceScout(
   if (loop.scout.round) return { ...loop, scout: await advanceRound(ctx, project, loop, now) };
   const waiting = ctx.store.items(project.id, WAITING_STAGES).length;
   if (!scoutDue(loop, waiting, now.getTime())) return loop;
-  if (freeSlots(ctx.sessions.activeCount(project.id), project.factoryLimits) === 0) return loop;
+  // At the work-in-progress limit the factory finishes open work before it finds more.
+  if (wipOf(ctx, project, loop).holding) return loop;
+  // The scout comes last for a free agent: after reviews, fixes, rebases and builds.
+  const reuse = ctx.sessions.reusable(loop.scout.sessionId);
+  if (!claimSlot(ctx, project, "scout", SCOUT_SLOT, { wake: reuse?.id })) return loop;
   try {
     return { ...loop, scout: await startRound(ctx, project, loop, now) };
   } catch (error) {
@@ -82,12 +101,16 @@ export interface ScoutNowFacts {
   activeSessions: number;
   /** Why today's budget is spent (`budgetExceeded`), or null. */
   overBudget: string | null;
+  /** Reviews, fixes, rebases and builds waiting for an agent: they get free ones first. */
+  waitingForAgent?: number;
+  /** The work-in-progress limit (`wip.ts`); a round waits while it holds. */
+  wip?: FactoryWip | null;
 }
 
 /**
  * Why "Run scout now" can't start a round right now, in plain words, or null when it can. A
  * manual round skips the interval and the backlog threshold, never the kill switch, a pause, the
- * budget, a running round or the agent limit.
+ * budget, a running round, the work-in-progress limit or the agent limit.
  */
 export function scoutNowBlocker(
   project: Pick<Project, "autonomyMode" | "archivedAt" | "killSwitch" | "factoryLimits">,
@@ -103,9 +126,16 @@ export function scoutNowBlocker(
   if (facts.overBudget)
     return `${facts.overBudget.charAt(0).toUpperCase()}${facts.overBudget.slice(1)}.`;
   if (loop.scout.round) return "A scout round is already running.";
-  if (freeSlots(facts.activeSessions, project.factoryLimits) === 0) {
+  if (facts.wip?.holding) {
+    return `${wipText(facts.wip)}: the scout finds new work once open pull requests merge.`;
+  }
+  const free = freeSlots(facts.activeSessions, project.factoryLimits);
+  if (free === 0) {
     const max = project.factoryLimits.maxConcurrentSessions;
     return `No free agent: all ${max} ${max === 1 ? "is" : "are"} working (Agents at once).`;
+  }
+  if (free <= (facts.waitingForAgent ?? 0)) {
+    return "No free agent: reviews, fixes and builds waiting for one come first.";
   }
   return null;
 }
@@ -114,12 +144,15 @@ export function scoutNowBlocker(
 export function scoutNowFacts(
   ctx: FactoryContext,
   project: Project,
+  loop: FactoryLoop,
   spend = budgetSpend(ctx, project.id, localDay(ctx.now()), project.factoryLimits),
 ): ScoutNowFacts {
   return {
     globalKillSwitch: ctx.settings.get().factory.killSwitch,
-    activeSessions: ctx.sessions.activeCount(project.id),
+    activeSessions: busySlots(ctx, project.id),
     overBudget: budgetExceeded(spend, project.factoryLimits),
+    waitingForAgent: ctx.slots.ahead(project.id, "scout", SCOUT_SLOT),
+    wip: wipOf(ctx, project, loop),
   };
 }
 
@@ -132,7 +165,7 @@ export async function runScoutNow(
   project: Project,
   loop: FactoryLoop,
 ): Promise<FactoryLoop> {
-  const blocked = scoutNowBlocker(project, loop, scoutNowFacts(ctx, project));
+  const blocked = scoutNowBlocker(project, loop, scoutNowFacts(ctx, project, loop));
   if (blocked) throw conflict(blocked, SCOUT_UNAVAILABLE);
   const scout = await startRound(ctx, project, loop, ctx.now());
   if (!scout.round) throw conflict("The scout's session couldn't start.", SCOUT_UNAVAILABLE);
@@ -181,6 +214,8 @@ async function startRound(
       lenses: [],
       findings: [],
       filed: 0,
+      heldSince: null,
+      heldMs: 0,
     },
   };
 }
@@ -198,7 +233,14 @@ async function advanceRound(
   const scout = loop.scout;
   const round = scout.round;
   if (!round) return scout;
-  if (now.getTime() - Date.parse(round.startedAt) > ROUND_TIMEOUT_MS) return endRound(scout, now);
+  // Every area reviewer reported (or the scout reviews by itself), but the work-in-progress
+  // limit holds: filing waits, with the findings kept, until a PR merges. Nothing runs
+  // meanwhile, so the held time doesn't count against the round's timeout.
+  const holding = () => wipOf(ctx, project, loop).holding;
+  if (round.phase === "reviewing" && round.lenses.every((l) => l.reported) && holding()) {
+    return { ...scout, round: holdRound(round, now) };
+  }
+  if (roundRunMs(round, now) > ROUND_TIMEOUT_MS) return endRound(scout, now);
   const s = scout.sessionId ? ctx.repo.find(scout.sessionId)?.session : undefined;
   if (!s || s.status === "failed") return endRound(scout, now);
   const at = now.toISOString();
@@ -232,15 +274,40 @@ async function advanceRound(
     }
   }
   if (lenses.some((l) => !l.reported)) return { ...scout, round: { ...round, lenses } };
+  // Filing is the scout's next turn: it waits at the work-in-progress limit, and for a free
+  // agent after everything else waiting for one (`slots.ts`), held either way.
+  if (holding() || !claimSlot(ctx, project, "scout", SCOUT_SLOT, { wake: s.id })) {
+    return { ...scout, round: holdRound({ ...round, lenses }, now) };
+  }
+  const maxIssues = Math.max(0, loop.tuning.maxIssuesPerRound - round.filed);
+  const known = knownTitles(ctx, project.id);
+  // A round planned without area reviewers while the limit held: the scout reviews by itself now.
   await ctx.sessions.message(
     s.id,
-    scoutFilePrompt({
-      findings: round.findings,
-      maxIssues: Math.max(0, loop.tuning.maxIssuesPerRound - round.filed),
-      known: knownTitles(ctx, project.id),
-    }),
+    lenses.length === 0
+      ? scoutSelfReviewPrompt({ maxIssues, known })
+      : scoutFilePrompt({ findings: round.findings, maxIssues, known }),
   );
-  return { ...scout, round: { ...round, lenses, phase: "filing", sentAt: at } };
+  const released = releaseRound({ ...round, lenses }, now);
+  return { ...scout, round: { ...released, phase: "filing", sentAt: at } };
+}
+
+/** Time the round has been running, not counting the time it was held waiting to file. */
+export function roundRunMs(round: ScoutRound, now: Date): number {
+  const held = round.heldSince ? now.getTime() - Date.parse(round.heldSince) : 0;
+  return now.getTime() - Date.parse(round.startedAt) - round.heldMs - held;
+}
+
+/** The round waits to file, at the WIP limit or for an agent (from now, unless it already was). */
+function holdRound(round: ScoutRound, now: Date): ScoutRound {
+  return round.heldSince ? round : { ...round, heldSince: now.toISOString() };
+}
+
+/** The hold is over: its time is added to the round's held time. */
+function releaseRound(round: ScoutRound, now: Date): ScoutRound {
+  if (!round.heldSince) return round;
+  const held = Math.max(0, now.getTime() - Date.parse(round.heldSince));
+  return { ...round, heldSince: null, heldMs: round.heldMs + held };
 }
 
 export function defaultBranch(project: Project): string {
@@ -281,6 +348,6 @@ export function scoutStatus(
             Date.parse(scout.lastRoundAt) + tuning.discoveryIntervalMin * 60_000,
           ).toISOString(),
     rounds: scout.rounds,
-    runNowBlockedBy: scoutNowBlocker(project, loop, scoutNowFacts(ctx, project, spend)),
+    runNowBlockedBy: scoutNowBlocker(project, loop, scoutNowFacts(ctx, project, loop, spend)),
   };
 }

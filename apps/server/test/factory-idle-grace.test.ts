@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   BUILDER_NUDGE,
   FOREGROUND_COMMANDS,
+  NON_INTERACTIVE_COMMANDS,
   REPRODUCE_NUDGE,
   REVIEWER_NUDGE,
 } from "../src/services/factory/prompts";
@@ -184,6 +185,9 @@ describe("an agent waiting on its own background command (#124)", () => {
     const [builder, reviewer] = env.starts.map((s) => s.input?.text ?? "");
     expect(builder).toContain(FOREGROUND_COMMANDS);
     expect(reviewer).toContain(FOREGROUND_COMMANDS);
+    // #194: a command waiting on a prompt is stopped and rerun, never waited on.
+    expect(builder).toContain(NON_INTERACTIVE_COMMANDS);
+    expect(reviewer).toContain(NON_INTERACTIVE_COMMANDS);
   });
 });
 

@@ -221,6 +221,7 @@ describe("PM system prompt", () => {
       ## How CodeDen keeps you informed
 
       - Every message you receive starts with a \`<codeden_status>\` block: a fresh digest of running and queued work (work key, purpose, status, progress, age), the next scheduled automation runs, open inbox items and recent finishes and failures. Trust it; you do not need a tool call to learn the current state.
+      - Times you tell the user are in their local time (the digest's \`tz\` and \`local\`). Times in tool results and the digest are UTC unless marked.
       - After it may come a \`<codeden_updates>\` block, "Updates since your last turn": typed notices (session finished, needs input, failed, PR opened, checks failed, automation skipped, conflict, PM messages). React to the ones that need action and ignore routine ones.
       - Everything after the last of these blocks is what the sender actually wrote.
       - You have no write access to project code. You act only through CodeDen tools on the \`codeden\` MCP server; reading files and read-only git commands are fine.
@@ -294,6 +295,7 @@ describe("orchestrator system prompt", () => {
       ## How CodeDen keeps you informed
 
       - Every message you receive starts with a \`<codeden_status>\` block: a fresh digest of running and queued work (work key, purpose, status, progress, age), the next scheduled automation runs, open inbox items and recent finishes and failures. Trust it; you do not need a tool call to learn the current state.
+      - Times you tell the user are in their local time (the digest's \`tz\` and \`local\`). Times in tool results and the digest are UTC unless marked.
       - After it may come a \`<codeden_updates>\` block, "Updates since your last turn": typed notices (session finished, needs input, failed, PR opened, checks failed, automation skipped, conflict, PM messages). React to the ones that need action and ignore routine ones.
       - Everything after the last of these blocks is what the sender actually wrote.
       - You have no write access to project code. You act only through CodeDen tools on the \`codeden\` MCP server; reading files and read-only git commands are fine.

@@ -13,6 +13,7 @@ import { ownedPr, pullRequests } from "./pr-status";
 import { scoutStatus } from "./scout";
 import { factoryStats, viewRecentItems, viewWindow } from "./stats";
 import { ACTIVE_STAGES, DONE_STAGES, WAITING_STAGES } from "./store";
+import { wipOf } from "./wip";
 
 /**
  * A work item for the panel and the pipeline diagram; `owned` is the open PR the factory still
@@ -106,6 +107,7 @@ export async function buildStatus(ctx: FactoryContext, projectId: string): Promi
     stats: factoryStats(all, ctx.now()),
     consecutiveFailures: loop.consecutiveFailures,
     activeSessions: ctx.sessions.activeCount(projectId),
+    wip: wipOf(ctx, project, loop),
     backlog: waiting.map(toWork),
     inProgress: active.map(toWork),
     mergeChecks: [...active, ...done].flatMap((i) => mergeChecks(i) ?? []).slice(0, 20),

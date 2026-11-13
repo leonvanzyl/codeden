@@ -80,7 +80,7 @@ describe("factory pipelines with the Fake provider (§10.1)", () => {
       { ".codeden/VISION.md": VISION_TEMPLATE },
     );
     gh.githubProjects.add(h.projectId);
-  }, 60_000);
+  });
   afterAll(async () => {
     await h?.close();
   });
@@ -202,7 +202,7 @@ describe("factory pipelines with the Fake provider (§10.1)", () => {
     const digest = (await h.api("POST", `/projects/${h.projectId}/factory/digest`))
       .body as FactoryDigest;
     expect(digest.shipped.map((s) => s.title)).toEqual(["Saving an empty task crashes"]);
-  }, 90_000);
+  });
 
   it("ignores an untrusted issue until it is let in, and never merges it automatically", async () => {
     const issue = gh.openIssue({
@@ -253,7 +253,7 @@ describe("factory pipelines with the Fake provider (§10.1)", () => {
     expect(gh.merges).toHaveLength(merges);
     expect(ready.inProgress.find((w) => w.id === itemId)?.step).toBe("merge");
     expect(h.server.services.inbox.find(`inbox:factory-ready:${itemId}`)?.status).toBe("open");
-  }, 90_000);
+  });
 
   it("fails a bug whose CI is red and leaves the PR for a human", async () => {
     const { itemId, builder } = await trustedIssue("Reset button crashes", ["bug"]);
@@ -279,7 +279,7 @@ describe("factory pipelines with the Fake provider (§10.1)", () => {
     );
     expect(status.consecutiveFailures).toBe(1);
     expect(status.recent[0]).toMatchObject({ id: itemId, stage: "failed" });
-  }, 60_000);
+  });
 
   it("hands an oversized PR to the PM, who can allow it without a revise round", async () => {
     const { itemId, builder } = await trustedIssue("Scaffold the app", ["enhancement"]);
@@ -334,7 +334,7 @@ describe("factory pipelines with the Fake provider (§10.1)", () => {
     const size = item(itemId).checks.find((c) => c.name === "size");
     expect(size?.detail).toMatch(/allowed by the PM: Initial scaffold/);
     expect(gh.merges.some((m) => m.title.startsWith("Scaffold the app"))).toBe(true);
-  }, 60_000);
+  });
 
   it("never waits on the user: factory agents decide and record it", async () => {
     const started = Date.now();
@@ -393,5 +393,5 @@ describe("factory pipelines with the Fake provider (§10.1)", () => {
     const mine = await h.startFakeSession();
     expect(h.server.services.factory.isUnattended(mine)).toBe(false);
     expect(h.server.services.factory.isUnattended(scout)).toBe(true);
-  }, 60_000);
+  });
 });

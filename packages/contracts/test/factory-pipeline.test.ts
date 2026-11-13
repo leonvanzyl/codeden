@@ -7,6 +7,7 @@ import {
   type Investigation,
   Project,
   pipelineStep,
+  ScoutRound,
   ScoutState,
 } from "../src";
 import { sampleProject, ts } from "./fixtures";
@@ -80,5 +81,20 @@ describe("factory pipelines (§10.1)", () => {
     expect(filed.priority).toBe("normal");
     expect(FactoryFileIssueRequest.safeParse({ ...filed, type: "chore" }).success).toBe(false);
     expect(ScoutState.parse({}).lensSessions).toEqual({});
+    // A round saved before the work-in-progress limit reads as never held.
+    const round = {
+      id: "r1",
+      phase: "reviewing",
+      startedAt: "2026-11-13T00:00:00.000Z",
+      sentAt: "2026-11-13T00:00:00.000Z",
+    } as const;
+    expect(ScoutRound.parse(round)).toMatchObject({ heldSince: null, heldMs: 0 });
+    const held = ScoutRound.parse({
+      ...round,
+      heldSince: "2026-11-13T04:00:00.000Z",
+      heldMs: 7_200_000,
+    });
+    expect(ScoutRound.parse(JSON.parse(JSON.stringify(held)))).toEqual(held);
+    expect(ScoutRound.safeParse({ ...round, heldMs: -1 }).success).toBe(false);
   });
 });

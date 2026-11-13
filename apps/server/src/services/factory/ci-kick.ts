@@ -2,9 +2,8 @@ import type { FactoryItem, Project } from "@codeden/contracts";
 import { errorMessage } from "../errors";
 import type { FactoryContext } from "./context";
 import type { FactoryPr } from "./github-port";
-import { freeSlots } from "./policy";
 import { ciKickPrompt } from "./prompts-integration";
-import { prAgent, startIntegrator } from "./rebase";
+import { prAgent, repairSlot, startIntegrator } from "./rebase";
 import { isBusy } from "./sessions";
 
 /**
@@ -74,8 +73,9 @@ export async function kickCi(
   const at = ctx.now().toISOString();
   if (agent) {
     if (isBusy(agent)) return true;
-    // Its turn holds an agent slot like any other the factory starts: wait for a free one.
-    if (freeSlots(ctx.sessions.activeCount(project.id), project.factoryLimits) === 0) {
+    // Its turn holds an agent slot like any other the factory starts: wait for a free one,
+    // after the reviews waiting for one (`slots.ts`).
+    if (!repairSlot(ctx, project, item, agent)) {
       note(ctx, item, "CI never started: waiting for a free agent to push a commit that starts it");
       return true;
     }

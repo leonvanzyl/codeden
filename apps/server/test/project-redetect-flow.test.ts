@@ -230,7 +230,7 @@ describe("re-detection over HTTP and across restarts", () => {
       return p.kind === "github" ? p : undefined;
     });
     expect(upgraded.github).toMatchObject({ owner: "octo", repo: "test-todo" });
-  }, 30_000);
+  });
 });
 
 describe("re-detection after a real agent turn", () => {
@@ -251,5 +251,5 @@ describe("re-detection after a real agent turn", () => {
     } finally {
       await h.close();
     }
-  }, 60_000);
+  });
 });

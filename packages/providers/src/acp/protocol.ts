@@ -18,6 +18,11 @@ export interface AcpInitializeResult {
     loadSession?: boolean;
     promptCapabilities?: { image?: boolean; audio?: boolean; embeddedContext?: boolean };
     mcpCapabilities?: { http?: boolean; sse?: boolean };
+    /**
+     * Session features beyond version 1's core. `subagents` (an object) means the agent runs
+     * its subagents as child sessions, because the client opted in (`clientCapabilities`).
+     */
+    sessionCapabilities?: { subagents?: unknown; list?: unknown } | null;
   };
   authMethods?: { id: string; name?: string; description?: string }[];
   agentInfo?: { name?: string; version?: string };
@@ -154,7 +159,32 @@ export type AcpSessionUpdate =
       size?: number;
       cost?: { amount?: number; currency?: string } | null;
     }
+  | AcpSubagentSpawned
+  | AcpSubagentStateUpdate
   | { sessionUpdate: string; [key: string]: unknown };
+
+/**
+ * A subagent started as a child session (agents that accepted the `subagents` client
+ * capability). Sent on the parent's session; the child's own updates and requests then arrive
+ * under `subagentSessionId`. Vendor details (a parent tool call id, the subagent type) may sit
+ * in `_meta.<vendor>`.
+ */
+export interface AcpSubagentSpawned {
+  sessionUpdate: "subagent_spawned";
+  subagentSessionId: string;
+  name?: string;
+  task?: string;
+  capabilities?: Record<string, unknown> | null;
+  _meta?: Record<string, unknown> | null;
+}
+
+/** A child session's state changed; `completed`, `failed`, `cancelled` and `disconnected` end it. */
+export interface AcpSubagentStateUpdate {
+  sessionUpdate: "subagent_state_update";
+  subagentSessionId: string;
+  state: "completed" | "failed" | "cancelled" | "disconnected" | string;
+  _meta?: Record<string, unknown> | null;
+}
 
 export interface AcpSessionNotification {
   sessionId: string;

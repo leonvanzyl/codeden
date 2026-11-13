@@ -438,7 +438,6 @@ export const providers: ProviderInfo[] = [
     capabilities: {
       ...caps,
       steer: false,
-      subagents: false,
       rollback: false,
       fork: false,
       reasoningEffort: false,

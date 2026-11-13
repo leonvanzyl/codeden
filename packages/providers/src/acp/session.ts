@@ -29,16 +29,20 @@ import type {
 } from "./protocol";
 import { type AcpRpc, AcpRpcError, METHOD_NOT_FOUND } from "./rpc";
 import { currentMode, openOrLoad, setMode, setModel } from "./setup";
+import { AcpSubagents } from "./subagents";
 
 /**
  * A session on an ACP agent (§7.2): one agent process per CodeDen session, since every session
  * has its own MCP servers and role-scoped token. A new session runs `session/new` in the
  * worktree; a resumed one `session/load`s the agent's own session (the resume token) and drops
  * its replayed history. When the agent exits, the next `send()` starts it again and resumes.
+ * Subagents the agent runs as child sessions are child threads (`AcpSubagents`): updates and
+ * requests are routed by the ACP session id they carry.
  */
 export class AcpSession implements ProviderSession {
   readonly events = new AsyncQueue<AgentEvent>();
   private readonly mapper: AcpEventMapper;
+  private readonly subagents: AcpSubagents;
   private readonly broker: ApprovalBroker;
   private readonly policy: AcpPolicy;
   private readonly mcpServers: string[];
@@ -64,9 +68,10 @@ export class AcpSession implements ProviderSession {
   ) {
     const emit = (event: AgentEvent) => {
       if (
-        event.type === "turn.completed" ||
-        event.type === "turn.failed" ||
-        event.type === "turn.interrupted"
+        (event.type === "turn.completed" ||
+          event.type === "turn.failed" ||
+          event.type === "turn.interrupted") &&
+        event.threadId === this.mapper.threadId
       ) {
         this.turnPending = false;
       }
@@ -74,12 +79,16 @@ export class AcpSession implements ProviderSession {
     };
     this.mcpServers = opts.mcpServers.map((s) => s.name);
     this.trusted = trustedServers(opts);
+    const tools = { cwd: opts.cwd, mcpServers: this.mcpServers };
+    this.subagents = new AcpSubagents({ sessionId: opts.sessionId, emit, tools });
     this.mapper = new AcpEventMapper({
       sessionId: opts.sessionId,
       emit,
-      tools: { cwd: opts.cwd, mcpServers: this.mcpServers },
+      tools,
       onMode: (mode) => this.onAgentMode(mode),
       onConfigOptions: (options) => this.onConfigOptions(options),
+      beforeEnd: (ok) => this.subagents.endAll(ok),
+      onToolDone: (state) => this.subagents.toolDone(this.mapper, state),
     });
     this.broker = new ApprovalBroker(emit);
     this.policy = policyFor(opts);
@@ -91,7 +100,7 @@ export class AcpSession implements ProviderSession {
 
   /** Start the agent and open (or resume) its session. */
   async start(): Promise<void> {
-    this.events.push({ type: "thread.started", thread: { id: this.mapper.rootThreadId } });
+    this.events.push({ type: "thread.started", thread: { id: this.mapper.threadId } });
     await this.ensureAgent();
   }
 
@@ -323,14 +332,23 @@ export class AcpSession implements ProviderSession {
     this.config.onSetup?.(this.setup, this.info);
   }
 
-  private host(): AcpExtensionHost {
+  /** The host for an extension call from the ACP session `acpSessionId` (the root or a child). */
+  private host(acpSessionId: string | undefined): AcpExtensionHost {
     return extensionHost({
       cwd: this.opts.cwd,
       broker: this.broker,
-      mapper: this.mapper,
+      mapper: this.mapperOf(acpSessionId) ?? this.mapper,
+      subagents: this.subagents,
+      childSessions: () => agentCan(this.info, "subagents"),
       planning: () => this.planning,
       exitPlanMode: () => this.exitPlanMode(),
     });
+  }
+
+  /** The mapper for an ACP session id: the root session's, a child's, or none (unknown). */
+  private mapperOf(acpSessionId: string | undefined): AcpEventMapper | undefined {
+    if (!acpSessionId || acpSessionId === this.acpSession) return this.mapper;
+    return this.subagents.mapperFor(acpSessionId);
   }
 
   /** The user approved the plan: leave plan mode for the session's level, and say so. */
@@ -342,22 +360,30 @@ export class AcpSession implements ProviderSession {
     await this.applyMode().catch(() => undefined);
   }
 
+  /**
+   * Updates go to the mapper of the session they name: the root session's, or a subagent's
+   * child session's. Updates of sessions CodeDen doesn't know are dropped.
+   */
   private onNotification(message: AcpIncoming): void {
     if (message.method === "session/update") {
       const params = message.params as AcpSessionNotification | undefined;
-      if (!params?.update || params.sessionId !== this.acpSession) return;
-      this.mapper.handle(params.update);
+      const mapper = params?.sessionId ? this.mapperOf(params.sessionId) : undefined;
+      if (!params?.update || !mapper) return;
+      if (!this.subagents.handle(params.update, mapper)) mapper.handle(params.update);
       return;
     }
-    this.config.spec.extensions?.notification?.(message.method, message.params, this.host());
+    const host = this.host(sessionIdOf(message.params));
+    this.config.spec.extensions?.notification?.(message.method, message.params, host);
   }
 
+  /** Requests from a child session (permissions, vendor requests) go to its child thread. */
   private async onRequest(message: AcpIncoming): Promise<unknown> {
+    const mapper = this.mapperOf(sessionIdOf(message.params)) ?? this.mapper;
     if (message.method === "session/request_permission") {
       return answerPermission(message.params as AcpPermissionRequest, {
         broker: this.broker,
         policy: this.policy,
-        mapper: this.mapper,
+        mapper,
         cwd: this.opts.cwd,
         mcpServers: this.mcpServers,
         trustedServers: this.trusted,
@@ -366,7 +392,7 @@ export class AcpSession implements ProviderSession {
     const handled = this.config.spec.extensions?.request?.(
       message.method,
       message.params,
-      this.host(),
+      this.host(sessionIdOf(message.params)),
     );
     if (handled) return handled;
     throw new AcpRpcError(METHOD_NOT_FOUND, `CodeDen does not support ${message.method}`);
@@ -386,4 +412,10 @@ export class AcpSession implements ProviderSession {
     this.mapper.endTurn(exitedOutcome(this.config.spec.label, code, stderr));
     this.turnPending = false;
   }
+}
+
+/** The ACP session id a request or notification names, if any. */
+function sessionIdOf(params: unknown): string | undefined {
+  const id = (params as { sessionId?: unknown } | null | undefined)?.sessionId;
+  return typeof id === "string" && id ? id : undefined;
 }

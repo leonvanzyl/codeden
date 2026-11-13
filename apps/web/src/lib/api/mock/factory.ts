@@ -88,6 +88,12 @@ export function mockFactoryApi(world: MockWorld): FactoryApi {
       globalKillSwitch: world.snapshot.settings.factory.killSwitch,
       tuning: FactoryTuning.parse({}),
       activeSessions: Math.min(f.inProgress.length, f.limits.maxConcurrentSessions),
+      // The work-in-progress limit follows the agent limit (no `maxOpenPrs` set).
+      wip: {
+        openPrs: f.inProgress.filter((w) => w.pr).length,
+        limit: f.limits.maxConcurrentSessions,
+        holding: f.inProgress.filter((w) => w.pr).length >= f.limits.maxConcurrentSessions,
+      },
       backlog: f.backlog.map(work),
       inProgress: f.inProgress.map(work).map((w) => {
         // Check counts from the fixture's merge checks of the same pull request.
