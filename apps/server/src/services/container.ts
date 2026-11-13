@@ -313,6 +313,7 @@ export function createServices(opts: ServicesOptions): AppServices {
     sessions,
     projects,
     inbox,
+    artifacts,
     github: opts.orchestration?.github ?? new GithubServicePort(github),
     trustedAuthors,
     automation: opts.orchestration?.automation ?? automations,

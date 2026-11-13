@@ -1,11 +1,12 @@
-import type {
-  GithubConnection,
-  GithubPr,
-  GithubPrDetails,
-  ProjectStatus,
-  Session,
-  StartSessionResponse,
-  WorkSummary,
+import {
+  ConflictDecision,
+  type GithubConnection,
+  type GithubPr,
+  type GithubPrDetails,
+  type ProjectStatus,
+  type Session,
+  type StartSessionResponse,
+  type WorkSummary,
 } from "@codeden/contracts";
 import type { CodeDenClient } from "../client";
 import { checks, mockIssues, mockPrs, searchPrChecksLater } from "./fixtures/github";
@@ -131,20 +132,23 @@ export function mockOrchestration(world: MockWorld, deps: Deps): OrchestrationPa
     },
     listConflicts: (q = {}) =>
       delay(world.conflicts.filter((c) => !q.projectId || c.projectId === q.projectId)),
-    async resolveConflict(id, decision) {
+    async resolveConflict(id, request) {
       const record = world.conflicts.find((c) => c.id === id);
       if (!record) throw new Error("Conflict not found");
       world.conflicts = world.conflicts.filter((c) => c.id !== id);
+      // Like the server: `start` replaces the saved request; only the decision is kept.
+      const decision = ConflictDecision.parse(request);
+      const text = request.start?.input?.text || record.request.purpose;
       let result: StartSessionResponse = { status: "skipped" };
       if (decision.resolution === "join") {
-        await deps.sendMessage(decision.sessionId, { text: record.request.purpose }, "queue");
+        await deps.sendMessage(decision.sessionId, { text }, "queue");
         result = { status: "joined", sessionId: decision.sessionId };
       }
       if (decision.resolution === "force" && record.projectId) {
         const sessionId = deps.createSession(
           record.projectId,
-          record.request.purpose,
-          record.request.workKey,
+          text.split("\n")[0] || record.request.purpose,
+          request.start?.workKey ?? record.request.workKey,
         );
         result = { status: "started", sessionId };
       }

@@ -3,6 +3,7 @@ import {
   AutomationGuards,
   AutomationRun,
   ConflictDecision,
+  ResolveConflictRequest,
   Session,
   StartWorkResult,
   WorkKey,
@@ -85,6 +86,18 @@ describe("situational awareness (§8.4)", () => {
       true,
     );
     expect(ConflictDecision.safeParse({ resolution: "join", sessionId: "s9" }).success).toBe(true);
+  });
+
+  it("resolves a conflict with the decision and, optionally, the request to start instead", () => {
+    const start = { projectId: "p1", input: { text: "Better wording" }, workKey: "issue:9" };
+    const parsed = ResolveConflictRequest.parse({ resolution: "wait", behindId: "s9", start });
+    expect(parsed).toMatchObject({ resolution: "wait", behindId: "s9", start });
+    // The start request gets its defaults, as `POST /api/sessions` would give it.
+    expect(parsed.start?.workspace).toEqual({ mode: "worktree" });
+    expect(ResolveConflictRequest.parse(JSON.parse(JSON.stringify(parsed)))).toEqual(parsed);
+    // A bare decision still works, and the decision rules still apply.
+    expect(ResolveConflictRequest.parse({ resolution: "skip" })).toEqual({ resolution: "skip" });
+    expect(ResolveConflictRequest.safeParse({ resolution: "force", start }).success).toBe(false);
   });
 
   it("records skipped runs with a reason", () => {

@@ -50,7 +50,8 @@ export interface ConflictOutcome {
 /**
  * A start request that matched running work (§8.4). The same four choices the agents get:
  * wait (queue behind), skip, join (send as a follow-up) or force (with a recorded reason).
- * `decideWith` retries something other than a session start (an automation's run now).
+ * `decideWith` replaces the retry of the saved request: an automation's run now, or the New
+ * session draft as it is when the decision is made.
  * `replace` opens the resulting session in place of the current history entry (the New session
  * draft becomes that session, so Back doesn't return to an emptied draft).
  */

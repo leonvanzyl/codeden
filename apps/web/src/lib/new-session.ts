@@ -119,20 +119,32 @@ export function buildStartRequest(
 }
 
 /**
+ * The purpose a start takes from its text, as the server derives it: the first line that isn't
+ * blank, shortened to 120 characters. `null` for a draft without text.
+ */
+export function draftPurpose(text: string): string | null {
+  const line = text
+    .split(/\r?\n/)
+    .find((l) => l.trim())
+    ?.trim();
+  if (!line) return null;
+  return line.length > 120 ? `${line.slice(0, 117)}...` : line;
+}
+
+/**
  * A conflict the server did not persist (no `conflictId`), shown and resolved like a persisted
- * one: its decisions retry the same start request.
+ * one: its decisions retry the start request.
  */
 export function localConflict(
   request: StartSessionRequestInit,
   result: Extract<StartWorkResult, { status: "conflict" }>,
   now = new Date(),
 ): ConflictRecord {
-  const text = request.input?.text.trim() ?? "";
   return {
     id: `${LOCAL_CONFLICT_PREFIX}${now.getTime()}`,
     projectId: request.projectId,
     request: {
-      purpose: text.split(/\r?\n/)[0] || "New session",
+      purpose: draftPurpose(request.input?.text ?? "") ?? "New session",
       workKey: request.workKey || result.existing[0]?.workKey || "request:new",
       startedBy: { kind: "user" },
     },

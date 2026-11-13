@@ -1,10 +1,11 @@
 import { randomUUID } from "node:crypto";
 import {
-  type ConflictDecision,
+  ConflictDecision,
   ConflictRecord,
   type InboxItem,
   type JsonValue,
   type ListConflictsQuery,
+  type ResolveConflictRequest,
   type ResolveConflictResponse,
   StartSessionRequest,
   type StartSessionResponse,
@@ -14,7 +15,8 @@ import { desc, eq } from "drizzle-orm";
 import type { Db } from "../../db/client";
 import { conflicts } from "../../db/schema-orchestration";
 import type { EventStore } from "../../events/store";
-import { conflict as conflictError, notFound } from "../errors";
+import type { ArtifactService } from "../artifacts";
+import { badRequest, conflict as conflictError, notFound } from "../errors";
 import type { InboxService } from "../inbox-service";
 import { derivePurpose, deriveWorkKey } from "../sessions/conflicts";
 import type { SessionService } from "../sessions/session-service";
@@ -24,6 +26,8 @@ export interface ConflictServiceDeps {
   store: EventStore;
   inbox: InboxService;
   sessions: SessionService;
+  /** Saves pasted images, so a recorded start refers to them instead of carrying the bytes. */
+  artifacts: Pick<ArtifactService, "externalizeAttachments">;
   /** Tell the project's PM (a `conflict` notice). */
   onRecorded?: (record: ConflictRecord) => void;
 }
@@ -31,7 +35,7 @@ export interface ConflictServiceDeps {
 /**
  * Persisted conflicts (§8.4): a start request that matched running work becomes an inbox
  * item of kind `conflict` plus its details, resolvable later with wait, skip, join or force.
- * Resolving retries the original start with the decision.
+ * Resolving retries the saved start (or the one the resolver sends instead) with the decision.
  */
 export class ConflictService {
   constructor(private readonly deps: ConflictServiceDeps) {}
@@ -46,7 +50,18 @@ export class ConflictService {
     });
     const now = new Date().toISOString();
     const id = `conflict:${randomUUID()}`;
-    const { conflict: _drop, ...start } = req;
+    const { conflict: _drop, ...rest } = req;
+    // Pasted images become artifacts first: the record goes into the event log, which is never
+    // pruned (§6), so it keeps a reference rather than the image itself.
+    const start = rest.input
+      ? {
+          ...rest,
+          input: this.deps.artifacts.externalizeAttachments(rest.input, {
+            sessionId: null,
+            projectId: req.projectId,
+          }),
+        }
+      : rest;
     const record: ConflictRecord = {
       id,
       projectId: req.projectId,
@@ -111,13 +126,22 @@ export class ConflictService {
     return this.withStatus(row.record);
   }
 
-  /** Retry the original start with `decision` and close the inbox item. */
-  async resolve(id: string, decision: ConflictDecision): Promise<ResolveConflictResponse> {
+  /**
+   * Retry the start with the decision and close the inbox item. The saved request is retried
+   * unless `request.start` replaces it (the New session draft as it is now). Only the decision
+   * is kept on the item, never the replacement's input.
+   */
+  async resolve(id: string, request: ResolveConflictRequest): Promise<ResolveConflictResponse> {
     const record = this.get(id);
     if (record.status !== "open")
       throw conflictError("The conflict was already resolved", "resolved");
+    const decision = ConflictDecision.parse(request);
+    const replacement = request.start;
+    if (replacement && replacement.projectId !== record.projectId) {
+      throw badRequest("The new request is for another project", "project_mismatch");
+    }
     const req = StartSessionRequest.parse({
-      ...(record.start as Record<string, unknown>),
+      ...((replacement ?? record.start) as Record<string, unknown>),
       conflict: decision,
     });
     const result: StartSessionResponse = await this.deps.sessions.start(req);

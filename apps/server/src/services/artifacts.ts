@@ -106,12 +106,13 @@ export class ArtifactService {
   /**
    * Store pasted (base64) images as artifacts and point the attachment at the artifact, so
    * large payloads never land in the event log and stored input (queued messages, pending
-   * starts) never carries a filesystem path. `resolveAttachments` turns the reference into a
-   * file path when the input is handed to the runner.
+   * starts, conflict records) never carries a filesystem path. `resolveAttachments` turns the
+   * reference into a file path when the input is handed to the runner. Input that belongs to no
+   * session yet (a conflicting start) goes to the shared folder.
    */
   externalizeAttachments(
     input: UserInput,
-    owner: { sessionId: string; projectId: string | null },
+    owner: { sessionId: string | null; projectId: string | null },
   ): UserInput {
     if (!input.attachments.some((a) => a.type === "image" && a.source.type === "base64")) {
       return input;

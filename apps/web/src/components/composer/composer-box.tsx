@@ -1,4 +1,4 @@
-import type { Session } from "@codeden/contracts";
+import type { Session, UserInputInit } from "@codeden/contracts";
 import { Paperclip } from "lucide-react";
 import {
   type ClipboardEvent,
@@ -16,7 +16,7 @@ import { useSnapshotData } from "@/lib/queries";
 import { useComposerBounds } from "@/lib/toast-placement";
 import { cn } from "@/lib/utils";
 import { type Draft, getDraft, useComposerStore } from "@/stores/composer";
-import { AttachmentStrip, filesToAttachments } from "./attachments";
+import { AttachmentStrip, filesToAttachments, toInputAttachments } from "./attachments";
 import { VoiceButton } from "./voice-button";
 
 export const composerPlaceholders: Record<Session["role"], string> = {
@@ -28,6 +28,12 @@ export const composerPlaceholders: Record<Session["role"], string> = {
 /** A draft can be sent with text, attachments or both. */
 export const canSendDraft = (draft: Draft) =>
   draft.text.trim().length > 0 || draft.attachments.length > 0;
+
+/** What sending the draft sends. */
+export const draftInput = (draft: Draft): UserInputInit => ({
+  text: draft.text.trim(),
+  attachments: toInputAttachments(draft.attachments),
+});
 
 /** Enter sends; Shift+Enter and IME composition keep typing. */
 export const isSendKey = (e: KeyboardEvent<HTMLTextAreaElement>) =>

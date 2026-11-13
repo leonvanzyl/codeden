@@ -13,6 +13,7 @@ import {
 } from "@codeden/contracts";
 import type { Db } from "../../db/client";
 import type { EventStore } from "../../events/store";
+import type { ArtifactService } from "../artifacts";
 import { errorMessage } from "../errors";
 import type { TrustedAuthors } from "../github/review-trust";
 import type { InboxService } from "../inbox-service";
@@ -61,6 +62,8 @@ export interface OrchestrationDeps {
   sessions: SessionService;
   projects: ProjectService;
   inbox: InboxService;
+  /** Saves the pasted images of a conflicting start before it is recorded. */
+  artifacts: Pick<ArtifactService, "externalizeAttachments">;
   github?: GithubPort;
   /** The project's trusted authors, whose PR reviews count without write access. Default: none. */
   trustedAuthors?: TrustedAuthors;

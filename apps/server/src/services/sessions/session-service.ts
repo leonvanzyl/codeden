@@ -172,21 +172,20 @@ export class SessionService {
       }
     }
 
-    const session = this.buildSession(req, project, {
-      purpose,
-      workKey,
-      scope,
-      queued: queuedBehind.length > 0,
-    });
+    const queued = queuedBehind.length > 0;
+    const session = this.buildSession(req, project, { purpose, workKey, scope, queued });
     const meta: StoredStartMeta = {
       workspaceMode: req.workspace.mode,
       workspaceFallback: null,
       forced,
       queuedBehind,
-      pending: queuedBehind.length > 0 ? { input: req.input, workspace: req.workspace } : null,
+      // A pending start keeps its pasted images as artifacts, like a queued message.
+      pending: queued
+        ? { input: req.input && this.externalize(session, req.input), workspace: req.workspace }
+        : null,
     };
     repo.create(session, meta);
-    if (queuedBehind.length > 0) {
+    if (queued) {
       return { status: "queued", sessionId: session.id, behind: queuedBehind };
     }
     this.launchInBackground(session.id, req.input, req.workspace);

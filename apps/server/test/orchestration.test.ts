@@ -201,10 +201,18 @@ describe("orchestration (§8): role sessions, digest, tools, notices, conflicts"
   });
 
   it("persists user conflicts as inbox items resolvable with wait, skip, join or force", async () => {
+    const PNG_B64 =
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+    const image = {
+      type: "image",
+      mediaType: "image/png",
+      name: "image.png",
+      source: { type: "base64", data: PNG_B64 },
+    };
     const dup = {
       workKey: "automation:security-audit",
       purpose: "Audit again",
-      input: { text: "audit" },
+      input: { text: "audit", attachments: [image] },
     };
     const res = await h.api("POST", "/sessions", {
       projectId: h.projectId,
@@ -229,6 +237,12 @@ describe("orchestration (§8): role sessions, digest, tools, notices, conflicts"
     const out = resolved.body as { conflict: ConflictRecord; result: StartSessionResponse };
     expect(out.result.status).toBe("queued");
     expect(out.conflict).toMatchObject({ status: "resolved", resolution: { resolution: "wait" } });
+    // The pasted image was saved as an artifact: neither the record nor the pending start
+    // carries its bytes (#169).
+    expect(JSON.stringify(out.conflict)).not.toContain(PNG_B64);
+    const queuedId = out.result.status === "queued" ? out.result.sessionId : "";
+    const pending = h.server.services.sessionRepo.find(queuedId)?.startMeta?.pending;
+    expect(pending?.input?.attachments[0]).toMatchObject({ source: { type: "artifact" } });
     expect(
       (await h.api("POST", `/conflicts/${conflictId}/resolve`, { resolution: "skip" })).status,
     ).toBe(409);
