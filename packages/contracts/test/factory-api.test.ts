@@ -9,6 +9,7 @@ import {
   FactoryLoop,
   FactoryStatus,
   FactoryTuning,
+  FactoryTuningPatch,
   isFactoryMode,
   Notice,
   REVIEW_SUMMARY_MAX,
@@ -226,6 +227,13 @@ describe("factory API contracts (§10.1)", () => {
     );
     expect(FactoryTuning.safeParse({ reviewerFallback: "never" }).success).toBe(false);
     expect(FactoryTuning.safeParse({ reviewerModel: "" }).success).toBe(false);
+    // The WIP limit follows the agent limit until someone sets it; null sets it back.
+    expect(loop.tuning.maxOpenPrs).toBeNull();
+    const wip = FactoryTuning.parse({ maxOpenPrs: 4 });
+    expect(FactoryTuning.parse(JSON.parse(JSON.stringify(wip))).maxOpenPrs).toBe(4);
+    expect(FactoryTuning.safeParse({ maxOpenPrs: 0 }).success).toBe(false);
+    expect(FactoryTuningPatch.parse({ maxOpenPrs: null })).toEqual({ maxOpenPrs: null });
+    expect(FactoryTuningPatch.parse({ maxFixAttempts: 1 })).not.toHaveProperty("maxOpenPrs");
     expect(
       FactoryAllowLargeChangeRequest.parse({ itemId: "i1", reason: "Initial scaffold" }),
     ).toEqual({ itemId: "i1", reason: "Initial scaffold" });
@@ -327,6 +335,16 @@ describe("factory API contracts (§10.1)", () => {
       medianMergeMs7d: null,
       merged7d: 0,
     });
+    // A status from before the WIP limit reads as not holding anything back.
+    expect(status.wip).toEqual({ openPrs: 0, limit: 2, holding: false });
+    const holding = FactoryStatus.parse({
+      ...status,
+      wip: { openPrs: 3, limit: 3, holding: true },
+    });
+    expect(FactoryStatus.parse(JSON.parse(JSON.stringify(holding)))).toEqual(holding);
+    expect(FactoryStatus.safeParse({ ...status, wip: { openPrs: 1, limit: 0 } }).success).toBe(
+      false,
+    );
     const work = {
       id: "i1",
       title: "Add a counter",
