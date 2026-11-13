@@ -16,6 +16,7 @@ import {
 } from "./provider-failure";
 import { baseBranchOf } from "./rebase";
 import { recheckOf, recheckSent, recheckSentFor, withoutRecheckRequest } from "./recheck";
+import { CLEAN_REVIEW, environmentStrikes, replaceBlockedReviewer } from "./review-environment";
 import { pickReviewer, type ReviewerChoice, type ReviewerWait } from "./reviewer-choice";
 import { isBusy } from "./sessions";
 import { claimSlot, reviewTier } from "./slots";
@@ -36,7 +37,8 @@ const MAX_REVIEWER_RESTARTS = 3;
 /**
  * Where a new reviewer works: in the PR agent's worktree while it is there (offline, on the
  * PR branch), otherwise in a fresh worktree on the PR's head, fetched by CodeDen (a revert PR
- * opened through the API, an author whose session is gone, a worktree cleanup removed).
+ * opened through the API, an author whose session is gone, a worktree cleanup removed, or an
+ * earlier reviewer whose environment there couldn't verify the change).
  */
 function reviewHead(
   ctx: FactoryContext,
@@ -45,7 +47,8 @@ function reviewHead(
   pr: FactoryPr,
 ): { headBranch: string; baseBranch: string } | null {
   const builder = item.builderSessionId ? ctx.repo.find(item.builderSessionId)?.session : undefined;
-  if (builder?.worktreePath && !builder.worktreeRemovedAt) return null;
+  const shared = builder?.worktreePath && !builder.worktreeRemovedAt;
+  if (shared && !item.nudges[CLEAN_REVIEW]) return null;
   return { headBranch: pr.headBranch, baseBranch: baseBranchOf(project) };
 }
 
@@ -286,6 +289,15 @@ export async function reviewerStalled(
     return loop;
   }
   if (stoppedSinceNudge(s, nudged, ctx.now(), loop.tuning)) {
+    // Its environment had already kept it from verifying the change: no revise round for that.
+    if (environmentStrikes(item) > 0) {
+      return replaceBlockedReviewer(
+        ctx,
+        loop,
+        item,
+        "ended without a verdict after its local environment couldn't verify the change",
+      );
+    }
     return failReview(ctx, project, loop, item, "The reviewer ended without a verdict");
   }
   return loop;
