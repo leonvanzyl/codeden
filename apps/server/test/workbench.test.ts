@@ -115,11 +115,11 @@ describe("terminal channel", () => {
     );
     // bash with bracketed paste emits `ESC[?2004l\r` before the command's output, so allow
     // carriage returns at the start of the line.
-    await waitUntil(() => /(^|\n)\r*codeden-ready\r?\n/.test(output.replace(ansi, "")), 20_000);
+    await waitUntil(() => /(^|\n)\r*codeden-ready\r?\n/.test(output.replace(ansi, "")));
     ws.send(JSON.stringify({ type: "kill" }));
-    await waitUntil(() => controls.some((c) => c.type === "exited"), 20_000);
+    await waitUntil(() => controls.some((c) => c.type === "exited"));
     ws.close();
-  }, 40_000);
+  });
 
   it("needs the install token", async () => {
     const ws = new WebSocket(`${h.server.url.replace("http", "ws")}/ws/pty`);

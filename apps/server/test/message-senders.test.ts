@@ -77,9 +77,7 @@ describe("messages from a PM or the orchestrator record their sender", () => {
     expect(input.from).toBe("pm");
   });
 
-  it("persists the orchestrator's message_pm as from the orchestrator", {
-    timeout: 40_000,
-  }, async () => {
+  it("persists the orchestrator's message_pm as from the orchestrator", async () => {
     const res = await call(
       "orchestrator",
       "message_pm",

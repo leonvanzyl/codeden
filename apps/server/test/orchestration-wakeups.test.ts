@@ -186,7 +186,7 @@ describe("schedule_wakeup, list_wakeups and cancel_wakeup", () => {
           r.item.input.text.includes("Ask the shop PM whether the release is ready"),
       );
       return found;
-    }, 20_000);
+    });
     expect(user).toBeTruthy();
-  }, 40_000);
+  });
 });

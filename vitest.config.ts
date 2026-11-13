@@ -89,7 +89,7 @@ const RUNNER_WORKTREE_TESTS = [
  * room for a busy machine. In the shared pool they started all at once and starved each other
  * into Vitest's 5 s timeout whenever other builds kept the machine busy. A worker limit of its
  * own needs its own `groupOrder`. The test timeout stays above the harness's 30 s `waitUntil`,
- * so a slow wait reports what it waited for.
+ * so a slow wait reports what it waited for; the suites set no lower timeouts of their own.
  */
 const processHeavy = () => ({
   sequence: { groupOrder: 1 },
@@ -99,8 +99,8 @@ const processHeavy = () => ({
 });
 
 /**
- * The other runner and server suites still start git and child processes (clones, fake CLIs),
- * which take seconds on a busy machine: more room than Vitest's 5 s default.
+ * The other runner, server and release-script suites still start git and child processes
+ * (clones, fake CLIs), which take seconds on a busy machine: more room than Vitest's 5 s default.
  */
 const SPAWNS_PROCESSES = { testTimeout: 20_000, hookTimeout: 30_000 };
 
@@ -117,7 +117,9 @@ const FAST = [
       exclude: [...configDefaults.exclude, ...DESKTOP_PROCESS_TESTS],
     },
   },
-  { test: { name: "scripts", root: "scripts", include: ["**/*.test.mjs"] } },
+  {
+    test: { name: "scripts", root: "scripts", include: ["**/*.test.mjs"], ...SPAWNS_PROCESSES },
+  },
   {
     test: {
       name: "@codeden/runner",

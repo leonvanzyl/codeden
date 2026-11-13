@@ -268,7 +268,7 @@ describe("orchestration (§8): role sessions, digest, tools, notices, conflicts"
     expect(notices.map((n) => n.type)).toContain("conflict");
   });
 
-  it("wakes the PM with typed notices when its agent finishes", { timeout: 40_000 }, async () => {
+  it("wakes the PM with typed notices when its agent finishes", async () => {
     const started = JSON.parse(
       (
         await call(
@@ -293,16 +293,14 @@ describe("orchestration (§8): role sessions, digest, tools, notices, conflicts"
           return data;
       }
       return undefined;
-    }, 30_000);
+    });
     expect(batch.notices.length).toBeGreaterThanOrEqual(1);
     await statusIs(pmId, "idle");
     const undelivered = h.server.services.orchestration.notices.undelivered("pm", h.projectId);
     expect(undelivered.find((n) => n.sessionId === started.sessionId)).toBeUndefined();
   });
 
-  it("answers ask_pm from the PM's turn, including the running audit from its digest", {
-    timeout: 30_000,
-  }, async () => {
+  it("answers ask_pm from the PM's turn, including the running audit from its digest", async () => {
     const res = await call(
       "orchestrator",
       "ask_pm",
@@ -317,9 +315,7 @@ describe("orchestration (§8): role sessions, digest, tools, notices, conflicts"
     await statusIs(pmId, "idle");
   });
 
-  it("keeps informational PM messages out of the orchestrator's way and wakes it otherwise", {
-    timeout: 40_000,
-  }, async () => {
+  it("keeps informational PM messages out of the orchestrator's way and wakes it otherwise", async () => {
     const info = await call(
       "pm",
       "message_orchestrator",
@@ -346,7 +342,7 @@ describe("orchestration (§8): role sessions, digest, tools, notices, conflicts"
     await waitUntil(async () => {
       const user = (await items(orchestrator.id)).find((r) => r.item.kind === "user_message");
       return user ? true : undefined;
-    }, 30_000);
+    });
     const user = (await items(orchestrator.id)).find((r) => r.item.kind === "user_message");
     const text = user?.item.kind === "user_message" ? user.item.input.text : "";
     expect(text).toContain('<codeden_status scope="all projects"');
@@ -354,9 +350,7 @@ describe("orchestration (§8): role sessions, digest, tools, notices, conflicts"
     expect(text).toContain("Audit still running");
   });
 
-  it("stores project notes for the PM and changes model/effort on the next turn", {
-    timeout: 30_000,
-  }, async () => {
+  it("stores project notes for the PM and changes model/effort on the next turn", async () => {
     await call(
       "pm",
       "update_project_notes",
