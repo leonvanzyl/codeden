@@ -18,6 +18,7 @@ import { ServiceError } from "../services/errors";
 import { type RunnerPort, type RunnerRouter, runnerPort } from "../services/runner-port";
 import { RunnerClient } from "./client";
 import type { RunnerLaunchConfig, RunnerStartTimeouts } from "./launcher";
+import type { ExecLinkConfig } from "./transport-exec";
 
 /** A runner to drive: its record and how to reach it. */
 export interface RunnerSpec {
@@ -26,10 +27,15 @@ export interface RunnerSpec {
   backend: RunnerBackendId;
   /** The home runner: global work (providers, utility jobs, orchestrator, PMs) goes to it. */
   home?: boolean;
-  /** The runner's data directory, and its lock file (`<dir>/runner/runner.json`). */
+  /**
+   * Reach it through an exec link (`codeden runner-link` started next to it, e.g. with
+   * `docker exec -i`) instead of the loopback WebSocket in its lock file.
+   */
+  link?: ExecLinkConfig;
+  /** The runner's data directory, and its lock file (`<dir>/runner/runner.json`); loopback. */
   dir: string;
   lockFile: string;
-  /** How to start it when none is live; `null` only attaches to a running one. */
+  /** Loopback: how to start it when none is live; `null` only attaches to a running one. */
   launch: RunnerLaunchConfig | null;
   sandboxRef?: string | null;
   projectId?: string | null;
@@ -136,6 +142,7 @@ export class RunnerHub implements RunnerRouter {
       describe,
       // Only the home runner, next to the server, is trusted; any other may be a sandbox's.
       untrusted: !record.home,
+      link: spec.link,
       home: spec.dir,
       lockFile: spec.lockFile,
       db: this.opts.db,
