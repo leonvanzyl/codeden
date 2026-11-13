@@ -11,7 +11,10 @@ import { utf8ByteLength } from "../tool-output";
  * Portable code (no `Buffer`), shared by the server's exec transport and the link itself.
  */
 
-/** The longest line either side accepts, in UTF-8 bytes without its `\n`: 16 MiB. */
+/**
+ * The longest line either side accepts: 16 MiB of UTF-8, counting every byte but the `\n` (a
+ * `\r` before it counts too).
+ */
 export const RUNNER_LINK_MAX_LINE_BYTES = 16 * 1024 * 1024;
 
 /**
@@ -85,10 +88,11 @@ const CARRIAGE_RETURN = 0x0d;
 /**
  * Splits a byte stream into link messages. Lines may arrive split across any number of chunks,
  * mid-character included (a `\n` byte never occurs inside a UTF-8 sequence, so a line is only
- * decoded once whole). A trailing `\r` is tolerated and empty lines are skipped. A line over
- * the limit is dropped without buffering it, and decoding resumes after its `\n`; a line that
- * is not JSON is dropped too. Each drop is reported through `onDrop`. A partial line left when
- * the stream ends is never delivered.
+ * decoded once whole). A trailing `\r` is tolerated (it still counts towards the limit) and
+ * empty lines are skipped. A line over the limit is dropped without buffering more than the
+ * limit, and decoding resumes after its `\n`; a line that is not JSON is dropped too. Each drop
+ * is reported through `onDrop` with the line's size. A partial line left when the stream ends is
+ * never delivered.
  */
 export class LinkFrameDecoder {
   private readonly maxBytes: number;
@@ -119,8 +123,8 @@ export class LinkFrameDecoder {
       const piece = chunk.subarray(start, end);
       if (this.skipped !== null) {
         this.skipped += piece.length;
-      } else if (this.size + piece.length > this.maxBytes + 1) {
-        // One extra byte allows a trailing "\r"; past that the line can't fit.
+      } else if (this.size + piece.length > this.maxBytes) {
+        // Every byte before the "\n" counts, a "\r" included: past the limit it can't fit.
         this.skipped = this.size + piece.length;
         this.parts = [];
         this.size = 0;
@@ -157,18 +161,19 @@ export class LinkFrameDecoder {
   }
 
   private line(bytes: Uint8Array, messages: unknown[]): void {
-    const end = bytes[bytes.length - 1] === CARRIAGE_RETURN ? bytes.length - 1 : bytes.length;
-    if (end === 0) return;
-    if (end > this.maxBytes) {
-      this.onDrop?.("too_large", end);
+    // The raw line is checked before its "\r" is stripped (`push` keeps it within the limit).
+    if (bytes.length > this.maxBytes) {
+      this.onDrop?.("too_large", bytes.length);
       return;
     }
+    const end = bytes[bytes.length - 1] === CARRIAGE_RETURN ? bytes.length - 1 : bytes.length;
+    if (end === 0) return;
     const text = this.text.decode(bytes.subarray(0, end));
     if (text.trim() === "") return;
     try {
       messages.push(JSON.parse(text));
     } catch {
-      this.onDrop?.("invalid_json", end);
+      this.onDrop?.("invalid_json", bytes.length);
     }
   }
 }

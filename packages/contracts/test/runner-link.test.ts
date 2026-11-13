@@ -106,7 +106,35 @@ describe("runner link framing", () => {
     }
     expect(out).toEqual([{ before: 1 }, { after: 2 }]);
     expect(drops).toEqual([["too_large", RUNNER_LINK_MAX_LINE_BYTES + 1]]);
-    expect(peak).toBeLessThanOrEqual(RUNNER_LINK_MAX_LINE_BYTES + 1);
+    expect(peak).toBeLessThanOrEqual(RUNNER_LINK_MAX_LINE_BYTES);
+    expect(d.buffered).toBe(0);
+  });
+
+  it("counts a CR towards the limit: with CRLF, a line at the limit decodes and one byte more is dropped", () => {
+    // Content of limit-1 bytes plus "\r" is exactly the limit; the next one is a byte over.
+    const fits = JSON.stringify(messageOfBytes(RUNNER_LINK_MAX_LINE_BYTES - 1));
+    const over = JSON.stringify(messageOfBytes(RUNNER_LINK_MAX_LINE_BYTES));
+    const { d, drops } = decoder();
+    let peak = 0;
+    const out: unknown[] = [];
+    const data = bytes(`${fits}\r\n${over}\r\n{"after":3}\r\n`);
+    for (let i = 0; i < data.length; i += 1024 * 1024) {
+      out.push(...d.push(data.subarray(i, i + 1024 * 1024)));
+      peak = Math.max(peak, d.buffered);
+    }
+    expect(out).toHaveLength(2);
+    expect((out[0] as string).length).toBe(RUNNER_LINK_MAX_LINE_BYTES - 3);
+    expect(out[1]).toEqual({ after: 3 });
+    expect(drops).toEqual([["too_large", RUNNER_LINK_MAX_LINE_BYTES + 1]]);
+    expect(peak).toBeLessThanOrEqual(RUNNER_LINK_MAX_LINE_BYTES);
+  });
+
+  it("applies the CR rule at a small limit too, split byte by byte", () => {
+    const { d, drops } = decoder(5);
+    // `"abc"` + CR is 6 bytes (over); `"ab"` + CR is exactly 5; `"abc"` without CR is 5.
+    const data = bytes('"abc"\r\n"ab"\r\n"abc"\n');
+    expect(feed(d, data, 1)).toEqual(["ab", "abc"]);
+    expect(drops).toEqual([["too_large", 6]]);
     expect(d.buffered).toBe(0);
   });
 
