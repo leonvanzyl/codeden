@@ -40,13 +40,22 @@ export const SessionStatus = z.enum([
 export type SessionStatus = z.infer<typeof SessionStatus>;
 
 /**
- * Where a forked session came from: the source session and the checkpoint its worktree
- * started from (null when the source had none yet). The fork continues the source's
- * conversation through the provider's native fork; the source is left as it was.
+ * How a session was made from another one: `fork` continues the source's conversation through
+ * the provider's native fork; `handoff` starts a new conversation, possibly on another
+ * provider, from a brief of the source's work (§9). Both start from the source's code.
+ */
+export const ForkKind = z.enum(["fork", "handoff"]);
+export type ForkKind = z.infer<typeof ForkKind>;
+
+/**
+ * Where a forked or handed-off session came from: the source session and the checkpoint its
+ * worktree started from (null when the source had none yet). The source is left as it was.
  */
 export const ForkOrigin = z.object({
   sessionId: Id,
   checkpoint: z.int().nonnegative().nullable(),
+  /** A fork or a handoff; absent on forks recorded before handoffs existed, so means `fork`. */
+  kind: ForkKind.optional(),
   /**
    * The source's turn the fork was taken at ("Fork from here"): its conversation ends with
    * that turn and its code is that turn's checkpoint. Absent or null: the source's latest

@@ -95,6 +95,19 @@ describe("ProviderUtilityService", () => {
     expect(calls).toHaveLength(0);
   });
 
+  it("summarises a handoff's transcript, unless the job is off or nothing answers", async () => {
+    const { port, calls } = fakeOneShot({ claude: "  - Built the form\n- Tests fail  " });
+    expect(await service(port).handoffSummary("User: Add login\nAgent: Done")).toBe(
+      "- Built the form\n- Tests fail",
+    );
+    expect(calls).toEqual([{ providerId: "claude", model: undefined }]);
+    const off = service(port, { utilityModel: { jobs: { handoffSummaries: false } } });
+    expect(await off.handoffSummary("User: Add login")).toBeNull();
+    expect(await service(port).handoffSummary("  ")).toBeNull();
+    expect(calls).toHaveLength(1);
+    expect(await service(fakeOneShot({}).port).handoffSummary("User: Add login")).toBeNull();
+  });
+
   it("reports when no provider can run the utility model, once", async () => {
     warnings.length = 0;
     const svc = service(fakeOneShot({}, ["fake"]).port);

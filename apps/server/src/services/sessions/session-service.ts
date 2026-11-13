@@ -3,6 +3,8 @@ import type {
   AutonomyLevel,
   ForkSessionRequest,
   ForkSessionResponse,
+  HandoffSessionRequest,
+  HandoffSessionResponse,
   JsonValue,
   ProviderInfo,
   QueueSender,
@@ -30,8 +32,10 @@ import {
   runnerForSession,
   toServiceError,
 } from "../runner-port";
+import type { UtilityService } from "../utility";
 import { derivePurpose, deriveWorkKey, findConflicts } from "./conflicts";
 import { planFork } from "./fork";
+import { planHandoff } from "./handoff";
 import type { InputDecorator } from "./input-decorator";
 import type { LaunchFork, SessionLauncher } from "./launcher";
 import type { Outbox } from "./outbox";
@@ -52,6 +56,8 @@ export interface SessionServiceDeps extends RunnerDeps {
   questions: QuestionBroker;
   /** Revokes a stopped session's MCP tokens. */
   tokens: Pick<McpTokenStore, "revokeSession">;
+  /** Writes the summary in a handoff's brief (§7.4); without it the brief quotes the last reply. */
+  utility?: Pick<UtilityService, "handoffSummary">;
   /** Wait before retrying a queued message the runner could not take (default 30 s). */
   outboxRetryMs?: number;
 }
@@ -217,6 +223,19 @@ export class SessionService {
     const plan = await planFork({ repo, projects, runner: this.runnerOf(id) }, id, req);
     repo.create(plan.session, plan.meta);
     this.launchInBackground(plan.session.id, undefined, plan.start.workspace, plan.start.fork);
+    return { sessionId: plan.session.id };
+  }
+
+  /**
+   * Hand an agent session off (§9): a new session, on any provider, with its code as a fork has
+   * it and a brief of its work as the first message, which starts a turn (`handoff.ts`). The
+   * worktree is made in the background.
+   */
+  async handoff(id: string, req: HandoffSessionRequest): Promise<HandoffSessionResponse> {
+    const { repo, projects, utility } = this.deps;
+    const plan = await planHandoff({ repo, projects, runner: this.runnerOf(id), utility }, id, req);
+    repo.create(plan.session, plan.meta);
+    this.launchInBackground(plan.session.id, plan.input, plan.start.workspace, plan.start.fork);
     return { sessionId: plan.session.id };
   }
 
