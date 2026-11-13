@@ -16,7 +16,7 @@ interface Segment {
 }
 
 /**
- * A short excerpt around the first match of FTS5 `highlight()` output (matches wrapped in
+ * A short excerpt around the first match of highlighted text (matches wrapped in
  * `HIGHLIGHT_OPEN`/`HIGHLIGHT_CLOSE`), as plain parts: whitespace collapsed, an ellipsis where
  * text was cut, never HTML.
  */

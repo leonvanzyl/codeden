@@ -237,9 +237,17 @@ describe("api routes", () => {
     expect(TranscriptSearchResponse.parse(res.json())).toEqual({
       query: '"prisma migrate" OR NEAR(',
       hits: [],
-      truncated: false,
+      nextCursor: null,
     });
+    const filtered = await call(
+      "GET",
+      "/search/transcripts?q=cart%00hook&role=pm&includeArchived=false&cursor=12&limit=5",
+    );
+    expect(filtered.status).toBe(200);
+    expect(TranscriptSearchResponse.parse(filtered.json())).toMatchObject({ query: "cart hook" });
     expect((await call("GET", "/search/transcripts?q=")).status).toBe(400);
     expect((await call("GET", "/search/transcripts?q=cart&limit=500")).status).toBe(400);
+    expect((await call("GET", "/search/transcripts?q=cart&cursor=next")).status).toBe(400);
+    expect((await call("GET", "/search/transcripts?q=cart&role=boss")).status).toBe(400);
   });
 });

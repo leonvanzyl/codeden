@@ -115,9 +115,12 @@ export function createHttpClient(origin: string, opts: HttpClientOptions = {}): 
     forkSession: (id, req) =>
       post(`/sessions/${enc(id)}/fork`, req ?? {}, (v) => ForkSessionResponse.parse(v)),
     queue: httpQueueApi(http),
-    searchTranscripts: ({ q, projectId, limit }) => {
+    searchTranscripts: ({ q, projectId, role, includeArchived, cursor, limit }) => {
       const params = new URLSearchParams({ q });
       if (projectId) params.set("projectId", projectId);
+      if (role) params.set("role", role);
+      if (includeArchived === false) params.set("includeArchived", "false");
+      if (cursor) params.set("cursor", cursor);
       if (limit) params.set("limit", String(limit));
       return get(`/search/transcripts?${params}`, (v) => TranscriptSearchResponse.parse(v));
     },

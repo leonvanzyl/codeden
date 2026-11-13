@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { findMigrationsDir, openDatabase } from "../src/db/client";
+import { SearchBackfill } from "../src/services/search/backfill";
 
 const all = findMigrationsDir();
 const names = readdirSync(all).filter((n) => /^\d{14}_/.test(n));
@@ -171,60 +172,141 @@ describe("migrations", { timeout: 30_000 }, () => {
     }
   });
 
-  it("add the transcript search index and backfill it once from the stored items", () => {
-    const file = join(tempDir(), "before-search.db");
-    const old = openDatabase(
-      file,
-      partialMigrations((n) => !n.endsWith("_transcript_search")),
-    );
-    const insert = old.client.prepare(
-      "INSERT INTO items (session_id, id, thread_id, turn_id, position, kind, status, data, created_at, updated_at) VALUES ('s1', ?, 't1', 'u1', ?, ?, 'completed', ?, 'x', 'x')",
-    );
+  describe("transcript search", () => {
+    const search = (database: ReturnType<typeof openDatabase>, trigrams: string) =>
+      database.client
+        .prepare(
+          "SELECT s.item_id FROM item_search_fts f JOIN item_search s ON s.id = f.rowid WHERE item_search_fts MATCH ? ORDER BY s.item_id",
+        )
+        .all(trigrams);
+    const rows = (database: ReturnType<typeof openDatabase>) =>
+      (database.client.prepare("SELECT count(*) AS n FROM item_search").get() as { n: number }).n;
+
+    function storeItems(database: ReturnType<typeof openDatabase>, stored: object[]): void {
+      const insert = database.client.prepare(
+        "INSERT INTO items (session_id, id, thread_id, turn_id, position, kind, status, data, created_at, updated_at) VALUES ('s1', ?, 't1', 'u1', ?, ?, 'completed', ?, ?, ?)",
+      );
+      stored.forEach((item, i) => {
+        const { id, kind } = item as { id: string; kind: string };
+        const ts = new Date(Date.UTC(2026, 10, 1, 10, i)).toISOString();
+        insert.run(id, i, kind, JSON.stringify({ status: "completed", ...item }), ts, ts);
+      });
+    }
+
     const stored = [
       { id: "m1", kind: "user_message", input: { text: "Where is the webhook retry?" } },
       { id: "a1", kind: "assistant_message", text: "In src/webhooks/retry.ts" },
       { id: "r1", kind: "reasoning", text: "webhook thoughts are not indexed" },
       // An old row this build can't read: skipped, not fatal.
       { id: "x1", kind: "user_message" },
+      { id: "a2", kind: "assistant_message", text: "The webhook retries three times" },
+      { id: "a3", kind: "assistant_message", text: "Done" },
+      { id: "a4", kind: "assistant_message", text: "Retry backoff doubles" },
     ];
-    stored.forEach((item, i) => {
-      insert.run(item.id, i, item.kind, JSON.stringify({ status: "completed", ...item }));
-    });
-    old.close();
 
-    const database = openDatabase(file, all);
-    try {
-      const search = (q: string) =>
-        database.client
-          .prepare(
-            "SELECT s.item_id FROM item_search_fts f JOIN item_search s ON s.id = f.rowid WHERE item_search_fts MATCH ? ORDER BY s.item_id",
-          )
-          .all(q);
-      expect(search('"webhook"')).toEqual([{ item_id: "a1" }, { item_id: "m1" }]);
-      expect(search('"retry.ts"')).toEqual([{ item_id: "a1" }]);
-      const triggers = database.client
-        .prepare("SELECT name FROM sqlite_master WHERE type = 'trigger' ORDER BY name")
-        .all();
-      expect(triggers).toEqual([
-        { name: "item_search_ad" },
-        { name: "item_search_ai" },
-        { name: "item_search_au" },
-      ]);
-    } finally {
-      database.close();
-    }
-    // Reopening doesn't index again.
-    const reopened = openDatabase(file, all);
-    try {
-      expect(reopened.client.prepare("SELECT count(*) AS n FROM item_search").get()).toEqual({
-        n: 2,
-      });
-      reopened.client.exec(
-        "INSERT INTO item_search_fts(item_search_fts) VALUES ('integrity-check')",
+    it("add the index; the server indexes stored items in the background, resuming after an interruption", async () => {
+      const file = join(tempDir(), "before-search.db");
+      const old = openDatabase(
+        file,
+        partialMigrations((n) => !/_(transcript_search|search_newest_first)$/.test(n)),
       );
-    } finally {
-      reopened.close();
-    }
+      storeItems(old, stored);
+      old.close();
+
+      const first = openDatabase(file, all);
+      // Opening the database (before the server listens) indexes nothing.
+      expect(rows(first)).toBe(0);
+      expect(new SearchBackfill(first.db).pending()).toBe(7);
+      // The first batch commits, then the process stops.
+      expect(new SearchBackfill(first.db, { batchSize: 3 }).step()).toBe(3);
+      first.close();
+
+      const database = openDatabase(file, all);
+      try {
+        const log: string[] = [];
+        let clock = 0;
+        const backfill = new SearchBackfill(database.db, {
+          batchSize: 3,
+          log: (m) => log.push(m),
+          now: () => (clock += 6_000),
+        });
+        expect(backfill.pending()).toBe(4);
+        await backfill.run();
+        expect(log).toEqual([
+          "search: indexing 4 transcript items in the background",
+          "search: indexed 3 of 4 transcript items",
+          "search: indexed 4 of 4 transcript items",
+          expect.stringMatching(/^search: indexed 4 transcript items in [\d.]+ s$/),
+        ]);
+        // Every indexable item once: not the reasoning, not the unreadable row.
+        expect(rows(database)).toBe(5);
+        expect(search(database, '"web" "ebh" "bho" "hoo" "ook"')).toEqual([
+          { item_id: "a1" },
+          { item_id: "a2" },
+          { item_id: "m1" },
+        ]);
+        // Newest first follows the items' times, not the order they were indexed in.
+        const order = database.client
+          .prepare("SELECT item_id FROM item_search ORDER BY id DESC")
+          .all()
+          .map((r) => (r as { item_id: string }).item_id);
+        expect(order).toEqual(["a4", "a3", "a2", "a1", "m1"]);
+        const triggers = database.client
+          .prepare("SELECT name FROM sqlite_master WHERE type = 'trigger' ORDER BY name")
+          .all();
+        expect(triggers).toEqual([
+          { name: "item_search_ad" },
+          { name: "item_search_ai" },
+          { name: "item_search_au" },
+        ]);
+        database.client.exec(
+          "INSERT INTO item_search_fts(item_search_fts) VALUES ('integrity-check')",
+        );
+      } finally {
+        database.close();
+      }
+      // The next start has nothing left to read.
+      const reopened = openDatabase(file, all);
+      try {
+        expect(new SearchBackfill(reopened.db).pending()).toBe(0);
+        expect(rows(reopened)).toBe(5);
+      } finally {
+        reopened.close();
+      }
+    });
+
+    it("rebuild the first index (ranked, with positions) as the newest-first one", async () => {
+      const file = join(tempDir(), "first-search.db");
+      const old = openDatabase(
+        file,
+        partialMigrations((n) => !n.endsWith("_search_newest_first")),
+      );
+      storeItems(old, stored.slice(0, 2));
+      old.client
+        .prepare(
+          "INSERT INTO item_search (session_id, item_id, thread_id, kind, text, created_at) VALUES ('s1', 'm1', 't1', 'user_message', 'Where is the webhook retry?', 'x')",
+        )
+        .run();
+      old.close();
+
+      const database = openDatabase(file, all);
+      try {
+        expect(rows(database)).toBe(0);
+        await new SearchBackfill(database.db).run();
+        expect(search(database, '"ret" "etr" "try"')).toEqual([
+          { item_id: "a1" },
+          { item_id: "m1" },
+        ]);
+        const sql = (
+          database.client
+            .prepare("SELECT sql FROM sqlite_master WHERE name = 'item_search_fts'")
+            .get() as { sql: string }
+        ).sql;
+        expect(sql).toContain("detail='none'");
+      } finally {
+        database.close();
+      }
+    });
   });
 
   it("add the runners table to a database from before several runners, keeping its data", () => {

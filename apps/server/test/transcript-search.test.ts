@@ -91,7 +91,6 @@ const indexRows = (db: Database) =>
     .select({
       sessionId: itemSearch.sessionId,
       itemId: itemSearch.itemId,
-      kind: itemSearch.kind,
       text: itemSearch.text,
     })
     .from(itemSearch)
@@ -122,7 +121,6 @@ describe("transcript search index", () => {
       {
         sessionId: "s1",
         itemId: "a1",
-        kind: "assistant_message",
         text: "I fixed the webhook retry logic",
       },
     ]);
@@ -183,7 +181,7 @@ describe("transcript search index", () => {
 });
 
 describe("transcript search queries", () => {
-  it("matches case- and accent-insensitively, and inside identifiers and paths", () => {
+  it("matches ignoring case and accents, and inside identifiers and paths", () => {
     session("s1");
     completed("s1", say("a1", "Moved the logic into useCartHook in src/hooks/cart.ts"));
     completed("s1", say("a2", "Le café est prêt"));
@@ -230,29 +228,40 @@ describe("transcript search queries", () => {
     session("s1");
     completed("s1", say("a1", "Open a PR for the cart fix"));
     completed("s1", say("a2", "The cart total is wrong"));
-    expect(search("pr")).toEqual({ query: "pr", hits: [], truncated: false });
+    expect(search("pr")).toEqual({ query: "pr", hits: [], nextCursor: null });
     expect(search("a b")).toMatchObject({ hits: [] });
     expect(ids("cart pr")).toEqual(["s1/a1"]);
+    // Every trigram of the long terms, quoted; short terms only filter.
     expect(parseQuery('say "hi" to NEAR to')).toEqual({
-      match: '"say" """hi""" "NEAR"',
-      short: ["to"],
+      terms: ["say", '"hi"', "to", "NEAR"],
+      folded: ["say", '"hi"', "to", "near"],
+      match: '"say" """hi" "hi""" "NEA" "EAR"',
     });
   });
 
-  it("caps hits per session, limits the response and filters by project", () => {
+  it("highlights every term, short ones included, and finds the trigrams in order only", () => {
+    session("s1");
+    completed("s1", say("a1", "Open a PR for the cart fix"));
+    // Every trigram of "carthook" is here, but not the word: not a match.
+    completed("s1", say("a2", "cart, rth, tho, hoo, ook"));
+    const [hit] = search("cart pr").hits;
+    expect(hit?.snippet.filter((p) => p.match).map((p) => p.text)).toEqual(["PR", "cart"]);
+    expect(ids("carthook")).toEqual([]);
+  });
+
+  it("lists every match newest first, limits the response and filters by project", () => {
     session("s1", "p1");
     for (let i = 0; i < 6; i++) completed("s1", say(`a${i}`, `deploy step ${i}`));
     session("s2", "p2");
     completed("s2", say("b1", "deploy to staging"));
 
     const all = search("deploy");
-    expect(all.hits.filter((h) => h.sessionId === "s1")).toHaveLength(3);
-    expect(all.hits.filter((h) => h.sessionId === "s2")).toHaveLength(1);
-    expect(all.truncated).toBe(false);
+    expect(all.hits.map((h) => h.itemId)).toEqual(["b1", "a5", "a4", "a3", "a2", "a1", "a0"]);
+    expect(all.nextCursor).toBeNull();
 
     const limited = search("deploy", { limit: 2 });
-    expect(limited.hits).toHaveLength(2);
-    expect(limited.truncated).toBe(true);
+    expect(limited.hits.map((h) => h.itemId)).toEqual(["b1", "a5"]);
+    expect(limited.nextCursor).not.toBeNull();
 
     expect(ids("deploy", { projectId: "p2" })).toEqual(["s2/b1"]);
     expect(search("deploy", { projectId: "p1" }).hits.every((h) => h.sessionId === "s1")).toBe(
