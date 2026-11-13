@@ -27,6 +27,7 @@ import { claudeNotesDirs } from "./notes-dirs";
 import { buildQueryOptions, claudeEffort, toSdkUserMessage } from "./options";
 import { ClaudePolicy, permissionModeFor } from "./permissions";
 import { carriesToolResult, planApprovalItem, planDecision, planText } from "./plan-review";
+import { PlanUsageReader } from "./plan-usage";
 import { askQuestion } from "./questions";
 import type { ClaudeSdkModule } from "./sdk";
 import { approvalTitle, PLAN_TOOL, QUESTION_TOOL } from "./tools";
@@ -90,6 +91,8 @@ export class ClaudeSession implements ProviderSession {
   private planExitToolUseId: string | undefined;
   /** Uuids of messages steered into the running turn, so a Stop can tell which it cancelled. */
   private readonly steered = new Set<string>();
+  /** The subscription's usage windows, read when a query starts and after each turn. */
+  private readonly planUsage = new PlanUsageReader();
 
   constructor(
     private readonly opts: SessionOptions,
@@ -345,7 +348,20 @@ export class ClaudeSession implements ProviderSession {
     if (this.config.onModels) {
       q.supportedModels().then(this.config.onModels, () => {});
     }
+    this.reportPlanUsage(q);
     return prompts;
+  }
+
+  /**
+   * Report the subscription's usage windows (with percentages) for the Usage page: once when
+   * the query starts and after each turn, since `rate_limit_event`s rarely carry a figure.
+   */
+  private reportPlanUsage(q: Query): void {
+    void this.planUsage.read(q).then((usage) => {
+      if (usage && !this.closed) {
+        this.events.push({ type: "usage.updated", threadId: this.mapper.rootThreadId, usage });
+      }
+    });
   }
 
   private async pump(q: Query): Promise<void> {
@@ -354,6 +370,9 @@ export class ClaudeSession implements ProviderSession {
       for await (const message of q) {
         this.mapper.handle(message);
         this.afterMessage(message);
+        const type = str(message, "type");
+        if (type === "rate_limit_event") this.planUsage.noteEvent(message);
+        if (type === "result") this.reportPlanUsage(q);
       }
     } catch (error) {
       failure = error;

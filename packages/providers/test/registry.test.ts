@@ -4,7 +4,7 @@ import { getProvider, listProviders, providerInfo } from "../src";
 
 describe("provider registry", () => {
   it("lists the built-in providers with honest capabilities", () => {
-    expect(listProviders().map((p) => p.id)).toEqual(["claude", "codex", "opencode"]);
+    expect(listProviders().map((p) => p.id)).toEqual(["claude", "codex", "opencode", "cursor"]);
     const claude = getProvider("claude");
     const codex = getProvider("codex");
     expect(claude?.capabilities()).toMatchObject({ subagents: true, planMode: true, steer: true });
@@ -15,9 +15,18 @@ describe("provider registry", () => {
       steer: true,
       liveAutonomy: true,
     });
+    // Cursor: ACP has no steering, and subagents are not wired up yet.
+    expect(getProvider("cursor")?.capabilities()).toMatchObject({
+      subagents: false,
+      planMode: true,
+      steer: false,
+      readOnly: true,
+      liveAutonomy: true,
+    });
     for (const p of listProviders()) {
       ProviderInfo.parse(providerInfo(p));
-      expect(p.utilityModel?.().providerId).toBe(p.id);
+      // Cursor offers no one-shot calls for the utility model.
+      if (p.utilityModel) expect(p.utilityModel().providerId).toBe(p.id);
     }
     expect(getProvider("nope")).toBeUndefined();
   });

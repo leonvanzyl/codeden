@@ -78,9 +78,32 @@ describe("api schemas", () => {
     expect(RefreshModelsResponse.safeParse({}).success).toBe(false);
   });
 
+  it("round-trips Cursor's setup check and sign-in command", () => {
+    expect(SetupToolId.options).toContain("cursor");
+    const check = roundTrip(SetupCheck, {
+      id: "cursor",
+      label: "Cursor",
+      state: "missing",
+      installed: true,
+      version: "2026.10.22-abc1234",
+      executablePath: "/home/me/.local/bin/agent",
+      loggedIn: false,
+      authMethod: null,
+      account: null,
+      loginExpiresAt: null,
+      message: "Not signed in to Cursor",
+      fix: { kind: "login", command: "'/home/me/.local/bin/agent' login" },
+      durationMs: 400,
+    });
+    expect(check.fix?.kind).toBe("login");
+    expect(
+      roundTrip(LoginCommandResponse, { tool: "cursor", command: "agent", args: ["login"] }).tool,
+    ).toBe("cursor");
+  });
+
   it("round-trips OpenCode's setup check, sign-in command and provider info", () => {
     expect(SetupToolId.options).toContain("opencode");
-    expect(LoginToolId.options).toEqual(["claude", "codex", "opencode", "gh"]);
+    expect(LoginToolId.options).toEqual(["claude", "codex", "opencode", "cursor", "gh"]);
     const check = roundTrip(SetupCheck, {
       id: "opencode",
       label: "OpenCode",

@@ -37,7 +37,7 @@ Off by default. When you turn it on:
 
 ## The orchestrator and PMs can't write code
 
-They always run read-only, whatever their level: Claude gets no edit tools and a policy that denies writing commands (checks included), Codex runs in a read-only sandbox, and OpenCode's edits and writing commands are refused by CodeDen's policy. They act only through CodeDen's tools.
+They always run read-only, whatever their level: Claude gets no edit tools and a policy that denies writing commands (checks included), Codex runs in a read-only sandbox, and OpenCode's and Cursor's edits and writing commands are refused by CodeDen's policy (Cursor also runs in its read-only `ask` mode). They act only through CodeDen's tools.
 
 ## Permissions
 
@@ -54,14 +54,17 @@ Each agent session and each automation runs at a **permission level**, from Read
 
 OpenCode has no OS sandbox of its own. CodeDen gives its sessions permission rules that make every edit, command, path outside the worktree and web fetch ask, and answers each request with its own policy, the same classifier Claude uses: approved on the spot, refused with a reason, or shown to you. **Approve for session** is kept by CodeDen for that session only: OpenCode's own "always" would save the rule for every session in the repository, so CodeDen never sends it. The OpenCode server CodeDen starts listens on `127.0.0.1` with a random password, and a small plugin removes that password (and the config carrying CodeDen's MCP token) from the environment of the agent's shell commands.
 
-Read-only is offered only on providers that report the `readOnly` capability (Claude Code, Codex and OpenCode all do); the server refuses it elsewhere. Under Read-only:
+Cursor's CLI asks before the tool calls its own rules gate, over its ACP server (`agent acp`), and CodeDen decides each request by level exactly as for OpenCode, with the same classifier. CodeDen never starts it with `--force`, and only ever answers "once": Cursor's "always" option would save the rule in your Cursor settings. Known gap: what Cursor's own allowlist (`~/.cursor/cli-config.json`, a project's `.cursor/cli.json`) allows runs without asking, so CodeDen only sees what Cursor asks about.
+
+Read-only is offered only on providers that report the `readOnly` capability (Claude Code, Codex, OpenCode and Cursor all do); the server refuses it elsewhere. Under Read-only:
 
 - **Claude** may run commands that only read (`ls`, `cat`, `rg`, `cd`, `sed` scripts that only print such as `sed -n 1,40p`, `git status`/`log`/`diff`/`show`/`stash list` including `git -C <dir> …`, `gh ... view`/`list`/`checks`, `gh search`, `gh api` GET requests, and their PowerShell equivalents) and the project's **checks**: `npm`/`pnpm`/`yarn`/`bun` `test`, `lint`, `typecheck` or `check`, `tsc`, `vitest`, `jest`, `eslint`, `biome check`, `ruff check`, `pytest`, `mypy`, `cargo test`/`check`/`clippy` and `go test`/`vet`. Fix, write, snapshot-update and watch flags (`--fix`, `--write`, `-u`, `--watch`, ...), output redirection and command substitution are refused, and so are the options that make a reading program write or run something (`sort -o`, Windows `sort /O[UTPUT]` and `/T[EMPORARY]`, `uniq` with an output file, `find -fprint`/`-exec`, also after `--`, `fd -x`, `rg --pre`, `less -o`, `tree -o`, `date -s`, `git diff --output`, `git grep -O`, `git ls-remote --upload-pack`), git's writing forms (creating a branch or tag by name, `git remote`/`worktree`/`reflog` changes, `git config` writes, abbreviations included), `gh` verbs other than view, list, status, diff and checks (and `gh` extensions), unquoted parentheses and braces (PowerShell runs code in them, even after an allowed cmdlet), background jobs (`&`), installs, builds, commits and pushes. Options are read from the words the shell actually passes (`-'o'` is `-o`); variable expansion, `$'…'` quoting and unquoted patterns that could expand to an option are refused, since what they pass can't be read from the command. Checks run the project's own scripts, so a test that writes files (coverage, caches) can still write them; the agent itself cannot.
 - **Codex** runs every command in its read-only sandbox, so checks run but any write fails.
 - **OpenCode** follows the same allowlist as Claude: commands that only read and the project's checks run; edits and every other command are refused with the reason, which the agent sees.
+- **Cursor** runs in its read-only `ask` mode, and CodeDen's policy refuses edits and commands outside the same allowlist.
 - **CodeDen's `create_pull_request`** is hidden from read-only sessions and refused if called. Commenting on issues and attaching screenshots as evidence still work, so the agent can report what it found.
 
-Changing the level while a session runs is saved on the session and sent to the running agent. Claude and OpenCode follow it from their next tool call, into and out of Read-only too; Codex from its next turn (the composer tells you which). Approvals that are already waiting stay waiting.
+Changing the level while a session runs is saved on the session and sent to the running agent. Claude, OpenCode and Cursor follow it from their next tool call, into and out of Read-only too; Codex from its next turn (the composer tells you which). Approvals that are already waiting stay waiting.
 
 ### Plan mode
 
@@ -95,7 +98,7 @@ When you approve, you can approve once or for the rest of the session.
 
 ## Credentials
 
-- **Provider logins** (Claude Code, Codex, OpenCode) stay with their CLIs. CodeDen runs your installed `claude`, `codex` and `opencode`, which use their own logins and credentials; it never implements a login and never sees your password.
+- **Provider logins** (Claude Code, Codex, OpenCode, Cursor) stay with their CLIs. CodeDen runs your installed `claude`, `codex`, `opencode` and `agent`, which use their own logins and credentials; it never implements a login and never sees your password.
 - **GitHub** is read from `gh auth token` at runtime and kept in memory only.
 - **Optional API keys** (ElevenLabs, OpenAI, Gemini, a fallback GitHub token) go into the **OS keychain** (Windows Credential Manager, macOS Keychain, Secret Service on Linux) through `@napi-rs/keyring`. They're never written to files or returned by the API, and cloud voice keys never reach the browser. If no keychain is usable, keys are kept in memory for the current run only.
 - `settings.json` and `usage-settings.json` hold no secrets.

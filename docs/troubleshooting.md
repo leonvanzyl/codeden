@@ -82,6 +82,7 @@ Where CodeDen looks, in order:
    - Claude Code: `~/.local/bin/claude` (`%USERPROFILE%\.local\bin\claude.exe` on Windows), then `~/.claude/local/claude`.
    - Codex: `~/.local/bin/codex`, then `~/.codex/packages/standalone/current` (or under `CODEX_HOME`).
    - OpenCode: `~/.opencode/bin/opencode` (`%USERPROFILE%\.opencode\bin\opencode.exe` on Windows), where its install script puts it; `/opt/homebrew/bin/opencode` and `/usr/local/bin/opencode` on macOS.
+   - Cursor CLI: `cursor-agent`, or an `agent` whose version is Cursor's (`2026.10.22-…`): `~/.local/bin/agent`, and `%LOCALAPPDATA%\cursor-agent\agent.cmd` on Windows.
    - GitHub CLI: `C:\Program Files\GitHub CLI\gh.exe` on Windows; `/opt/homebrew/bin/gh` and `/usr/local/bin/gh` on macOS.
 
 The first copy that answers `--version` is used for detection, for sessions and for **Sign in**, so a working native install wins over a broken shim earlier on PATH. When the native installer says its folder *"is not in your PATH"*, CodeDen still finds it; add the folder to your PATH if you also want `claude` to work in your own terminals.
@@ -94,6 +95,7 @@ Use **Sign in** on the setup checklist, or run the CLI's own login in a terminal
 claude auth login
 codex login
 opencode auth login
+agent login
 gh auth login
 ```
 
@@ -102,6 +104,12 @@ A Claude login close to expiry shows as a warning; signing in again clears it.
 **Sign in** runs the copy CodeDen found by its full path (in PowerShell, for example `& 'C:\Users\you\.local\bin\claude.exe' auth login`), so it works even when that copy isn't on your PATH. If the row says **"Could not read the Claude login state"**, CodeDen ran `claude auth status` but couldn't understand the answer. Open **Details** to see the exit code and output.
 
 OpenCode with no connected provider is a warning rather than an error: its own free models work without an account. `opencode auth login` connects a provider (Anthropic, OpenAI, and many more); API keys in your environment and providers in `opencode.json` count too. CodeDen checks with `opencode auth list --standalone`, which runs a private OpenCode server for a few seconds and never starts or touches OpenCode's background service.
+
+### The Cursor CLI asks for `agent update`
+
+CodeDen drives the Cursor CLI through its ACP server (`agent acp`), which older builds don't have. Run `agent update` (or reinstall with `curl https://cursor.com/install -fsS | bash`, or `irm 'https://cursor.com/install?win32=true' | iex` on Windows), then press **Re-check**. Another program named `agent` on your PATH isn't Cursor's: CodeDen only uses an `agent` whose `--version` is a Cursor build, and prefers `cursor-agent` when both are installed.
+
+Cursor's own permission settings (`~/.cursor/cli-config.json`, a project's `.cursor/cli.json`) apply before CodeDen's: what they allow runs without asking, so CodeDen can only judge what Cursor asks about. Keep their allowlists short if you rely on CodeDen's levels.
 
 ### OpenCode is installed but shows as unsupported
 

@@ -38,6 +38,14 @@ export function knownLocations(name: string, opts: KnownLocationOptions = {}): s
         p.join(standalone, "current", exe("codex")),
       ];
     }
+    case "cursor-agent":
+    case "agent": {
+      // Cursor's CLI installer: `~/.local/bin` on macOS and Linux; on Windows a launcher
+      // (`agent.cmd`) in `%LOCALAPPDATA%\cursor-agent`.
+      if (!win) return [p.join(home, ".local", "bin", name)];
+      const local = env.LOCALAPPDATA || p.join(home, "AppData", "Local");
+      return [p.join(local, "cursor-agent", `${name}.cmd`)];
+    }
     case "opencode":
       // The install script: `~/.opencode/bin`; Homebrew, for apps started from the Finder.
       return [

@@ -1,5 +1,5 @@
 import type { AutonomyMode, Session, Usage, UsageSource } from "@codeden/contracts";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { automationRuns, projects, sessions } from "../../db/schema";
 import { rateLimitWindows, usageLedger } from "../../db/schema-usage";
 import type { Tx } from "../../events/projection-db";
@@ -89,7 +89,8 @@ export function attribution(tx: Tx, sessionId: string) {
 /**
  * Ledger projection for one `usage.updated` (§12.6), run inside the append transaction. A
  * report with a turn id upserts that turn's row with the turn's usage so far (providers
- * report per-turn figures); rate-limit windows are kept as their latest reading.
+ * report per-turn figures); rate-limit windows are kept per window id as their latest reading,
+ * with the last known percentage when the latest reading has none.
  */
 export function applyUsageReport(tx: Tx, report: UsageReport): void {
   const { usage } = report;
@@ -121,12 +122,16 @@ export function applyUsageReport(tx: Tx, report: UsageReport): void {
       .get()?.provider;
     if (!provider) return;
     for (const w of usage.rateLimits) {
+      const prev = storedWindow(tx, provider, w.id);
       const row = {
         provider,
         windowId: w.id,
         status: w.status,
-        usedPercent: w.usedPercent ?? null,
-        resetsAt: w.resetsAt ?? null,
+        ...percentOf(w.usedPercent, prev, report.ts),
+        resetsAt:
+          prev?.resetsAt && sameReset(prev.resetsAt, w.resetsAt)
+            ? prev.resetsAt
+            : (w.resetsAt ?? null),
         observedAt: report.ts,
         sessionId: report.sessionId,
       };
@@ -139,4 +144,47 @@ export function applyUsageReport(tx: Tx, report: UsageReport): void {
         .run();
     }
   }
+}
+
+/** The stored reading of a window, if any. */
+function storedWindow(tx: Tx, provider: string, windowId: string) {
+  return tx
+    .select({
+      usedPercent: rateLimitWindows.usedPercent,
+      usedPercentAt: rateLimitWindows.usedPercentAt,
+      observedAt: rateLimitWindows.observedAt,
+      resetsAt: rateLimitWindows.resetsAt,
+    })
+    .from(rateLimitWindows)
+    .where(and(eq(rateLimitWindows.provider, provider), eq(rateLimitWindows.windowId, windowId)))
+    .get();
+}
+
+/**
+ * A window's percentage and when it was read. A reading without one (Claude often reports only
+ * the status) keeps the stored figure while that window has not reset: its reset time is known
+ * and still after `at`, so the figure still describes the current window.
+ */
+function percentOf(
+  next: number | undefined,
+  prev: ReturnType<typeof storedWindow>,
+  at: string,
+): { usedPercent: number | null; usedPercentAt: string | null } {
+  if (next !== undefined) return { usedPercent: next, usedPercentAt: at };
+  const current = !!prev?.resetsAt && Date.parse(prev.resetsAt) > Date.parse(at);
+  if (!current || prev?.usedPercent == null) return { usedPercent: null, usedPercentAt: null };
+  return { usedPercent: prev.usedPercent, usedPercentAt: prev.usedPercentAt ?? prev.observedAt };
+}
+
+/** Two reset times this close describe the same window; a new window resets hours later. */
+const SAME_RESET_MS = 2 * 60_000;
+
+/**
+ * True when a new reset time is the stored one, give or take the sources' rounding (Claude's
+ * events report whole seconds, its plan usage fractions of one). The stored string is then
+ * kept, so one window keeps one reset time, and with it one alert id.
+ */
+function sameReset(stored: string, next: string | undefined): boolean {
+  if (!next) return false;
+  return Math.abs(Date.parse(stored) - Date.parse(next)) <= SAME_RESET_MS;
 }
