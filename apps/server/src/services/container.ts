@@ -17,6 +17,7 @@ import { BrowserService } from "./browser/browser-service";
 import { type Exec, runTool } from "./exec";
 import { type FactoryOptions, FactoryService } from "./factory/factory-service";
 import { type FactoryGithub, GithubFactoryPort } from "./factory/github-port";
+import { FILE_RESET_NOTICES, reportFileReset } from "./file-reset-notice";
 import { ConfigFiles } from "./files/config-files";
 import { GithubService, type GithubServiceDeps } from "./github/github-service";
 import { projectTrustedAuthors } from "./github/review-trust";
@@ -393,6 +394,8 @@ export function createServices(opts: ServicesOptions): AppServices {
       artifacts,
       repo: sessionRepo,
       usageFile: join(opts.paths.home, "image-usage.json"),
+      onUsageReset: (reset) =>
+        reportFileReset(reset, FILE_RESET_NOTICES.imageUsage, { store: opts.store, log: opts.log }),
       generatedDir: join(opts.paths.home, "generated"),
       log: opts.log,
     }),

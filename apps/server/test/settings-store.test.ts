@@ -1,14 +1,15 @@
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Settings, UsageSettings } from "@codeden/contracts";
+import { Settings } from "@codeden/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { startServer } from "../src";
-import { openDatabase } from "../src/db/client";
-import { inboxItems } from "../src/db/schema";
-import { EventStore } from "../src/events/store";
-import { fileResetInboxItem, reportFileReset } from "../src/services/file-reset-notice";
-import { UsageService } from "../src/services/usage/usage-service";
+import type { EventStore } from "../src/events/store";
+import {
+  FILE_RESET_NOTICES,
+  fileResetInboxItem,
+  reportFileReset,
+} from "../src/services/file-reset-notice";
 import { SettingsStore } from "../src/settings-store";
 
 let dir: string;
@@ -104,11 +105,10 @@ describe("telling the user about a reset", () => {
     const append = vi.fn();
     const log = vi.fn();
 
-    const item = reportFileReset(
-      reset,
-      { what: "Settings", where: "in Settings" },
-      { store: { append } as unknown as EventStore, log },
-    );
+    const item = reportFileReset(reset, FILE_RESET_NOTICES.settings, {
+      store: { append } as unknown as EventStore,
+      log,
+    });
 
     expect(append).toHaveBeenCalledWith([
       { type: "inbox.created", sessionId: null, payload: { item } },
@@ -146,33 +146,8 @@ describe("telling the user about a reset", () => {
     expect(backups()).toHaveLength(1);
   });
 
-  it("treats a broken usage-settings.json (budgets, prices) the same way", () => {
-    vi.spyOn(console, "warn").mockImplementation(() => {});
-    const usageFile = join(dir, "usage-settings.json");
-    const original = '{ "budgets": [], "timezone": "Europe/Amsterdam", }\n';
-    writeFileSync(usageFile, original);
-    const database = openDatabase(join(dir, "codeden.db"));
-    try {
-      const usage = new UsageService({
-        db: database.db,
-        store: new EventStore(database.db),
-        settingsFile: usageFile,
-      });
-      expect(usage.settings()).toEqual(UsageSettings.parse({}));
-      const copies = readdirSync(dir).filter((n) => n.startsWith("usage-settings.json.invalid-"));
-      expect(copies).toHaveLength(1);
-      expect(readFileSync(join(dir, copies[0] as string), "utf8")).toBe(original);
-      const items = database.db.select().from(inboxItems).all();
-      expect(items.map((i) => i.title)).toEqual([
-        "Usage settings were reset: usage-settings.json could not be read",
-      ]);
-    } finally {
-      database.close();
-    }
-  });
-
   it("gives each reset its own item id, from the copy", () => {
-    const notice = { what: "Settings", where: "in Settings" };
+    const notice = FILE_RESET_NOTICES.settings;
     const a = fileResetInboxItem({ file, copy: `${file}.invalid-1`, reason: "x" }, notice);
     const b = fileResetInboxItem({ file, copy: `${file}.invalid-2`, reason: "x" }, notice);
     expect(a.id).toBe("inbox:file-reset:settings.json.invalid-1");

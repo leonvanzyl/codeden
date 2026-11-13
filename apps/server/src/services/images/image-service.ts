@@ -17,6 +17,7 @@ import {
   resolveImageOutput,
 } from "@codeden/providers";
 import type { SettingsStore } from "../../settings-store";
+import type { FileReset } from "../../user-json-file";
 import type { ArtifactService } from "../artifacts";
 import { badRequest, errorMessage, ServiceError } from "../errors";
 import type { SessionRepo } from "../sessions/repo";
@@ -41,6 +42,8 @@ export interface ImageServiceDeps {
   repo: SessionRepo;
   /** `<home>/image-usage.json`. */
   usageFile: string;
+  /** Told when a damaged usage file was kept as a copy and today's counts reset. */
+  onUsageReset?: (reset: FileReset) => void;
   /** `<home>/generated`: output for roles without a worktree and for the test button. */
   generatedDir: string;
   log?: (message: string) => void;
@@ -90,7 +93,7 @@ export class ImageService {
   private refreshing: Promise<boolean> | undefined;
 
   constructor(private readonly deps: ImageServiceDeps) {
-    this.usage = new ImageUsageStore(deps.usageFile);
+    this.usage = new ImageUsageStore(deps.usageFile, undefined, deps.onUsageReset);
   }
 
   /** Global settings with the project's override applied. */
