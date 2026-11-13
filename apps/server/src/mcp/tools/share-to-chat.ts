@@ -68,7 +68,10 @@ export const shareToChat = defineTool({
       name = input.name ?? basename(real);
       // Artifacts can be published with attach_evidence, so secrets never become one.
       const stored = services.artifacts.artifactForFile(real)?.name;
-      assertNotSecret({ realPath: real, names: [input.path, stored, name] }, services.paths.home);
+      assertNotSecret(
+        { realPath: real, paths: [input.path], names: [stored, name] },
+        services.paths.home,
+      );
       if (statSync(real).size > MAX_ATTACHMENT_BYTES)
         throw new ToolError("File is larger than 20 MB");
       bytes = readFileSync(real);

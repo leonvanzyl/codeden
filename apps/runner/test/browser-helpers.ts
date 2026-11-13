@@ -20,6 +20,22 @@ export const TEST_PAGE = `<!doctype html>
   <script>console.log('page ready'); fetch('/api/ping');</script>
 </body></html>`;
 
+/** Buttons that open a confirm, a prompt and an alert, and write what they returned to `#out`. */
+export const DIALOGS_PAGE = `<!doctype html>
+<html><head><title>Dialogs</title>
+<style>
+  body { margin: 0; font: 16px system-ui, sans-serif; }
+  button { position: absolute; left: 100px; width: 200px; height: 40px; }
+  #del { top: 100px; } #ren { top: 160px; } #note { top: 220px; }
+  #out { position: absolute; left: 100px; top: 300px; }
+</style></head>
+<body>
+  <button id="del" onclick="out.textContent = confirm('Delete this item?') ? 'deleted' : 'kept'">Delete</button>
+  <button id="ren" onclick="out.textContent = 'name: ' + prompt('New name?', 'draft')">Rename</button>
+  <button id="note" onclick="alert('Saved!'); out.textContent = 'alert closed'">Notify</button>
+  <p id="out"></p>
+</body></html>`;
+
 /** Local HTTP server for browser tests (pages, cookies, a slow-appearing element). */
 export class TestSite {
   private constructor(
@@ -51,6 +67,12 @@ export class TestSite {
           );
         case "/page2":
           return res.end("<title>Second page</title><h1>Second</h1>");
+        case "/dialogs":
+          return res.end(DIALOGS_PAGE);
+        case "/leave":
+          return res.end(
+            "<title>Unsaved</title><input aria-label=Draft><script>addEventListener('beforeunload', (e) => { e.preventDefault(); e.returnValue = ''; })</script>",
+          );
         default:
           res.statusCode = 404;
           return res.end("not found");

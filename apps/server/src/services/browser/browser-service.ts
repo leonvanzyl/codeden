@@ -129,11 +129,20 @@ export class BrowserService {
     return { cdpUrl: result.cdpUrl, tabs: result.tabs ?? [], engine: result.engine ?? "runner" };
   }
 
-  /** The session's tabs; `open: false` when it has no browser yet (never throws for that). */
+  /**
+   * The session's tabs, and the page dialogs waiting for an answer; `open: false` when it has no
+   * browser yet (never throws for that).
+   */
   async tabs(sessionId: string): Promise<BrowserTabsResponse> {
     try {
-      const { tabs, engine } = await this.command({ name: "browser.tabs.list", sessionId });
-      return { open: true, tabs, engine: engine ?? "runner" };
+      const result = await this.command({ name: "browser.tabs.list", sessionId });
+      const { tabs, engine, dialogs } = result;
+      return {
+        open: true,
+        tabs,
+        engine: engine ?? "runner",
+        ...(dialogs?.length ? { dialogs } : {}),
+      };
     } catch (error) {
       if (isBrowserNotOpen(error)) return { open: false, tabs: [] };
       throw error;

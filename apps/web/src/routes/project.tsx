@@ -12,6 +12,7 @@ import { useEffect, useRef } from "react";
 import { AutomationsPanel } from "@/components/automations/automations-panel";
 import { SectionLabel } from "@/components/common/bits";
 import { AutonomyModeButton } from "@/components/factory/autonomy-dialog";
+import { OpenFactoryViewButton } from "@/components/factory/factory-actions";
 import { FactoryPanel } from "@/components/factory/factory-panel";
 import { ProjectGithub } from "@/components/github/project-github";
 import { SessionsList } from "@/components/project/lists";
@@ -93,6 +94,7 @@ export function ProjectPage({
         }
         actions={
           <>
+            {factory && <OpenFactoryViewButton projectId={projectId} />}
             <Button size="sm" variant="ghost" asChild>
               <Link to="/projects/$projectId/vision" params={{ projectId }}>
                 <FileText /> Vision

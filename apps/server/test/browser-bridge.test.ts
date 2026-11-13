@@ -1,9 +1,16 @@
-import type { BrowserClientMessage, BrowserServerMessage, BrowserTab } from "@codeden/contracts";
+import type {
+  BrowserClientMessage,
+  BrowserDialog,
+  BrowserDialogClosed,
+  BrowserServerMessage,
+  BrowserTab,
+} from "@codeden/contracts";
 import type { WSContext } from "hono/ws";
 import { describe, expect, it } from "vitest";
 import { BrowserBridge } from "../src/realtime/browser";
 import { AgentActivity } from "../src/services/browser/agent-activity";
 import type { BrowserService } from "../src/services/browser/browser-service";
+import { ServiceError } from "../src/services/errors";
 
 const tab: BrowserTab = { tabId: "t1", url: "http://localhost:3000/", title: "App", active: true };
 const tick = () => new Promise((r) => setTimeout(r, 0));
@@ -190,10 +197,129 @@ describe("BrowserBridge frames", () => {
   });
 });
 
+/**
+ * A bridge over a fake runner that lists its open dialogs and, like the runner, answers only a
+ * dialog that is still open (`no_dialog` otherwise).
+ */
+function dialogBridge() {
+  const commands: Array<Record<string, unknown>> = [];
+  let open: BrowserDialog[] = [];
+  const browser = {
+    tabs: async () => ({ open: true, tabs: [tab], ...(open.length ? { dialogs: open } : {}) }),
+    open: async () => ({ tabs: [tab] }),
+    command: async (cmd: Record<string, unknown>) => {
+      commands.push(cmd);
+      if (cmd.name === "browser.dialog" && !open.some((d) => d.dialogId === cmd.dialogId)) {
+        throw new ServiceError(409, "no_dialog", `Dialog ${cmd.dialogId} is no longer open`);
+      }
+      return {};
+    },
+  } as unknown as BrowserService;
+  const bridge = new BrowserBridge({ browser });
+  const connect = async () => {
+    const messages: BrowserServerMessage[] = [];
+    const ws = {
+      readyState: 1,
+      raw: {},
+      send: (data: string) => messages.push(JSON.parse(data) as BrowserServerMessage),
+    } as unknown as WSContext;
+    const events = bridge.handlers({ sessionId: "s1" });
+    events.onOpen?.(new Event("open"), ws);
+    await settle();
+    const say = async (msg: BrowserClientMessage) => {
+      events.onMessage?.(new MessageEvent("message", { data: JSON.stringify(msg) }), ws);
+      await settle();
+    };
+    const close = () => events.onClose?.(new CloseEvent("close"), ws);
+    return { messages, say, close };
+  };
+  /** The runner's dialogs change, and it says so on the stream. */
+  const update = (dialogs: BrowserDialog[], closed?: BrowserDialogClosed) => {
+    open = dialogs;
+    bridge.onStream({
+      kind: "browser.dialogs",
+      sessionId: "s1",
+      dialogs,
+      ...(closed && { closed }),
+    });
+  };
+  return { bridge, connect, commands, update };
+}
+
+const confirmDialog: BrowserDialog = {
+  dialogId: "d00000001",
+  tabId: "t1",
+  type: "confirm",
+  message: "Delete this item?",
+};
+
+describe("BrowserBridge page dialogs", () => {
+  it("shows dialogs to every viewer, late joiners too, and sends a viewer's answer", async () => {
+    const { bridge, connect, commands, update } = dialogBridge();
+    const desk = await connect();
+    const dialog = confirmDialog;
+    update([dialog]);
+    expect(desk.messages.at(-1)).toEqual({ type: "dialogs", dialogs: [dialog] });
+    const phone = await connect();
+    expect(phone.messages).toContainEqual({ type: "dialogs", dialogs: [dialog] });
+
+    await phone.say({ type: "dialog", dialogId: dialog.dialogId, accept: true });
+    expect(commands.at(-1)).toEqual({
+      name: "browser.dialog",
+      sessionId: "s1",
+      dialogId: dialog.dialogId,
+      accept: true,
+      by: "viewer",
+    });
+    const closed = { ...dialog, by: "viewer" as const, accepted: true };
+    update([], closed);
+    expect(desk.messages.at(-1)).toEqual({ type: "dialogs", dialogs: [], closed });
+
+    // A closed browser has no dialogs.
+    update([dialog]);
+    bridge.onStream({ kind: "browser.tabs", sessionId: "s1", tabs: [] });
+    expect(desk.messages.at(-1)).toMatchObject({ type: "state", open: false });
+    expect(desk.messages.at(-2)).toEqual({ type: "dialogs", dialogs: [] });
+  });
+
+  it("a late answer is no error: the viewer gets the dialogs as they are now", async () => {
+    const { connect, update } = dialogBridge();
+    const desk = await connect();
+    update([confirmDialog]);
+    // The agent answered it, and the page asked the next question before the desk's answer came.
+    const next = { ...confirmDialog, dialogId: "d00000002", message: "Delete everything?" };
+    update([], { ...confirmDialog, by: "agent", accepted: true });
+    update([next]);
+    await desk.say({ type: "dialog", dialogId: confirmDialog.dialogId, accept: true });
+    expect(desk.messages.some((m) => m.type === "error")).toBe(false);
+    expect(desk.messages.at(-1)).toEqual({ type: "dialogs", dialogs: [next] });
+  });
+
+  it("tells a viewer that reconnects about dialogs closed while it was away", async () => {
+    for (const by of ["agent", "timeout"] as const) {
+      const { connect, update } = dialogBridge();
+      const first = await connect();
+      update([confirmDialog]);
+      expect(first.messages.at(-1)).toEqual({ type: "dialogs", dialogs: [confirmDialog] });
+      first.close();
+      // Answered (or timed out) while the viewer was disconnected.
+      update([], { ...confirmDialog, by, accepted: by === "agent" });
+      const back = await connect();
+      expect(back.messages.filter((m) => m.type === "dialogs")).toEqual([
+        { type: "dialogs", dialogs: [] },
+      ]);
+    }
+  });
+});
+
 describe("BrowserBridge", () => {
   it("detaches viewers with a closed state when the browser closes, and re-attaches on open", async () => {
     const { bridge, messages, commands, setOpen } = await setup();
-    expect(messages.at(-1)).toMatchObject({ type: "state", open: true, watching: true });
+    // An open browser's state comes with its dialogs, none here.
+    expect(messages.slice(-2)).toMatchObject([
+      { type: "state", open: true, watching: true },
+      { type: "dialogs", dialogs: [] },
+    ]);
     expect(commands.filter((c) => c.name === "browser.screencast")).toHaveLength(1);
 
     setOpen(false);
@@ -222,6 +348,9 @@ describe("BrowserBridge", () => {
     bridge.onStream({ kind: "browser.tabs", sessionId: "s1", tabs: [tab] });
     await tick();
     expect(commands.filter((c) => c.name === "browser.screencast" && c.watching)).toHaveLength(2);
-    expect(messages.at(-1)).toMatchObject({ type: "state", open: true, watching: true });
+    expect(messages.slice(-2)).toMatchObject([
+      { type: "state", open: true, watching: true },
+      { type: "dialogs", dialogs: [] },
+    ]);
   });
 });

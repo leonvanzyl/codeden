@@ -5,8 +5,9 @@ import type {
   BrowserTab,
   RunnerStream,
 } from "@codeden/contracts";
-import type { BrowserContext, CDPSession, Page } from "playwright-core";
+import type { BrowserContext, CDPSession, Dialog, Page } from "playwright-core";
 import { CommandError } from "../errors";
+import { DialogKeeper } from "./dialogs";
 import { InputForwarder } from "./input";
 import { BrowserLogs } from "./logs";
 import { type FrameStream, Screencast } from "./screencast";
@@ -34,6 +35,8 @@ export interface BrowserSessionOptions {
   engine?: BrowserEngine;
   /** Native only: drop the relay connection (the views stay in the app). */
   disconnect?: () => Promise<void>;
+  /** Page dialogs nobody answers are dismissed after this long. Default `DIALOG_TIMEOUT_MS`. */
+  dialogTimeoutMs?: number;
 }
 
 /** Native tabs that close within this long of each other count as one disconnect. */
@@ -74,6 +77,8 @@ export class BrowserSession {
   readonly engine: BrowserEngine;
   readonly logs = new BrowserLogs();
   readonly screencast: Screencast;
+  /** Page dialogs waiting for a viewer or an agent to answer them. */
+  readonly dialogs: DialogKeeper;
   private readonly tabs = new Map<string, TabState>();
   private readonly titles = new Map<string, string>();
   private readonly byPage = new WeakMap<Page, TabState>();
@@ -102,6 +107,16 @@ export class BrowserSession {
     this.context.setDefaultTimeout(opts.timeoutMs);
     this.context.setDefaultNavigationTimeout(opts.timeoutMs);
     this.screencast = new Screencast(opts.sessionId, (frame: FrameStream) => this.stream(frame));
+    this.dialogs = new DialogKeeper({
+      timeoutMs: opts.dialogTimeoutMs,
+      onChange: (dialogs, closed) => {
+        if (this.closed) return;
+        const { sessionId } = this;
+        this.stream({ kind: "browser.dialogs", sessionId, dialogs, ...(closed ? { closed } : {}) });
+      },
+    });
+    // Without a listener Playwright dismisses every dialog at once: hold them for an answer.
+    this.context.on("dialog", (dialog) => this.onDialog(dialog));
     // Native views have whatever size the desktop panel gives them: frames are only capped.
     const frame = this.native ? nativeFrame() : framePixels(this.viewport);
     void this.screencast.setFrameSize(frame, this.viewport);
@@ -173,18 +188,22 @@ export class BrowserSession {
   }
 
   async navigate(url: string, tabId?: string): Promise<{ url: string; status: number | null }> {
-    const page = this.page(tabId);
-    const response = await page.goto(normalizeUrl(url), { waitUntil: "domcontentloaded" });
+    const { tabId: id, page } = this.tabState(tabId);
+    const response = await this.dialogs.whileNavigating(id, () =>
+      page.goto(normalizeUrl(url), { waitUntil: "domcontentloaded" }),
+    );
     await this.refreshTitle(page);
     return { url: page.url(), status: response?.status() ?? null };
   }
 
   async history(action: "back" | "forward" | "reload", tabId?: string): Promise<string> {
-    const page = this.page(tabId);
+    const { tabId: id, page } = this.tabState(tabId);
     const options = { waitUntil: "domcontentloaded" as const };
-    if (action === "back") await page.goBack(options);
-    else if (action === "forward") await page.goForward(options);
-    else await page.reload(options);
+    await this.dialogs.whileNavigating(id, async () => {
+      if (action === "back") await page.goBack(options);
+      else if (action === "forward") await page.goForward(options);
+      else await page.reload(options);
+    });
     await this.refreshTitle(page);
     return page.url();
   }
@@ -215,18 +234,24 @@ export class BrowserSession {
     return { ...next };
   }
 
-  /** Forward panel input to the active tab. */
+  /**
+   * Forward panel input to the active tab. Dropped while a dialog pauses the page (it would only
+   * pile up behind it); input that opens a dialog returns once it is open.
+   */
   async dispatchInput(input: BrowserInput): Promise<void> {
     const state = this.tabState();
+    if (this.dialogs.get(state.tabId)) return;
+    const cdp = await this.cdp(state);
     if (this.native && "frameWidth" in input) {
       // A native view's frame always shows the whole view, so map against the view's own CSS
       // size. Frame metadata isn't trusted for that: its units follow the platform's scale
       // handling (DIPs rather than CSS pixels on HiDPI macOS).
       const { viewportWidth: _w, viewportHeight: _h, ...pointer } = input;
       const viewport = await this.nativeViewport();
-      return this.input.dispatch(await this.cdp(state), pointer, viewport);
+      await this.dialogs.race(state.tabId, () => this.input.dispatch(cdp, pointer, viewport));
+      return;
     }
-    await this.input.dispatch(await this.cdp(state), input, this.viewport);
+    await this.dialogs.race(state.tabId, () => this.input.dispatch(cdp, input, this.viewport));
   }
 
   /**
@@ -237,6 +262,7 @@ export class BrowserSession {
   async close(opts: { closeTabs?: boolean } = {}): Promise<void> {
     if (this.closed) return;
     this.closed = true;
+    this.dialogs.dispose();
     await this.screencast.dispose();
     if (this.native) {
       if (opts.closeTabs) {
@@ -261,6 +287,7 @@ export class BrowserSession {
     }));
     this.disconnected = true;
     this.closed = true;
+    this.dialogs.dispose();
     void this.screencast.dispose();
     this.tabs.clear();
     this.activeTabId = undefined;
@@ -274,6 +301,7 @@ export class BrowserSession {
     this.byPage.set(page, state);
     this.logs.attach(page, tabId);
     state.sized = this.emulate(state);
+    void this.dialogs.watchClosing(tabId, this.cdp(state));
     page.on("framenavigated", (frame) => {
       if (frame === page.mainFrame()) void this.refreshTitle(page);
     });
@@ -293,6 +321,7 @@ export class BrowserSession {
     if (this.disconnected) return;
     this.tabs.delete(state.tabId);
     this.titles.delete(state.tabId);
+    this.dialogs.closedElsewhere(state.tabId);
     if (this.closed) return;
     if (this.activeTabId === state.tabId) {
       this.activeTabId = undefined;
@@ -301,6 +330,15 @@ export class BrowserSession {
       else await this.screencast.setTab(undefined);
     }
     this.publishTabs();
+  }
+
+  /** A page dialog opened: hold it on its tab (a page not seen yet becomes a tab first). */
+  private onDialog(dialog: Dialog): void {
+    const page = dialog.page();
+    const state =
+      page && !this.closed ? (this.byPage.get(page) ?? this.register(page, false)) : null;
+    if (state) this.dialogs.opened(state.tabId, dialog);
+    else void dialog.dismiss().catch(() => undefined);
   }
 
   private async refreshTitle(page: Page): Promise<void> {

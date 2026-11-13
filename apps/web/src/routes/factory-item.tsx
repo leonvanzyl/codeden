@@ -1,12 +1,6 @@
-import {
-  type FactoryItem,
-  type MergeCheck,
-  pipelineStep,
-  type ReviewVerdict,
-} from "@codeden/contracts";
+import { type FactoryItem, pipelineStep, type ReviewVerdict } from "@codeden/contracts";
 import { Link } from "@tanstack/react-router";
 import {
-  AlertTriangle,
   Check,
   ChevronLeft,
   CircleDot,
@@ -18,10 +12,13 @@ import {
 import type { ReactNode } from "react";
 import { SectionLabel } from "@/components/common/bits";
 import { StatusDot } from "@/components/common/status-dot";
-import { CheckPill } from "@/components/factory/factory-columns";
-import { InvestigationCard, ItemActions } from "@/components/factory/item-parts";
 import {
-  CHECK_HELP,
+  CheckRow,
+  InvestigationCard,
+  ItemActions,
+  SessionLink,
+} from "@/components/factory/item-parts";
+import {
   CHECK_LABEL,
   SOURCE_LABEL,
   STAGE_LABEL,
@@ -41,39 +38,6 @@ function Fact({ label, children }: { label: string; children: ReactNode }) {
     <div className="flex items-baseline justify-between gap-3 text-xs">
       <span className="shrink-0 text-muted-foreground">{label}</span>
       <span className="min-w-0 truncate text-right">{children}</span>
-    </div>
-  );
-}
-
-function SessionLink({ id, label }: { id: string | null; label: string }) {
-  if (!id)
-    return <span className="text-muted-foreground">{label === "session" ? "—" : label}</span>;
-  return (
-    <Link
-      to="/sessions/$sessionId"
-      params={{ sessionId: id }}
-      className="text-primary hover:underline"
-    >
-      {label}
-    </Link>
-  );
-}
-
-function CheckRow({ check }: { check: MergeCheck }) {
-  return (
-    <div className="flex items-start gap-3 border-b border-border px-3.5 py-2.5 last:border-0">
-      <CheckPill check={check} />
-      <div className="min-w-0 flex-1 text-2xs">
-        <p className={cn(check.state === "fail" && "text-status-failed")}>
-          {check.detail ?? CHECK_HELP[check.name]}
-        </p>
-        {check.escalate && (
-          <p className="mt-0.5 flex items-center gap-1 text-status-waiting">
-            <AlertTriangle className="size-3" /> Escalated: a human has to review and merge this
-          </p>
-        )}
-      </div>
-      <span className="shrink-0 text-3xs text-muted-foreground">{ago(check.at)}</span>
     </div>
   );
 }

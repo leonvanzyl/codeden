@@ -101,6 +101,11 @@ export interface BrowserChannel {
    * viewers. The latest size is re-sent after a reconnect.
    */
   viewport(size: BrowserViewportSize, claim?: boolean): void;
+  /**
+   * Answer page dialog `dialogId`: OK (`accept`) or Cancel; `promptText` is what a prompt
+   * returns. Not queued while disconnected: false when it could not be sent.
+   */
+  dialog(dialogId: string, accept: boolean, promptText?: string): boolean;
   close(): void;
 }
 

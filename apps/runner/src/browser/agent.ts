@@ -1,10 +1,25 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, extname, isAbsolute } from "node:path";
-import { MAX_FOCUS_TYPE_CHARS } from "@codeden/contracts";
+import { type BrowserDialog, MAX_FOCUS_TYPE_CHARS } from "@codeden/contracts";
 import type { Locator, Page } from "playwright-core";
 import { CommandError } from "../errors";
 import { pngSize } from "./images";
 import type { BrowserSession } from "./session";
+
+/** An action's result: the dialog it opened, which now waits for an answer. */
+export interface ActionResult {
+  dialog?: BrowserDialog;
+}
+
+/**
+ * The tab an agent command acts on, refused while a dialog pauses its page: the page can't
+ * answer until the dialog is, so the command would only hang.
+ */
+export function target(session: BrowserSession, tabId?: string): { tabId: string; page: Page } {
+  const id = session.tabId(tabId);
+  session.dialogs.assertNone(id);
+  return { tabId: id, page: session.page(id) };
+}
 
 /** Limits applied to `evaluate` (§12.2 agent tools). */
 export interface EvaluateGuard {
@@ -30,18 +45,26 @@ export interface SnapshotResult {
   title: string;
   snapshot: string;
   truncated: boolean;
+  dialog?: BrowserDialog;
 }
 
 /**
  * Accessibility snapshot of a tab in YAML, with `[ref=eN]` element refs that stay stable
- * for unchanged elements across snapshots. Refs resolve against the latest snapshot.
+ * for unchanged elements across snapshots. Refs resolve against the latest snapshot. While a
+ * dialog pauses the page there is no snapshot, only the dialog.
  */
 export async function snapshot(session: BrowserSession, tabId?: string): Promise<SnapshotResult> {
-  const page = session.page(tabId);
+  const id = session.tabId(tabId);
+  const page = session.page(id);
+  const dialog = session.dialogs.get(id);
+  if (dialog) {
+    const title = session.listTabs().find((t) => t.tabId === id)?.title ?? "";
+    return { tabId: id, url: page.url(), title, snapshot: "", truncated: false, dialog };
+  }
   const text = await page.ariaSnapshot({ mode: "ai" });
   const truncated = text.length > MAX_SNAPSHOT_CHARS;
   return {
-    tabId: session.tabId(tabId),
+    tabId: id,
     url: page.url(),
     title: await page.title(),
     snapshot: truncated ? `${text.slice(0, MAX_SNAPSHOT_CHARS)}\n# ... truncated` : text,
@@ -76,10 +99,13 @@ export async function click(
   session: BrowserSession,
   ref: string,
   opts: { tabId?: string; button?: "left" | "middle" | "right"; doubleClick?: boolean } = {},
-): Promise<void> {
+): Promise<ActionResult> {
+  const { tabId, page } = target(session, opts.tabId);
   const options = opts.button ? { button: opts.button } : {};
-  await withRef(session.page(opts.tabId), ref, (locator) =>
-    opts.doubleClick ? locator.dblclick(options) : locator.click(options),
+  return session.dialogs.race(tabId, () =>
+    withRef(page, ref, (locator) =>
+      opts.doubleClick ? locator.dblclick(options) : locator.click(options),
+    ),
   );
 }
 
@@ -93,8 +119,8 @@ export async function type(
   ref: string | undefined,
   text: string,
   opts: { tabId?: string; submit?: boolean } = {},
-): Promise<void> {
-  const page = session.page(opts.tabId);
+): Promise<ActionResult> {
+  const { tabId, page } = target(session, opts.tabId);
   if (ref === undefined) {
     if (text.length > MAX_FOCUS_TYPE_CHARS) {
       throw new CommandError(
@@ -102,28 +128,50 @@ export async function type(
         `Without a ref, type at most ${MAX_FOCUS_TYPE_CHARS} characters`,
       );
     }
-    try {
-      await page.keyboard.type(text);
-      if (opts.submit) await page.keyboard.press("Enter");
-    } catch (error) {
-      const message = error instanceof Error ? error.message.split("\n")[0] : String(error);
-      throw new CommandError("action_failed", `Typing at the focused element failed: ${message}`);
-    }
-    return;
+    return session.dialogs.race(tabId, async () => {
+      try {
+        await page.keyboard.type(text);
+        if (opts.submit) await page.keyboard.press("Enter");
+      } catch (error) {
+        const message = error instanceof Error ? error.message.split("\n")[0] : String(error);
+        throw new CommandError("action_failed", `Typing at the focused element failed: ${message}`);
+      }
+    });
   }
-  await withRef(page, ref, async (locator) => {
-    await locator.fill(text);
-    if (opts.submit) await locator.press("Enter");
-  });
+  return session.dialogs.race(tabId, () =>
+    withRef(page, ref, async (locator) => {
+      await locator.fill(text);
+      if (opts.submit) await locator.press("Enter");
+    }),
+  );
 }
 
 /** Press a key or chord (`Enter`, `Control+A`) on whatever has focus. */
-export async function press(session: BrowserSession, key: string, tabId?: string): Promise<void> {
-  try {
-    await session.page(tabId).keyboard.press(key);
-  } catch (error) {
-    throw new CommandError("action_failed", `Could not press ${key}: ${String(error)}`);
-  }
+export async function press(
+  session: BrowserSession,
+  key: string,
+  tabId?: string,
+): Promise<ActionResult> {
+  const tab = target(session, tabId);
+  return session.dialogs.race(tab.tabId, async () => {
+    try {
+      await tab.page.keyboard.press(key);
+    } catch (error) {
+      throw new CommandError("action_failed", `Could not press ${key}: ${String(error)}`);
+    }
+  });
+}
+
+/** `browser.dialog`: answer dialog `dialogId`, and only that one (`no_dialog` once it closed). */
+export function answerDialog(
+  session: BrowserSession,
+  answer: { dialogId: string; accept: boolean; promptText?: string; by?: "agent" | "viewer" },
+): Promise<BrowserDialog> {
+  return session.dialogs.answer(answer.dialogId, {
+    accept: answer.accept,
+    promptText: answer.promptText,
+    by: answer.by ?? "agent",
+  });
 }
 
 export interface ScreenshotResult {
@@ -147,7 +195,7 @@ export async function screenshot(
   if (extname(path).toLowerCase() !== ".png") {
     throw new CommandError("invalid_path", "Screenshot path must end in .png");
   }
-  const page = session.page(opts.tabId);
+  const { page } = target(session, opts.tabId);
   const ref = opts.ref;
   const buffer = ref
     ? await withRef(page, ref, (locator) => locator.screenshot({ type: "png", scale: "css" }))
@@ -170,7 +218,7 @@ export async function evaluate(
   tabId?: string,
 ): Promise<{ json: string; truncated: boolean }> {
   if (!guard.enabled) throw new CommandError("forbidden", "evaluate is disabled for this runner");
-  const page = session.page(tabId);
+  const { page } = target(session, tabId);
   let timer: NodeJS.Timeout | undefined;
   const timeout = new Promise<never>((_, reject) => {
     timer = setTimeout(
@@ -216,7 +264,7 @@ export async function wait(session: BrowserSession, opts: WaitOptions): Promise<
   if (conditions.filter((c) => c !== undefined).length !== 1) {
     throw new CommandError("invalid_wait", "Give exactly one of selector, text or networkIdle");
   }
-  const page = session.page(opts.tabId);
+  const { page } = target(session, opts.tabId);
   const timeout = opts.timeoutMs ?? session.timeoutMs;
   try {
     if (opts.selector) await page.locator(opts.selector).first().waitFor({ timeout });

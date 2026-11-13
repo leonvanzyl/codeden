@@ -1,6 +1,7 @@
 import type { BrowserModifierKey, BrowserMouseAction } from "@codeden/contracts";
 import type { Page } from "playwright-core";
 import { CommandError } from "../errors";
+import { type ActionResult, target } from "./agent";
 import type { ViewportSize } from "./input";
 import type { BrowserSession } from "./session";
 
@@ -204,12 +205,16 @@ export async function mouseAction(
   if (command.action === "scroll") await scrollSettled(page);
 }
 
-/** `browser.mouse`: act at coordinates in a session's tab, checked against its current viewport. */
+/**
+ * `browser.mouse`: act at coordinates in a session's tab, checked against its current viewport.
+ * Returns as soon as the action opens a page dialog.
+ */
 export async function mouse(
   session: BrowserSession,
   command: MouseCommand & { tabId?: string },
-): Promise<void> {
+): Promise<ActionResult> {
+  const { tabId, page } = target(session, command.tabId);
   // The bounds are the target tab's own: a native view in the background may differ in size.
-  const page = session.page(command.tabId);
-  await mouseAction(page, command, await session.currentViewport(command.tabId));
+  const viewport = await session.currentViewport(tabId);
+  return session.dialogs.race(tabId, () => mouseAction(page, command, viewport));
 }

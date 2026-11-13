@@ -210,6 +210,12 @@ export const FactoryItem = z.object({
    * once none of them is busy (a turn is never cut off), then empties the list.
    */
   earlierSessionIds: z.array(Id).default([]),
+  /**
+   * When the item entered its current pipeline step (`pipelineStep`), for "how long has it been
+   * here" on the Factory view. Set on creation and whenever the step changes; null on items
+   * saved before it existed (readers fall back to `updatedAt`).
+   */
+  stepSince: Timestamp.nullable().default(null),
   createdAt: Timestamp,
   updatedAt: Timestamp,
   mergedAt: Timestamp.nullable(),
@@ -509,9 +515,54 @@ export const FactoryWorkItem = z.object({
   attempts: z.int().nonnegative().default(0),
   reason: z.string().nullable(),
   note: z.string().nullable(),
+  /** Why it failed, for items that did (see `FactoryFailureKind`). */
+  failureKind: FactoryFailureKind.nullable().default(null),
+  /** When it entered its current pipeline step; null when unknown (use `updatedAt`). */
+  stepSince: Timestamp.nullable().default(null),
+  mergedAt: Timestamp.nullable().default(null),
+  finishedAt: Timestamp.nullable().default(null),
+  /**
+   * The open pull request the factory still owns for it: its own, or, while a rebuild has no PR
+   * of its own yet (or failed without one), the PR the rebuild replaces. Null when it owns none.
+   * Unlike `FactoryStatus.pullRequests`, never cut short.
+   */
+  ownedPr: GitHubPrRef.nullable().default(null),
+  /**
+   * Its merge checks so far: passed (passed or skipped), failed and all recorded; null before
+   * any ran.
+   */
+  checks: z
+    .object({
+      passed: z.int().nonnegative(),
+      failed: z.int().nonnegative(),
+      total: z.int().nonnegative(),
+    })
+    .nullable()
+    .default(null),
   updatedAt: Timestamp,
 });
 export type FactoryWorkItem = z.infer<typeof FactoryWorkItem>;
+
+/**
+ * Throughput figures of the Factory view's stats strip, counted over the project's items by the
+ * server's local day (the same day the merge counter and the budget use).
+ */
+export const FactoryStats = z.object({
+  /** Factory items merged today, by CodeDen or by a person on GitHub. */
+  mergedToday: z.int().nonnegative().default(0),
+  /** Items that failed today. */
+  failedToday: z.int().nonnegative().default(0),
+  /** Items whose merge was reverted today. */
+  revertedToday: z.int().nonnegative().default(0),
+  /**
+   * Median time from the factory taking the issue in (`createdAt`) to its merge, over the items
+   * merged in the last 7 days, in milliseconds; null when none merged.
+   */
+  medianMergeMs7d: z.number().nonnegative().nullable().default(null),
+  /** How many merges the median is over. */
+  merged7d: z.int().nonnegative().default(0),
+});
+export type FactoryStats = z.infer<typeof FactoryStats>;
 
 /** Merge-check results of one item with a PR. */
 export const FactoryMergeChecks = z.object({
@@ -539,6 +590,8 @@ export const FactoryStatus = z.object({
   tuning: FactoryTuning,
   spendToday: z.object({ tokens: z.int().nonnegative(), usd: z.number().nonnegative() }),
   mergesToday: z.int().nonnegative(),
+  /** Today's merges, failures and reverts and the 7-day median time to merge. */
+  stats: FactoryStats.prefault({}),
   consecutiveFailures: z.int().nonnegative(),
   activeSessions: z.int().nonnegative(),
   /** Waiting: being classified (`candidate`) or for a free agent (`backlog`). */
@@ -550,8 +603,14 @@ export const FactoryStatus = z.object({
    * the rest (being checked, rebased, rebuilt, waiting for you) and today's merges.
    */
   pullRequests: z.array(FactoryPrEntry).default([]),
-  /** Merged, reverted, failed, rejected and escalated items, newest first. */
+  /** Merged, reverted, failed, rejected and escalated items, newest first (the latest 30). */
   recent: z.array(FactoryWorkItem),
+  /**
+   * Finished items the Factory view keeps showing, however many newer results `recent` holds:
+   * every escalated item, failed items that failed in the last 24 hours or still own an open
+   * pull request, and items merged today.
+   */
+  viewRecent: z.array(FactoryWorkItem).default([]),
   /** Issues by untrusted authors, newest first; nothing runs on them until let in. */
   ignored: z.array(FactoryWorkItem).default([]),
   /** The account CodeDen uses on GitHub (always trusted); null when unknown. */

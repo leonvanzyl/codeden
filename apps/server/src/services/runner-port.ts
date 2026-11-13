@@ -89,7 +89,9 @@ export function toServiceError(error: unknown): ServiceError {
     code === "unknown_session" ||
     code === "unsupported" ||
     code === "no_turn" ||
-    code === "turn_running"
+    code === "turn_running" ||
+    code === "dialog_open" ||
+    code === "no_dialog"
   ) {
     return new ServiceError(409, code, message);
   }
