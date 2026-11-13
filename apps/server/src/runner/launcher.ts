@@ -138,6 +138,8 @@ export async function startRunnerProcess(opts: {
   lockFile: string;
   stale?: RunnerLock;
   timeouts?: RunnerStartTimeouts;
+  /** Stop waiting (the client stopped); the runner keeps starting and is attached to later. */
+  signal?: AbortSignal;
   onSlow?: (info: { pid: number | undefined; elapsedMs: number }) => void;
 }): Promise<RunnerLock> {
   const slowAfterMs = opts.timeouts?.slowAfterMs ?? DEFAULT_RUNNER_SLOW_AFTER_MS;
@@ -153,6 +155,7 @@ export async function startRunnerProcess(opts: {
   let slowReported = false;
   for (;;) {
     await new Promise((r) => setTimeout(r, 100));
+    opts.signal?.throwIfAborted();
     const lock = readLiveRunnerLock(opts.lockFile);
     if (lock && isFreshLock(lock, pid, opts.stale)) return lock;
     const exited = pid === undefined || exitCode !== undefined || !isProcessAlive(pid);
