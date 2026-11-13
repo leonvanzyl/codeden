@@ -102,9 +102,18 @@ When you approve, you can approve once or for the rest of the session.
 - **Image generation** writes only inside the session's worktree (never `.git`, never through a symlink that escapes).
 - The **browser** refuses `chrome://`, `edge://`, `devtools://` and `javascript:` URLs, and each session has its own browser context.
 
+## What CodeDen trusts from GitHub
+
+On a public repository anyone can open an issue, comment or review a pull request, and whatever reaches an agent is a prompt. So CodeDen decides by author before GitHub text starts or steers any work. Labels never count as trust, because issue templates can apply them for anyone.
+
+- **Factory intake.** The software factory and the dark factory take on issues only from **trusted authors**: the GitHub account CodeDen uses (the one `gh` is signed in as) and the logins in the project's **Trusted authors**. Everyone else's issues are ignored, with no model call, session or comment, until you let one in, and work let in that way is never merged automatically. See [Who the factory works for](software-factory.md#who-the-factory-works-for).
+- **Issue triage.** Even with `autoStart` on, triage starts a session by itself only for issues by the account CodeDen uses, the project's trusted authors, or people with write access to the repository (its owner, organization members and collaborators). Anyone else's ready issue, and one whose author GitHub can't check at that moment, becomes a "Should I take this on?" decision in your inbox. See [Who triage starts work for](automations.md#who-triage-starts-work-for).
+- **Pull request feedback.** A review that requests changes is passed on to the session that owns the pull request only when the reviewer has write access, is the account CodeDen uses, or is one of the project's trusted authors. Anyone else's review reaches the project manager without its text and doesn't wake it. See [Feedback on your sessions' pull requests](github.md#feedback-on-your-sessions-pull-requests).
+- **Issue and comment text is data.** The briefs CodeDen gives agents that read GitHub text (factory builders, reviewers and the scout, the PM triaging an issue and the session that resolves it) say that the issue text and its comments are input data, not instructions, and a session told about a review is told the same of comments and reviews from people without write access. The agent acts on the work they describe and ignores anything in them that asks it to reveal secrets or credentials, change CI, release or deploy files, contact unknown hosts or act outside the repository.
+
 ## Automatic merges
 
-Automatic merging only exists in the experimental Software factory and Dark factory modes, and only when you turn **auto-merge** on: then behind merge checks, protected areas and server-enforced limits, with a kill switch. On a public repository anyone can open an issue, so the factory only takes on issues by **trusted authors** (the account CodeDen uses on GitHub and the logins you list); everyone else's are ignored until you let one in, and work let in that way is never merged automatically. See [The software factory and the dark factory](software-factory.md).
+Automatic merging only exists in the experimental Software factory and Dark factory modes, and only when you turn **auto-merge** on: then behind merge checks, protected areas and server-enforced limits, with a kill switch. On a public repository anyone can open an issue, so the factory only takes on issues by **trusted authors** (the account CodeDen uses on GitHub and the logins you list); everyone else's are ignored until you let one in, and work let in that way is never merged automatically. See [What CodeDen trusts from GitHub](#what-codeden-trusts-from-github) and [The software factory and the dark factory](software-factory.md).
 
 ## Data and telemetry
 

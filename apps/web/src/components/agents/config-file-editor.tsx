@@ -1,6 +1,6 @@
 import type { AgentConfigDiff, AgentConfigFile, AgentConfigLocator } from "@codeden/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { RotateCcw, Save, Trash2 } from "lucide-react";
+import { ArrowLeft, RotateCcw, Save, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { CodeEditor } from "@/components/editor/code-editor";
@@ -31,16 +31,23 @@ const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 /**
  * Edit one native agent-config file in place (§12.4): CodeMirror, a server-side diff preview
  * before every write, optimistic concurrency on the file's hash, and delete with a backup.
+ * Below `md` the toolbar wraps: Back and the path, then the actions.
  */
 export function ConfigFileEditor({
   file,
   placeholder,
   onChanged,
+  hidden,
+  onBack,
 }: {
   file: AgentConfigFile;
   placeholder?: string;
   /** Called after a save or delete so lists can refresh. */
   onChanged: () => void;
+  /** Kept mounted but not shown (a phone showing the file list), so the draft survives. */
+  hidden?: boolean;
+  /** Adds a Back button that returns to the file list (phones). */
+  onBack?: () => void;
 }) {
   const client = useClient();
   const queryClient = useQueryClient();
@@ -106,9 +113,24 @@ export function ConfigFileEditor({
 
   const exists = content.data?.exists ?? file.exists;
   return (
-    <div className="flex min-w-0 flex-1 flex-col" data-testid="config-file-editor">
-      <div className="flex h-11 shrink-0 items-center gap-2 border-b border-border px-4">
-        <code className="truncate font-mono text-xs" title={file.absolutePath}>
+    <div hidden={hidden} className="flex min-w-0 flex-1 flex-col" data-testid="config-file-editor">
+      <div className="flex h-11 shrink-0 items-center gap-2 border-b border-border px-4 max-md:h-auto max-md:flex-wrap max-md:gap-y-1 max-md:px-2 max-md:py-1">
+        {onBack && (
+          <Button
+            size="icon-sm"
+            variant="ghost"
+            onClick={onBack}
+            aria-label="Back to files"
+            title="Back to files"
+          >
+            <ArrowLeft />
+          </Button>
+        )}
+        {/* Phones show the whole path, wrapped, instead of cutting off the file name. */}
+        <code
+          className="truncate font-mono text-xs max-md:min-w-0 max-md:flex-1 max-md:break-all max-md:whitespace-normal"
+          title={file.absolutePath}
+        >
           {file.absolutePath}
         </code>
         {!exists && (
@@ -122,6 +144,8 @@ export function ConfigFileEditor({
             title="Unsaved changes"
           />
         )}
+        {/* Phones: the actions start a second row. */}
+        <span aria-hidden className="hidden max-md:block max-md:basis-full" />
         <span className="ml-auto shrink-0 text-3xs text-muted-foreground">
           {file.modifiedAt ? `edited ${ageShort(file.modifiedAt)} ago` : ""}
         </span>
@@ -137,6 +161,7 @@ export function ConfigFileEditor({
           <Button
             size="xs"
             variant="ghost"
+            className="pointer-coarse:min-w-10"
             onClick={() => setConfirmDelete(true)}
             aria-label={`Delete ${file.name}`}
           >

@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useClient } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { useViewport } from "@/lib/viewport";
 import { ConfigFileEditor } from "./config-file-editor";
 import type { NewConfigKind } from "./config-templates";
 import { NewConfigFileDialog } from "./new-config-file-dialog";
@@ -45,7 +46,8 @@ export function useAgentConfigFiles(projectId: string | null) {
  * Master-detail view of native agent-config files of some kinds (§12.4): grouped by provider,
  * edited in place with a diff preview. `create` adds a "New" button for skills or subagents;
  * `rowAddon` adds a control to rows, and `onFilesChanged` runs after a file is written,
- * created or deleted here.
+ * created or deleted here. On phones (§13) the list and the open file take turns at full
+ * width: picking a file opens it, and Back returns to the list.
  */
 export function ConfigFilesView({
   projectId,
@@ -71,15 +73,31 @@ export function ConfigFilesView({
   };
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const { phone } = useViewport();
+  /** On phones: the open file is shown instead of the list. */
+  const [fileOpen, setFileOpen] = useState(false);
+  const open = (key: string) => {
+    setSelectedKey(key);
+    setFileOpen(true);
+  };
   const list = (files.data?.files ?? [])
     .filter((f) => kinds.includes(f.kind))
     .sort((a, b) => scopeOrder[a.scope] - scopeOrder[b.scope] || a.path.localeCompare(b.path));
   const current =
     list.find((f) => fileKey(f) === selectedKey) ?? list.find((f) => f.exists) ?? list[0] ?? null;
+  const showList = !phone || !fileOpen || !current;
+  const showFile = !phone || !showList;
 
   return (
     <div className="flex min-h-0 flex-1 overflow-hidden rounded-xl border border-border bg-card">
-      <aside className="flex w-72 shrink-0 flex-col border-r border-border">
+      {/* Hidden rather than unmounted, so each side keeps its scroll position and draft. */}
+      <aside
+        hidden={!showList}
+        className={cn(
+          "flex flex-col",
+          phone ? "min-w-0 flex-1" : "w-72 shrink-0 border-r border-border",
+        )}
+      >
         {create && (
           <div className="border-b border-border p-2">
             <Button
@@ -116,7 +134,7 @@ export function ConfigFilesView({
                     key={fileKey(f)}
                     file={f}
                     active={current ? fileKey(current) === fileKey(f) : false}
-                    onSelect={() => setSelectedKey(fileKey(f))}
+                    onSelect={() => open(fileKey(f))}
                     addon={rowAddon?.(f)}
                   />
                 ))}
@@ -140,9 +158,11 @@ export function ConfigFilesView({
           file={current}
           placeholder={placeholder}
           onChanged={changed}
+          hidden={!showFile}
+          onBack={phone ? () => setFileOpen(false) : undefined}
         />
       ) : (
-        <div className="flex flex-1 items-center justify-center">
+        <div hidden={!showFile} className="flex flex-1 items-center justify-center">
           <EmptyState icon={<FileText />} title="Nothing selected">
             {emptyText}
           </EmptyState>
@@ -155,7 +175,7 @@ export function ConfigFilesView({
           open={creating}
           onOpenChange={setCreating}
           onCreated={(created) => {
-            setSelectedKey(fileKey(created));
+            open(fileKey(created));
             changed();
           }}
         />

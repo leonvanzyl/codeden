@@ -1,6 +1,6 @@
 # CodeDen: Design
 
-> Status: **locked for v1**, 2026-11-07. Changes to anything in "Locked decisions" need an explicit design discussion and an update to this file. The desktop app (§17) was approved on 2026-11-08. Opt-in network access for phones and tablets (§15.1) was approved on 2026-11-08. The software factory and dark factory redesign (§10.1) was approved on 2026-11-11.
+> Status: **locked for v1**, 2026-11-07. Changes to anything in "Locked decisions" need an explicit design discussion and an update to this file. The desktop app (§17) was approved on 2026-11-08. Opt-in network access for phones and tablets (§15.1) was approved on 2026-11-08. The software factory and dark factory redesign (§10.1) was approved on 2026-11-11. Remote runners in sandboxes (§4.2, [remote-runners.md](remote-runners.md)) were proposed on 2026-11-12; the network questions in §15.2 await the user's decision.
 
 ## 1. What CodeDen is
 
@@ -42,9 +42,10 @@ Installed with `npx codeden`, or as the desktop app (§17). Open source under th
 | Database | SQLite through the built-in `node:sqlite` and Drizzle (`drizzle-orm/node-sqlite`), WAL mode |
 | Web UI | React 19 + Vite single-page app; Tailwind v4 + shadcn/ui; TanStack Router + TanStack Query; Zustand. **Not Next.js** |
 | API typing | Hono typed RPC client for HTTP; shared zod schemas for the WebSocket event model |
-| Agents | Claude Code through the **Claude Agent SDK**, using the user's installed `claude` binary. Codex through **`codex app-server`** (JSON-RPC, with types generated from the installed Codex). OpenCode through a private **`opencode serve`** per session (its v2 HTTP API and event stream). A generic **ACP** adapter comes after v1 |
+| Agents | Claude Code through the **Claude Agent SDK**, using the user's installed `claude` binary. Codex through **`codex app-server`** (JSON-RPC, with types generated from the installed Codex). OpenCode through a private **`opencode serve`** per session (its v2 HTTP API and event stream). A generic **ACP** adapter comes after v1. In a sandbox the same adapters run inside the remote runner; batch modes (`claude -p`, `codex exec`) are not used |
 | Agent ↔ app | One internal **MCP server** (Streamable HTTP) with **role-scoped tokens** (orchestrator, PM, agent) |
-| Process model | **Server and runner are separate processes** from day one (§4) |
+| Process model | **Server and runner are separate processes** from day one (§4). The server can drive several runners: the home runner next to it, and one per sandboxed session (§4.2) |
+| Execution backends | `local` (worktrees on this machine) is the default and needs nothing extra. Opt-in per project or session: `docker` (plain Docker Engine, a container per session) and `upstash-box` (a box per session). The whole runner runs inside the sandbox and clones the repo there ([remote-runners.md](remote-runners.md)) |
 | Terminal | node-pty in the runner, xterm.js in the UI |
 | Default autonomy | **Auto, risky actions ask** (§11.2). Overridable per project and per session |
 | Image generation | A pluggable `generate_image` tool available to every agent. Engines: Codex (the default when Codex is logged in), Gemini image models, OpenAI Images. Chosen in Settings (§12.5) |
@@ -53,7 +54,7 @@ Installed with `npx codeden`, or as the desktop app (§17). Open source under th
 | Projects | GitHub repos get the full issue/PR/evidence flow. **Local-only folders are supported** without the GitHub features |
 | Forges | GitHub only in v1 |
 | Platforms | Windows, macOS and Linux. **Windows is tested first** |
-| Network exposure | The runner, its MCP proxy and the server's `/mcp` listen on or answer **127.0.0.1 only**, always. The server's web UI, HTTP API and UI WebSockets are 127.0.0.1 only **by default**; **opt-in network access** (decided 2026-11-08, §15.1) moves just that HTTP listener to `0.0.0.0` on the same port, behind a password sign-in, for phones and tablets on the LAN or the user's own VPN |
+| Network exposure | The runner, its MCP proxy and the server's `/mcp` listen on or answer **127.0.0.1 only**, always. The server's web UI, HTTP API and UI WebSockets are 127.0.0.1 only **by default**; **opt-in network access** (decided 2026-11-08, §15.1) moves just that HTTP listener to `0.0.0.0` on the same port, behind a password sign-in, for phones and tablets on the LAN or the user's own VPN. Sandboxed runners are reached through an exec link, which changes nothing here; any listener for remote runners **needs the user's decision** (§15.2) |
 | Tooling | Biome (lint and format), tsdown (bundling), Vitest, Playwright (end-to-end) |
 
 ## 4. Architecture
@@ -97,9 +98,9 @@ The runner hosts everything that has to sit next to the code: agent processes (t
 
 - **Local today.** It's a separate, detached process that the server starts on demand. It's found again through a lock file in the data directory holding its port, token, PID and version.
 - **Survives server restarts.** A server restart (crash, update, dev reload) doesn't touch running agents. The server reconnects and catches up.
-- **Event journal.** The runner keeps events locally until the server acknowledges them by sequence number, so nothing is lost while the server is away.
+- **Event journal.** The runner keeps events locally until the server acknowledges them by sequence number, so nothing is lost while the server is away. Streamed deltas for one item are batched (up to about 50 ms) before they're journaled, and acknowledged events are compacted out of the journal lazily rather than on every ack.
 - **Upgrades.** On a version mismatch, the runner drains. It finishes or pauses turns, then restarts. Sessions are resumed through their provider's resume support, with an automatic "you were interrupted, continue" message when a turn was cut off.
-- **Remote later.** The same runner package can run inside an Upstash Box, a VPS or a container and connect back over the same protocol. That's the seam for the software factory; no remote backend ships in v1.
+- **Remote runners** ([remote-runners.md](remote-runners.md), phased). The same runner package runs, whole and unchanged, inside a sandbox: a Docker container or an Upstash Box, one per agent session. An **execution backend** makes, pauses and deletes sandboxes. The server reaches each sandboxed runner through an **exec link**: it starts `codeden runner-link` inside the sandbox through the backend's own stdio channel (`docker exec -i`, Upstash `exec.session`), which splices to the runner's loopback WebSocket. No listener is opened anywhere, and a dropped link costs nothing because the runner keeps journaling. In a sandbox the runner clones the repo into a path it chooses instead of making a worktree in `<home>/wt`. The orchestrator and PMs stay on the home runner next to the server. A design spike ran the packed runner in a Linux container with the Fake provider over both an exec link and a dial-out link.
 
 ### 4.3 Runner protocol
 
@@ -108,10 +109,20 @@ A versioned, zod-typed message protocol over one WebSocket:
 - **Server → runner commands:** `workspace.prepare`, `session.start`, `session.send`, `session.steer`, `session.interrupt`, `session.respond` (approval or answer), `session.stop`, `pty.*`, `browser.*`, `git.*`, `mcp.test` (an MCP server connection test, §12.4).
 - **Runner → server events:** normalized agent events (§7.3), process status, terminal output, browser frames. Each event carries a monotonically increasing `seq`, which the server acknowledges. Provider lists (with each provider's models) are sent at the handshake and again whenever a list changes, for example once model discovery finishes.
 - **Handshake:** the protocol version, runner version and capabilities are exchanged on connect.
+- **Transports.** The protocol is JSON messages and doesn't depend on the carrier. The server reaches a runner through a `RunnerTransport`:
+  - `loopback`: the local runner's `127.0.0.1` WebSocket, found through its lock file, as today.
+  - `exec`: newline-delimited JSON on the stdin and stdout of `codeden runner-link`, run inside a sandbox (§4.2).
+  - A `dial-out` transport, where the runner connects to the server, is deferred to the §15.2 decision.
+- **Additions for remote runners** (planned, [remote-runners.md](remote-runners.md) §18):
+  - `welcome` reports `platform`, `arch`, `home` and `backend`.
+  - `workspace.prepare` gains a `clone` strategy whose path the runner chooses.
+  - `fs.list/stat/read/write` and a chunked `transfer.*` stream, so the server never reads a remote worktree from its own disk.
+  - `mcp.request`/`mcp.response` frames tunnel MCP (§4.4).
+  - `runner.credentials` delivers provider credentials into runner memory after each handshake.
 
 ### 4.4 MCP access path
 
-Agents always call a **local MCP proxy inside the runner** (`http://127.0.0.1:<runnerPort>/mcp`). The proxy forwards to the server's `/mcp` over the runner connection, with the session's scoped token. Locally and remotely, agents see the same localhost address and nothing extra is exposed.
+Agents always call a **local MCP proxy inside the runner** (`http://127.0.0.1:<runnerPort>/mcp`), with the session's scoped token. A local runner's proxy forwards over HTTP to the server's loopback `/mcp`. A sandboxed runner's proxy tunnels each request over its runner link instead, and the server answers it in-process with the same token check, so `/mcp` stays loopback-only. Locally and remotely, agents see the same localhost address and nothing extra is exposed.
 
 ## 5. Repository layout
 
@@ -174,7 +185,9 @@ interface ProviderSession {
 }
 ```
 
-**`ProviderCapabilities` flags:** `resume`, `steer`, `interrupt`, `approvals`, `userQuestions`, `subagents`, `rollback`, `fork`, `images`, `planMode`, `reasoningEffort`, `mcp`, `skills`.
+**`ProviderCapabilities` flags:** `resume`, `steer`, `interrupt`, `approvals`, `userQuestions`, `subagents`, `rollback`, `fork`, `images`, `planMode`, `reasoningEffort`, `mcp`, `skills`, and two optional ones (absent counts as false):
+- `liveAutonomy`: an autonomy change reaches a running turn from its next tool call; without it, a running turn keeps its level and the change applies from the next turn.
+- `readOnly`: the `read_only` level is enforced natively (no file edits, no writing shell commands, no commits or pushes, §11.2); without it, the provider's sessions can't use `read_only`.
 
 **Forking.** An adapter with `fork` implements `forkConversation(resumeToken, { cwd })`. It copies that conversation into a new one at once and returns the copy's resume token, which a session then resumes like any other. The original conversation is never written to. The runner exposes it as `provider.fork`. `SessionOptions.forkFrom` does the same as a session opens: the adapter copies that conversation and the session resumes the copy. A `resumeToken` wins over it, and a provider without `fork` refuses it. An adapter that can stop a copy partway reports a `forkPoint` on a root turn's end event (`turn.completed`, `turn.failed`, `turn.interrupted`), an opaque position in its conversation. `forkConversation` with `upTo: forkPoint` copies through that turn and no further. When the conversation no longer holds that point (it was replaced or deleted), it throws `fork_point_missing` before copying anything, never falling back to the whole conversation; the runner reports that code as it is and every other failure as `fork_failed`.
 
@@ -223,7 +236,7 @@ A conversation is a **thread** made of **turns**, and each turn holds **items**.
 
 **Automatic retry** (`settings.sessions.autoRetry`, default on). When an agent session's root turn fails as `transient` or `usage_limit`, the session goes idle with no inbox item, and the server continues it with a `codeden` message ("Previous turn stopped (<reason>); continue where you left off."): after 20 s, 90 s and 5 min for transient failures (at most three in a row), or a minute after a usage limit resets. A notice in the failed turn says when. A user message or Stop cancels a pending retry; pending retries are derived from the turns table, so a restart keeps them. When the retries run out, there is no reset time, or the setting is off, the session fails as before (`failed`, a `run_failed` inbox item and the PM notices that follow). Orchestrator and PM sessions are never retried this way.
 
-**Subagents** are child threads with `parentThreadId` and `parentItemId`. The parent transcript shows a compact subagent card with live status. A finished subagent's item carries `stats` (total tokens, tool calls, duration) when the provider reports them, and the card shows them; providers that report none show none. The figures are display only and never added to usage totals, which come from the provider's own turn figures. Clicking it opens the child thread in a side panel or as its own view, and approvals raised inside a subagent surface in the parent and in the inbox.
+**Subagents** are child threads with `parentThreadId` and `parentItemId`. The parent transcript shows a compact subagent card with live status. A finished subagent's item carries `stats` (total tokens, tool calls, duration, and its own calls' tokens per model) when the provider reports them, and the card shows them; providers that report none show none. The card leads with what the run cost: the server prices its tokens per model like a turn (§12.6: reported, estimated from the price table, or not priced; "API-equivalent" for subscription logins), when the session's usage is read, so price edits apply, and the tooltip breaks the cost down by model. Claude streams each call's output count before the call ends, so once a Claude subagent finishes, its transcript (the SDK's `getSubagentMessages`) supplies the final counts and the card is sent again; when it can't be read, the streamed counts stay. The figures, cost included, are display only and never added to usage totals, which come from the provider's own turn figures. Clicking it opens the child thread in a side panel or as its own view, and approvals raised inside a subagent surface in the parent and in the inbox.
 
 ### 7.4 Utility model
 
@@ -253,7 +266,9 @@ All three roles are the same kind of agent session, differing only in **role**, 
 |---|---|---|---|
 | Orchestrator | 1 | `~/.codeden/orchestrator/` | Your front door. Creates and configures projects, routes requests to PMs, summarises status across projects |
 | Project Manager | 1 per project | Read-only view of the repo | Triages issues, plans work, starts and steers agent sessions, reviews results, escalates to you |
-| Agent | many | Its own worktree and branch | Does the work: code, tests, PRs, evidence |
+| Agent | many | Its own worktree and branch, or its own clone in a sandbox (§4.2) | Does the work: code, tests, PRs, evidence |
+
+The orchestrator and PMs always run on the home runner next to the server: they write no code, need little more than MCP, and are long-lived, so a sandbox each would add cost and no isolation.
 
 ### 8.2 How work flows
 
@@ -414,7 +429,7 @@ Issue ─► Identify type ┼─ Feature:  Analyze ───► Implement ─�
 
 **Vision.** Both factory modes require a project vision in `.codeden/VISION.md`, edited in the UI. It covers goals, target users and principles; what is out of scope; the quality bar; and **protected areas** (paths or topics that always need a human: auth, payments, data migrations, infrastructure, licensing). Agents get it in their prompts; the analyzer checks requests against it; the scout finds work with it.
 
-**Unattended in dark factory.** Nobody waits on the user in dark-factory mode. A question from the PM or a factory session (through `ask_user` or the provider's own question tool) is answered at once by the server: decide from the vision, which wins over the current code. The agent records each judgement call with `factory_record_decision`, and it reaches the inbox and the digest for review. Protected areas, a missing or self-contradicting vision, and irreversible actions outside the code are flagged at high priority, but the loop never blocks on them. Sessions the user starts still ask as usual. Approvals are never granted on the user's behalf: in a dark factory the PM's and factory sessions' approvals are **denied** at once with the same guidance, and sessions started by an automation, a PM or the factory in other modes wait 30 minutes for the user, then are denied (`decidedBy: policy`), so unattended work never waits forever.
+**Unattended in dark factory.** Nobody waits on the user in dark-factory mode. A question from the PM or a factory session (through `ask_user` or the provider's own question tool) is answered at once by the server: decide from the vision, which wins over the current code. An MCP server's form is never answered for the user, since its answers would go to the server as data: it is withdrawn (no data sent) on the same terms as an approval is denied. The agent records each judgement call with `factory_record_decision`, and it reaches the inbox and the digest for review. Protected areas, a missing or self-contradicting vision, and irreversible actions outside the code are flagged at high priority, but the loop never blocks on them. Sessions the user starts still ask as usual. Approvals are never granted on the user's behalf: in a dark factory the PM's and factory sessions' approvals are **denied** at once with the same guidance, and sessions started by an automation, a PM or the factory in other modes wait 30 minutes for the user, then are denied (`decidedBy: policy`), so unattended work never waits forever.
 
 **Limits** (required, enforced by the server, not left to agent judgement):
 - agents at once, automatic merges per day (with auto-merge on)
@@ -464,22 +479,29 @@ The UI calls these **Permissions** and shows them as a ladder, **Read-only → S
   - Offered only where the provider reports `capabilities.readOnly`; the server refuses `read_only` agent sessions on other providers. UI and orchestration read the capability, never the provider id.
   - **Claude:** the `default` permission mode, with CodeDen's PreToolUse hook denying the edit tools and every shell command outside the read-only allowlist. Agent sessions may also run the project's checks (test, lint, type-check commands without fix, write, snapshot-update or watch flags). The hook decides per call, so the level can change live.
   - **Codex:** the read-only sandbox with `never` approvals and no network: writes fail instead of asking; it applies from the next turn.
+  - **OpenCode:** CodeDen's policy answers each permission ask: every edit is refused, and every command outside the same read-only allowlist as Claude's (checks included for agent sessions), with the reason the agent sees. It decides per request, so the level can change live.
   - CodeDen's `create_pull_request` is hidden from and refused for read-only sessions.
   - The orchestrator and PMs are read-only by role (`SessionOptions.readOnly`) at every level, without checks.
 - **Supervised:** every edit and command asks.
+  - **Claude:** the `default` permission mode, with every edit and command routed to an approval.
+  - **Codex:** `untrusted` approvals with the workspace-write sandbox.
+  - **OpenCode:** every edit and command is routed to an approval.
 - **Auto, risky actions ask** (default):
   - Edits and normal commands inside the worktree run freely.
   - Risky actions go to the inbox: writes outside the worktree, force pushes, deleting branches, global installs, network access to unlisted hosts, and secrets access (reading a credentials file or dumping the environment; search patterns, file names used as data and creating an env file inside the worktree are not access).
   - **Claude:** `acceptEdits` plus a `canUseTool` policy classifier.
   - **Codex:** workspace-write sandbox (network off) plus on-request approvals. The sandbox keeps `.git` read-only and blocks the network, so Codex asks to escalate for ordinary work (`git commit`, `pnpm install`). CodeDen runs every such request through the same risk classifier: what the level allows is approved by policy at once (recorded as `decidedBy: policy`, never shown as a card to answer), and only risky actions reach the user. Patches and extra permissions are judged by their paths the same way. An approved escalation runs outside Codex's sandbox, as Claude's commands do.
+  - **OpenCode:** no OS sandbox. The session's permission rules make every edit, command, path outside the worktree and web fetch ask, and CodeDen's risk classifier decides each ask: approved by policy at once, or, for risky actions only, shown to the user.
 - **Full:** no approvals inside the worktree.
   - **Claude:** `bypassPermissions`, and the classifier asks only for writes outside the worktree.
   - **Codex:** workspace-write sandbox with the network on, plus on-request approvals that CodeDen's policy approves unless they write outside the worktree. (With `never`, Codex could not commit at all, since the sandbox keeps `.git` read-only.)
+  - **OpenCode:** the same asks as under Auto, and CodeDen's policy approves them all except writes outside the worktree.
 - **The OS temp directory** (`os.tmpdir()`, `%TEMP%`/`%TMP%`, `$TMPDIR`, `/tmp`, and Git Bash's `/tmp` on Windows) counts as inside the worktree for writes and deletes under Auto and Full, so logs and scratch files there don't ask. Only the temp directories themselves qualify: never their root, a filesystem root or the home directory, and a secrets file written there still asks. Supervised is unchanged.
 - **The session's own branch** (the branch of its own worktree, `SessionOptions.ownBranch`; never its base branch or `main`/`master`) may be force-pushed **with a lease** without asking, as after a rebase; plain `--force`, refspecs with `+` and remote deletions still ask. `git branch -d` (merged work only) doesn't ask; `-D` does. `create_pull_request` retries a rejected push of the session's own branch with a lease.
 - **Claude's own notes** (its plans folder, `plansDirectory` or `~/.claude/plans`, and the project's auto-memory folder) count like the temp directory for Claude sessions under Auto and Full: plan mode and memory writes don't ask. Only the user's own Claude settings can move them, never a folder covering Claude's config folder, the home directory or a filesystem root, and a secrets file there still asks.
+- **MCP tools and elicitations (Codex).** Codex asks before running one of the user's MCP tools that isn't marked read-only, through an MCP elicitation marked as a tool approval (`_meta.codex_approval_kind: "mcp_tool_call"`). CodeDen decides it as it decides a Claude MCP tool call: approved by policy under Auto and Full, a card naming the server, the tool and its arguments under Supervised (unless Codex marks it for the user's own answer), declined under Read-only. CodeDen's own MCP server is trusted and never asks. An MCP server's own form becomes a question card built from its schema (`UserQuestionItem.mcpServer`), and its answers go back to the server as the form's content; the card can also be dismissed, which sends the server nothing. A link a server asks the user to open (URL mode) becomes an approval card showing the link (web links only), which the user opens. Neither is decided by policy.
 - **The classifier reads commands like a shell:** quoted text, heredoc bodies and PowerShell here-strings are data, redirects count only outside quotes, and relative paths resolve from where a `cd` (in the same command, or an earlier one Claude reports) moved the shell.
-- **Changing the level on a running session** saves it on the session (`PATCH /api/sessions/:id`, recorded as `session.updated`) and sends it to the live provider session. Claude applies it from the next tool call (`liveAutonomy`); Codex from the next turn, through per-turn approval and sandbox overrides. Approvals already waiting stay waiting.
+- **Changing the level on a running session** saves it on the session (`PATCH /api/sessions/:id`, recorded as `session.updated`) and sends it to the live provider session. Claude and OpenCode apply it from the next tool call (`liveAutonomy`); Codex from the next turn, through per-turn approval and sandbox overrides. Approvals already waiting stay waiting.
 - **Plan mode** sits on top of the level, for agent sessions on providers that report `capabilities.planMode` (Claude today):
   - Turned on when a session starts or from the composer (`Session.planMode`, sent like the level). The agent explores and proposes a plan.
   - While planning, file edits and writing commands are refused at every level, Full included, by the read-only command rules (which also refuse writing options such as `sort -o`, and unquoted parentheses and braces); reads and the project's checks run. The agent's own notes stay writable at every level, Read-only included, since Claude writes its plan file there. **Claude:** the `plan` permission mode, plus CodeDen's PreToolUse hook (Claude's plan mode hands edits to `canUseTool`, which Auto and Full would approve).
@@ -537,8 +559,10 @@ node-pty sessions owned by the runner, so they survive server restarts, with bou
   - navigate
   - accessibility snapshot
   - click and type
+  - pointer actions at page coordinates (click, hover, drag, scroll) and typing at whatever has focus: computer use, step 1, for what the snapshot can't reach (canvases, maps, charts, drag handles, custom sliders, games, hover menus)
   - screenshot
   - console and network logs
+- **Coordinates.** Viewport CSS pixels, origin top-left: the pixels of a viewport screenshot (agent screenshots are taken at `scale: "css"`) and the units of `getBoundingClientRect`. They are stateless, the same on either engine, and points outside the current viewport are refused.
 - **Screenshots.** They can be posted to the chat with `share_to_chat` or attached as PR evidence.
 - **Isolation.** One browser context per session in the runner's Chromium; one in-memory session partition per session for native views (`codeden-browser:<sessionId>`, never the window's own session). Cookies and storage never cross sessions.
 - **Dev servers.** CodeDen discovers running dev servers so agents and you can open them in one click.
@@ -611,7 +635,7 @@ Detailed, trustworthy reports on spend and usage across every provider, project 
   - average cost per merged PR and per session
   - drill-down from any bar to the sessions behind it
   - CSV export
-- **In context.** Cost and tokens appear on each session header and turn footer, a per-project spend card sits on project home, and the dark-factory budget meter (§10.1) reads from the same ledger.
+- **In context.** Cost and tokens appear on each session header and turn footer, a per-project spend card sits on project home, and the dark-factory budget meter (§10.1) reads from the same ledger. Each finished subagent card shows what that run cost (§7.3), priced with the same table and labels; it is a breakdown of work the turns already count, so it never adds to the ledger, totals, budgets or factory limits.
 - **Budgets and alerts.** Optional daily or monthly spend alerts globally and per project, delivered as inbox items and notifications. Factory limits enforce the same figures.
 
 ## 13. UI
@@ -682,6 +706,16 @@ The owner can open CodeDen from a phone or tablet on the same network or over th
 - **Reachable remotely:** the UI, the HTTP API and the UI WebSockets (`/ws`, `/ws/pty`, `/ws/browser`), behind the session. **Never reachable remotely:** `/mcp` (404 to remote peers), the runner and its MCP proxy (always 127.0.0.1), and network management (the switch and the password are loopback-only; remote devices see the status and can sign devices out). The install token is never accepted from a remote peer.
 - **Signed-in devices** are listed with Sign out and Sign out all; revoking closes remote connections so the device notices at once.
 - **Plain http.** There is no certificate for a LAN address, so phones allow no service worker, push notifications or microphone there; CodeDen ships a manifest and icons for Add to Home Screen, but no service worker. HTTPS (for example behind the user's own reverse proxy) is a later step.
+
+### 15.2 Remote runners and the network rule (**needs the user's decision**)
+
+Details are in [remote-runners.md](remote-runners.md) §7 and §9.2. Nothing here changes the §3 rule until the user decides.
+
+- **Proposed: exec links only.** The server reaches sandboxed runners through the backend's own authenticated stdio channel (the Docker daemon, Upstash's API over TLS). The runner listens on the sandbox's loopback, and the server opens no new listener, so the rule holds unchanged.
+- **Deferred:** a dial-out attach listener for runners the server can't exec into. It would be a separate port, off by default, bound to 127.0.0.1 and exposed through the user's own reverse proxy or tunnel, with per-runner secrets over TLS.
+- **Deferred:** an internet-facing UI for a self-hosted server. The user's VPN works today.
+- **Tokens are the boundary.** Docker Desktop forwards `host.docker.internal` to the host's loopback, so a local container reaches 127.0.0.1 services as a loopback peer (seen in the spike). The install token and the server's own secrets never enter a sandbox. Provider credentials are sent over the link into runner memory only, never into images, snapshots or container config.
+- **GitHub credentials in sandboxes:** brokered per server-initiated git operation (recommended), a token scoped to the repo in the sandbox, or none (git bundles through the server). The user picks one.
 
 ## 16. Distribution and operations
 
@@ -770,7 +804,8 @@ Browser speech recognition doesn't work inside Electron, so dictation there uses
 | Desktop | Desktop app | The Electron app (§17): installers, tray, notifications, deep links, automatic updates |
 | Browser | Browser panel | Phase 1: the full-panel screencast on every surface. Phase 2: native browser views in the desktop app with a per-session CDP relay (§12.2, §17) |
 | OpenCode | Third provider | OpenCode through a private `opencode serve` per session (§7.2): setup, models, approvals, questions, subagents, steering, resume and usage |
-| Later | | ACP adapter, OpenCode's revert, fork and plan agent, remote runners (Upstash Box, SSH/VPS, Docker), webhooks, GitLab and other forges, remote/mobile access |
+| Remote runners | Sandboxed agent sessions | Eight phases ([remote-runners.md](remote-runners.md) §18): several runners with per-session routing; the exec link (`codeden runner-link`); clone workspaces, file access and MCP over the link; the Docker backend; the runner picker and health; the Upstash Box backend; idle pause, cleanup and compute cost; the self-hosting guide |
+| Later | | ACP adapter, OpenCode's revert, fork and plan agent, more runner backends (Docker Sandboxes, SSH/VPS, a dial-out link), local-only projects in sandboxes, webhooks, GitLab and other forges, remote/mobile access |
 
 ## 20. Spikes before M1 (de-risk first)
 

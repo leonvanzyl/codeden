@@ -36,7 +36,7 @@ const PNG_B64 =
 
 /** Paste an image file into the composer the way the clipboard does. */
 async function pasteImage(page: Page) {
-  const composer = page.getByRole("textbox", { name: "Message" });
+  const composer = page.getByLabel("Message", { exact: true });
   await composer.evaluate((el, b64) => {
     const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
     const data = new DataTransfer();
@@ -88,7 +88,7 @@ async function expectOpensInViewer(page: Page) {
 async function pasteSendAndReload(page: Page, text: string) {
   await settle(page);
   await pasteImage(page);
-  const composer = page.getByRole("textbox", { name: "Message" });
+  const composer = page.getByLabel("Message", { exact: true });
   await composer.fill(text);
   await composer.press("Enter");
   await expect(page.getByText(text, { exact: true }).first()).toBeVisible();
@@ -126,7 +126,7 @@ test("a pasted image shows as a thumbnail in the orchestrator chat, also after a
   page,
 }) => {
   await page.goto(`${env("CODEDEN_E2E_URL")}/`);
-  const composer = page.getByRole("textbox", { name: "Message" });
+  const composer = page.getByLabel("Message", { exact: true });
   await composer.fill("Hello orchestrator");
   await composer.press("Enter");
   await expect(page.getByText(/^Echo: /).first()).toBeVisible({ timeout: 30_000 });

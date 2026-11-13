@@ -1,12 +1,20 @@
-import type { RateLimitsResponse, RateLimitWindow } from "@codeden/contracts";
+import type { RateLimitsResponse, RateLimitWindow, SubagentCost } from "@codeden/contracts";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { BreakdownTable } from "@/components/usage/breakdown";
-import { money, percent, tokens, trend } from "@/components/usage/format";
+import {
+  money,
+  percent,
+  subagentCostLines,
+  subagentCostText,
+  tokens,
+  trend,
+} from "@/components/usage/format";
 import { mockReport } from "@/components/usage/mock-data";
 import { colorSlots } from "@/components/usage/palette";
 import { presetRange } from "@/components/usage/range-picker";
 import { RateLimitMeters } from "@/components/usage/rate-limits";
+import { costIsCurrent } from "@/components/usage/subagent-cost";
 import { TopSessionsTable } from "@/components/usage/top-sessions";
 import { UsageTotals } from "@/components/usage/totals";
 import { ReportsPage } from "@/routes/reports";
@@ -29,6 +37,59 @@ describe("usage formatting", () => {
     expect(trend(112, 100)).toEqual({ text: "+12%", up: true });
     expect(trend(96, 100)).toEqual({ text: "−4%", up: false });
     expect(trend(5, 0)).toBeNull();
+  });
+
+  it("labels a subagent's cost and explains it per model", () => {
+    const model = (name: string, costUsd: number, costSource: SubagentCost["costSource"]) => ({
+      model: name,
+      inputTokens: 1_200,
+      outputTokens: 300,
+      cacheReadTokens: 40_000,
+      cacheWriteTokens: 15_000,
+      reasoningTokens: 0,
+      costUsd,
+      costSource,
+    });
+    const reported: SubagentCost = {
+      itemId: "a1",
+      costUsd: 0.42,
+      costSource: "reported",
+      models: [{ ...model("anthropic/claude-opus-5-5", 0.42, "reported"), label: "Opus 5.5" }],
+    };
+    expect(subagentCostText(reported)).toBe("$0.42");
+    expect(subagentCostLines(reported, "api")).toEqual([
+      "Subagent cost",
+      "Opus 5.5: $0.42 · 1k input · 300 output · 40k cache reads · 15k cache writes",
+    ]);
+    const partly: SubagentCost = {
+      itemId: "a1",
+      costUsd: 0.0123,
+      costSource: "estimated",
+      models: [model("claude-haiku-5-5", 0.0123, "estimated"), model("mystery", 0, "unpriced")],
+    };
+    expect(subagentCostText(partly)).toBe("≈ $0.012");
+    expect(subagentCostLines(partly, "subscription")).toEqual([
+      "API-equivalent cost (estimated from list prices) · not priced: mystery",
+      "claude-haiku-5-5: ≈ $0.012 · 1k input · 300 output · 40k cache reads · 15k cache writes",
+      "mystery: not priced · 1k input · 300 output · 40k cache reads · 15k cache writes",
+    ]);
+    const none: SubagentCost = {
+      ...partly,
+      costSource: "unpriced",
+      models: [model("x", 0, "unpriced")],
+    };
+    expect(subagentCostText(none)).toBeNull();
+    expect(subagentCostLines(none, "api")[0]).toBe("Not priced: no price for x");
+    expect(subagentCostText(undefined)).toBeNull();
+    expect(subagentCostLines(undefined, "api")).toEqual([]);
+
+    // A cost is current while it priced the tokens the card shows.
+    const shown = [
+      { inputTokens: 1_200, outputTokens: 300, cacheReadTokens: 40_000, cacheWriteTokens: 15_000 },
+    ];
+    expect(costIsCurrent(reported, shown)).toBe(true);
+    expect(costIsCurrent(reported, [{ ...shown[0], outputTokens: 900 } as never])).toBe(false);
+    expect(costIsCurrent(undefined, shown)).toBe(false);
   });
 
   it("computes preset ranges ending today", () => {

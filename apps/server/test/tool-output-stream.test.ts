@@ -1,11 +1,11 @@
-import type { AgentEvent, Item } from "@codeden/contracts";
-import { beforeEach, describe, expect, it } from "vitest";
-import { appendOutput } from "../src/events/reducer/items";
 import {
+  type AgentEvent,
+  type Item,
   OUTPUT_PREVIEW_CHARS,
-  previewRecord,
   STREAMED_OUTPUT_CHARS,
-} from "../src/services/sessions/preview";
+} from "@codeden/contracts";
+import { beforeEach, describe, expect, it } from "vitest";
+import { previewRecord } from "../src/services/sessions/preview";
 import { sampleSession } from "./helpers";
 import { MemoryProjection } from "./support/memory-projection";
 
@@ -88,24 +88,5 @@ describe("streamed tool output", () => {
     });
     const final = p.item("c1")?.item;
     expect(final?.kind === "tool_call" && final.output).toEqual(done);
-  });
-
-  it("keeps short output whole, and cuts an oversized chunk or a split surrogate pair cleanly", () => {
-    expect(appendOutput(appendOutput(undefined, "a\n", 10), "b\n", 10)).toEqual({
-      text: "a\nb\n",
-      truncated: false,
-      totalBytes: 4,
-    });
-    expect(appendOutput({ text: "abc", truncated: false }, "0123456789xy", 10)).toEqual({
-      text: "23456789xy",
-      truncated: true,
-      totalBytes: 15,
-    });
-    // "😀" is two UTF-16 units (4 UTF-8 bytes); a cut between them drops the lone half.
-    expect(appendOutput(undefined, "😀abc", 4)).toEqual({
-      text: "abc",
-      truncated: true,
-      totalBytes: 7,
-    });
   });
 });

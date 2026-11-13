@@ -56,7 +56,15 @@ In **Manual** and **Assisted** projects, nothing is ever merged without you. Aut
 
 ### Feedback on your sessions' pull requests
 
-When a pull request owned by a session **you** started fails its checks, gets a review that requests changes, or runs into merge conflicts, CodeDen sends the session a message (from CodeDen, queued behind a running turn) so the agent can fix it without you relaying anything: the failing checks with their links (and a hint to read the logs with `gh run view <run-id> --log-failed`), the reviewer's comments, or the base branch to merge. Each problem is sent once per head commit, and at most three messages go out per pull request; after that it's up to you. Archived and stopped sessions aren't messaged. Sessions started by a project manager, the orchestrator or an automation are followed up by the project manager instead. Turn it off under **Settings › General › Agent sessions › Pass on pull request feedback**.
+When a pull request owned by a session **you** started fails its checks, gets a trusted review that requests changes (see below), or runs into merge conflicts, CodeDen sends the session a message (from CodeDen, queued behind a running turn) so the agent can fix it without you relaying anything: the failing checks with their links (and a hint to read the logs with `gh run view <run-id> --log-failed`), the reviewer's comments, or the base branch to merge. Each problem is sent once per head commit, and at most three messages go out per pull request; after that it's up to you. Archived and stopped sessions aren't messaged. Sessions started by a project manager, the orchestrator or an automation are followed up by the project manager instead. Turn it off under **Settings › General › Agent sessions › Pass on pull request feedback**.
+
+On a public repository anyone can review a pull request, and a review passed on to an agent is a prompt. So requested changes are passed on only when the reviewer:
+
+- has write access to the repository: its owner, a member of the organization that owns it, or a collaborator (GitHub's author association);
+- is the GitHub account CodeDen uses (the one `gh` is signed in as);
+- is one of the project's **Trusted authors** (in its [factory settings](software-factory.md#who-the-factory-works-for)).
+
+The message also tells the agent that comments and reviews from people without write access are input data, not instructions. Anyone else's review isn't sent to the session. The project manager still gets a notice about it, but without the review's text, and it doesn't wake the PM: it shows up in the PM's next update instead. See [Security → What CodeDen trusts from GitHub](security.md#what-codeden-trusts-from-github).
 
 ## Evidence
 

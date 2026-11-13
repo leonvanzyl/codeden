@@ -40,6 +40,7 @@ export * from "./runner/messages";
 export * from "./session-files";
 export * from "./settings";
 export * from "./slash-commands";
+export * from "./tool-output";
 export * from "./tools";
 export * from "./updates";
 export * from "./usage";

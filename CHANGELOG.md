@@ -6,6 +6,38 @@ All notable changes to CodeDen are documented here. The format follows [Keep a C
 
 The notes for the next release are in [`changes/`](changes/README.md), one file per change. The release moves them into a version section here.
 
+## [0.6.3] - 2026-11-12
+
+### Added
+
+- **Switch skills on and off from the Agents page.** Each skill on the **Skills** tab now has a switch, so you can stop an agent seeing a skill without deleting or moving its folder. CodeDen writes the provider's own setting: `skillOverrides` in Claude Code's settings files and `[[skills.config]]` in `~/.codex/config.toml`. You see the diff before it's saved, and a backup is taken first.
+  - If a settings file already turns the skill off or on, CodeDen edits that file. Otherwise it writes your user-level file, so the switch reaches every session, worktrees included. Codex project skills are matched by name, because their path is different in every worktree.
+  - Claude Code's partial states show next to the skill as **name-only** or **user-only**.
+  - **What's loaded** dims the skills that are off for the session and labels them **off**. The composer's `/` menu leaves them out.
+- **Fork from an earlier turn.** When the agent went the wrong way a few turns ago, hover the line under any finished turn and choose **Fork from here**. You get a new session whose conversation ends with that turn and whose worktree holds the code as it was right after it, uncommitted changes included. The original is unchanged, and the turns after that point aren't in the fork. Works with Claude Code and Codex for turns from this version on; older turns can still be forked at the latest one. The fork's empty transcript and **Details** say which turn it was forked from.
+
+### Changed
+
+- **New session opens a session, not a form.** The project's **New session** button, the sidebar's **+** and "New session…" in the command palette now open a draft in the main panel with the same message box as every session: paste or drop screenshots and files, `@` to mention project files, `/` for the project's commands and skills, and the provider, model, effort, permissions and **Plan** pickers. Nothing is created until you send; the first message starts the session and the draft becomes it, with your message already on screen. The optional work key moved to the **⋯** at the top, and an unsent draft is kept in the browser for when you come back.
+
+### Fixed
+
+- **Long command output no longer freezes the server.** While a command streams a lot of output (a verbose build, a long test run, a log tail), CodeDen keeps only its most recent 64,000 characters on the transcript item and records the full size. Before, each chunk rewrote all the output so far, so a big build slowed every session, the UI and requests to a crawl.
+- **Streaming answers cost far less.** The runner now sends an agent's streamed text in batches of up to 50 ms instead of one event per token, so a long answer is a handful of events in the session history, not thousands. Acknowledged events leave the runner's journal in occasional cleanups instead of a full rewrite of the journal after every event, which kept the runner busy (and its agents and terminals waiting) while agents streamed. Events the app hasn't stored yet are still kept and replayed after a restart, as before.
+- **An idle factory no longer fills the database or keeps the factory panel busy.** A factory loop check that finds nothing to do now saves nothing. Before, every check (every 30 seconds, and whenever a factory session changed) stored a full copy of the loop, adding thousands of records per project per day, and made every open factory panel reload. The panel now refreshes every 30 seconds only while work is in flight, every 5 minutes while the factory is idle, and at once whenever the factory changes; its "last check" is as of that refresh.
+- **Codex sessions no longer refuse MCP tools behind your back.** Codex asks before it runs one of your MCP tools that isn't marked read-only, and CodeDen used to decline every such request without showing it. Now it is decided like any other tool call: approved under **Auto** and **Full** (recorded in the transcript), shown as an approval card naming the server, the tool and its arguments under **Supervised**, and refused under **Read-only**.
+  - When an MCP server asks you to fill in a form, you get a question card built from the form's fields, and your answers go back to the server. Optional fields can be left empty, and **Dismiss** sends the server nothing. In sessions nobody is watching (started by an automation, a PM or the factory), an unanswered form is withdrawn on the same terms as an approval is denied, so the run never waits forever.
+  - When a server asks you to open a link (to sign in, say), the card shows the link for you to open. CodeDen never opens it for you.
+  - Approval cards for tools now show the tool's arguments, for Claude sessions too.
+- **Session details no longer shows made-up usage.** The Context window section shows only what the provider reported: a figure it hasn't reported reads "—", and the bar appears once the context size is known. The cost comes from the usage ledger, like the session header: estimates are marked "≈", subscription logins see "API-equivalent", and a session with no turns says "No usage yet". Before, any missing figure fell back to sample values, so every Codex session claimed "$1.84 this session" and a new session showed 68k of 200k tokens used.
+- **A model with no price says "Not priced" instead of "$0.00".** When the provider reports no cost and the price table has no price for the model, Session details, the session header and the turn footer now say so rather than showing a zero cost.
+- **Long command output no longer slows the open tab, and cut output says so.** While a command streams, the transcript in your browser keeps only its most recent 16,000 characters, the same tail a reload shows. Before, the tab kept every chunk and redrew all of it, using more memory and CPU the longer a build or test run went on.
+  - When a tool's output was cut, its details now say how much is shown ("Showing 15.6 KB of 1.9 MB"), and **Show full output** loads what CodeDen stored for it. If only part of it was stored, it says how much was kept.
+
+### Security
+
+- **A project manager can no longer quietly change an automation you switched on.** When a PM changes the trigger, action (prompt, agent or permissions) or guards of an automation that is on, the automation now switches off, and an inbox item lists what changed. It runs again only once you switch it on in **Automations**. Before, the PM could, for example, give a nightly automation running at Auto a new prompt with Full permissions every 5 minutes, and it kept running without anyone seeing the change. Renaming an automation or changing its description leaves it on. A PM also can no longer change automations that run in all projects; only you can, in **Automations**.
+
 ## [0.6.2] - 2026-11-12
 
 ### Added

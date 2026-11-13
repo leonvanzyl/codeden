@@ -114,6 +114,8 @@ export function useForkSession(session: Session) {
   return {
     canFork,
     blocked: canFork ? (fork.isPending ? "Forking…" : forkBlocked(session)) : null,
+    /** A fork is under way (its "Forking the session…" toast is showing). */
+    pending: fork.isPending,
     /** Fork at the latest moment, or through the end of `turnId`. */
     fork: (turnId?: string) => fork.mutate(turnId),
   };

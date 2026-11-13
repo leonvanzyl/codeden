@@ -89,6 +89,7 @@ export async function buildStatus(ctx: FactoryContext, projectId: string): Promi
     scout: project.autonomyMode === "dark_factory" ? scoutStatus(ctx, project, loop, spend) : null,
     visionExists: visionOf(project).exists,
     lastDigest: ctx.store.digests(projectId, 1)[0] ?? null,
-    lastTickAt: loop.lastTickAt,
+    // Kept in memory: an idle tick saves nothing (`FactoryStore.saveTick`).
+    lastTickAt: ctx.store.lastTick(projectId) ?? loop.lastTickAt,
   };
 }

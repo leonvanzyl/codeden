@@ -28,6 +28,7 @@ export function DiffLinePicker({
   onComment,
   onPreview,
   className,
+  labelClassName,
 }: {
   path: string;
   patch: string;
@@ -35,6 +36,8 @@ export function DiffLinePicker({
   /** The lines picked so far, to highlight in the diff; null when the list closes unused. */
   onPreview: (range: ReviewRange | null) => void;
   className?: string;
+  /** For the visible "Comment" label (the button keeps its accessible name without it). */
+  labelClassName?: string;
 }) {
   const lines = useMemo(() => pickerLines(patch), [patch]);
   const [open, setOpen] = useState(false);
@@ -102,7 +105,8 @@ export function DiffLinePicker({
           aria-label={`Comment on lines of ${path}`}
           title="Pick lines to comment on (arrow keys, then Enter)"
         >
-          <MessageSquarePlus /> Comment
+          <MessageSquarePlus />
+          <span className={labelClassName}>Comment</span>
         </Button>
       </PopoverTrigger>
       <PopoverContent

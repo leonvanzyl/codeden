@@ -164,3 +164,24 @@ export type AgentEventOf<T extends AgentEventType> = Extract<AgentEvent, { type:
 export const AGENT_EVENT_TYPES = AgentEvent.options.map(
   (o) => o.shape.type.value,
 ) as readonly AgentEventType[];
+
+/**
+ * Merge two consecutive `item.delta` events into one that appends both texts, when they
+ * extend the same item the same way: same thread, turn and item, same delta type and, for
+ * tool output, the same stream. Applying the result equals applying `a` then `b`. Returns
+ * `undefined` when they can't be merged.
+ */
+export function mergeItemDeltas(
+  a: AgentEventOf<"item.delta">,
+  b: AgentEventOf<"item.delta">,
+): AgentEventOf<"item.delta"> | undefined {
+  if (a.itemId !== b.itemId || a.turnId !== b.turnId || a.threadId !== b.threadId) return;
+  const x = a.delta;
+  const y = b.delta;
+  if (x.type === "tool_input" && y.type === "tool_input") {
+    return { ...b, delta: { ...y, partialJson: x.partialJson + y.partialJson } };
+  }
+  if (x.type === "tool_output" && y.type === "tool_output" && x.stream !== y.stream) return;
+  if (x.type !== y.type || x.type === "tool_input" || y.type === "tool_input") return;
+  return { ...b, delta: { ...y, text: x.text + y.text } };
+}

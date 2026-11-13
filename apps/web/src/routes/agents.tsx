@@ -27,6 +27,14 @@ export const AGENT_TABS: { id: AgentTab; label: string }[] = [
   ...(providersWith("hooks").length > 0 ? [{ id: "hooks" as const, label: "Hooks" }] : []),
 ];
 
+/**
+ * The tab strip scrolls sideways on phones: a tab that becomes the open one (e.g. from a link
+ * to Hooks) is scrolled into view. A stable ref callback, so it runs only then.
+ */
+function revealTab(el: HTMLButtonElement | null) {
+  el?.scrollIntoView({ block: "nearest", inline: "nearest" });
+}
+
 /** Agent configuration (§12.4): each provider's native files, edited in place. */
 export function AgentsPage({ tab, projectId }: { tab: AgentTab; projectId: string | null }) {
   const navigate = useNavigate();
@@ -71,15 +79,16 @@ export function AgentsPage({ tab, projectId }: { tab: AgentTab; projectId: strin
           </Select>
         }
       />
-      <div className="flex min-h-0 flex-1 flex-col px-6 pt-4 pb-6">
-        <div className="mb-4 flex items-center gap-1 border-b border-border">
+      <div className="flex min-h-0 flex-1 flex-col px-4 pt-4 pb-6 sm:px-6">
+        <div className="mb-4 flex shrink-0 items-center gap-1 border-b border-border scroll-thin max-md:overflow-x-auto">
           {AGENT_TABS.map((t) => (
             <button
               key={t.id}
+              ref={tab === t.id ? revealTab : undefined}
               type="button"
               onClick={() => go({ tab: t.id })}
               className={cn(
-                "-mb-px border-b-2 px-3 py-2 text-[13px] text-muted-foreground transition-colors hover:text-foreground",
+                "-mb-px shrink-0 border-b-2 px-3 py-2 text-[13px] whitespace-nowrap text-muted-foreground transition-colors hover:text-foreground",
                 tab === t.id ? "border-primary text-foreground" : "border-transparent",
               )}
             >

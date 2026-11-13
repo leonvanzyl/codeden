@@ -1,10 +1,11 @@
 import type { AgentConfigScope, LoadedHooks } from "@codeden/contracts";
+import { EditorView } from "@codemirror/view";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { formToHandler } from "@/components/agents/hook-form";
 import { HooksList } from "@/components/agents/hooks-list";
 import { McpServers } from "@/components/agents/mcp-servers";
-import { SkillsView } from "@/components/agents/memory-editor";
+import { MemoryEditor, SkillsView } from "@/components/agents/memory-editor";
 import { PatchView } from "@/components/agents/patch-dialog";
 import { LoadedConfig } from "@/components/workbench/loaded-config";
 import { createMockClient } from "@/lib/api/mock";
@@ -175,6 +176,48 @@ describe("SkillsView", () => {
     expect(row?.getAttribute("data-muted")).toBe("true");
     // The cached menu is marked stale, so the composer asks again before offering the skill.
     expect(queryClient.getQueryState(menu)?.isInvalidated).toBe(true);
+  });
+});
+
+describe("ConfigFilesView on a phone", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("opens a file in the list's place and keeps its draft across Back", async () => {
+    vi.spyOn(window, "matchMedia").mockImplementation(
+      (query: string) =>
+        ({
+          matches: query === "(max-width: 767.98px)",
+          media: query,
+          onchange: null,
+          addListener: () => {},
+          removeListener: () => {},
+          addEventListener: () => {},
+          removeEventListener: () => {},
+          dispatchEvent: () => false,
+        }) as MediaQueryList,
+    );
+    renderWithClient(<MemoryEditor projectId="p-storefront" />, createMockClient());
+    const rowName = /^\.claude\/rules\/testing\.md/;
+    // The list comes first: no file is open.
+    const row = await screen.findByRole("button", { name: rowName });
+    expect(screen.queryByRole("button", { name: "Back to files" })).toBeNull();
+    fireEvent.click(row);
+    const back = await screen.findByRole("button", { name: "Back to files" });
+    expect(screen.queryByRole("button", { name: rowName })).toBeNull();
+
+    // Edit the open file, go back to the list and open it again: the draft is still there.
+    const editor = screen.getByTestId("config-file-editor");
+    await waitFor(() => expect(editor.querySelector(".cm-editor")).toBeTruthy());
+    const view = EditorView.findFromDOM(editor.querySelector(".cm-editor") as HTMLElement);
+    view?.dispatch({ changes: { from: 0, insert: "- Run the tests first.\n" } });
+    const save = screen.getByRole("button", { name: "Review & save" }) as HTMLButtonElement;
+    await waitFor(() => expect(save.disabled).toBe(false));
+    fireEvent.click(back);
+    expect(screen.queryByRole("button", { name: "Review & save" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: rowName }));
+    expect(
+      (screen.getByRole("button", { name: "Review & save" }) as HTMLButtonElement).disabled,
+    ).toBe(false);
   });
 });
 

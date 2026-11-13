@@ -1,4 +1,4 @@
-import type { BrowserTab } from "@codeden/contracts";
+import { type BrowserTab, MAX_FOCUS_TYPE_CHARS } from "@codeden/contracts";
 import { z } from "zod";
 import { defineTool, ToolError } from "../define";
 
@@ -60,7 +60,8 @@ export const browserSnapshot = defineTool({
 
 export const browserClick = defineTool({
   name: "browser_click",
-  description: "Click an element by its ref from browser_snapshot.",
+  description:
+    "Click an element by its ref from browser_snapshot. For things without a useful ref (canvas, map, drag handle), click at screenshot coordinates with browser_mouse.",
   roles: ["agent"],
   scope: "session",
   input: z.object({
@@ -77,19 +78,24 @@ export const browserClick = defineTool({
 
 export const browserType = defineTool({
   name: "browser_type",
-  description:
-    "Fill an editable element (input, textarea, contenteditable) by ref, replacing its value. `submit: true` presses Enter afterwards.",
+  description: `Fill an editable element (input, textarea, contenteditable) by ref, replacing its value. Without a ref, types the text as key presses into whatever has focus (at most ${MAX_FOCUS_TYPE_CHARS} characters), e.g. after clicking into a canvas editor with browser_mouse. \`submit: true\` presses Enter afterwards.`,
   roles: ["agent"],
   scope: "session",
-  input: z.object({
-    ref,
-    text: z.string().max(100_000),
-    submit: z.boolean().optional(),
-    tabId,
-  }),
+  input: z
+    .object({
+      ref: ref.optional(),
+      text: z.string().max(100_000),
+      submit: z.boolean().optional(),
+      tabId,
+    })
+    .refine((v) => v.ref !== undefined || v.text.length <= MAX_FOCUS_TYPE_CHARS, {
+      message: `Without a ref, type at most ${MAX_FOCUS_TYPE_CHARS} characters`,
+      path: ["text"],
+    }),
   handler: async (input, { services, sessionId }) => {
     await services.browser.agentCommand({ name: "browser.type", sessionId, ...input });
-    return `Typed into ${input.ref}${input.submit ? " and pressed Enter" : ""}.`;
+    const where = input.ref ? `into ${input.ref}` : "at the focused element";
+    return `Typed ${where}${input.submit ? " and pressed Enter" : ""}.`;
   },
 });
 

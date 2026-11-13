@@ -29,7 +29,7 @@ import { planFork } from "./fork";
 import type { InputDecorator } from "./input-decorator";
 import type { LaunchFork, SessionLauncher } from "./launcher";
 import type { Outbox } from "./outbox";
-import { isTransientRunnerError, OutboxHolds } from "./outbox-holds";
+import { isTransientRunnerError, isTurnRunningError, OutboxHolds } from "./outbox-holds";
 import { planModeUnsupported, readOnlyUnsupported } from "./permissions";
 import type { Answerer, QuestionBroker } from "./questions";
 import { applyPendingConfig, updateSession } from "./reconfigure";
@@ -71,9 +71,13 @@ export class SessionService {
   readonly launching = new Map<string, Promise<void>>();
   /** Rewrites a turn's input at send time (the orchestration status digest, §8.4). */
   private inputDecorator: InputDecorator | undefined;
-  /** Sessions with a delivery in flight: one at a time, so others queue behind it (`sendNow`). */
-  private readonly delivering = new Set<string>();
   private readonly holds: OutboxHolds;
+  /**
+   * Sessions with a turn on its way to the runner (between the status check and the runner's
+   * answer). Another message for one of them waits in the queue instead of racing it into a
+   * second turn.
+   */
+  private readonly delivering = new Set<string>();
 
   constructor(private readonly deps: SessionServiceDeps) {
     this.holds = new OutboxHolds({
@@ -224,26 +228,35 @@ export class SessionService {
   ): Promise<SendMessageResponse> {
     const session = this.deps.repo.get(id);
     if (NOT_STARTED.has(session.status)) return this.enqueue(id, req.input, from);
-    const running = BUSY.has(session.status);
-    // A delivery in flight is a turn about to start: like a running one, nothing overtakes it.
-    if (running || this.delivering.has(id)) {
+    // A turn on its way to the runner counts as running, though there is nothing to steer yet.
+    const delivering = this.delivering.has(id);
+    if (BUSY.has(session.status) || delivering) {
       if (req.whenBusy === "reject") throw conflict("A turn is running", "turn_running");
-      if (req.whenBusy === "steer" && running) {
+      if (req.whenBusy === "steer" && !delivering) {
         await this.steer(id, req.input);
         return { status: "steered" };
       }
       return this.enqueue(id, req.input, from);
     }
+    // Its place in the queue, should it end up there: ahead of messages that arrive meanwhile.
+    const place = this.deps.outbox.reserve();
     try {
       await this.sendNow(session, req.input, from);
     } catch (error) {
+      // The provider is still running a turn the server had not seen: the message waits for it.
+      if (isTurnRunningError(error)) {
+        if (req.whenBusy === "reject") throw conflict("A turn is running", "turn_running");
+        const queued = this.enqueue(id, req.input, from, place);
+        this.flushIfSettled(id);
+        return queued;
+      }
       // CodeDen's own roles never lose a message to a runner restart: it waits in the queue.
       // The user sees the error instead; a wake (`reject`) is retried by its scheduler.
       if (from === "user" || req.whenBusy === "reject" || !isTransientRunnerError(error)) {
         throw error;
       }
       this.holds.hold(id, true);
-      return this.enqueue(id, req.input, from);
+      return this.enqueue(id, req.input, from, place);
     }
     this.holds.release(id);
     return { status: "sent" };
@@ -323,7 +336,8 @@ export class SessionService {
   /**
    * Send the next queued message once no turn is running (idle, or after a failed or
    * interrupted turn). If delivery fails the message goes back in its place and delivery
-   * pauses (`OutboxHolds`); only an error that is not a runner restart fails the session.
+   * pauses (`OutboxHolds`); only an error that is not a runner restart fails the session. A
+   * turn still running on the runner is no error: the message waits for its end.
    */
   async flushOutbox(id: string): Promise<void> {
     if (this.holds.isHeld(id) || this.delivering.has(id)) return;
@@ -335,6 +349,11 @@ export class SessionService {
     try {
       await this.sendNow(session, next.input, next.from);
     } catch (error) {
+      if (isTurnRunningError(error)) {
+        this.deps.outbox.restore(next);
+        this.flushIfSettled(id);
+        return;
+      }
       const transient = isTransientRunnerError(error);
       this.holds.hold(id, transient);
       this.deps.outbox.restore(next);
@@ -369,14 +388,11 @@ export class SessionService {
   // ---------------------------------------------------------------- internals
 
   /**
-   * Deliver one turn's input. The session is reserved before anything awaits, so two sends to
-   * an idle session can't both start a delivery: the runner would reject the second after the
-   * decorator acted on it. Messages sent meanwhile queue, and are sent next if this one fails.
+   * Start a turn. Marks the session `delivering` before anything is awaited; messages queued
+   * meanwhile are delivered once it is settled again (`flushIfSettled`).
    */
   private async sendNow(session: Session, raw: UserInput, from: QueueSender): Promise<void> {
-    if (this.delivering.has(session.id)) throw conflict("A turn is running", "turn_running");
     this.delivering.add(session.id);
-    let sent = false;
     try {
       const decorated = this.inputDecorator?.(session, raw, from) ?? { input: raw };
       try {
@@ -385,14 +401,26 @@ export class SessionService {
         decorated.failed?.();
         throw error;
       }
-      sent = true;
       decorated.delivered?.();
     } finally {
       this.delivering.delete(session.id);
-      if (!sent && this.deps.outbox.count(session.id) > 0) {
-        setImmediate(() => void this.flushOutbox(session.id).catch(() => undefined));
-      }
+      // The turn may have ended before the runner's answer: the flush its end triggered found
+      // this delivery in flight and skipped, so nothing else would send what queued up.
+      if (this.deps.outbox.count(session.id) > 0) this.flushIfSettled(session.id);
     }
+  }
+
+  /**
+   * Deliver the queue on the next tick if no turn is running: after a delivery (its turn may
+   * already be over) or a refusal because a turn was running (that turn may have ended before
+   * the refusal was handled). Otherwise the end of the turn delivers it (`SessionLifecycle`).
+   * It runs after the caller's error handling, so a delivery pause (`OutboxHolds`) set there
+   * still applies.
+   */
+  private flushIfSettled(id: string): void {
+    const status = this.deps.repo.find(id)?.session.status;
+    if (!status || !FLUSHABLE.has(status)) return;
+    setImmediate(() => void this.flushOutbox(id).catch(() => undefined));
   }
 
   /** Hand a turn's input to the runner, resuming the session when it no longer hosts it. */
@@ -420,16 +448,26 @@ export class SessionService {
         await this.deps.launcher.resume(this.deps.repo.get(session.id), input);
       }
     } catch (error) {
-      this.deps.repo.update(session.id, (s) =>
-        s.status === "running" ? { ...s, status: previous } : s,
-      );
+      // Refused because the provider is running a turn: the session is running, so it stays so
+      // and that turn's end delivers what waits. Anything else: back to how it was.
+      if (!isTurnRunningError(error)) {
+        this.deps.repo.update(session.id, (s) =>
+          s.status === "running" ? { ...s, status: previous } : s,
+        );
+      }
       throw toServiceError(error);
     }
   }
 
-  private enqueue(id: string, input: UserInput, from: QueueSender): SendMessageResponse {
+  /** Queue a message; `at` is a place reserved for it earlier (`Outbox.reserve`). */
+  private enqueue(
+    id: string,
+    input: UserInput,
+    from: QueueSender,
+    at?: string,
+  ): SendMessageResponse {
     const session = this.deps.repo.get(id);
-    this.deps.outbox.push(id, this.externalize(session, input), from);
+    this.deps.outbox.push(id, this.externalize(session, input), from, at);
     return { status: "queued" };
   }
 

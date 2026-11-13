@@ -1,15 +1,15 @@
-import type {
-  InboxItem,
-  Item,
-  ItemDelta,
-  ItemOf,
-  ItemRecord,
-  JsonValue,
-  Session,
-  ToolOutput,
+import {
+  appendToolOutput,
+  type InboxItem,
+  type Item,
+  type ItemDelta,
+  type ItemOf,
+  type ItemRecord,
+  type JsonValue,
+  type Session,
+  STREAMED_OUTPUT_CHARS,
 } from "@codeden/contracts";
 import { isFactorySession } from "../../services/factory/starter";
-import { STREAMED_OUTPUT_CHARS } from "../../services/sessions/preview";
 
 export type RequestItem = ItemOf<"approval_request"> | ItemOf<"user_question">;
 
@@ -37,34 +37,10 @@ export function applyDelta(item: Item, delta: ItemDelta): Item {
         : item;
     case "tool_output":
       if (item.kind !== "tool_call") return item;
-      return { ...item, output: appendOutput(item.output, delta.text) };
+      return { ...item, output: appendToolOutput(item.output, delta.text, STREAMED_OUTPUT_CHARS) };
     case "tool_input":
       return item;
   }
-}
-
-/**
- * Append a streamed output chunk, keeping only the last `max` characters (the end of command
- * output is the useful part) and counting every byte seen in `totalBytes`. The work per chunk
- * is bounded by `max` and the chunk, never by the output streamed so far. Pure.
- */
-export function appendOutput(
-  output: ToolOutput | undefined,
-  chunk: string,
-  max = STREAMED_OUTPUT_CHARS,
-): ToolOutput {
-  const prev = output?.text ?? "";
-  const totalBytes =
-    (output?.totalBytes ?? Buffer.byteLength(prev, "utf8")) + Buffer.byteLength(chunk, "utf8");
-  if (prev.length + chunk.length <= max) {
-    return { ...output, text: prev + chunk, truncated: output?.truncated ?? false, totalBytes };
-  }
-  const keep = max - chunk.length;
-  let text = keep > 0 ? prev.slice(prev.length - keep) + chunk : chunk.slice(chunk.length - max);
-  // Never start on the second half of a surrogate pair cut in two.
-  const first = text.charCodeAt(0);
-  if (first >= 0xdc00 && first <= 0xdfff) text = text.slice(1);
-  return { ...output, text, truncated: true, totalBytes };
 }
 
 /** Deterministic inbox id for the request item `itemId`, so log replay is idempotent. */

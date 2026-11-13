@@ -72,8 +72,8 @@ test("M1 flow with the Fake provider", async ({ page }) => {
     await expect(page).toHaveURL(/\/projects\/[^/]+\/new$/);
     const draft = page.getByTestId("new-session");
     await expect(draft.getByRole("button", { name: "Provider and model" })).toContainText(/Fake/);
-    await draft.getByRole("textbox", { name: "Message" }).fill("Say hello [approval]");
-    await draft.getByRole("textbox", { name: "Message" }).press("Enter");
+    await draft.getByLabel("Message", { exact: true }).fill("Say hello [approval]");
+    await draft.getByLabel("Message", { exact: true }).press("Enter");
     await expect(page).toHaveURL(/\/sessions\//);
     await expect(page.getByText("Echo: Say hello [approval]")).toBeVisible();
   });

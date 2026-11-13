@@ -41,7 +41,12 @@ export function toServiceError(error: unknown): ServiceError {
   const code = runnerErrorCode(error) ?? "runner_error";
   const message = error instanceof Error ? error.message : String(error);
   if (code === "runner_unavailable") return new ServiceError(503, code, message);
-  if (code === "unknown_session" || code === "unsupported" || code === "no_turn") {
+  if (
+    code === "unknown_session" ||
+    code === "unsupported" ||
+    code === "no_turn" ||
+    code === "turn_running"
+  ) {
     return new ServiceError(409, code, message);
   }
   return new ServiceError(502, code, message);

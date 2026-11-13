@@ -6,6 +6,7 @@ import type {
 } from "@codeden/contracts";
 import * as agent from "./agent";
 import type { BrowserManager } from "./manager";
+import * as pointer from "./pointer";
 
 export type BrowserCommandName = Extract<RunnerCommandName, `browser.${string}`>;
 export type BrowserCommand = RunnerCommandOf<BrowserCommandName>;
@@ -113,6 +114,10 @@ export function createBrowserCommandHandlers(deps: BrowserCommandDeps): BrowserC
     },
     "browser.press": async (c) => {
       await agent.press(manager.get(c.sessionId), c.key, c.tabId);
+      return {};
+    },
+    "browser.mouse": async ({ name: _name, sessionId, ...command }) => {
+      await pointer.mouse(manager.get(sessionId), command);
       return {};
     },
     "browser.screenshot": (c) =>
