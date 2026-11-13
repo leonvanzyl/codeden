@@ -4,7 +4,7 @@ import type {
   ProviderStatus,
   SessionOptions,
 } from "@codeden/contracts";
-import { modelsOf } from "../acp/config";
+import { agentCan, modelsOf } from "../acp/config";
 import type { AcpAgentSpec } from "../acp/extensions";
 import type { AcpInitializeResult, AcpSessionSetup } from "../acp/protocol";
 import { AcpSession } from "../acp/session";
@@ -35,9 +35,10 @@ export const CURSOR_AGENT: AcpAgentSpec = {
  * read-only sessions also run in Cursor's read-only `ask` mode. Plan mode is Cursor's `plan`
  * mode with its plan approval; questions are Cursor's question requests; resume is
  * `session/load`. Not wired up: steering (ACP has no way to add input to a running prompt),
- * subagents, rollback, fork and reasoning effort (Cursor lists each effort as its own model).
- * Images and MCP servers (CodeDen's tools are an HTTP MCP server) follow what the CLI reports
- * in `initialize`, once detection or a session has started it.
+ * rollback, fork and reasoning effort (Cursor lists each effort as its own model). Images, MCP
+ * servers (CodeDen's tools are an HTTP MCP server) and subagents (child threads, from CLIs
+ * that run them as child sessions) follow what the CLI reports in `initialize`, once
+ * detection or a session has started it.
  */
 const BASE_CAPABILITIES: ProviderCapabilities = {
   resume: true,
@@ -114,16 +115,18 @@ export class CursorAdapter implements ProviderAdapter {
     return status;
   }
 
-  /** What the CLI reported in `initialize` refines images and MCP; the rest is fixed. */
+  /** What the CLI reported in `initialize` refines images, MCP and subagents; the rest is fixed. */
   capabilities(): ProviderCapabilities {
-    const caps = this.info?.agentCapabilities;
+    const info = this.info;
+    const caps = info?.agentCapabilities;
     return {
       ...BASE_CAPABILITIES,
-      ...(caps
+      ...(info && caps
         ? {
             resume: caps.loadSession === true,
             images: caps.promptCapabilities?.image === true,
             mcp: caps.mcpCapabilities?.http === true,
+            subagents: agentCan(info, "subagents"),
           }
         : {}),
     };

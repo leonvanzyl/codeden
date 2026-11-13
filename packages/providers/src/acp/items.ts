@@ -1,7 +1,13 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import type { FileChange, ItemStatus, ToolCallItem, UserInput } from "@codeden/contracts";
+import type {
+  FileChange,
+  GeneratedImage,
+  ItemStatus,
+  ToolCallItem,
+  UserInput,
+} from "@codeden/contracts";
 import { num, shorten, str, toJson, toolOutput } from "../util/text";
 import type { AcpContentBlock, AcpToolCall, AcpToolContent } from "./protocol";
 
@@ -11,6 +17,8 @@ export interface AcpToolState extends AcpToolCall {
   name?: string;
   startedAt?: number;
   endedAt?: number;
+  /** Images the call created, reported by a vendor extension (e.g. Cursor's image generation). */
+  generatedImages?: GeneratedImage[];
 }
 
 /** Context for mapping: the worktree (relative paths resolve against it) and MCP server names. */
@@ -177,6 +185,7 @@ export function toolCallItem(
     ...(state.startedAt !== undefined && state.endedAt !== undefined
       ? { durationMs: Math.max(0, Math.round(state.endedAt - state.startedAt)) }
       : {}),
+    ...(state.generatedImages?.length ? { generatedImages: state.generatedImages } : {}),
   };
   switch (state.kind) {
     case "execute": {

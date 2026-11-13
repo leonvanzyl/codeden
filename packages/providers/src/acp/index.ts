@@ -18,3 +18,4 @@ export { clientCapabilities, startAgent } from "./process";
 export * from "./protocol";
 export { AcpRpc, AcpRpcError, METHOD_NOT_FOUND } from "./rpc";
 export { AcpSession } from "./session";
+export { AcpSubagents, type AcpTaskReport, agentTypeOf } from "./subagents";

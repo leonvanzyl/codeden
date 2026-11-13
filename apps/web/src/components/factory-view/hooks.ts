@@ -28,6 +28,11 @@ export function useChatColumn(): boolean {
   return useMedia("(min-width: 1280px)", true);
 }
 
+/** True at `sm` (640 px) and wider: room for the pixel scene (#209). Phones get the board. */
+export function useRoomy(): boolean {
+  return useMedia("(min-width: 640px)", true);
+}
+
 /**
  * The time, refreshed every `everyMs`, for "in this step for 12m" labels. A render clock
  * only: the data itself arrives over the WebSocket.

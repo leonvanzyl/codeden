@@ -4,6 +4,7 @@ import type { AcpInitializeResult } from "../acp/protocol";
 import { AcpRpcError, METHOD_NOT_FOUND } from "../acp/rpc";
 import { type ResolvedCommand, runCommand } from "../util/exec";
 import { parseCursorStatus } from "./detect";
+import { CURSOR_CLIENT_CAPABILITIES } from "./extensions";
 import { modelsFromListing, parseModelList } from "./models";
 
 /** Cursor's request that lists the account's models without opening a session. */
@@ -52,6 +53,8 @@ export async function probeCursor(
         args: ["acp"],
         label: "Cursor",
         ...(signedIn ? { authMethod: "cursor_login" } : {}),
+        // As sessions do, so `initialize` reports whether subagents run as child sessions.
+        clientCapabilities: CURSOR_CLIENT_CAPABILITIES,
         timeoutMs,
       },
     );

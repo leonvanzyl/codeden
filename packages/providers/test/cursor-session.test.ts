@@ -1,126 +1,22 @@
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { AgentEvent, ItemOf, RuntimeResponse, SessionOptions } from "@codeden/contracts";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { ProviderSession } from "../src/adapter";
-import { CursorAdapter } from "../src/cursor/adapter";
+import type { ItemOf } from "@codeden/contracts";
+import { describe, expect, it } from "vitest";
 import { validateEventStream } from "../src/replay/validate";
+import {
+  chunk,
+  completedOf,
+  fakeAcp,
+  isTurnEnd,
+  permission,
+  type Request,
+} from "./support/fake-acp";
 
-const fakeAgent = {
-  kind: "node-script" as const,
-  path: process.execPath,
-  script: join(import.meta.dirname, "fixtures", "fake-acp", "agent.mjs"),
-};
-
-type Logged = { method: string; params: Record<string, unknown> & { outcome?: unknown } };
-let dir: string;
-const logFile = () => join(dir, "acp.log");
-const logged = (method?: string): Logged[] =>
-  existsSync(logFile())
-    ? readFileSync(logFile(), "utf8")
-        .trim()
-        .split("\n")
-        .map((line) => JSON.parse(line) as Logged)
-        .filter((m) => !method || m.method === method)
-    : [];
-
-type Step = Record<string, unknown>;
-const chunk = (text: string): Step => ({
-  update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text } },
-});
-const permission = (toolCall: Record<string, unknown>): Step => ({
-  request: "session/request_permission",
-  params: {
-    toolCall,
-    options: [
-      { optionId: "allow-once", name: "Allow once", kind: "allow_once" },
-      { optionId: "allow-always", name: "Always allow", kind: "allow_always" },
-      { optionId: "reject-once", name: "Reject", kind: "reject_once" },
-    ],
-  },
-});
-
-function options(script: Step[], extra: Partial<SessionOptions> = {}): SessionOptions {
-  const file = join(dir, `script-${Math.random().toString(36).slice(2)}.json`);
-  writeFileSync(file, JSON.stringify(script));
-  return {
-    sessionId: "s1",
-    role: "agent",
-    cwd: dir,
-    autonomy: "auto",
-    mcpServers: [],
-    additionalDirectories: [],
-    planMode: false,
-    ...extra,
-    env: { FAKE_ACP_LOG: logFile(), FAKE_ACP_SCRIPT: file, ...extra.env },
-  };
-}
-
-const isTurnEnd = (e: AgentEvent) =>
-  e.type === "turn.completed" || e.type === "turn.failed" || e.type === "turn.interrupted";
-
-type Request = ItemOf<"approval_request"> | ItemOf<"user_question">;
-
-/** Reads a session's events, answering approvals and questions with `answer`. */
-class Reader {
-  readonly all: AgentEvent[] = [];
-  private readonly it: AsyncIterator<AgentEvent>;
-  answer: (item: Request) => RuntimeResponse | undefined = () => ({
-    kind: "approval",
-    decision: "allow_once",
-  });
-
-  constructor(private readonly session: ProviderSession) {
-    this.it = session.events[Symbol.asyncIterator]();
-  }
-
-  async until(match: (e: AgentEvent) => boolean): Promise<AgentEvent> {
-    for (;;) {
-      const next = await this.it.next();
-      if (next.done) throw new Error("event stream ended");
-      const e = next.value;
-      this.all.push(e);
-      if (
-        e.type === "item.started" &&
-        (e.item.kind === "approval_request" || e.item.kind === "user_question")
-      ) {
-        const response = this.answer(e.item);
-        if (response) await this.session.respond(e.item.requestId, response);
-      }
-      if (match(e)) return e;
-    }
-  }
-
-  async turn(text: string): Promise<AgentEvent[]> {
-    const from = this.all.length;
-    await this.session.send({ text, attachments: [] });
-    await this.until(isTurnEnd);
-    return this.all.slice(from);
-  }
-}
-
-const sessions: ProviderSession[] = [];
-async function open(script: Step[], extra: Partial<SessionOptions> = {}) {
-  const adapter = new CursorAdapter({ executable: fakeAgent });
-  const session = await adapter.openSession(options(script, extra));
-  sessions.push(session);
-  return { session, reader: new Reader(session), adapter };
-}
-
-const completedOf = (events: AgentEvent[], kind: string) =>
-  events.flatMap((e) => (e.type === "item.completed" && e.item.kind === kind ? [e.item] : []));
-
-beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), "codeden-cursor-"));
-});
-
-afterEach(async () => {
-  await Promise.all(sessions.splice(0).map((s) => s.close()));
-});
+const acp = fakeAcp();
+const { logged, open } = acp;
 
 describe("Cursor session over ACP", () => {
   it("opens a session in the worktree and streams a turn: message, command and file edit", async () => {
+    const dir = acp.dir;
     const edited = join(dir, "src", "app.ts");
     const { session, reader } = await open(
       [
@@ -262,6 +158,7 @@ describe("Cursor session over ACP", () => {
   });
 
   it("asks for every edit under supervised, and refuses edits in read-only (ask mode)", async () => {
+    const dir = acp.dir;
     const edit = permission({
       toolCallId: "e1",
       kind: "edit",
@@ -385,10 +282,7 @@ describe("Cursor session over ACP", () => {
         { id: "2", content: "Test it", status: "pending" },
       ]),
       todos(true, [{ id: "1", content: "Write code", status: "completed" }]),
-      {
-        request: "cursor/task",
-        params: { toolCallId: "sub", description: "Explore", prompt: "Look" },
-      },
+      { request: "cursor/something_new", params: { toolCallId: "x" } },
     ]);
     const events = await reader.turn("Go");
     const list = completedOf(events, "todo_list")[0] as ItemOf<"todo_list">;
@@ -396,7 +290,9 @@ describe("Cursor session over ACP", () => {
       { id: "1", text: "Write code", status: "completed" },
       { id: "2", text: "Test it", status: "pending" },
     ]);
-    expect(logged("answer:cursor/task")[0]?.params).toMatchObject({ error: { code: -32601 } });
+    expect(logged("answer:cursor/something_new")[0]?.params).toMatchObject({
+      error: { code: -32601 },
+    });
   });
 
   it("interrupts with session/cancel and cancels a waiting approval", async () => {
@@ -430,7 +326,10 @@ describe("Cursor session over ACP", () => {
       model: "gpt-5",
     });
     expect(session.resumeToken()).toBe("sess-old");
-    expect(logged("session/load")[0]?.params).toMatchObject({ sessionId: "sess-old", cwd: dir });
+    expect(logged("session/load")[0]?.params).toMatchObject({
+      sessionId: "sess-old",
+      cwd: acp.dir,
+    });
     expect(logged("session/new")).toEqual([]);
     expect(logged("session/set_config_option")[0]?.params).toMatchObject({
       sessionId: "sess-old",
@@ -442,6 +341,9 @@ describe("Cursor session over ACP", () => {
       completedOf(reader.all, "assistant_message") as ItemOf<"assistant_message">[]
     ).map((m) => m.text);
     expect(texts).toEqual(["Welcome back."]);
+    // The replayed subagent run (its card and child thread) is history too.
+    expect(reader.all.filter((e) => e.type === "thread.started")).toHaveLength(1);
+    expect(completedOf(reader.all, "subagent")).toEqual([]);
     expect(events.some((e) => e.type === "turn.completed")).toBe(true);
     expect(validateEventStream(reader.all)).toEqual([]);
   });
