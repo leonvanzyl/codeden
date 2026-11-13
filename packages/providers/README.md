@@ -7,10 +7,11 @@ Provider adapters behind one normalized interface (`ProviderAdapter` / `Provider
 | `claude` | Claude Agent SDK `query()` with streaming input, `pathToClaudeCodeExecutable` = the user's `claude` | SDK pinned to `0.3.318` (tested with Claude Code 2.1.318); loaded through `loadClaudeSdk()` |
 | `codex` | `codex app-server` JSON-RPC over stdio | Types generated from Codex 0.160.1 into `src/codex/protocol/` |
 | `opencode` | A private `opencode serve --stdio` per session, v2 HTTP API + SSE events | Tested with OpenCode 2.2.7 (minimum 2.2.0); route types in `src/opencode/protocol.ts` |
+| `cursor` | The Cursor CLI's ACP server (`agent acp`), one per session, through the generic ACP client in `src/acp/` | Agent Client Protocol version 1, typed by hand in `src/acp/protocol.ts`; Cursor's extensions in `src/cursor/extensions.ts` |
 | `fake` | Scripted, deterministic | Demos and tests |
 | `replay` | Plays back recorded fixtures | Contract tests; never spawns a CLI |
 
-`getProvider(id)` / `listProviders()` return the built-in real adapters. Each adapter also exposes `utilityModel()` for tool-less one-shots (§7.4). `ApprovalBroker` and the risky-action classifier (`src/policy/`) are provider-neutral.
+`getProvider(id)` / `listProviders()` return the built-in real adapters. Each adapter except Cursor also exposes `utilityModel()` for tool-less one-shots (§7.4). `ApprovalBroker` and the risky-action classifier (`src/policy/`) are provider-neutral.
 
 ## Scripts
 
@@ -36,7 +37,7 @@ The SDK is not redistributed in the published `codeden` package. `loadClaudeSdk(
 
 ## Autonomy mapping (§11.2)
 
-| Level | Claude | Codex | OpenCode |
+| Level | Claude | Codex | OpenCode / Cursor |
 |---|---|---|---|
 | supervised | `default` + PreToolUse hook forces every edit/command to ask | `untrusted`, workspace-write sandbox | every edit and command goes to the user |
 | auto | `acceptEdits` + hook asks only when the classifier flags a call | `on-request`, workspace-write, network off | only calls the classifier flags go to the user |
@@ -83,6 +84,15 @@ OpenCode has no OS sandbox. Its sessions get permission rules that make every `e
 - **Sign-in.** OpenCode's own free models work without an account (`authMethod: "free"`); providers activated by environment variables or config count as signed in (`"environment"`); saved credentials from `opencode auth login` are `"credentials"`.
 - **Utility model.** `POST /api/experimental/generate/text` (`{ prompt, model }`, no tools, no session) on a short-lived server; it takes no system prompt, so `system` goes in front of the prompt. A model chosen in Settings is sent as is. With none, `cheapUtilityModel()` (`src/opencode/models.ts`) reads `/api/model/default` and `/api/model` on the same server and picks the cheapest model from the default model's provider, by listed input + output price per million tokens (the base price, not a context tier), a free one included. Disabled, deprecated and unpriced models are skipped (the default too), and the default wins ties. Staying on the default's provider keeps side jobs on the account the user already chose (an Anthropic default gives Haiku, never another provider's free tier). With no default, no prices or a failed lookup, no model is sent and OpenCode uses its own default.
 - **Not wired up yet:** OpenCode's revert (rollback), fork, the `plan` agent (plan mode) and skills, so those capabilities are `false`.
+
+**ACP (`src/acp/`) and Cursor (`src/cursor/`)**
+
+- **Generic client.** `AcpSession` takes an `AcpAgentSpec` (command arguments, auth method, mode ids, vendor extensions); nothing in `src/acp/` knows about Cursor. Messages are JSON-RPC 2.0 with `jsonrpc: "2.0"`, one per line; the agent's logs on stderr are kept as a short tail for errors only.
+- **Resume replays history.** `session/load` streams the whole conversation as `session/update`s before it answers. The mapper drops updates outside a turn, so the replay never reaches the transcript.
+- **Permissions.** Options are picked by `kind`, never by id: `allow_once` or `reject_once`. `allow_always` would save a rule in the agent's own settings, so `allow_session` stays in `AcpPolicy`. A cancelled turn must answer `{ outcome: "cancelled" }`.
+- **Tool call ids can repeat across turns**, so item ids are `<turn>:<toolCallId>`.
+- **Cursor.** `cursor_login` reuses the CLI's login. Models come from `cursor/list_available_models`, else `agent --list-models`, and are set through the `model` config option (Cursor's `session/set_model` answers `{}` without confirming anything, so it is only the fallback). `cursor/ask_question` and `cursor/create_plan` are blocking requests answered with `{ outcome: { outcome: ... } }`; `cursor/update_todos` may arrive as either. `cursor/task` and `cursor/generate_image` are refused with -32601 until subagents and images are wired up.
+- **Tests** drive `test/fixtures/fake-acp/agent.mjs`, a scripted ACP agent that also answers the CLI's `--version`, `status` and `--list-models`.
 
 ## Image generation (`src/image/`, §12.5)
 
