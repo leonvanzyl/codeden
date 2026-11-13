@@ -62,9 +62,14 @@ const PR_STEPS = [
 export const FOREGROUND_COMMANDS =
   "Run installs, builds and tests in the foreground and wait for them in the same turn, even when they take minutes. If a command does run in the background, wait for it before you end your turn: don't end a turn with a message that you are still waiting.";
 
+/** Nothing can answer a prompt in an agent's shell, so a command that asks one never ends. */
+export const NON_INTERACTIVE_COMMANDS =
+  "Run installs and other commands non-interactively: nothing can answer a prompt in your shell. If a command waits on a prompt (such as \"Proceed? (Y/n)\"), stop it and rerun it non-interactively (with `CI=true`, `--yes` or the tool's own flag); don't wait for it.";
+
 const WORK_RULES = [
   "Rules: work only in this worktree, keep the change small and focused, stay out of protected areas, and never deploy or release anything. Don't stop to ask the user: make the reasonable call within the issue and the vision and say what you assumed in the pull request. If you truly cannot go on, call `finish` with outcome `blocked`.",
   FOREGROUND_COMMANDS,
+  NON_INTERACTIVE_COMMANDS,
   UNTRUSTED_INPUT,
 ];
 
@@ -214,6 +219,7 @@ export function reviewerPrompt(
     "",
     read,
     FOREGROUND_COMMANDS,
+    NON_INTERACTIVE_COMMANDS,
     `Judge: ${REVIEW_FOCUS[type]} Does it fit the vision and stay out of its out-of-scope list and protected areas? Are there tests that prove the behaviour (or are none needed)? Any security problems (injection, secrets, unsafe input, risky dependencies)?`,
     UNTRUSTED_INPUT,
     "",
