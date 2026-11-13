@@ -75,6 +75,8 @@ export interface ThreadMapperOptions {
  */
 export class CodexThreadMapper {
   private current: string | undefined;
+  /** The last turn CodeDen closed itself (a stop's deadline, a newer turn): Codex may still report it. */
+  private closedHere: string | undefined;
   private readonly open = new Map<string, Item>();
   private plan: { id: string; todos: Todo[] } | undefined;
   private readonly turnUsage = new CodexTurnUsage();
@@ -96,7 +98,9 @@ export class CodexThreadMapper {
     if (this.current) this.endTurn({ type: "interrupted" }, this.current);
     this.current = turnId;
     this.o.emit({ type: "turn.started", threadId: this.threadId, turnId });
-    this.o.onTurnStarted?.(turnId);
+    // Codex reporting on a turn CodeDen already closed (it confirms a stop after the deadline)
+    // reopens that turn only to end it as Codex says: that is not new work.
+    if (turnId !== this.closedHere) this.o.onTurnStarted?.(turnId);
   }
 
   private ctx(turnId: string): { threadId: string; turnId: string } {
@@ -262,14 +266,13 @@ export class CodexThreadMapper {
   private completeTurn(turn: Turn): void {
     this.beginTurn(turn.id);
     const forkPoint = this.o.root ? turn.id : undefined;
-    if (turn.status === "completed") this.endTurn({ type: "completed" }, turn.id, forkPoint);
-    else if (turn.status === "interrupted")
-      this.endTurn({ type: "interrupted" }, turn.id, forkPoint);
+    if (turn.status === "completed") this.close({ type: "completed" }, turn.id, forkPoint);
+    else if (turn.status === "interrupted") this.close({ type: "interrupted" }, turn.id, forkPoint);
     else {
       const info = turn.error?.codexErrorInfo;
       const kind = classifyCodexError(info);
       const retryAt = kind === "usage_limit" ? usageLimitResetsAt(this.o.limits()) : undefined;
-      this.endTurn(
+      this.close(
         {
           type: "failed",
           message: turn.error?.message ?? "Codex turn failed",
@@ -284,9 +287,19 @@ export class CodexThreadMapper {
     }
   }
 
-  /** Close the running turn (also used when the process dies or the session closes). */
-  endTurn(outcome: TurnOutcome, turnId = this.current, forkPoint?: string): void {
+  /**
+   * Close the running turn from CodeDen's side: a stop's deadline, a newer turn, the process
+   * dying or the session closing. Codex may still report on it later (see `beginTurn`).
+   */
+  endTurn(outcome: TurnOutcome, turnId = this.current): void {
     if (!turnId || turnId !== this.current) return;
+    this.closedHere = turnId;
+    this.close(outcome, turnId);
+  }
+
+  /** End the running turn with `outcome` (and, for a turn Codex completed, its fork point). */
+  private close(outcome: TurnOutcome, turnId: string, forkPoint?: string): void {
+    if (turnId !== this.current) return;
     const ctx = this.ctx(turnId);
     const end = { ...ctx, ...(forkPoint ? { forkPoint } : {}) };
     const ok = outcome.type === "completed";
