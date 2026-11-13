@@ -8,10 +8,14 @@ import type { SessionOptions } from "@codeden/contracts";
  * own environment (`base`) sets is kept, so `CI=false` opts out, and a value the server passes in
  * `SessionOptions.env` wins over both. Every provider applies `SessionOptions.env` to the agent
  * process, so this holds for all of them.
+ *
+ * A project can turn this off (`SessionOptions.ciEnv: false`, from `Project.agentCiEnv`) when
+ * `CI=true` gets in its tools' way: the options are then passed on unchanged, with no `CI` added.
  */
 export function agentSessionOptions(
   opts: SessionOptions,
   base: NodeJS.ProcessEnv = process.env,
 ): SessionOptions {
+  if (opts.ciEnv === false) return opts;
   return { ...opts, env: { CI: base.CI || "true", ...opts.env } };
 }

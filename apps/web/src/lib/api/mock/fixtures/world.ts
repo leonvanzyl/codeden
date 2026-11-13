@@ -28,6 +28,7 @@ function project(
     factoryLimits: limits,
     killSwitch: false,
     timezone: null,
+    agentCiEnv: true,
     pinned: false,
     sortOrder: 0,
     createdAt: ago(60 * 24 * 12),

@@ -258,9 +258,11 @@ export class SessionLauncher {
    * Provider options for a start or resume: model, effort, autonomy, plan mode, cwd, the
    * CodeDen system prompt, and, given the session's MCP token, CodeDen's MCP server through the
    * runner's local proxy. A session still planning reopens in plan mode; one whose plan was
-   * approved reopens at its permission level.
+   * approved reopens at its permission level. A project that turned off `CI=true` for its
+   * agents (`agentCiEnv`) sends `ciEnv: false`.
    */
   sessionOptions(session: Session, mcpToken: string | null = null): SessionOptions {
+    const project = this.projectOf(session);
     const proxyUrl = runnerForSession(this.deps, session.id).mcpProxyUrl();
     const mcpServers: McpServerConfig[] = [];
     if (proxyUrl && mcpToken) {
@@ -282,13 +284,14 @@ export class SessionLauncher {
       autonomy: session.autonomy,
       planMode: session.planMode ?? false,
       resumeToken: session.resumeToken ?? undefined,
-      systemPrompt: codedenSystemPrompt(session, this.projectOf(session)),
+      systemPrompt: codedenSystemPrompt(session, project),
       // The orchestrator and PMs never write project code (§11.2). Agent sessions at the
       // `read_only` level carry it in `autonomy`, so it can change live.
       readOnly: session.role !== "agent",
       codedenHome: this.deps.home,
       mcpServers,
       ...(ownBranch(session) ? { ownBranch: ownBranch(session) } : {}),
+      ...(project?.agentCiEnv === false ? { ciEnv: false } : {}),
     });
   }
 

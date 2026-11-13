@@ -400,6 +400,7 @@ describe("issue intake ownership (§10.1)", () => {
     factoryLimits: FactoryLimits.parse({}),
     killSwitch: false,
     timezone: null,
+    agentCiEnv: true,
     pinned: false,
     sortOrder: 0,
     createdAt: "2026-11-07T10:00:00.000Z",

@@ -14,6 +14,7 @@ function compactProject(p: Project) {
     defaultProvider: p.defaultProvider,
     autonomy: p.autonomy,
     autonomyMode: p.autonomyMode,
+    agentCiEnv: p.agentCiEnv,
   };
 }
 
@@ -67,7 +68,7 @@ export const createProject = defineTool({
 export const updateProject = defineTool({
   name: "update_project",
   description:
-    "Change a project's name, default provider, default autonomy level, timezone or default branch. Pass null to clear an override.",
+    "Change a project's name, default provider, default autonomy level, timezone, default branch, or whether its agent sessions run with CI=true. Pass null to clear an override.",
   roles: ["orchestrator"],
   scope: "global",
   input: z.object({
@@ -77,6 +78,12 @@ export const updateProject = defineTool({
     autonomy: AutonomyLevel.nullable().optional(),
     timezone: z.string().nullable().optional(),
     defaultBranch: z.string().nullable().optional(),
+    agentCiEnv: z
+      .boolean()
+      .optional()
+      .describe(
+        "false: agent sessions opened from now on run without CI=true (only when the user asks, e.g. their Playwright or Yarn setup misbehaves under CI)",
+      ),
   }),
   handler: async ({ projectId, ...patch }, { services }) => {
     projectFor(services, projectId);

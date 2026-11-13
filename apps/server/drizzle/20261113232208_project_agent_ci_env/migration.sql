@@ -1,0 +1,1 @@
+ALTER TABLE `projects` ADD `agent_ci_env` integer DEFAULT true NOT NULL;

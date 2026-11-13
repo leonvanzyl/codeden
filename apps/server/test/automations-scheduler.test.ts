@@ -23,6 +23,7 @@ const project: Project = {
   factoryLimits: {} as Project["factoryLimits"],
   killSwitch: false,
   timezone: "UTC",
+  agentCiEnv: true,
   pinned: false,
   sortOrder: 0,
   createdAt: ts,
