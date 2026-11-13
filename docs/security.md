@@ -32,7 +32,7 @@ Off by default. When you turn it on:
 - Each agent session gets its own **MCP token** for CodeDen's internal MCP server, minted when the session starts or resumes, **stored only as a SHA-256 hash**, and **revoked** when the session stops, completes or fails. The install token is not accepted on the MCP endpoint, and MCP tokens are not accepted by the UI API.
 - Tokens are **role-scoped**: the orchestrator, PMs and agents see only the tools for their role; others aren't even listed. Browser tools always act on the caller's own session, and no tool takes another session's id.
 - Agents reach CodeDen through a **local MCP proxy in the runner** on `127.0.0.1`. The token is passed to Codex over stdin, never on a command line.
-- **Agent environments** inherit your environment minus CodeDen's own secrets: `CODEDEN_*` variables whose names contain `TOKEN`, `SECRET`, `KEY` or `PASSWORD` never reach agents, terminals or setup scripts. (Your other environment variables are passed through, as they would be in your own terminal.)
+- **Agent environments** inherit your environment minus CodeDen's own variables: no `CODEDEN_*` variable (CodeDen's data folder, its installer, its secrets) reaches agents, terminals or setup scripts, so an agent can't find CodeDen's home through its environment and a CodeDen checkout's tests run against their own stubs. (Your other environment variables are passed through, as they would be in your own terminal.)
 - Tokens are never logged or written into transcripts.
 
 ## The orchestrator and PMs can't write code

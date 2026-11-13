@@ -20,6 +20,7 @@ export {
 } from "./policy/risk";
 export * from "./registry";
 export * from "./replay";
+export { agentEnv } from "./util/agent-env";
 export { brokenInstallMessage } from "./util/detect-exe";
 export {
   isElectronRuntime,

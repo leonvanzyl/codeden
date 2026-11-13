@@ -57,7 +57,11 @@ const TEMP_VARS = [
   /^(\$TMPDIR|\$\{TMPDIR\}|\$TEMP|\$\{TEMP\}|\$TMP|\$\{TMP\})(?=$|[\\/])/,
   /^(\$env:TEMP|\$env:TMP|%TEMP%|%TMP%)(?=$|[\\/])/i,
 ];
-/** CodeDen's home variable, which agents inherit: case-sensitive in POSIX shells only. */
+/**
+ * CodeDen's home variable: case-sensitive in POSIX shells only. Agents don't inherit it
+ * (`agentEnv`), but a shell profile or the command itself can set it, so it still resolves to
+ * CodeDen's home.
+ */
 const CODEDEN_HOME_VARS = [
   /^(\$CODEDEN_HOME|\$\{CODEDEN_HOME\})(?=$|[\\/])/,
   /^(\$env:CODEDEN_HOME|%CODEDEN_HOME%)(?=$|[\\/])/i,
