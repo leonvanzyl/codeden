@@ -1,5 +1,5 @@
 import { readdirSync, readFileSync, realpathSync } from "node:fs";
-import { availableParallelism, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { configDefaults, defineConfig } from "vitest/config";
@@ -58,14 +58,6 @@ const SERVER_PROCESS_TESTS = [
 const DESKTOP_PROCESS_TESTS = ["test/relay-chromium.test.ts"];
 
 /**
- * The longest real-runner suite, four factory pipelines in one file (over a minute on its own),
- * starts with the fast suites instead of after them, where it alone would add its whole length
- * to the run. One such suite beside the fast ones gets a fair share of the machine; its tests
- * set their own 60-90 s timeouts.
- */
-const STARTS_WITH_FAST_SUITES = ["test/factory-flow.test.ts"];
-
-/**
  * Server suites that start a real runner process with the Fake provider: they call
  * `startHarness` (`apps/server/test/support/harness.ts`) or `startServer` without
  * `runner: false`. Found by reading the test files, so a new suite lands here on its own.
@@ -75,7 +67,6 @@ const SERVER_RUNNER_TESTS = readdirSync(join(SERVER_ROOT, "test"))
   .filter((file) => file.endsWith(".test.ts"))
   .map((file) => `test/${file}`)
   .filter((file) => !SERVER_PROCESS_TESTS.includes(file))
-  .filter((file) => !STARTS_WITH_FAST_SUITES.includes(file))
   .filter((file) => {
     const source = readFileSync(join(SERVER_ROOT, file), "utf8");
     return (
@@ -94,18 +85,13 @@ const RUNNER_WORKTREE_TESTS = [
 
 /**
  * The process-heavy suites above (a server, a runner through tsx and git worktrees per suite)
- * run in a phase of their own after the fast suites, a few at a time, with timeouts that leave
- * room for a busy machine. In the shared pool they started all at once and starved each other
- * into Vitest's 5 s timeout whenever other builds kept the machine busy. A worker limit of its
- * own needs its own `groupOrder`. The test timeout stays above the harness's 30 s `waitUntil`,
- * so a slow wait reports what it waited for; the suites set no lower timeouts of their own.
+ * get timeouts that leave room for a busy machine: with Vitest's 5 s they timed out whenever
+ * other builds kept the machine busy. The test timeout stays above the harness's 30 s
+ * `waitUntil`, so a slow wait reports what it waited for; the suites set no lower timeouts of
+ * their own. They share the pool with the fast suites: a worker limit of their own would need
+ * a phase of their own after the fast suites, which made `pnpm test` 40-50% slower.
  */
-const processHeavy = () => ({
-  sequence: { groupOrder: 1 },
-  maxWorkers: Math.max(3, Math.floor(availableParallelism() / 4)),
-  testTimeout: 60_000,
-  hookTimeout: 60_000,
-});
+const PROCESS_HEAVY = { testTimeout: 60_000, hookTimeout: 60_000 };
 
 /**
  * The other runner, server and release-script suites still start git and child processes
@@ -142,7 +128,7 @@ const FAST = [
       name: "@codeden/runner (worktrees)",
       root: "apps/runner",
       include: RUNNER_WORKTREE_TESTS,
-      ...processHeavy(),
+      ...PROCESS_HEAVY,
     },
   },
   {
@@ -160,7 +146,7 @@ const FAST = [
       name: "@codeden/server (runner)",
       root: "apps/server",
       include: SERVER_RUNNER_TESTS,
-      ...processHeavy(),
+      ...PROCESS_HEAVY,
     },
   },
 ];
