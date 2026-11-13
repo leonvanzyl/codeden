@@ -232,7 +232,7 @@ Tip: quote any value that starts with `{{`, as in the `workKey` above, so YAML d
 | `action` | `start_session` \| `message_pm` \| `triage` | `start_session` | |
 | `workKey` | string | `automation:<file name>` | `<kind>:<id>`; may use placeholders |
 | `title` | string | | Session title; may use placeholders |
-| `provider` | string | the agent role default | `claude`, `codex` |
+| `provider` | string | the agent role default | `claude`, `codex`, `opencode` |
 | `model` | string | the provider default | |
 | `effort` | `minimal` \| `low` \| `medium` \| `high` \| `xhigh` \| `max` | | Each model supports a subset |
 | `autonomy` | `read_only` \| `supervised` \| `auto` \| `full` | your default | The permissions; see [Security](security.md#permissions) |

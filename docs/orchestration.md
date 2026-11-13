@@ -1,6 +1,6 @@
 # Orchestration
 
-CodeDen runs three kinds of agent: one **orchestrator**, one **project manager (PM)** per project, and any number of **agent sessions**. They're all ordinary agent sessions on Claude Code or Codex; what differs is their role, system prompt, working directory and tools.
+CodeDen runs three kinds of agent: one **orchestrator**, one **project manager (PM)** per project, and any number of **agent sessions**. They're all ordinary agent sessions on Claude Code, Codex or OpenCode; what differs is their role, system prompt, working directory and tools.
 
 | Role | How many | Works in | Can edit code? | Purpose |
 |---|---|---|---|---|
@@ -8,7 +8,7 @@ CodeDen runs three kinds of agent: one **orchestrator**, one **project manager (
 | Project manager | 1 per project | The project root, read-only | No | Triages issues, plans work, starts and steers agent sessions, reviews results, escalates to you |
 | Agent | Many | Its own worktree and branch | Yes | Does the work: code, tests, PRs, evidence |
 
-The orchestrator and PMs run **read-only**: Claude gets no edit tools and a policy that denies writing commands, Codex gets a read-only sandbox. They act only through CodeDen's tools. Choose the provider, model and effort for each role in **Settings → Providers** (Claude Code is the default for the orchestrator and PMs when it's available).
+The orchestrator and PMs run **read-only**: Claude gets no edit tools and a policy that denies writing commands, Codex gets a read-only sandbox, and CodeDen's policy refuses OpenCode's edits and writing commands. They act only through CodeDen's tools. Choose the provider, model and effort for each role in **Settings → Providers** (Claude Code is the default for the orchestrator and PMs when it's available).
 
 ![A PM reporting on its project](images/pm-chat.png)
 

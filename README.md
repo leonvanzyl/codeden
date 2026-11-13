@@ -106,6 +106,9 @@ Each project climbs a ladder: **Manual** → **Assisted** (the default) → **So
 Everything an agent touches, next to the chat:
 
 - **Diffs and checkpoints.** Every turn is snapshotted into a hidden git ref, so you get exact per-turn and whole-session diffs and can restore files to any earlier turn. Commit and push from the git bar.
+- **Diff comments.** Comment on the agent's changes line by line, then send them all back as one message. [Comment on lines](docs/workbench.md#comment-on-lines).
+- **Fork a session**, or fork from an earlier turn, to try another approach with the same conversation and code while the original carries on. [Fork a session](docs/workbench.md#fork-a-session).
+- **Plan mode** (Claude Code). The agent explores and proposes a plan, and only starts changing code once you approve it. [Plan mode](docs/security.md#plan-mode).
 - **Files.** A file tree and a syntax-highlighted viewer for the session's worktree.
 - **Terminal.** Real PTY terminals owned by the runner, so they survive server restarts.
 - **Browser.** A Chromium the agents drive (navigate, snapshot, click, type, screenshot, console and network logs), streamed edge to edge into the panel at the panel's own size. Click, type and scroll in it at any time.
@@ -115,9 +118,13 @@ Everything an agent touches, next to the chat:
 
 [Workbench guide](docs/workbench.md).
 
-### Agent memory, skills, subagents and MCP servers
+### Agent memory, skills, subagents, MCP servers and hooks
 
-First-class editors for each provider's **own files**: `CLAUDE.md`, `AGENTS.md`, `.claude/rules/`, Claude's auto-memory, skills, subagents, `.mcp.json`, `~/.claude.json` and `~/.codex/config.toml`. Edits are written in place with a diff preview and a backup, so they show up in the terminal CLI too, and a **What's loaded** view shows which files a session actually has in context. [Agent configuration](docs/agent-config.md).
+First-class editors for each provider's **own files**: `CLAUDE.md`, `AGENTS.md`, `.claude/rules/`, Claude's auto-memory, skills, subagents, `.mcp.json`, `~/.claude.json`, `~/.codex/config.toml` and Claude's settings files. Edits are written in place with a diff preview and a backup, so they show up in the terminal CLI too, and a **What's loaded** view shows which files a session actually has in context. [Agent configuration](docs/agent-config.md).
+
+- **Skill switches.** Turn a skill off or back on without deleting it, through Claude Code's and Codex's own settings. [Switch skills on and off](docs/agent-config.md#switch-skills-on-and-off).
+- **MCP connection tests.** Check that an MCP server starts, connects and lists its tools before an agent needs it. [Test a server](docs/agent-config.md#test-a-server).
+- **Hooks.** Add, edit, disable and delete Claude Code's hooks, the commands it runs before or after tool calls and on other events. [Hooks](docs/agent-config.md#hooks).
 
 ### Image generation for every agent
 
@@ -297,8 +304,8 @@ It's experimental. Read [The software factory and the dark factory](docs/softwar
 | [GitHub](docs/github.md) | Issues, PRs, checks, reviews and the evidence branch |
 | [Automations](docs/automations.md) | Triggers, guards, templates and writing your own |
 | [The software factory and the dark factory](docs/software-factory.md) | Modes, pipelines, trusted authors, the scout, the vision file, merge checks, limits and the kill switch |
-| [Workbench](docs/workbench.md) | Diffs, checkpoints, files, terminal, browser, composer, shortcuts |
-| [Agent configuration](docs/agent-config.md) | Memory, skills, subagents and MCP servers |
+| [Workbench](docs/workbench.md) | Diffs, diff comments, checkpoints, forks, files, terminal, browser, composer, shortcuts |
+| [Agent configuration](docs/agent-config.md) | Memory, skills and skill switches, subagents, MCP servers and hooks |
 | [Voice and images](docs/voice-and-images.md) | Dictation, read-aloud and image generation |
 | [Usage and costs](docs/usage-and-costs.md) | The ledger, reports, budgets and rate limits |
 | [Phones, tablets and network access](docs/remote-access.md) | Opening CodeDen from your phone, the QR code, Add to Home Screen and VPNs |
