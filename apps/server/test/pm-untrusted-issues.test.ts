@@ -154,12 +154,12 @@ describe("PM tools and untrusted issues in turns the user didn't start (#137)", 
       { type: "project.created", sessionId: null, payload: { project: Project.parse(project) } },
     ]);
     github.githubProjects.add(GH);
-  }, 60_000);
+  });
   afterAll(async () => {
     await h?.close();
   });
 
-  it("start_session refuses a stranger's issue in a triage turn", { timeout: 60_000 }, async () => {
+  it("start_session refuses a stranger's issue in a triage turn", async () => {
     await waitUntil(() => h.server.services.automations.definitions.find(triageId));
     expect((await h.api("POST", `/automations/${triageId}/enable`, {})).status).toBe(200);
     h.server.services.store.append([
@@ -212,9 +212,7 @@ describe("PM tools and untrusted issues in turns the user didn't start (#137)", 
     expect(issueSessions(45)).toHaveLength(1);
   });
 
-  it("factory_admit_issue refuses in turns an automation or a GitHub notice started", {
-    timeout: 60_000,
-  }, async () => {
+  it("factory_admit_issue refuses in turns an automation or a GitHub notice started", async () => {
     const mode = await h.api("PUT", `/projects/${GH}/autonomy`, {
       mode: "software_factory",
       limits: { dailyBudget: { usd: 5 } },
@@ -261,9 +259,7 @@ describe("PM tools and untrusted issues in turns the user didn't start (#137)", 
     expect(item(ignored?.id as string)).toMatchObject({ stage: "ignored", trust: "untrusted" });
   });
 
-  it("still lets the PM admit and start untrusted work when the user asked in this turn", {
-    timeout: 60_000,
-  }, async () => {
+  it("still lets the PM admit and start untrusted work when the user asked in this turn", async () => {
     // Fresh issues from untrusted authors, so this doesn't depend on the tests above.
     h.server.services.store.append([
       {
@@ -296,9 +292,7 @@ describe("PM tools and untrusted issues in turns the user didn't start (#137)", 
     expect(issueSessions(47)).toHaveLength(1);
   });
 
-  it("counts a request the orchestrator passes on only when the user started its turn", {
-    timeout: 60_000,
-  }, async () => {
+  it("counts a request the orchestrator passes on only when the user started its turn", async () => {
     const asOrchestrator = (name: string, args: unknown, sessionId: string) =>
       h.server.services.tools.call(name, args, {
         role: "orchestrator",
@@ -368,9 +362,7 @@ describe("PM tools and untrusted issues in turns the user didn't start (#137)", 
     expect(issueSessions(49)).toHaveLength(0);
   });
 
-  it("keeps an automatic turn untrusted when the runner took it but its answer was lost", {
-    timeout: 60_000,
-  }, async () => {
+  it("keeps an automatic turn untrusted when the runner took it but its answer was lost", async () => {
     h.server.services.store.append([
       {
         type: "issue.updated",
@@ -444,9 +436,7 @@ describe("PM tools and untrusted issues in turns the user didn't start (#137)", 
     );
   });
 
-  it("never lets a user message that didn't start the turn authorize an automation's turn", {
-    timeout: 60_000,
-  }, async () => {
+  it("never lets a user message that didn't start the turn authorize an automation's turn", async () => {
     h.server.services.store.append([
       {
         type: "issue.updated",

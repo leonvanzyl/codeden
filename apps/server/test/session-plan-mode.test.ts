@@ -45,7 +45,7 @@ describe("plan mode through a real runner (Fake provider)", () => {
   let h: Harness;
   beforeAll(async () => {
     h = await startHarness();
-  }, 60_000);
+  });
   afterAll(async () => {
     await h?.close();
   });
@@ -66,9 +66,7 @@ describe("plan mode through a real runner (Fake provider)", () => {
       response: { kind: "approval", decision, ...(message ? { message } : {}) },
     });
 
-  it("starts planning, keeps planning when declined and implements once approved", {
-    timeout: 60_000,
-  }, async () => {
+  it("starts planning, keeps planning when declined and implements once approved", async () => {
     const res = await h.api("POST", "/sessions", {
       projectId: h.projectId,
       provider: "fake",
@@ -109,9 +107,7 @@ describe("plan mode through a real runner (Fake provider)", () => {
     }
   });
 
-  it("turns plan mode on and off for a running session with PATCH", {
-    timeout: 60_000,
-  }, async () => {
+  it("turns plan mode on and off for a running session with PATCH", async () => {
     const id = await h.startFakeSession("first");
     expect((await session(id)).planMode).toBe(false);
 

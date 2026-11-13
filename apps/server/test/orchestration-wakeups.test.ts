@@ -117,7 +117,7 @@ describe("schedule_wakeup, list_wakeups and cancel_wakeup", () => {
     h = await startHarness({
       orchestration: { wake: { debounceMs: 50, maxWaitMs: 300 }, wakeupMinDelayMs: 0 },
     });
-  }, 60_000);
+  });
   afterAll(async () => {
     await h?.close();
   });

@@ -47,7 +47,7 @@ describe("answer_question", () => {
 
   beforeAll(async () => {
     h = await startHarness({ askUserWaitMs: 3_000 });
-  }, 60_000);
+  });
   afterAll(async () => {
     await h?.close();
   });

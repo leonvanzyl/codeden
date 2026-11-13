@@ -20,7 +20,7 @@ beforeAll(async () => {
   h = await startHarness();
   sessionId = await h.startFakeSession();
   worktree = (await h.detail(sessionId)).session.worktreePath ?? "";
-}, 60_000);
+});
 
 afterAll(async () => {
   await h?.close();
@@ -70,7 +70,7 @@ describe("checkpoints, diffs and git", () => {
     );
     expect(restored.deleted).toEqual(["hello.txt"]);
     expect(existsSync(join(worktree, "hello.txt"))).toBe(false);
-  }, 60_000);
+  });
 
   it("commits in the worktree and reports push failures", async () => {
     writeFileSync(join(worktree, "notes.md"), "notes\n");

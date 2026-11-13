@@ -19,7 +19,7 @@ describe("get_session and session id prefixes", () => {
 
   beforeAll(async () => {
     h = await startHarness({ askUserWaitMs: 60_000 });
-  }, 60_000);
+  });
   afterAll(async () => {
     await h?.close();
   });

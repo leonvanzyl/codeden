@@ -251,5 +251,5 @@ describe("re-detection after a real agent turn", () => {
     } finally {
       await h.close();
     }
-  }, 60_000);
+  });
 });

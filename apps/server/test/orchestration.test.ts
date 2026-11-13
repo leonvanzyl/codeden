@@ -62,7 +62,7 @@ describe("orchestration (§8): role sessions, digest, tools, notices, conflicts"
     h = await startHarness({
       orchestration: { wake: { debounceMs: 50, maxWaitMs: 300 }, askTimeoutMs: 15_000 },
     });
-  }, 60_000);
+  });
   afterAll(async () => {
     await h?.close();
   });

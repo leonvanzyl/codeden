@@ -86,18 +86,20 @@ const RUNNER_WORKTREE_TESTS = [
 /**
  * The process-heavy suites above (a server, a runner through tsx and git worktrees per suite)
  * get timeouts that leave room for a busy machine: with Vitest's 5 s they timed out whenever
- * other builds kept the machine busy. The test timeout stays above the harness's 30 s
- * `waitUntil`, so a slow wait reports what it waited for; the suites set no lower timeouts of
- * their own. They share the pool with the fast suites: a worker limit of their own would need
- * a phase of their own after the fast suites, which made `pnpm test` 40-50% slower.
+ * other builds kept the machine busy, and a saturated machine still takes up to a minute for
+ * some of their tests. The test timeout stays above the harness's 60 s `waitUntil` and 90 s
+ * runner-command floor, so a slow wait reports what it waited for; the suites set no lower
+ * timeouts of their own. They share the pool with the fast suites: a worker limit of their own
+ * would need a phase of their own after the fast suites, which made `pnpm test` 40-50% slower
+ * (on a busy machine, `capWorkersWhenBusy` below limits every project instead).
  */
-const PROCESS_HEAVY = { testTimeout: 60_000, hookTimeout: 60_000 };
+const PROCESS_HEAVY = { testTimeout: 120_000, hookTimeout: 120_000 };
 
 /**
  * The other runner, server and release-script suites still start git and child processes
  * (clones, fake CLIs), which take seconds on a busy machine: more room than Vitest's 5 s default.
  */
-const SPAWNS_PROCESSES = { testTimeout: 20_000, hookTimeout: 30_000 };
+const SPAWNS_PROCESSES = { testTimeout: 40_000, hookTimeout: 60_000 };
 
 /** The fast suites: `pnpm test`, CI and the release run these. */
 const FAST = [

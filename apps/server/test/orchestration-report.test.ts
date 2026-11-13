@@ -74,7 +74,7 @@ describe("reportTo: orchestrator", () => {
 
     beforeAll(async () => {
       h = await startHarness({ orchestration: { wake: { debounceMs: 50, maxWaitMs: 300 } } });
-    }, 60_000);
+    });
     afterAll(async () => {
       await h?.close();
     });
@@ -127,6 +127,6 @@ describe("reportTo: orchestrator", () => {
         notices.list({ target: "orchestrator" }).every((n) => n.deliveredAt) ? true : undefined,
       );
       expect(orchestrator.role).toBe("orchestrator");
-    }, 60_000);
+    });
   });
 });

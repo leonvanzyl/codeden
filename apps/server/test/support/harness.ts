@@ -17,9 +17,9 @@ export const TOKEN = "d".repeat(64);
 /**
  * The shortest deadline of any server-to-runner command in tests (`runnerRequestTimeoutFloorMs`):
  * on a busy machine the runner can take longer than the product's 5-30 s to stop a session or
- * answer a status. Below the 60 s test timeout, so a command that never answers says so.
+ * answer a status. Below the 120 s test timeout, so a command that never answers says so.
  */
-export const RUNNER_REQUEST_TIMEOUT_FLOOR_MS = 45_000;
+export const RUNNER_REQUEST_TIMEOUT_FLOOR_MS = 90_000;
 
 /** A server with a real runner (Fake provider) and a local git repo as a project. */
 export interface Harness {
@@ -36,12 +36,12 @@ export interface Harness {
 
 /**
  * Poll `probe` until it returns a value (not `undefined` or `false`). The default deadline is
- * generous for a busy machine and half the runner project's 60 s test timeout
+ * generous for a busy machine and half the runner project's 120 s test timeout
  * (`vitest.config.ts`), so a slow wait reports itself before Vitest stops the test.
  */
 export async function waitUntil<T>(
   probe: () => Promise<T | undefined> | T | undefined,
-  timeoutMs = 30_000,
+  timeoutMs = 60_000,
 ): Promise<T> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {

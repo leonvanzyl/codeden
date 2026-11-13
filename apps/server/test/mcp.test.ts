@@ -18,7 +18,7 @@ beforeAll(async () => {
     sessionId,
     projectId: h.projectId,
   });
-}, 60_000);
+});
 
 afterAll(async () => {
   await h?.close();

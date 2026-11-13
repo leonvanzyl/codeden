@@ -16,7 +16,7 @@ beforeAll(async () => {
   h = await startHarness({
     worktreeCleanup: { now: () => new Date(clock), initialDelayMs: 60 * 60_000 },
   });
-}, 60_000);
+});
 
 afterAll(async () => {
   await h?.close();
@@ -59,7 +59,7 @@ describe("worktree cleanup (§9)", () => {
     expect(after.archivedAt).toBeNull();
     expect(after.worktreePath).toBe(worktree);
     expect(existsSync(worktree)).toBe(true);
-  }, 60_000);
+  });
 
   it("keeps a worktree with uncommitted changes unless forced, and says when it discarded them", async () => {
     const archived = await h.startFakeSession();
@@ -91,7 +91,7 @@ describe("worktree cleanup (§9)", () => {
     expect(await services().worktreeCleanup.sweep()).not.toContain(idle);
     expect(existsSync(join(idleTree, "notes.txt"))).toBe(true);
     clock = Date.now();
-  }, 60_000);
+  });
 
   it("finishes removing the half-deleted worktree an earlier archive left behind", async () => {
     const id = await h.startFakeSession();
@@ -109,7 +109,7 @@ describe("worktree cleanup (§9)", () => {
     expect(existsSync(worktree)).toBe(false);
     expect((await h.detail(id)).session.worktreeRemovedAt).toBeTruthy();
     expect(branches()).toContain(before.branch as string);
-  }, 60_000);
+  });
 
   it("never removes a worktree another live session works in", async () => {
     const owner = await h.startFakeSession();
@@ -127,7 +127,7 @@ describe("worktree cleanup (§9)", () => {
     services().sessionRepo.update(other, (s) => ({ ...s, cwd: otherCwd }));
     expect((await archive(owner)).worktree.status).toBe("removed");
     expect(existsSync(worktree)).toBe(false);
-  }, 60_000);
+  });
 
   it("sweeps worktrees inactive for the configured days, unless the PR is open", async () => {
     const idle = await h.startFakeSession();
@@ -149,7 +149,7 @@ describe("worktree cleanup (§9)", () => {
     expect(existsSync(idleTree)).toBe(false);
     expect(existsSync(reviewedTree)).toBe(true);
     expect((await h.detail(idle)).session.worktreeRemovedAt).toBeTruthy();
-  }, 60_000);
+  });
 
   it("leaves inactive worktrees alone when cleanup is off", async () => {
     const id = await h.startFakeSession();
@@ -159,7 +159,7 @@ describe("worktree cleanup (§9)", () => {
     expect(await services().worktreeCleanup.sweep()).not.toContain(id);
     expect(existsSync((await h.detail(id)).session.worktreePath as string)).toBe(true);
     await h.api("PATCH", "/settings", { worktrees: { cleanup: true } });
-  }, 60_000);
+  });
 
   it("cleans up a project's worktrees when the project is archived", async () => {
     const id = await h.startFakeSession();
@@ -170,7 +170,7 @@ describe("worktree cleanup (§9)", () => {
       (await h.detail(id)).session.worktreeRemovedAt ? true : undefined,
     );
     expect(existsSync(worktree)).toBe(false);
-  }, 60_000);
+  });
 });
 
 describe("cleanupDue", () => {

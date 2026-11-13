@@ -7,7 +7,7 @@ describe("messages from a PM or the orchestrator record their sender", () => {
 
   beforeAll(async () => {
     h = await startHarness();
-  }, 60_000);
+  });
   afterAll(async () => {
     await h?.close();
   });
