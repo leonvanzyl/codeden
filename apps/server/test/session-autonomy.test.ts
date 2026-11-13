@@ -131,7 +131,7 @@ describe("PATCH /api/sessions/:id with autonomy, through a real runner", () => {
   let h: Harness;
   beforeAll(async () => {
     h = await startHarness();
-  }, 60_000);
+  });
   afterAll(async () => {
     await h?.close();
   });
@@ -142,9 +142,7 @@ describe("PATCH /api/sessions/:id with autonomy, through a real runner", () => {
       .filter((i) => i.kind === "approval" && i.status === "open");
   const statusOf = async (id: string) => (await h.detail(id)).session.status;
 
-  it("applies the level to the live session from its next tool call", {
-    timeout: 60_000,
-  }, async () => {
+  it("applies the level to the live session from its next tool call", async () => {
     const id = await h.startFakeSession("first");
     expect((await h.detail(id)).session.autonomy).toBe("auto");
 
@@ -171,9 +169,7 @@ describe("PATCH /api/sessions/:id with autonomy, through a real runner", () => {
     );
   });
 
-  it("starts an agent session with read-only permissions and switches it live", {
-    timeout: 60_000,
-  }, async () => {
+  it("starts an agent session with read-only permissions and switches it live", async () => {
     const res = await h.api("POST", "/sessions", {
       projectId: h.projectId,
       provider: "fake",

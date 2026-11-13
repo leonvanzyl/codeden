@@ -1,7 +1,10 @@
-import { cleanup } from "@testing-library/react";
+import { cleanup, configure } from "@testing-library/react";
 import { afterEach } from "vitest";
 
 afterEach(() => cleanup());
+
+// `findBy*` and `waitFor` wait up to 5 s (not 1 s): a busy machine renders slowly.
+configure({ asyncUtilTimeout: 5_000 });
 
 // jsdom lacks these browser APIs used by layout code.
 if (!("ResizeObserver" in globalThis)) {

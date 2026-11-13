@@ -15,7 +15,7 @@ describe("role session retries after a failed turn (§8.2)", () => {
     h = await startHarness({
       orchestration: { wake: { debounceMs: 50, maxWaitMs: 300 }, failedTurnRetryMs: [300, 300] },
     });
-  }, 60_000);
+  });
   afterAll(async () => {
     await h?.close();
   });
@@ -63,7 +63,7 @@ describe("role session retries after a failed turn (§8.2)", () => {
         (r) => r.item.kind === "notice" && r.item.code === NOTICE_BATCH_CODE,
       );
       return found.length >= 3 ? found : undefined;
-    }, 30_000);
+    });
     expect(batches).toHaveLength(3);
     await waitUntil(async () =>
       (await h.detail(pmId)).session.status === "failed" ? true : undefined,
@@ -73,5 +73,5 @@ describe("role session retries after a failed turn (§8.2)", () => {
     expect((await items(pmId)).filter((r) => r.item.kind === "notice")).toHaveLength(3);
     const waiting = orchestration.notices.undelivered("pm", h.projectId);
     expect(waiting.map((n) => n.id)).toContain("orchestrator.message:retry-test");
-  }, 60_000);
+  });
 });

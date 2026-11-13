@@ -48,7 +48,7 @@ async function sourceSession() {
 }
 
 // Git-heavy (worktrees, checkpoints): slow on loaded Windows runners.
-describe("workspace.prepare for a fork", { timeout: 30_000 }, () => {
+describe("workspace.prepare for a fork", () => {
   it("branches from the source branch and restores its latest checkpoint before setup", async () => {
     const { repo, ctx, source } = await sourceSession();
     const sourceStatus = sh(source.cwd, "status", "--porcelain");

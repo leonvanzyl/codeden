@@ -18,7 +18,7 @@ beforeAll(async () => {
     sessionId,
     projectId: h.projectId,
   });
-}, 60_000);
+});
 
 afterAll(async () => {
   await h?.close();
@@ -271,7 +271,7 @@ describe("CodeDen MCP endpoint", () => {
         : undefined;
     });
     expect(snapshot).toBeTruthy();
-  }, 30_000);
+  });
 
   it("keeps a session's token when a turn fails, so its next turn still has the tools", async () => {
     const failing = await h.startFakeSession();

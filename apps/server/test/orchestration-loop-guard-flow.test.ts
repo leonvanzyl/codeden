@@ -50,14 +50,12 @@ describe("orchestration loop guard (§8.2) with a real runner", () => {
     const res = await h.api("POST", `/orchestration/projects/${h.projectId}/pm`);
     pmId = (res.body as { session: { id: string } }).session.id;
     await idle(pmId);
-  }, 60_000);
+  });
   afterAll(async () => {
     await h?.close();
   });
 
-  it("delivers a user's request to a PM that was only woken by its own sessions' reports", {
-    timeout: 60_000,
-  }, async () => {
+  it("delivers a user's request to a PM that was only woken by its own sessions' reports", async () => {
     // The PM's own agent session reports twice: each finished turn wakes the PM.
     const started = StartSessionResponse.parse(
       (
@@ -98,9 +96,7 @@ describe("orchestration loop guard (§8.2) with a real runner", () => {
     expect(h.server.services.orchestration.wakes.allowed(`pm:${h.projectId}`)).toBe(true);
   });
 
-  it("paces an orchestrator <-> PM ping-pong without the user, queueing instead of refusing", {
-    timeout: 60_000,
-  }, async () => {
+  it("paces an orchestrator <-> PM ping-pong without the user, queueing instead of refusing", async () => {
     const o = h.server.services.orchestration;
     // The PM writes to the orchestrator, which is woken automatically (no user in this turn).
     await call("pm", "message_orchestrator", { text: "Need a decision on issue 11" }, pmId);

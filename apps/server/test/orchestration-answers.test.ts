@@ -47,7 +47,7 @@ describe("answer_question", () => {
 
   beforeAll(async () => {
     h = await startHarness({ askUserWaitMs: 3_000 });
-  }, 60_000);
+  });
   afterAll(async () => {
     await h?.close();
   });
@@ -71,7 +71,7 @@ describe("answer_question", () => {
     const closed = inboxItem(item.id);
     expect(closed.status).toBe("resolved");
     expect(closed.resolution).toMatchObject({ decidedBy: "pm" });
-  }, 30_000);
+  });
 
   it("answers a question that already went to the inbox: it arrives as a message from the PM", async () => {
     const id = await agent({ kind: "automation", id: "nightly" });
@@ -96,8 +96,8 @@ describe("answer_question", () => {
       )
         ? true
         : undefined;
-    }, 20_000);
-  }, 30_000);
+    });
+  });
 
   it("refuses approvals, other projects', user-started and answered items", async () => {
     const answer = (inboxItemId: string, projectId = h.projectId) =>
@@ -130,7 +130,7 @@ describe("answer_question", () => {
     expect(again.isError).toBe(true);
     expect(again.text).toMatch(/already/i);
     expect((await answer("inbox:nope")).isError).toBe(true);
-  }, 40_000);
+  });
 
   it("tells the PM which inbox item a question is and that it can answer it", () => {
     const text = renderNotices([

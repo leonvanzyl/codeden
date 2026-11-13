@@ -67,7 +67,7 @@ describe("generate_image and the image settings", () => {
         requestInit: { headers: { Authorization: `Bearer ${token}` } },
       }),
     );
-  }, 60_000);
+  });
 
   afterAll(async () => {
     await mcp?.close();
