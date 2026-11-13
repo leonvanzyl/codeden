@@ -214,10 +214,20 @@ describe("orchestration (§8): role sessions, digest, tools, notices, conflicts"
       purpose: "Audit again",
       input: { text: "audit", attachments: [image] },
     };
+    const first = await h.api("POST", "/sessions", {
+      projectId: h.projectId,
+      provider: "fake",
+      ...dup,
+      input: { text: "audit" },
+    });
+    expect(first.status).toBe(409);
+    const firstId = (first.body as { conflictId: string }).conflictId;
+    // Sent again (with an image now): the new conflict replaces the first one (#169).
     const res = await h.api("POST", "/sessions", {
       projectId: h.projectId,
       provider: "fake",
       ...dup,
+      replacesConflict: firstId,
     });
     expect(res.status).toBe(409);
     const conflictId = (res.body as { conflictId: string }).conflictId;
@@ -227,6 +237,10 @@ describe("orchestration (§8): role sessions, digest, tools, notices, conflicts"
       ConflictRecord.parse(c),
     );
     expect(open.map((c) => c.id)).toContain(conflictId);
+    expect(open.map((c) => c.id)).not.toContain(firstId);
+    expect(
+      (await h.api("POST", `/conflicts/${firstId}/resolve`, { resolution: "wait" })).status,
+    ).toBe(409);
     const inbox = (await h.api("GET", "/inbox")).body as { id: string; kind: string }[];
     expect(inbox.find((i) => i.id === conflictId)?.kind).toBe("conflict");
 

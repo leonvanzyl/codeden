@@ -7,6 +7,7 @@ import {
   type ListConflictsQuery,
   type ResolveConflictRequest,
   type ResolveConflictResponse,
+  type StartedBy,
   StartSessionRequest,
   type StartSessionResponse,
   type WorkSummary,
@@ -17,9 +18,14 @@ import { conflicts } from "../../db/schema-orchestration";
 import type { EventStore } from "../../events/store";
 import type { ArtifactService } from "../artifacts";
 import { badRequest, conflict as conflictError, notFound } from "../errors";
-import type { InboxService } from "../inbox-service";
+import { closedItem, type InboxService } from "../inbox-service";
 import { derivePurpose, deriveWorkKey } from "../sessions/conflicts";
 import type { SessionService } from "../sessions/session-service";
+
+/** The note on a conflict that a newer version of its request replaced. */
+const REPLACED = "Replaced by a newer request";
+
+const sameStarter = (a: StartedBy, b: StartedBy) => a.kind === b.kind && a.id === b.id;
 
 export interface ConflictServiceDeps {
   db: Db;
@@ -40,7 +46,12 @@ export interface ConflictServiceDeps {
 export class ConflictService {
   constructor(private readonly deps: ConflictServiceDeps) {}
 
-  /** Persist a conflict for `req`; returns the record (its id is the inbox item id). */
+  /**
+   * Persist a conflict for `req`; returns the record (its id is the inbox item id). The open
+   * conflicts it replaces are closed in the same transaction: the one `req.replacesConflict`
+   * names, and any from the same starter for the same work key in the project (the same request
+   * sent again), so a request never has two open conflicts.
+   */
   record(req: StartSessionRequest, existing: WorkSummary[]): ConflictRecord {
     const purpose = derivePurpose(req.purpose, req.input?.text);
     const workKey = deriveWorkKey({
@@ -50,7 +61,7 @@ export class ConflictService {
     });
     const now = new Date().toISOString();
     const id = `conflict:${randomUUID()}`;
-    const { conflict: _drop, ...rest } = req;
+    const { conflict: _drop, replacesConflict: _replaces, ...rest } = req;
     // Pasted images become artifacts first: the record goes into the event log, which is never
     // pruned (§6), so it keeps a reference rather than the image itself.
     const start = rest.input
@@ -99,12 +110,54 @@ export class ConflictService {
       resolvedAt: null,
       resolution: null,
     };
+    const replaced = this.replacedBy(req, workKey).map((old) => ({
+      type: "inbox.updated" as const,
+      sessionId: old.sessionId,
+      payload: { item: closedItem(old, "dismissed", { note: REPLACED, replacedBy: id }, now) },
+    }));
     this.deps.store.append([
       { type: "conflict.created", sessionId: null, payload: { conflict: record } },
       { type: "inbox.created", sessionId: null, payload: { item } },
+      ...replaced,
     ]);
     this.deps.onRecorded?.(record);
     return record;
+  }
+
+  /**
+   * A start that names the conflict it replaces went ahead without a new conflict (it started,
+   * or was settled by a decision): close that conflict, with the start's outcome.
+   */
+  closeReplaced(req: StartSessionRequest, outcome: StartSessionResponse): void {
+    const id = req.replacesConflict;
+    const record = id ? this.openRecord(id, req.projectId) : undefined;
+    const item = record && this.deps.inbox.find(record.id);
+    if (!item) return;
+    this.deps.inbox.close(item, "dismissed", {
+      note: REPLACED,
+      outcome: outcome as unknown as JsonValue,
+    });
+  }
+
+  /** The open inbox items of the conflicts `req` replaces (see `record`). */
+  private replacedBy(req: StartSessionRequest, workKey: string): InboxItem[] {
+    return this.list({ projectId: req.projectId ?? undefined })
+      .filter(
+        (c) =>
+          c.projectId === req.projectId &&
+          (c.id === req.replacesConflict ||
+            (c.request.workKey === workKey && sameStarter(c.request.startedBy, req.startedBy))),
+      )
+      .flatMap((c) => this.deps.inbox.find(c.id) ?? [])
+      .filter((i) => i.status === "open");
+  }
+
+  /** The conflict `id` if it is open and in `projectId`. */
+  private openRecord(id: string, projectId: string | null): ConflictRecord | undefined {
+    const row = this.deps.db.select().from(conflicts).where(eq(conflicts.id, id)).get();
+    if (!row) return undefined;
+    const record = this.withStatus(row.record);
+    return record.status === "open" && record.projectId === projectId ? record : undefined;
   }
 
   list(query: Partial<ListConflictsQuery> = {}): ConflictRecord[] {

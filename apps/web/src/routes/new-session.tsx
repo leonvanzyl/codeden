@@ -72,6 +72,7 @@ export function NewSessionPage({ projectId }: { projectId: string }) {
             conflict={start.conflict}
             decideWith={start.decide}
             onResolved={start.onConflictResolved}
+            startBlocked={start.startBlocked}
             replace
           />
         </div>

@@ -162,6 +162,12 @@ export const StartSessionRequest = z.object({
   input: UserInput.optional(),
   /** The caller's decision when a previous attempt returned `conflict`. */
   conflict: ConflictDecision.optional(),
+  /**
+   * The open persisted conflict this request is a new version of (the New session draft sent
+   * again while its card is up). The server closes that conflict whatever this start returns;
+   * a conflict that is closed already or belongs to another project is left alone.
+   */
+  replacesConflict: Id.optional(),
 });
 export type StartSessionRequest = z.infer<typeof StartSessionRequest>;
 export type StartSessionRequestInit = z.input<typeof StartSessionRequest>;

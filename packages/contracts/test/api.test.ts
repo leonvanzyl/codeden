@@ -34,6 +34,19 @@ describe("api schemas", () => {
     expect(req.workspace.mode).toBe("worktree");
     expect(req.startedBy).toEqual({ kind: "user" });
     expect(req.input?.attachments).toEqual([]);
+    expect(req.replacesConflict).toBeUndefined();
+  });
+
+  it("names the open conflict a start replaces", () => {
+    const req = roundTrip(StartSessionRequest, {
+      projectId: "p1",
+      input: { text: "Second wording" },
+      replacesConflict: "conflict:1",
+    });
+    expect(req.replacesConflict).toBe("conflict:1");
+    expect(StartSessionRequest.safeParse({ projectId: "p1", replacesConflict: "" }).success).toBe(
+      false,
+    );
   });
 
   it("round-trips a model refresh response", () => {

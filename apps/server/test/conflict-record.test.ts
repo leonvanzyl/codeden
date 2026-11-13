@@ -35,11 +35,12 @@ const running: WorkSummary = {
 };
 
 /** A New session draft's send: text, a pasted screenshot, the work key. */
-const request = (text: string, projectId = PROJECT) =>
+const request = (text: string, projectId = PROJECT, over: Record<string, unknown> = {}) =>
   StartSessionRequest.parse({
     projectId,
     provider: "fake",
     workKey: "issue:9",
+    ...over,
     input: {
       text,
       attachments: [
@@ -150,5 +151,60 @@ describe("recording a conflicting start with a pasted image (#169)", () => {
     ).rejects.toMatchObject({ code: "project_mismatch" });
     expect(start).not.toHaveBeenCalled();
     expect(conflicts.get(record.id).status).toBe("open");
+  });
+});
+
+describe("a new version of a request replaces its open conflict (#169)", () => {
+  const openConflictItems = () =>
+    inbox.list({ projectId: PROJECT }).filter((i) => i.kind === "conflict");
+
+  it("keeps one open conflict when the same request is recorded again", () => {
+    const first = conflicts.record(request("First wording"), [running]);
+    const second = conflicts.record(request("Second wording"), [running]);
+    expect(conflicts.list({ projectId: PROJECT }).map((c) => c.id)).toEqual([second.id]);
+    expect(openConflictItems().map((i) => i.id)).toEqual([second.id]);
+    expect(conflicts.get(first.id).status).toBe("dismissed");
+    expect(inbox.get(first.id).resolution).toMatchObject({ replacedBy: second.id });
+    // Closed in the same append as the new record: nothing in between.
+    const types = log().map((e) => e.type);
+    expect(types.slice(-3)).toEqual(["conflict.created", "inbox.created", "inbox.updated"]);
+  });
+
+  it("closes the conflict a re-send names, even when its work key changed", () => {
+    const first = conflicts.record(request("Fix login"), [running]);
+    const second = conflicts.record(
+      request("Fix signup", PROJECT, { workKey: "issue:10", replacesConflict: first.id }),
+      [running],
+    );
+    expect(conflicts.list({ projectId: PROJECT }).map((c) => c.id)).toEqual([second.id]);
+    // The id is not part of the saved request.
+    expect(second.start).not.toHaveProperty("replacesConflict");
+  });
+
+  it("leaves other starters' and other projects' conflicts open", () => {
+    const mine = conflicts.record(request("First wording"), [running]);
+    conflicts.record(
+      request("Nightly run", PROJECT, { startedBy: { kind: "automation", id: "a1" } }),
+      [running],
+    );
+    conflicts.record(request("Elsewhere", "p2", { replacesConflict: mine.id }), [running]);
+    expect(conflicts.get(mine.id).status).toBe("open");
+    expect(openConflictItems()).toHaveLength(2);
+  });
+
+  it("closes the replaced conflict when the re-send goes ahead without one", () => {
+    const first = conflicts.record(request("First wording"), [running]);
+    const resent = request("Now it starts", PROJECT, { replacesConflict: first.id });
+    conflicts.closeReplaced(resent, { status: "started", sessionId: "s-new" });
+    expect(conflicts.get(first.id)).toMatchObject({
+      status: "dismissed",
+      outcome: { status: "started", sessionId: "s-new" },
+    });
+    expect(openConflictItems()).toEqual([]);
+    // Closed already, unknown or absent: nothing to do.
+    expect(() => conflicts.closeReplaced(resent, { status: "skipped" })).not.toThrow();
+    const unknown = request("x", PROJECT, { replacesConflict: "conflict:none" });
+    expect(() => conflicts.closeReplaced(unknown, { status: "skipped" })).not.toThrow();
+    expect(() => conflicts.closeReplaced(request("x"), { status: "skipped" })).not.toThrow();
   });
 });

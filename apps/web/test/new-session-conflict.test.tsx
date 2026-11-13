@@ -1,7 +1,6 @@
 import {
   ConflictDecision,
   type ConflictRecord,
-  type InboxItem,
   type StartSessionRequestInit,
   type StartSessionResponse,
 } from "@codeden/contracts";
@@ -40,13 +39,15 @@ const running = {
 
 /**
  * The server's side of a New session start that matches running work, as `POST /api/sessions`
- * and `ConflictService` do it: every conflicting start is persisted (409 with `conflictId`), and
- * resolving a conflict retries the start request saved with it, or the `start` sent with the
- * decision. Dismissing the inbox item closes the conflict.
+ * and `ConflictService` do it: every conflicting start is persisted (409 with `conflictId`) and
+ * closes the open conflict it `replacesConflict`; resolving a conflict retries the start request
+ * saved with it, or the `start` sent with the decision. The inbox API fails, so nothing may
+ * depend on the browser closing a conflict itself.
  */
 function fakeServer() {
   const conflicts: ConflictRecord[] = [];
-  /** Every session the server started, with the request it started it from. */
+  /** Every start request the server received, and every session it started. */
+  const requests: StartSessionRequestInit[] = [];
   const started: StartSessionRequestInit[] = [];
   let n = 0;
   const startWith = (req: StartSessionRequestInit): StartSessionResponse => {
@@ -56,6 +57,9 @@ function fakeServer() {
   const client: CodeDenClient = {
     ...createMockClient(),
     async startSession(req) {
+      requests.push(req);
+      const replaced = conflicts.find((c) => c.id === req.replacesConflict);
+      if (replaced?.status === "open") replaced.status = "dismissed";
       if (req.conflict) return startWith(req);
       n += 1;
       const id = `conflict:${n}`;
@@ -92,16 +96,18 @@ function fakeServer() {
       record.resolution = decision;
       return { conflict: record, result };
     },
-    async resolveInbox(id, resolution) {
-      const record = conflicts.find((c) => c.id === id);
-      if (!record) throw new Error(`No inbox item ${id}`);
-      if (record.status === "open") record.status = resolution.status ?? "resolved";
-      // The draft only needs the item closed; it doesn't read the reply.
-      return {} as InboxItem;
+    async resolveInbox() {
+      throw new Error("Inbox unavailable");
     },
   };
-  return { client, conflicts, started, open: () => conflicts.filter((c) => c.status === "open") };
+  const open = () => conflicts.filter((c) => c.status === "open");
+  return { client, conflicts, requests, started, open };
 }
+
+const buttons = (card: HTMLElement) =>
+  ["Wait", "Join", "Force…"].map(
+    (name) => within(card).getByRole("button", { name }) as HTMLButtonElement,
+  );
 
 async function openDraft(client: CodeDenClient) {
   renderWithClient(<NewSessionPage projectId={PROJECT} />, client, { withRouter: true });
@@ -155,12 +161,14 @@ describe("a New session conflict while the draft is still editable (#169)", () =
 
     fireEvent.change(box, { target: { value: "Second wording" } });
     fireEvent.keyDown(box, { key: "Enter" });
-    // The new send is checked again; the earlier conflict is closed, not left in the inbox.
+    // The new send names the conflict it replaces, so the server closes it with the new one;
+    // nothing depends on a separate inbox call (which fails here).
     await waitFor(() => expect(server.conflicts).toHaveLength(2));
-    await waitFor(() =>
-      expect(server.open().map((c) => c.request.purpose)).toEqual(["Second wording"]),
-    );
-    expect(server.conflicts[0]?.status).toBe("dismissed");
+    expect(server.requests[1]).toMatchObject({
+      input: { text: "Second wording" },
+      replacesConflict: "conflict:1",
+    });
+    expect(server.open().map((c) => c.request.purpose)).toEqual(["Second wording"]);
 
     // The card now answers the new conflict.
     const card = screen.getByTestId("conflict-card");
@@ -168,5 +176,50 @@ describe("a New session conflict while the draft is still editable (#169)", () =
     await waitFor(() => expect(server.started).toHaveLength(1));
     expect(server.started[0]?.input?.text).toBe("Second wording");
     expect(server.conflicts.map((c) => c.status)).toEqual(["dismissed", "resolved"]);
+  });
+
+  it("starts nothing from a draft whose text and image were removed", async () => {
+    const server = fakeServer();
+    const box = await openDraft(server.client);
+    fireEvent.change(box, { target: { value: "First wording" } });
+    pasteImage(box);
+    await screen.findByRole("button", { name: "Remove image.png" });
+    fireEvent.keyDown(box, { key: "Enter" });
+    const card = await screen.findByTestId("conflict-card");
+
+    // Empty the composer: the message that was sent must not come back.
+    fireEvent.change(box, { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "Remove image.png" }));
+    await waitFor(() => expect(buttons(card).every((b) => b.disabled)).toBe(true));
+    expect(card.textContent).toContain("The composer is empty");
+    fireEvent.click(within(card).getByRole("button", { name: "Wait" }));
+    expect(server.started).toEqual([]);
+    // Skip still works.
+    expect((within(card).getByRole("button", { name: "Skip" }) as HTMLButtonElement).disabled).toBe(
+      false,
+    );
+
+    // With a task again, Wait starts exactly what the composer holds.
+    fireEvent.change(box, { target: { value: "Only text now" } });
+    await waitFor(() => expect(buttons(card)[0]?.disabled).toBe(false));
+    fireEvent.click(within(card).getByRole("button", { name: "Wait" }));
+    await waitFor(() => expect(server.started).toHaveLength(1));
+    expect(server.started[0]?.input).toEqual({ text: "Only text now", attachments: [] });
+  });
+
+  it("starts nothing from an image-only draft whose last image was removed", async () => {
+    const server = fakeServer();
+    const box = await openDraft(server.client);
+    pasteImage(box);
+    await screen.findByRole("button", { name: "Remove image.png" });
+    fireEvent.keyDown(box, { key: "Enter" });
+    const card = await screen.findByTestId("conflict-card");
+    expect(buttons(card).some((b) => b.disabled)).toBe(false);
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove image.png" }));
+    await waitFor(() => expect(buttons(card).every((b) => b.disabled)).toBe(true));
+    fireEvent.click(within(card).getByRole("button", { name: "Wait" }));
+    expect(server.started).toEqual([]);
+    expect(server.open()).toHaveLength(1);
   });
 });

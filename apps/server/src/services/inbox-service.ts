@@ -93,8 +93,7 @@ export class InboxService {
   /** Close an open item now (eagerly, before the agent's confirmation arrives). */
   close(item: InboxItem, status: "resolved" | "dismissed", resolution: JsonValue): InboxItem {
     if (item.status !== "open") return item;
-    const now = new Date().toISOString();
-    const next: InboxItem = { ...item, status, resolution, resolvedAt: now, updatedAt: now };
+    const next = closedItem(item, status, resolution);
     this.store.append([
       { type: "inbox.updated", sessionId: item.sessionId, payload: { item: next } },
     ]);
@@ -145,4 +144,14 @@ export class InboxService {
       },
     ]);
   }
+}
+
+/** `item` closed now with `status` and `resolution` (append it as `inbox.updated`). */
+export function closedItem(
+  item: InboxItem,
+  status: "resolved" | "dismissed",
+  resolution: JsonValue,
+  now = new Date().toISOString(),
+): InboxItem {
+  return { ...item, status, resolution, resolvedAt: now, updatedAt: now };
 }

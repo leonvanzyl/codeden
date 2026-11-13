@@ -50,15 +50,15 @@ const isPersisted = (record: ConflictRecord) => !record.id.startsWith(LOCAL_CONF
  * on a duplicate-work conflict the card shows above the composer; on a failure the draft stays.
  *
  * The composer stays usable under the card, so the card follows the draft: Wait, Join and Force
- * start the draft as it is when clicked (the message sent, if the composer was emptied), and
- * sending again checks the new draft and replaces the open conflict.
+ * start the draft as it is when clicked, and wait while it is empty (`startBlocked`). Sending
+ * again checks the new draft; the server closes the conflict it replaces (`replacesConflict`).
  */
 export function useStartDraft(projectId: string, resolved: ResolvedDraft, workKey: string) {
   const client = useClient();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const draftKey = newSessionDraftKey(projectId);
-  const draftText = useComposerStore((s) => getDraft(s, draftKey).text);
+  const draft = useComposerStore((s) => getDraft(s, draftKey));
   const [conflict, setConflict] = useState<{
     record: ConflictRecord;
     request: StartSessionRequestInit;
@@ -76,27 +76,21 @@ export function useStartDraft(projectId: string, resolved: ResolvedDraft, workKe
   };
   const toProject = () => void navigate({ to: "/projects/$projectId", params: { projectId } });
 
-  /** The start request for the draft as it is now; `sent` supplies the text if it was emptied. */
-  const currentRequest = (sent: StartSessionRequestInit): StartSessionRequestInit => {
-    const draft = getDraft(useComposerStore.getState(), draftKey);
-    const input = canSendDraft(draft) ? draftInput(draft) : (sent.input ?? { text: "" });
-    return buildStartRequest(projectId, input, resolved, workKey);
-  };
-
-  /** Close the conflict a new send replaces, so the inbox doesn't keep the stale request. */
-  const dismissReplaced = async (record: ConflictRecord | undefined) => {
-    if (!record || !isPersisted(record)) return;
-    await client
-      .resolveInbox(record.id, { status: "dismissed", note: "Replaced by a newer send" })
-      .catch(() => undefined);
+  /** The start request for the draft as it is now. An empty draft starts nothing. */
+  const currentRequest = (): StartSessionRequestInit => {
+    const now = getDraft(useComposerStore.getState(), draftKey);
+    if (!canSendDraft(now)) throw new Error("Write the task in the composer first");
+    return buildStartRequest(projectId, draftInput(now), resolved, workKey);
   };
 
   const start = useMutation({
     mutationFn: async (input: UserInputInit) => {
-      const replaced = conflict?.record;
+      // Sent again while the card is up: the server closes the conflict this replaces.
+      const replaced = conflict && isPersisted(conflict.record) ? conflict.record.id : undefined;
       const request = buildStartRequest(projectId, input, resolved, workKey);
-      const result = await client.startSession(request);
-      await dismissReplaced(replaced);
+      const result = await client.startSession(
+        replaced ? { ...request, replacesConflict: replaced } : request,
+      );
       if (result.status === "conflict") {
         // The server persisted the conflict (409 with `conflictId`); show that record.
         const persisted = result.conflictId
@@ -141,8 +135,7 @@ export function useStartDraft(projectId: string, resolved: ResolvedDraft, workKe
     if (!conflict) throw new Error("No conflict to resolve");
     const { record } = conflict;
     // Skip starts nothing, so the saved request is all it needs.
-    const request =
-      decision.resolution === "skip" ? conflict.request : currentRequest(conflict.request);
+    const request = decision.resolution === "skip" ? conflict.request : currentRequest();
     decidedInput.current = request.input;
     if (!isPersisted(record)) return client.startSession({ ...request, conflict: decision });
     const replacement = decision.resolution === "skip" ? {} : { start: request };
@@ -170,12 +163,16 @@ export function useStartDraft(projectId: string, resolved: ResolvedDraft, workKe
     toProject();
   };
 
-  // The card names what Wait or Force would start: the draft's first line as it is now.
+  // The card names what Wait or Force would start: the draft as it is now (the server's purpose
+  // for a draft with only attachments). An empty draft starts nothing until it has a task again.
+  const canStart = canSendDraft(draft);
   const shown = conflict && {
     ...conflict.record,
     request: {
       ...conflict.record.request,
-      purpose: draftPurpose(draftText) ?? conflict.record.request.purpose,
+      purpose: canStart
+        ? (draftPurpose(draft.text) ?? "New session")
+        : conflict.record.request.purpose,
     },
   };
 
@@ -185,6 +182,7 @@ export function useStartDraft(projectId: string, resolved: ResolvedDraft, workKe
     },
     sending: start.isPending,
     conflict: shown,
+    startBlocked: canStart ? null : "The composer is empty: write the task to start it, or skip",
     decide,
     onConflictResolved,
   };
