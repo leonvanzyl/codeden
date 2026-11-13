@@ -1,3 +1,4 @@
+import { Role } from "@codeden/contracts";
 import {
   createRootRoute,
   createRoute,
@@ -43,29 +44,58 @@ const rootRoute = createRootRoute({ component: Root });
 
 const shell = createRoute({ getParentRoute: () => rootRoute, id: "shell", component: AppShell });
 
+const text = (v: unknown): string | undefined => (typeof v === "string" && v ? v : undefined);
+
 const sessionRoute = createRoute({
   getParentRoute: () => shell,
   path: "/sessions/$sessionId",
-  // `?item=`: open the transcript at this item (a transcript search hit).
-  validateSearch: (s: Record<string, unknown>): { item?: string } =>
-    typeof s.item === "string" && s.item ? { item: s.item } : {},
+  // A transcript search hit: `?item=` opens the transcript at this item; `thread` and
+  // `threadItem` also open a subagent's thread beside it at that item.
+  validateSearch: (
+    s: Record<string, unknown>,
+  ): { item?: string; thread?: string; threadItem?: string } => {
+    const [item, thread, threadItem] = [text(s.item), text(s.thread), text(s.threadItem)];
+    return {
+      ...(item ? { item } : {}),
+      ...(thread && threadItem ? { thread, threadItem } : {}),
+    };
+  },
   component: function Session() {
     const { sessionId } = sessionRoute.useParams();
-    const { item } = sessionRoute.useSearch();
-    return <SessionPage sessionId={sessionId} focusItemId={item} />;
+    const { item, thread, threadItem } = sessionRoute.useSearch();
+    return (
+      <SessionPage
+        sessionId={sessionId}
+        focusItemId={item}
+        focusThread={thread && threadItem ? { threadId: thread, itemId: threadItem } : undefined}
+      />
+    );
   },
 });
 
 const searchRoute = createRoute({
   getParentRoute: () => shell,
   path: "/search",
-  validateSearch: (s: Record<string, unknown>): { q?: string; project?: string } => ({
-    ...(typeof s.q === "string" && s.q ? { q: s.q } : {}),
-    ...(typeof s.project === "string" && s.project ? { project: s.project } : {}),
-  }),
+  // `archived=false` leaves out archived sessions (they are included by default).
+  validateSearch: (
+    s: Record<string, unknown>,
+  ): { q?: string; project?: string; role?: Role; archived?: false } => {
+    const role = Role.safeParse(s.role);
+    return {
+      ...(text(s.q) ? { q: text(s.q) } : {}),
+      ...(text(s.project) ? { project: text(s.project) } : {}),
+      ...(role.success ? { role: role.data } : {}),
+      ...(s.archived === false || s.archived === "false" ? { archived: false as const } : {}),
+    };
+  },
   component: function Search() {
-    const { q, project } = searchRoute.useSearch();
-    return <SearchPage q={q ?? ""} projectId={project} />;
+    const { q, project, role, archived } = searchRoute.useSearch();
+    return (
+      <SearchPage
+        q={q ?? ""}
+        filters={{ projectId: project, role, includeArchived: archived !== false }}
+      />
+    );
   },
 });
 

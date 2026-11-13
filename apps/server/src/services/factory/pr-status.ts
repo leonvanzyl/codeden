@@ -9,7 +9,7 @@ import type { FactoryContext } from "./context";
 import { localDay } from "./policy";
 import { isRebasing, isUpdating, mergeQueue } from "./queue";
 import { rebaseAsks } from "./rebase";
-import { replacedPrs } from "./rebuild";
+import { replacedPrs, unreplacedOriginal } from "./rebuild";
 import { mayAutoMerge } from "./trust";
 
 /**
@@ -103,18 +103,26 @@ export function pullRequests(
       (i.stage === "merged" && i.mergedAt && localDay(new Date(i.mergedAt)) === today)
     ) {
       if (i.pr) merged.push(entry(i, i.pr));
-    } else if ((i.stage === "backlog" || i.stage === "building") && !i.pr && i.rebuiltFrom) {
-      others.push(entry(i, i.rebuiltFrom));
-    } else if (
-      i.pr &&
-      isOpen(i) &&
-      ["building", "verifying", "escalated", "failed"].includes(i.stage)
-    ) {
+    } else if (!i.pr) {
+      // A rebuild's original PR stays listed until its replacement exists, also when the
+      // rebuild ended without one.
+      const original = OWNING_STAGES.includes(i.stage) ? unreplacedOriginal(ctx, i) : null;
+      if (original) others.push(entry(i, original));
+    } else if (isOpen(i) && OWNING_STAGES.includes(i.stage)) {
       others.push(entry(i, i.pr));
     }
   }
   return [...queued, ...others, ...merged].slice(0, MAX_ENTRIES);
 }
+
+/** Stages in which an item's open PR is listed (merged ones are listed as merges). */
+const OWNING_STAGES: FactoryItem["stage"][] = [
+  "backlog",
+  "building",
+  "verifying",
+  "escalated",
+  "failed",
+];
 
 /** Most PRs the panel lists (the queue comes first, so it is never cut). */
 const MAX_ENTRIES = 40;

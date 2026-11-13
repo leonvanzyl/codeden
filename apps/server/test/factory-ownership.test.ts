@@ -249,6 +249,8 @@ describe("failures outside the work's code", () => {
     expect(env.inbox.find(`inbox:factory-stuck:${off.id}`)?.status).toBe("open");
     await tick();
     expect(item(off.id).stage).toBe("failed");
+    // Its reviewer is done, which frees the agent slot the CI kick below needs.
+    await env.setStatus(item(off.id).reviewerSessionId as string, "idle");
 
     env.gh.actions = true;
     const on = await verifying("none", "Add a timer", 4);

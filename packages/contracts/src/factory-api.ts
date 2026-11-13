@@ -177,7 +177,7 @@ export const FactoryItem = z.object({
   attempts: z.int().nonnegative(),
   /** Why it was rejected, failed or escalated. */
   reason: z.string().nullable(),
-  /** Why it failed: its own work, the infrastructure, or stuck until a person looks (see `FactoryFailureKind`). */
+  /** Why it failed or was escalated: its own work, the infrastructure, or stuck until a person looks (see `FactoryFailureKind`). */
   failureKind: FactoryFailureKind.nullable().default(null),
   /**
    * The pull request a rebuild replaced: after three requests to rebase it still conflicted, so
@@ -220,6 +220,17 @@ export type FactoryItem = z.infer<typeof FactoryItem>;
 /** Size limit defaults before 0.4.4, upgraded to the current defaults when a loop is read. */
 export const LEGACY_SIZE_LIMITS = { maxChangedLines: 800, maxChangedFiles: 40 } as const;
 
+/**
+ * What a review does when the provider chosen for it is unavailable (not installed, not signed
+ * in, at its usage limit, or it just failed to run):
+ * - `builder`: review on the builder's provider and model, in a fresh session;
+ * - `any`: review on any available provider;
+ * - `wait`: wait until the chosen provider is available again.
+ * With no provider available at all, every choice waits.
+ */
+export const ReviewerFallback = z.enum(["builder", "any", "wait"]);
+export type ReviewerFallback = z.infer<typeof ReviewerFallback>;
+
 /** Knobs of the loop beyond the required limits; all have safe defaults. */
 export const FactoryTuning = z.object({
   /**
@@ -251,8 +262,22 @@ export const FactoryTuning = z.object({
   maxIssuesPerRound: z.int().positive().default(3),
   /** Dark factory: the review areas the scout may use. */
   areas: z.array(DiscoveryArea).default(DiscoveryArea.options),
-  /** Provider for builders (`auto`: the project/role default). */
+  /**
+   * Provider for builders (`auto`: the project/role default). One that isn't available (not
+   * installed, not signed in, at its usage limit) is skipped for another available provider.
+   */
   builderProvider: z.union([z.literal("auto"), ProviderId]).default("auto"),
+  /** Model for builders on `builderProvider`; `null` (the default): that provider's default. */
+  builderModel: z.string().min(1).nullable().default(null),
+  /**
+   * Provider for the independent reviewer. `auto` (the default): a provider other than the
+   * builder's when one is available, which gives the most independent review.
+   */
+  reviewerProvider: z.union([z.literal("auto"), ProviderId]).default("auto"),
+  /** Model for reviewers on `reviewerProvider`; `null` (the default): that provider's default. */
+  reviewerModel: z.string().min(1).nullable().default(null),
+  /** What a review does when its chosen provider isn't available (see `ReviewerFallback`). */
+  reviewerFallback: ReviewerFallback.default("builder"),
   /** Minutes to wait for main CI after a merge before calling it done. */
   watchTimeoutMin: z.int().positive().default(120),
   /**

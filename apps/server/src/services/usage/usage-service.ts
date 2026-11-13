@@ -5,6 +5,7 @@ import {
   type InboxItem,
   type ProjectSpend,
   type RateLimitsResponse,
+  type RateLimitWindow,
   type SessionUsage,
   type UsageQuery,
   type UsageReport,
@@ -216,16 +217,20 @@ export class UsageService {
     };
   }
 
-  async limits(): Promise<RateLimitsResponse> {
+  /** The latest reading of every provider's rate-limit windows (the factory's availability). */
+  rateLimitWindows(): RateLimitWindow[] {
     const now = this.now();
-    const windows = this.opts.db
+    return this.opts.db
       .select()
       .from(rateLimitWindows)
       .all()
       .map((r) => toWindow(r, now))
       .sort((a, b) => a.provider.localeCompare(b.provider) || a.windowId.localeCompare(b.windowId));
+  }
+
+  async limits(): Promise<RateLimitsResponse> {
     return {
-      windows,
+      windows: this.rateLimitWindows(),
       warnPercent: this.settings().rateLimitWarnPercent,
       billing: await this.billing(),
     };

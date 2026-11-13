@@ -14,6 +14,7 @@ import type { InboxService } from "../inbox-service";
 import type { NoticeDraft } from "../orchestration/notices";
 import type { ProjectService } from "../projects/project-service";
 import type { SessionRepo } from "../sessions/repo";
+import type { RateLimitReading } from "./availability";
 import type { FactoryGithub } from "./github-port";
 import type { FactorySessions } from "./sessions";
 import type { FactoryStore } from "./store";
@@ -32,6 +33,8 @@ export interface FactoryContext {
       projectId?: string,
       sessionIds?: ReadonlySet<string>,
     ): { usd: number; tokens: number };
+    /** Latest rate-limit window of every provider: a `limited` one makes it unavailable. */
+    rateLimitWindows?(): RateLimitReading[];
   };
   inbox: InboxService;
   /** Record an orchestration notice (wakes its target unless `wake` is false). */

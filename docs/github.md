@@ -39,7 +39,7 @@ Sync produces events that the rest of CodeDen reacts to: `issue.opened`, `issue.
 Every session records its issue, branch, PR and commits.
 
 - **Branches** are `codeden/<slug>-<id>` by default, on a fresh worktree under `~/.codeden/wt/`.
-- **Pull requests** are opened by the agent with `create_pull_request`. It refuses to run with uncommitted changes unless the agent passes a commit message, pushes the session branch, then creates the PR (or updates the open one for that branch). The body gets `Fixes #<issue>` when the session has an issue, plus a footer naming the CodeDen session.
+- **Pull requests** are opened by the agent with `create_pull_request`. In a session you started, the agent opens one when you ask: type it, or click **Open PR** in the git bar or the **Issue / PR** tab. Sessions a PM, automation or the factory started open theirs when the work is done. `create_pull_request` refuses to run with uncommitted changes unless the agent passes a commit message, pushes the session branch, then creates the PR (or updates the open one for that branch). The body gets `Fixes #<issue>` when the session has an issue, plus a footer naming the CodeDen session.
 - **A PR belongs** to the session that opened it, or to the session whose branch is its head.
 - **Comments** CodeDen posts carry a hidden `<!-- codeden -->` marker (they're posted with your token). It's stripped again when comments are shown to agents or in the UI, and those comments never trigger automations.
 

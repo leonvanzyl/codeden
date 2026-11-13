@@ -70,6 +70,8 @@ export async function executeCommand(core: RunnerCore, command: RunnerCommand): 
         ? registry.list().filter((a) => a.id === command.providerId)
         : registry.list();
       const statuses = await Promise.all(adapters.map((a) => a.detect()));
+      // A periodic availability check (the factory) only wants to know who is signed in.
+      if (command.refreshModels === false) return { statuses };
       // A re-detect (after an install or a login, or "Refresh models") also refreshes model
       // lists; changes reach the server as a `providers` message as well.
       const refreshed = registry.refreshModels(adapters.map((a) => a.id));

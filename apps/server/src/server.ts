@@ -34,6 +34,7 @@ import { loopbackOrigins, securityMiddleware } from "./security";
 import { type AppServices, createServices, type ServicesOptions } from "./services/container";
 import type { Exec } from "./services/exec";
 import { FILE_RESET_NOTICES, reportFileReset } from "./services/file-reset-notice";
+import { SearchBackfill } from "./services/search/backfill";
 import { createSecretStore, MemorySecretStore, type SecretStore } from "./services/secrets";
 import { sessionWorkdir } from "./services/sessions/workdir";
 import type { Locate } from "./services/setup/tool-lookup";
@@ -339,6 +340,9 @@ export async function startServer(opts: StartServerOptions): Promise<RunningServ
   };
   writeJsonFile(paths.serverLock, lock);
   log(`server listening on ${url}`);
+  // Index transcript items the search index hasn't seen yet, a batch at a time (§6).
+  const searchBackfill = new SearchBackfill(database.db, { log });
+  searchBackfill.start();
   if (network.enabled) {
     log(
       `network access on: ${network
@@ -391,6 +395,7 @@ export async function startServer(opts: StartServerOptions): Promise<RunningServ
       services.prFeedback.stop();
       services.autoRetry.stop();
       services.updates.stop();
+      await searchBackfill.stop();
       await services.localStt.stop();
       stopUpdateEvents();
       stopTerminalEvents();

@@ -3,7 +3,6 @@ import { resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { drizzle } from "drizzle-orm/node-sqlite";
 import { migrate } from "drizzle-orm/node-sqlite/migrator";
-import { backfillSearchIndex } from "../services/search/index-writer";
 import * as schema from "./schema";
 
 export type Db = ReturnType<typeof createDrizzle>;
@@ -33,8 +32,8 @@ export interface Database {
 }
 
 /**
- * Open (or create) the SQLite database in WAL mode, apply pending migrations and index any
- * transcript items stored before transcript search existed.
+ * Open (or create) the SQLite database in WAL mode and apply pending migrations. Transcript
+ * items the search index hasn't seen are indexed later, in the background (`SearchBackfill`).
  */
 export function openDatabase(file: string, migrationsDir?: string): Database {
   const client = new DatabaseSync(file);
@@ -44,7 +43,6 @@ export function openDatabase(file: string, migrationsDir?: string): Database {
   client.exec("PRAGMA busy_timeout = 5000;");
   const db = createDrizzle(client);
   migrate(db, { migrationsFolder: findMigrationsDir(migrationsDir) });
-  backfillSearchIndex(db);
   return {
     db,
     client,

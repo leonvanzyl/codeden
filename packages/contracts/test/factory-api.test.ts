@@ -8,6 +8,7 @@ import {
   FactoryLimits,
   FactoryLoop,
   FactoryStatus,
+  FactoryTuning,
   isFactoryMode,
   Notice,
   REVIEW_SUMMARY_MAX,
@@ -200,6 +201,28 @@ describe("factory API contracts (§10.1)", () => {
       SetAutonomyModeRequest.safeParse({ mode: "dark_factory", tuning: { idleGraceMin: 0 } })
         .success,
     ).toBe(false);
+    // Loops saved before the reviewer settings keep today's behaviour.
+    expect(loop.tuning).toMatchObject({
+      builderModel: null,
+      reviewerProvider: "auto",
+      reviewerModel: null,
+      reviewerFallback: "builder",
+    });
+    const agents = {
+      builderProvider: "claude",
+      builderModel: "claude-opus-5-5",
+      reviewerProvider: "codex",
+      reviewerModel: "gpt-5.5",
+      reviewerFallback: "wait",
+    } as const;
+    const tuned = FactoryTuning.parse(agents);
+    expect(FactoryTuning.parse(JSON.parse(JSON.stringify(tuned)))).toEqual(tuned);
+    expect(tuned).toMatchObject(agents);
+    expect(SetAutonomyModeRequest.parse({ mode: "dark_factory", tuning: agents }).tuning).toEqual(
+      agents,
+    );
+    expect(FactoryTuning.safeParse({ reviewerFallback: "never" }).success).toBe(false);
+    expect(FactoryTuning.safeParse({ reviewerModel: "" }).success).toBe(false);
     expect(
       FactoryAllowLargeChangeRequest.parse({ itemId: "i1", reason: "Initial scaffold" }),
     ).toEqual({ itemId: "i1", reason: "Initial scaffold" });
