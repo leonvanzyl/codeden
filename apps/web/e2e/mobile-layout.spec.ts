@@ -1,10 +1,13 @@
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { type Browser, expect, type Page, test } from "@playwright/test";
 
 /**
  * Phone and tablet smoke (§13): the main screens fit without horizontal scroll at 390x844,
  * 820x1180 and 1180x820 on a touch screen, the sidebar is a drawer (or a rail in landscape)
  * and the right panel opens as a sheet. Toasts keep clear of the composer at every size,
- * including a desktop window where the right panel and terminal drawer move it.
+ * including a desktop window where the right panel and terminal drawer move it. On a phone
+ * the Agents page's config files open at full width.
  */
 const env = (name: string) => {
   const value = process.env[name];
@@ -99,6 +102,7 @@ for (const size of SIZES) {
         ["inbox", "/inbox"],
         ["project home", `/projects/${project}`],
         ["automations", `/projects/${project}/automations`],
+        ["agents", "/agents?tab=memory&project=global"],
         ["settings", "/settings/network"],
       ];
       for (const [label, path] of screens) {
@@ -153,6 +157,73 @@ for (const size of SIZES) {
     }
   });
 }
+
+test("the Agents page's files get the whole screen on a phone", async ({ browser }) => {
+  const phone = SIZES[0];
+  // A user skill, so the Skills tab has a row with an on/off switch.
+  const skill = join(env("CODEDEN_E2E_USER_HOME"), ".claude", "skills", "phone-check");
+  mkdirSync(skill, { recursive: true });
+  writeFileSync(
+    join(skill, "SKILL.md"),
+    "---\nname: phone-check\ndescription: Used by the phone layout test\n---\n\nSay hi.\n",
+  );
+  const { context, page } = await openContext(browser, phone);
+  try {
+    const agents = (tab: string) =>
+      page.goto(`${env("CODEDEN_E2E_URL")}/agents?tab=${tab}&project=global`);
+    // Memory, Skills and Subagents share one list + editor view. On a phone the list comes
+    // first, and picking a file opens it in the list's place.
+    await agents("memory");
+    const row = page.locator('[data-config-path=".claude/CLAUDE.md"]');
+    const editor = page.getByTestId("config-file-editor");
+    await row.tap();
+    await expect(editor.locator(".cm-content")).toContainText("Keep answers short.");
+    await expect(row).toBeHidden();
+    const box = (await editor.boundingBox()) ?? { x: 0, y: 0, width: 0, height: 0 };
+    // Most of the 390 px screen, not the sliver left beside a fixed-width file list.
+    expect(box.width, `editor is ${box.width} px wide`).toBeGreaterThanOrEqual(
+      phone.viewport.width * 0.8,
+    );
+    // The toolbar's controls sit inside the editor, not clipped off its right edge, and are
+    // 40 px tap targets (allowing sub-pixel layout).
+    const editorRight = box.x + box.width;
+    for (const name of ["Back to files", "Revert", /^Delete /, "Review & save"]) {
+      const button = (await editor.getByRole("button", { name }).boundingBox()) ?? box;
+      const right = button.x + button.width;
+      expect(right, `${name} ends at ${right}, the editor at ${editorRight}`).toBeLessThanOrEqual(
+        editorRight + 0.5,
+      );
+      expect(Math.min(button.width, button.height), `${name}`).toBeGreaterThanOrEqual(39.5);
+    }
+    // The whole path shows, not cut off.
+    const path = editor.locator("code").first();
+    await expect(path).toHaveText(/CLAUDE\.md$/);
+    expect(await path.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+    // Back, from the keyboard, returns to the list.
+    await editor.getByRole("button", { name: "Back to files" }).focus();
+    await page.keyboard.press("Enter");
+    await expect(row).toBeVisible();
+    await expect(editor).toBeHidden();
+
+    // Skills: a row's switch takes a tap just above its 14 px track (a 40 px target).
+    await agents("skills");
+    const toggle = page.getByRole("switch", { name: "phone-check: on" });
+    await toggle.tap({ position: { x: 12, y: -10 } });
+    await page.getByRole("button", { name: "Keep editing" }).tap();
+    await expect(toggle).toBeVisible();
+
+    // MCP servers and Hooks are single lists: they fit without scrolling sideways.
+    for (const tab of ["mcp", "hooks"]) {
+      await agents(tab);
+      await page.locator("main").waitFor();
+      await page.waitForTimeout(300);
+      await expectNoHorizontalScroll(page, `agents ${tab}`);
+    }
+  } finally {
+    await context.close();
+    rmSync(skill, { recursive: true, force: true });
+  }
+});
 
 type Box = { x: number; y: number; width: number; height: number };
 

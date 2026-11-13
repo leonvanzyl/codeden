@@ -90,6 +90,7 @@ export function useSkillSwitches(projectId: string | null) {
       end: (
         <Switch
           size="sm"
+          className="pointer-coarse:after:-inset-y-3.5"
           checked={skill.enabled}
           onCheckedChange={(on) => void ask(skill, on)}
           aria-label={`${skill.name}: ${skill.enabled ? "on" : "off"}`}
