@@ -1,5 +1,7 @@
-import { realpathSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readdirSync, readFileSync, realpathSync } from "node:fs";
+import { availableParallelism, tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { configDefaults, defineConfig } from "vitest/config";
 
 /**
@@ -55,6 +57,53 @@ const SERVER_PROCESS_TESTS = [
 ];
 const DESKTOP_PROCESS_TESTS = ["test/relay-chromium.test.ts"];
 
+/**
+ * Server suites that start a real runner process with the Fake provider: they call
+ * `startHarness` (`apps/server/test/support/harness.ts`) or `startServer` without
+ * `runner: false`. Found by reading the test files, so a new suite lands here on its own.
+ */
+const SERVER_ROOT = fileURLToPath(new URL("./apps/server/", import.meta.url));
+const SERVER_RUNNER_TESTS = readdirSync(join(SERVER_ROOT, "test"))
+  .filter((file) => file.endsWith(".test.ts"))
+  .map((file) => `test/${file}`)
+  .filter((file) => !SERVER_PROCESS_TESTS.includes(file))
+  .filter((file) => {
+    const source = readFileSync(join(SERVER_ROOT, file), "utf8");
+    return (
+      source.includes("startHarness(") ||
+      (source.includes("startServer(") && !source.includes("runner: false"))
+    );
+  });
+/** Runner suites that build git worktrees and checkpoints, many per test. */
+const RUNNER_WORKTREE_TESTS = [
+  "test/workspace.test.ts",
+  "test/workspace-base.test.ts",
+  "test/workspace-fork.test.ts",
+  "test/workspace-remove.test.ts",
+  "test/checkpoints.test.ts",
+];
+
+/**
+ * The process-heavy suites above (a server, a runner through tsx and git worktrees per suite)
+ * run in a phase of their own after the fast suites, a few at a time, with timeouts that leave
+ * room for a busy machine. In the shared pool they started all at once and starved each other
+ * into Vitest's 5 s timeout whenever other builds kept the machine busy. A worker limit of its
+ * own needs its own `groupOrder`. The test timeout stays above the harness's 30 s `waitUntil`,
+ * so a slow wait reports what it waited for.
+ */
+const processHeavy = () => ({
+  sequence: { groupOrder: 1 },
+  maxWorkers: Math.max(3, Math.floor(availableParallelism() / 4)),
+  testTimeout: 60_000,
+  hookTimeout: 60_000,
+});
+
+/**
+ * The other runner and server suites still start git and child processes (clones, fake CLIs),
+ * which take seconds on a busy machine: more room than Vitest's 5 s default.
+ */
+const SPAWNS_PROCESSES = { testTimeout: 20_000, hookTimeout: 30_000 };
+
 /** The fast suites: `pnpm test`, CI and the release run these. */
 const FAST = [
   "packages/*",
@@ -73,7 +122,16 @@ const FAST = [
     test: {
       name: "@codeden/runner",
       root: "apps/runner",
-      exclude: [...configDefaults.exclude, ...RUNNER_PROCESS_TESTS],
+      exclude: [...configDefaults.exclude, ...RUNNER_PROCESS_TESTS, ...RUNNER_WORKTREE_TESTS],
+      ...SPAWNS_PROCESSES,
+    },
+  },
+  {
+    test: {
+      name: "@codeden/runner (worktrees)",
+      root: "apps/runner",
+      include: RUNNER_WORKTREE_TESTS,
+      ...processHeavy(),
     },
   },
   {
@@ -81,7 +139,17 @@ const FAST = [
     test: {
       name: "@codeden/server",
       root: "apps/server",
-      exclude: [...configDefaults.exclude, ...SERVER_PROCESS_TESTS],
+      exclude: [...configDefaults.exclude, ...SERVER_PROCESS_TESTS, ...SERVER_RUNNER_TESTS],
+      ...SPAWNS_PROCESSES,
+    },
+  },
+  {
+    extends: "./apps/server/vitest.config.ts",
+    test: {
+      name: "@codeden/server (runner)",
+      root: "apps/server",
+      include: SERVER_RUNNER_TESTS,
+      ...processHeavy(),
     },
   },
 ];
