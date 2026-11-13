@@ -1,10 +1,12 @@
 import type { ForkOrigin } from "@codeden/contracts";
 import { Link } from "@tanstack/react-router";
 import { GitFork, MessageSquareDashed } from "lucide-react";
+import { useEffect } from "react";
 import { EmptyState } from "@/components/common/bits";
 import { ThreadView } from "@/components/thread/thread-view";
 import { forkOriginText } from "@/lib/fork-origin";
 import { useSession } from "@/lib/queries";
+import { useLayoutStore } from "@/stores/layout";
 
 /** A new fork's empty transcript: where it came from and that the agent remembers it. */
 function ForkedEmpty({ origin }: { origin: ForkOrigin }) {
@@ -28,15 +30,26 @@ function ForkedEmpty({ origin }: { origin: ForkOrigin }) {
   );
 }
 
-/** Any agent or PM session; `focusItemId` opens the transcript at that item. */
+/**
+ * Any agent or PM session; `focusItemId` opens the transcript at that item, and `focusThread`
+ * (a search hit inside a subagent's thread) also opens that thread beside it at the item.
+ */
 export function SessionPage({
   sessionId,
   focusItemId,
+  focusThread,
 }: {
   sessionId: string;
   focusItemId?: string;
+  focusThread?: { threadId: string; itemId: string };
 }) {
   const forkedFrom = useSession(sessionId)?.forkedFrom;
+  const openChildThread = useLayoutStore((s) => s.openChildThread);
+  const childThreadId = focusThread?.threadId;
+  const childItemId = focusThread?.itemId;
+  useEffect(() => {
+    if (childThreadId && childItemId) openChildThread(sessionId, childThreadId, childItemId);
+  }, [sessionId, childThreadId, childItemId, openChildThread]);
   return (
     <ThreadView
       key={sessionId}

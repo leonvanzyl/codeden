@@ -1,9 +1,10 @@
 import {
+  type Role,
   type Session,
   TRANSCRIPT_SEARCH_MIN_TERM,
   type TranscriptSearchHit,
 } from "@codeden/contracts";
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { useClient } from "./api";
 
@@ -29,22 +30,31 @@ export function useDebouncedValue<T>(value: T, ms: number): T {
   return ms <= 0 ? value : settled;
 }
 
+/** Which sessions a transcript search looks in. */
+export interface TranscriptSearchFilters {
+  projectId?: string;
+  role?: Role;
+  /** False leaves out archived sessions (they are included by default). */
+  includeArchived?: boolean;
+}
+
 /**
- * Search transcripts as the user types (§13): waits `debounceMs` after the last keystroke,
- * keeps the previous hits on screen while the next search runs, and does nothing until the
- * query has a term of 3+ characters.
+ * Search transcripts as the user types (§13), one page of the newest matches: waits
+ * `debounceMs` after the last keystroke, keeps the previous hits on screen while the next
+ * search runs, and does nothing until the query has a term of 3+ characters.
  */
 export function useTranscriptSearch(
   q: string,
-  opts: { limit?: number; projectId?: string; debounceMs?: number } = {},
+  opts: TranscriptSearchFilters & { limit?: number; debounceMs?: number } = {},
 ) {
   const client = useClient();
   const settled = useDebouncedValue(q.trim(), opts.debounceMs ?? 200);
   const enabled = canSearchTranscripts(settled);
+  const { limit, projectId, role, includeArchived } = opts;
   const query = useQuery({
-    queryKey: ["search", "transcripts", settled, opts.limit ?? null, opts.projectId ?? null],
+    queryKey: ["search", "transcripts", settled, limit, projectId, role, includeArchived],
     queryFn: () =>
-      client.searchTranscripts({ q: settled, limit: opts.limit, projectId: opts.projectId }),
+      client.searchTranscripts({ q: settled, limit, projectId, role, includeArchived }),
     enabled,
     placeholderData: keepPreviousData,
     staleTime: 10_000,
@@ -55,6 +65,60 @@ export function useTranscriptSearch(
     /** Typing hasn't settled, or a search is running. */
     searching: canSearchTranscripts(q) && (q.trim() !== settled || query.isFetching),
   };
+}
+
+/**
+ * Every match for `q`, newest first, a page at a time (the results page): `loadMore` fetches
+ * the next page while `hasMore`.
+ */
+export function useTranscriptSearchPages(
+  q: string,
+  opts: TranscriptSearchFilters & { limit: number },
+) {
+  const client = useClient();
+  const settled = q.trim();
+  const enabled = canSearchTranscripts(settled);
+  const { limit, projectId, role, includeArchived } = opts;
+  const query = useInfiniteQuery({
+    queryKey: ["search", "transcripts", "pages", settled, limit, projectId, role, includeArchived],
+    queryFn: ({ pageParam }) =>
+      client.searchTranscripts({
+        q: settled,
+        limit,
+        projectId,
+        role,
+        includeArchived,
+        cursor: pageParam,
+      }),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (last) => last.nextCursor ?? undefined,
+    enabled,
+    placeholderData: keepPreviousData,
+    staleTime: 10_000,
+  });
+  const pages = enabled ? query.data?.pages : undefined;
+  return {
+    /** Undefined until the first page arrives. */
+    hits: pages?.flatMap((p) => p.hits),
+    query: pages?.[0]?.query ?? settled,
+    error: query.error,
+    searching: query.isFetching && !query.isFetchingNextPage,
+    hasMore: Boolean(query.hasNextPage),
+    loadingMore: query.isFetchingNextPage,
+    loadMore: () => void query.fetchNextPage(),
+  };
+}
+
+/**
+ * Where a hit opens in its session (§13): `item` is the root-thread item to scroll to. For an
+ * item inside a subagent's thread that is the subagent card, and `thread` and `threadItem` open
+ * that thread beside it at the item itself.
+ */
+export function hitLinkSearch(
+  hit: Pick<TranscriptSearchHit, "itemId" | "threadId" | "anchorItemId">,
+): { item: string; thread?: string; threadItem?: string } {
+  if (hit.anchorItemId === hit.itemId) return { item: hit.itemId };
+  return { item: hit.anchorItemId, thread: hit.threadId, threadItem: hit.itemId };
 }
 
 /** What kind of transcript entry matched, in a word. */

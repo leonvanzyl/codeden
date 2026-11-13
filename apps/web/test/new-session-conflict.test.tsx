@@ -4,7 +4,7 @@ import {
   type StartSessionRequestInit,
   type StartSessionResponse,
 } from "@codeden/contracts";
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { CodeDenClient } from "@/lib/api/client";
 import { createMockClient } from "@/lib/api/mock";
@@ -37,6 +37,8 @@ const running = {
   startedAt: "2026-11-12T10:00:00.000Z",
 };
 
+const slug = (text: string) => text.toLowerCase().split(/\W+/).filter(Boolean).join("-");
+
 /**
  * The server's side of a New session start that matches running work, as `POST /api/sessions`
  * and `ConflictService` do it: every conflicting start is persisted (409 with `conflictId`) and
@@ -68,7 +70,8 @@ function fakeServer() {
         projectId: PROJECT,
         request: {
           purpose: req.input?.text.split("\n")[0] ?? "New session",
-          workKey: req.workKey ?? "issue:9",
+          // Without a typed key, the server derives one from the text.
+          workKey: req.workKey ?? `request:${slug(req.input?.text ?? "")}`,
           startedBy: { kind: "user" },
         },
         existing: [running],
@@ -221,5 +224,48 @@ describe("a New session conflict while the draft is still editable (#169)", () =
     fireEvent.click(within(card).getByRole("button", { name: "Wait" }));
     expect(server.started).toEqual([]);
     expect(server.open()).toHaveLength(1);
+  });
+});
+
+describe("the work key a New session conflict decision starts under (#187)", () => {
+  it("keeps the conflict's derived work key when the text is edited without a typed key", async () => {
+    useNewSessionStore.getState().setWorkKey(PROJECT, "");
+    const server = fakeServer();
+    const box = await openDraft(server.client);
+    fireEvent.change(box, { target: { value: "Fix the login bug" } });
+    fireEvent.keyDown(box, { key: "Enter" });
+    const card = await screen.findByTestId("conflict-card");
+    expect(server.requests[0]?.workKey).toBeUndefined();
+
+    fireEvent.change(box, { target: { value: "Fix the login bug, see the Safari console" } });
+    fireEvent.click(within(card).getByRole("button", { name: "Wait" }));
+    await waitFor(() => expect(server.started).toHaveLength(1));
+    expect(server.started[0]).toMatchObject({
+      workKey: "request:fix-the-login-bug",
+      input: { text: "Fix the login bug, see the Safari console" },
+      conflict: { resolution: "wait" },
+    });
+  });
+
+  it("checks a changed typed work key again instead of deciding", async () => {
+    const server = fakeServer();
+    const box = await openDraft(server.client);
+    fireEvent.change(box, { target: { value: "First wording" } });
+    fireEvent.keyDown(box, { key: "Enter" });
+    const card = await screen.findByTestId("conflict-card");
+
+    act(() => useNewSessionStore.getState().setWorkKey(PROJECT, "issue:10"));
+    await waitFor(() => expect(buttons(card).every((b) => b.disabled)).toBe(true));
+    expect(card.textContent).toContain("The work key changed");
+    fireEvent.click(within(card).getByRole("button", { name: "Wait" }));
+    expect(server.started).toEqual([]);
+
+    // Sending again checks the new key and replaces the conflict.
+    fireEvent.keyDown(box, { key: "Enter" });
+    await waitFor(() => expect(server.requests).toHaveLength(2));
+    expect(server.requests[1]).toMatchObject({
+      workKey: "issue:10",
+      replacesConflict: "conflict:1",
+    });
   });
 });

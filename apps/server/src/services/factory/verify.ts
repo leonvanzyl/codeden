@@ -17,7 +17,6 @@ import { joinQueue, leaveQueue } from "./queue";
 import {
   advanceConflicting,
   baseBranchOf,
-  recheckOf,
   restoreForAudit,
   settleConflict,
   trackedHead,
@@ -26,6 +25,7 @@ import {
   worktreeSettled,
 } from "./rebase";
 import { adoptAgentPr } from "./rebuild";
+import { recheckOf } from "./recheck";
 import { ensureReviewer, reviewerStalled } from "./reviewer";
 import { mayAutoMerge } from "./trust";
 
@@ -144,7 +144,7 @@ export async function advanceVerifying(
     }
     const reviewed = checks.find((c) => c.name === "review")?.state !== "skipped";
     if (!reviewed) return loop;
-    current = await ensureReviewer(ctx, project, current, vision.text, pr);
+    current = await ensureReviewer(ctx, project, loop, current, vision.text, pr);
     return reviewerStalled(ctx, project, loop, current);
   }
 

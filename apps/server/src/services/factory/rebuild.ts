@@ -9,8 +9,9 @@ import { markStuck } from "./outcomes";
  * Rebuilds (§10.1): a PR that still conflicts after three requests to rebase is usually cheaper
  * to redo than to rescue. The same item goes back to the queue with its investigation (the
  * reproduction or the spec) kept and a fresh builder from the latest default branch; once the
- * new PR is open, the old one is closed with a link to it. One rebuild per item: an item that
- * would need a second one is stuck and goes to the user.
+ * new PR is open, the old one is closed with a link to it. Until then the old PR stays the
+ * item's. One rebuild per item: an item that would need a second one, or whose rebuild ends
+ * without a new PR, is stuck and goes to the user.
  */
 
 /** Nudge set once the PR a rebuild replaced was closed. */
@@ -84,6 +85,46 @@ export async function rebuild(
     wake: false,
   });
   return loop;
+}
+
+/**
+ * The PR a rebuild is replacing, while the item has no new PR yet. It stays the item's until the
+ * replacement exists (owned, listed, a person may still merge or close it); only then is it
+ * closed with a link.
+ */
+export function rebuildOriginal(item: FactoryItem): GitHubPrRef | null {
+  const old = item.rebuiltFrom;
+  return old && !item.pr && !item.nudges[REPLACED_CLOSED] ? old : null;
+}
+
+/** `rebuildOriginal` while it is still open (as last synced). */
+export function unreplacedOriginal(ctx: FactoryContext, item: FactoryItem): GitHubPrRef | null {
+  const old = rebuildOriginal(item);
+  if (!old) return null;
+  const ref = ctx.github.prRef(item.projectId, old.number) ?? old;
+  return isOpen(ref.state) ? ref : null;
+}
+
+/**
+ * The rebuild ended before its replacement PR was opened (its builder stopped, or finished
+ * without one). The PR it was replacing is still open, and its conflicts are as they were; the
+ * item used its one rebuild, so it is stuck and goes to the user. That PR stays the item's.
+ * An infrastructure failure isn't this: the loop resumes the rebuild by itself (`recover.ts`).
+ */
+export function rebuildFailed(
+  ctx: FactoryContext,
+  loop: FactoryLoop,
+  item: FactoryItem,
+  original: GitHubPrRef,
+  reason: string,
+): FactoryLoop {
+  return markStuck(
+    ctx,
+    loop,
+    item,
+    `The rebuild of #${original.number} ended before its replacement pull request was opened (${reason}); #${original.number}, which kept having merge conflicts, is still open`,
+    `Resolve the conflicts on #${original.number} by hand and merge it, close it, or retry the item to rebuild it again.`,
+  );
 }
 
 /** A PR the item no longer stands for and the factory still has to close. */

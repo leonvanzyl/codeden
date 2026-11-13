@@ -1,6 +1,6 @@
 {
   "name": "@codeden/desktop",
-  "version": "0.6.3",
+  "version": "0.7.0",
   "private": true,
   "description": "CodeDen desktop app: an Electron shell that starts (or attaches to) the CodeDen server and loads the same UI.",
   "license": "MIT",

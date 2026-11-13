@@ -141,14 +141,17 @@ export class ConflictService {
 
   /** The open inbox items of the conflicts `req` replaces (see `record`). */
   private replacedBy(req: StartSessionRequest, workKey: string): InboxItem[] {
-    return this.list({ projectId: req.projectId ?? undefined })
-      .filter(
-        (c) =>
-          c.projectId === req.projectId &&
-          (c.id === req.replacesConflict ||
-            (c.request.workKey === workKey && sameStarter(c.request.startedBy, req.startedBy))),
-      )
-      .flatMap((c) => this.deps.inbox.find(c.id) ?? [])
+    // The conflict the re-send names is looked up by id, however many conflicts came after it.
+    const named = req.replacesConflict && this.openRecord(req.replacesConflict, req.projectId);
+    const resent = this.list({ projectId: req.projectId ?? undefined }).filter(
+      (c) =>
+        c.projectId === req.projectId &&
+        c.request.workKey === workKey &&
+        sameStarter(c.request.startedBy, req.startedBy),
+    );
+    const ids = new Set([...(named ? [named.id] : []), ...resent.map((c) => c.id)]);
+    return [...ids]
+      .flatMap((id) => this.deps.inbox.find(id) ?? [])
       .filter((i) => i.status === "open");
   }
 
@@ -181,8 +184,11 @@ export class ConflictService {
 
   /**
    * Retry the start with the decision and close the inbox item. The saved request is retried
-   * unless `request.start` replaces it (the New session draft as it is now). Only the decision
-   * is kept on the item, never the replacement's input.
+   * unless `request.start` replaces it (the New session draft as it is now). The replacement
+   * starts under the conflict's work key, the one the decision is about, so edited text can't
+   * derive another key and start new work instead; a replacement that names another work key is
+   * refused unless the decision is skip (send it again to check it for running work). Only the
+   * decision is kept on the item, never the replacement's input.
    */
   async resolve(id: string, request: ResolveConflictRequest): Promise<ResolveConflictResponse> {
     const record = this.get(id);
@@ -193,8 +199,16 @@ export class ConflictService {
     if (replacement && replacement.projectId !== record.projectId) {
       throw badRequest("The new request is for another project", "project_mismatch");
     }
+    const { workKey } = record.request;
+    const starts = decision.resolution !== "skip";
+    if (starts && replacement?.workKey && replacement.workKey !== workKey) {
+      throw conflictError(
+        `The work key changed from ${workKey}: send the request again to check it for running work`,
+        "work_key_changed",
+      );
+    }
     const req = StartSessionRequest.parse({
-      ...((replacement ?? record.start) as Record<string, unknown>),
+      ...((replacement ? { ...replacement, workKey } : record.start) as Record<string, unknown>),
       conflict: decision,
     });
     const result: StartSessionResponse = await this.deps.sessions.start(req);

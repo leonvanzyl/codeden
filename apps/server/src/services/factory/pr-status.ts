@@ -3,13 +3,14 @@ import {
   type FactoryItem,
   type FactoryPrEntry,
   type FactoryPrState,
+  type GitHubPrRef,
   type Project,
 } from "@codeden/contracts";
 import type { FactoryContext } from "./context";
 import { localDay } from "./policy";
 import { isRebasing, isUpdating, mergeQueue } from "./queue";
 import { rebaseAsks } from "./rebase";
-import { replacedPrs } from "./rebuild";
+import { replacedPrs, unreplacedOriginal } from "./rebuild";
 import { mayAutoMerge } from "./trust";
 
 /**
@@ -103,17 +104,36 @@ export function pullRequests(
       (i.stage === "merged" && i.mergedAt && localDay(new Date(i.mergedAt)) === today)
     ) {
       if (i.pr) merged.push(entry(i, i.pr));
-    } else if ((i.stage === "backlog" || i.stage === "building") && !i.pr && i.rebuiltFrom) {
-      others.push(entry(i, i.rebuiltFrom));
-    } else if (
-      i.pr &&
-      isOpen(i) &&
-      ["building", "verifying", "escalated", "failed"].includes(i.stage)
-    ) {
+    } else if (!i.pr) {
+      // A rebuild's original PR stays listed until its replacement exists, also when the
+      // rebuild ended without one.
+      const original = OWNING_STAGES.includes(i.stage) ? unreplacedOriginal(ctx, i) : null;
+      if (original) others.push(entry(i, original));
+    } else if (isOpen(i) && OWNING_STAGES.includes(i.stage)) {
       others.push(entry(i, i.pr));
     }
   }
   return [...queued, ...others, ...merged].slice(0, MAX_ENTRIES);
+}
+
+/** Stages in which an item's open PR is listed (merged ones are listed as merges). */
+const OWNING_STAGES: FactoryItem["stage"][] = [
+  "backlog",
+  "building",
+  "verifying",
+  "escalated",
+  "failed",
+];
+
+/**
+ * The open PR the factory still owns for an item, as `pullRequests` lists it: its own while
+ * open, or, without one, a rebuild's original that is still open. Null outside the owning
+ * stages. The Factory view uses it where the capped list may have left the item out.
+ */
+export function ownedPr(ctx: FactoryContext, i: FactoryItem): GitHubPrRef | null {
+  if (!OWNING_STAGES.includes(i.stage)) return null;
+  if (i.pr) return isOpen(i) ? i.pr : null;
+  return unreplacedOriginal(ctx, i);
 }
 
 /** Most PRs the panel lists (the queue comes first, so it is never cut). */

@@ -20,8 +20,11 @@ interface LayoutState {
   rightSheetOpen: boolean;
   rightWidth: number;
   rightTab: RightTab;
-  /** Subagent thread shown in the right panel's Thread tab. */
-  childThread: { sessionId: string; threadId: string } | null;
+  /**
+   * Subagent thread shown in the right panel's Thread tab; `focusItemId` (a search hit) opens
+   * it at that item instead of the end.
+   */
+  childThread: { sessionId: string; threadId: string; focusItemId?: string } | null;
   drawerOpen: boolean;
   drawerHeight: number;
   expandedProjects: Record<string, boolean>;
@@ -30,7 +33,7 @@ interface LayoutState {
   setRightWidth: (w: number) => void;
   toggleRight: (open?: boolean) => void;
   openRightTab: (tab: RightTab) => void;
-  openChildThread: (sessionId: string, threadId: string) => void;
+  openChildThread: (sessionId: string, threadId: string, focusItemId?: string) => void;
   setDrawerHeight: (h: number) => void;
   toggleDrawer: (open?: boolean) => void;
   toggleProject: (id: string, open?: boolean) => void;
@@ -59,9 +62,9 @@ export const useLayoutStore = create<LayoutState>()(
           return { rightOpen: next, rightSheetOpen: next };
         }),
       openRightTab: (tab) => set({ rightTab: tab, rightOpen: true, rightSheetOpen: true }),
-      openChildThread: (sessionId, threadId) =>
+      openChildThread: (sessionId, threadId, focusItemId) =>
         set({
-          childThread: { sessionId, threadId },
+          childThread: { sessionId, threadId, ...(focusItemId ? { focusItemId } : {}) },
           rightTab: "thread",
           rightOpen: true,
           rightSheetOpen: true,

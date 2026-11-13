@@ -9,8 +9,8 @@ import { DEPLOY_GLOBS, mentionsTopic } from "./vision";
 
 /**
  * Pure rules of the factory loop (§10.1). Everything here is deterministic and enforced by the
- * server, never left to agent judgement: budgets, slots, merge limits, pausing, reviewer choice
- * and the path heuristics the merge checks use.
+ * server, never left to agent judgement: budgets, slots, merge limits, pausing and the path
+ * heuristics the merge checks use.
  */
 
 /** Local calendar day, `YYYY-MM-DD` (counters and digests are per local day). */
@@ -87,34 +87,6 @@ export function mayMerge(mergesToday: number, limits: FactoryLimits): boolean {
 /** The loop pauses after this many failed merge checks or reverts in a row. */
 export function shouldPause(consecutiveFailures: number, limits: FactoryLimits): boolean {
   return consecutiveFailures >= limits.pauseAfterConsecutiveFailures;
-}
-
-/** Providers tried for reviews, in order, when the author's provider is excluded. */
-const REVIEW_ORDER = ["codex", "claude"];
-
-export interface ReviewerChoice {
-  provider: string;
-  /** True when the reviewer runs on a different provider from the author. */
-  crossProvider: boolean;
-  /** Set when the review falls back to the author's provider. */
-  note: string | null;
-}
-
-/**
- * The independent reviewer runs on a different provider from the author (Codex reviews
- * Claude's work and vice versa). With only one provider available it falls back to the same
- * provider and says so.
- */
-export function pickReviewer(author: string | null, available: readonly string[]): ReviewerChoice {
-  const others = available.filter((p) => p !== author);
-  const preferred = [...REVIEW_ORDER, ...others].find((p) => others.includes(p));
-  if (preferred) return { provider: preferred, crossProvider: true, note: null };
-  const fallback = author ?? available[0] ?? "claude";
-  return {
-    provider: fallback,
-    crossProvider: false,
-    note: `No provider other than ${fallback} is available; the review ran on the same provider as the author.`,
-  };
 }
 
 const TEST_FILE =

@@ -8,6 +8,7 @@ import {
   FactoryLimits,
   FactoryLoop,
   FactoryStatus,
+  FactoryTuning,
   isFactoryMode,
   Notice,
   REVIEW_SUMMARY_MAX,
@@ -72,6 +73,7 @@ const item: FactoryItem = {
   largeChange: null,
   sessionsArchivedAt: null,
   earlierSessionIds: [],
+  stepSince: ts,
   createdAt: ts,
   updatedAt: ts,
   mergedAt: null,
@@ -172,11 +174,13 @@ describe("factory API contracts (§10.1)", () => {
       investigation: _i,
       failureKind: _fk,
       rebuiltFrom: _rf,
+      stepSince: _ss,
       ...old
     } = item;
     expect(FactoryItem.parse(old)).toMatchObject({
       failureKind: null,
       rebuiltFrom: null,
+      stepSince: null,
       largeChange: null,
       sessionsArchivedAt: null,
       earlierSessionIds: [],
@@ -200,6 +204,28 @@ describe("factory API contracts (§10.1)", () => {
       SetAutonomyModeRequest.safeParse({ mode: "dark_factory", tuning: { idleGraceMin: 0 } })
         .success,
     ).toBe(false);
+    // Loops saved before the reviewer settings keep today's behaviour.
+    expect(loop.tuning).toMatchObject({
+      builderModel: null,
+      reviewerProvider: "auto",
+      reviewerModel: null,
+      reviewerFallback: "builder",
+    });
+    const agents = {
+      builderProvider: "claude",
+      builderModel: "claude-opus-5-5",
+      reviewerProvider: "codex",
+      reviewerModel: "gpt-5.5",
+      reviewerFallback: "wait",
+    } as const;
+    const tuned = FactoryTuning.parse(agents);
+    expect(FactoryTuning.parse(JSON.parse(JSON.stringify(tuned)))).toEqual(tuned);
+    expect(tuned).toMatchObject(agents);
+    expect(SetAutonomyModeRequest.parse({ mode: "dark_factory", tuning: agents }).tuning).toEqual(
+      agents,
+    );
+    expect(FactoryTuning.safeParse({ reviewerFallback: "never" }).success).toBe(false);
+    expect(FactoryTuning.safeParse({ reviewerModel: "" }).success).toBe(false);
     expect(
       FactoryAllowLargeChangeRequest.parse({ itemId: "i1", reason: "Initial scaffold" }),
     ).toEqual({ itemId: "i1", reason: "Initial scaffold" });
@@ -293,6 +319,74 @@ describe("factory API contracts (§10.1)", () => {
       lastTickAt: null,
     });
     expect(status.tuning.requireCi).toBe(true);
+    // A status from before the Factory view's stats still parses, with empty figures.
+    expect(status.stats).toEqual({
+      mergedToday: 0,
+      failedToday: 0,
+      revertedToday: 0,
+      medianMergeMs7d: null,
+      merged7d: 0,
+    });
+    const work = {
+      id: "i1",
+      title: "Add a counter",
+      workKey: "issue:3",
+      issue: item.issue,
+      pr: item.pr,
+      score: null,
+      sessionId: "s1",
+      stage: "failed",
+      step: "stopped",
+      source: "issue",
+      reason: "Checks failed",
+      note: null,
+      updatedAt: ts,
+    };
+    // Work items from before it lack the step time, merge and finish times, failure kind and
+    // check counts; a status without the view's uncapped list reads it as empty.
+    const before = FactoryStatus.parse({ ...status, recent: [work] });
+    expect(before.recent[0]).toMatchObject({
+      stepSince: null,
+      mergedAt: null,
+      finishedAt: null,
+      failureKind: null,
+      checks: null,
+      ownedPr: null,
+    });
+    expect(before.viewRecent).toEqual([]);
+    const owning = FactoryStatus.parse({
+      ...status,
+      viewRecent: [{ ...work, pr: null, ownedPr: item.pr }],
+    });
+    expect(FactoryStatus.parse(JSON.parse(JSON.stringify(owning)))).toEqual(owning);
+    expect(owning.viewRecent[0]?.ownedPr?.number).toBe(4);
+    const withChecks = FactoryStatus.parse({
+      ...status,
+      viewRecent: [{ ...work, checks: { passed: 5, failed: 1, total: 8 } }],
+    });
+    expect(FactoryStatus.parse(JSON.parse(JSON.stringify(withChecks)))).toEqual(withChecks);
+    expect(withChecks.viewRecent[0]?.checks).toEqual({ passed: 5, failed: 1, total: 8 });
+    expect(
+      FactoryStatus.safeParse({
+        ...status,
+        viewRecent: [{ ...work, checks: { passed: -1, failed: 0, total: 1 } }],
+      }).success,
+    ).toBe(false);
+    const viewed = FactoryStatus.parse({
+      ...status,
+      stats: {
+        mergedToday: 2,
+        failedToday: 1,
+        revertedToday: 1,
+        medianMergeMs7d: 5_400_000,
+        merged7d: 9,
+      },
+      recent: [{ ...work, stepSince: ts, finishedAt: ts, failureKind: "stuck" }],
+    });
+    expect(FactoryStatus.parse(JSON.parse(JSON.stringify(viewed)))).toEqual(viewed);
+    expect(
+      FactoryStatus.safeParse({ ...status, stats: { ...viewed.stats, failedToday: -1 } }).success,
+    ).toBe(false);
     // A status from before the merge queue still parses; its entries round-trip.
     expect(status.pullRequests).toEqual([]);
     const pullRequests = [

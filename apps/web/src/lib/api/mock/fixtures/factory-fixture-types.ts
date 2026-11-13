@@ -1,8 +1,10 @@
 import type {
   AutonomyMode,
+  FactoryFailureKind,
   FactoryLimits,
   FactoryLoopState,
   FactoryPrEntry,
+  FactoryStats,
   GitHubIssueRef,
   GitHubPrRef,
   PipelineStep,
@@ -27,14 +29,24 @@ export interface FixtureWorkItem {
     | "backlog"
     | "building"
     | "verifying"
+    | "watching"
     | "merged"
     | "reverted"
-    | "rejected";
+    | "rejected"
+    | "failed"
+    | "escalated";
   type?: WorkType;
   step?: PipelineStep;
   trust?: WorkTrust;
   author?: string;
   attempts?: number;
+  /** Minutes since it entered its current step (`stepSince`); a few minutes by default. */
+  stepMinutesAgo?: number;
+  note?: string;
+  reason?: string;
+  failureKind?: FactoryFailureKind;
+  /** Merge check counts, when its PR has no `mergeChecks` fixture. */
+  checks?: { passed: number; failed: number; total: number };
 }
 
 export type FixtureCheckName =
@@ -72,5 +84,7 @@ export interface FactoryFixture {
   ignored: FixtureWorkItem[];
   /** The PRs the factory owns, merge queue first (`FactoryStatus.pullRequests`). */
   pullRequests?: FactoryPrEntry[];
+  /** The Factory view's figures (`FactoryStatus.stats`); merges default to `mergesToday`. */
+  stats?: Partial<FactoryStats>;
   visionExists: boolean;
 }

@@ -12,6 +12,7 @@ import { useEffect, useRef } from "react";
 import { AutomationsPanel } from "@/components/automations/automations-panel";
 import { SectionLabel } from "@/components/common/bits";
 import { AutonomyModeButton } from "@/components/factory/autonomy-dialog";
+import { OpenFactoryViewButton } from "@/components/factory/factory-actions";
 import { FactoryPanel } from "@/components/factory/factory-panel";
 import { ProjectGithub } from "@/components/github/project-github";
 import { SessionsList } from "@/components/project/lists";
@@ -93,6 +94,7 @@ export function ProjectPage({
         }
         actions={
           <>
+            {factory && <OpenFactoryViewButton projectId={projectId} />}
             <Button size="sm" variant="ghost" asChild>
               <Link to="/projects/$projectId/vision" params={{ projectId }}>
                 <FileText /> Vision
@@ -166,12 +168,25 @@ export function ProjectPage({
                 </div>
                 {listed.length > 0 ? (
                   <SessionsList sessions={listed} />
-                ) : (
+                ) : showArchived ? (
                   <p className="rounded-xl border border-dashed border-border px-4 py-6 text-center text-xs text-muted-foreground">
-                    {showArchived
-                      ? "No archived sessions. Archive one from its menu to tidy the sidebar."
-                      : "No active sessions."}
+                    No archived sessions. Archive one from its menu to tidy the sidebar.
                   </p>
+                ) : (
+                  <div
+                    className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-border px-4 py-6 text-center text-xs text-muted-foreground"
+                    data-testid="sessions-empty"
+                  >
+                    <p>
+                      No active sessions. A session is one agent working on one task, in its own
+                      worktree and branch.
+                    </p>
+                    <Button size="sm" asChild>
+                      <Link to="/projects/$projectId/new" params={{ projectId }}>
+                        <MessageSquarePlus /> Start a session
+                      </Link>
+                    </Button>
+                  </div>
                 )}
               </section>
               <section id="automations">
