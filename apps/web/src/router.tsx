@@ -15,6 +15,7 @@ import { AutomationPage } from "@/routes/automation";
 import { NewAutomationPage } from "@/routes/automation-new";
 import { AutomationsPage, type AutomationsTab } from "@/routes/automations";
 import { FactoryItemPage } from "@/routes/factory-item";
+import { FactoryViewPage } from "@/routes/factory-view";
 import { HomePage } from "@/routes/home";
 import { InboxPage } from "@/routes/inbox";
 import { NewSessionPage } from "@/routes/new-session";
@@ -203,6 +204,19 @@ const factoryItemRoute = createRoute({
   },
 });
 
+/**
+ * The Factory view: full screen, outside the app shell (no sidebar or side panels), so it can be
+ * kept open on a second screen. Its static `view` segment ranks above `factory/$itemId`.
+ */
+const factoryViewRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/projects/$projectId/factory/view",
+  component: function FactoryView() {
+    const { projectId } = factoryViewRoute.useParams();
+    return <FactoryViewPage key={projectId} projectId={projectId} />;
+  },
+});
+
 const visionRoute = createRoute({
   getParentRoute: () => shell,
   path: "/projects/$projectId/vision",
@@ -283,6 +297,7 @@ const routeTree = rootRoute.addChildren([
     agentsRoute,
   ]),
   createRoute({ getParentRoute: () => rootRoute, path: "/setup", component: SetupPage }),
+  factoryViewRoute,
 ]);
 
 export const router = createRouter({ routeTree, defaultPreload: "intent" });

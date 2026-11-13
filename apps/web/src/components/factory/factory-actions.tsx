@@ -1,6 +1,7 @@
 import type { FactoryStatus } from "@codeden/contracts";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Radar, RefreshCw } from "lucide-react";
+import { Link } from "@tanstack/react-router";
+import { MonitorPlay, Radar, RefreshCw } from "lucide-react";
 import type { ReactNode } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -99,5 +100,29 @@ export function FactoryRunButtons({ f, stopped }: { f: FactoryStatus; stopped: b
         </HintButton>
       )}
     </>
+  );
+}
+
+/**
+ * Opens the Factory view (`/projects/$projectId/factory/view`): the full-screen live view of the
+ * factory. Only offered for projects in a factory mode.
+ */
+export function OpenFactoryViewButton({
+  projectId,
+  variant = "ghost",
+}: {
+  projectId: string;
+  variant?: "ghost" | "outline";
+}) {
+  return (
+    <Button size="sm" variant={variant} asChild>
+      <Link
+        to="/projects/$projectId/factory/view"
+        params={{ projectId }}
+        data-testid="open-factory-view"
+      >
+        <MonitorPlay /> Factory view
+      </Link>
+    </Button>
   );
 }

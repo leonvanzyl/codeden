@@ -42,9 +42,9 @@ export function useRoleSession(
 /**
  * Composer for a role session that does not exist yet: the first message, with any pasted or
  * attached images and files, creates it. Session controls (options, queue/steer, stop) come
- * with the session's own composer.
+ * with the session's own composer. Also the Factory view's quick chat before the PM exists.
  */
-function StartComposer({
+export function StartComposer({
   kind: role,
   projectId,
 }: {

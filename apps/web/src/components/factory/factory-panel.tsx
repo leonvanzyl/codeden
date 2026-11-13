@@ -11,7 +11,7 @@ import { factoryKeys, useFactoryStatus } from "@/lib/factory";
 import { ago, compact, usd } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { AutonomyDialog, ExperimentalBadge } from "./autonomy-dialog";
-import { FactoryRunButtons } from "./factory-actions";
+import { FactoryRunButtons, OpenFactoryViewButton } from "./factory-actions";
 import { ChecksColumn, IgnoredColumn, RecentColumn } from "./factory-columns";
 import { KillSwitchButton } from "./kill-switch";
 import { LOOP_LABEL, MODE_LABEL } from "./meta";
@@ -128,6 +128,7 @@ export function FactoryPanel({ project }: { project: Project }) {
           </div>
         </div>
         <div className="ml-auto flex flex-wrap items-center gap-1">
+          <OpenFactoryViewButton projectId={projectId} variant="outline" />
           {f.loopState === "paused" && (
             <Button size="sm" onClick={() => resume.mutate()} disabled={resume.isPending}>
               <Play /> Resume

@@ -1,5 +1,6 @@
 import { FactoryLimits, type FsListResponse, type SetupCheck } from "@codeden/contracts";
 import type { FactoryFixture } from "./factory-fixture-types";
+import { factoryViewInProgress, factoryViewRecent, factoryViewStats } from "./factory-view";
 import { gh } from "./helpers";
 
 const sf = gh("hearth-co/storefront");
@@ -135,7 +136,9 @@ export function factoryFor(
         type: "feature",
         step: "merge",
       },
+      ...factoryViewInProgress,
     ],
+    stats: factoryViewStats,
     mergeChecks: [
       {
         prNumber: 58,
@@ -196,6 +199,7 @@ export function factoryFor(
         pr: sf.pr(54, "Footer contrast", "merged"),
         stage: "merged",
       },
+      ...factoryViewRecent,
     ],
     pullRequests: [
       {

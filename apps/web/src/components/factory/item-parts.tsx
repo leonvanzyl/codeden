@@ -1,15 +1,56 @@
-import { type FactoryItem, WorkType } from "@codeden/contracts";
+import { type FactoryItem, type MergeCheck, WorkType } from "@codeden/contracts";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { RotateCcw, UserCheck } from "lucide-react";
+import { Link } from "@tanstack/react-router";
+import { AlertTriangle, RotateCcw, UserCheck } from "lucide-react";
 import { toast } from "sonner";
 import { SectionLabel } from "@/components/common/bits";
 import { Button } from "@/components/ui/button";
 import { useClient } from "@/lib/api";
 import { factoryKeys } from "@/lib/factory";
+import { ago } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import { TYPE_LABEL } from "./meta";
+import { CheckPill } from "./factory-columns";
+import { CHECK_HELP, TYPE_LABEL } from "./meta";
 
-/** Parts of the factory item page (§10.1): the first step's result and the item's actions. */
+/**
+ * Parts of the factory item page and the Factory view's item sheet (§10.1): the first step's
+ * result, the item's actions, its merge checks and its session links.
+ */
+
+/** A link to the builder's or reviewer's session, or a dash when there is none. */
+export function SessionLink({ id, label }: { id: string | null; label: string }) {
+  if (!id)
+    return <span className="text-muted-foreground">{label === "session" ? "—" : label}</span>;
+  return (
+    <Link
+      to="/sessions/$sessionId"
+      params={{ sessionId: id }}
+      className="text-primary hover:underline"
+    >
+      {label}
+    </Link>
+  );
+}
+
+/** One merge check with its result. */
+export function CheckRow({ check }: { check: MergeCheck }) {
+  return (
+    <div className="flex items-start gap-3 border-b border-border px-3.5 py-2.5 last:border-0">
+      <CheckPill check={check} />
+      <div className="min-w-0 flex-1 text-2xs">
+        <p className={cn(check.state === "fail" && "text-status-failed")}>
+          {check.detail ?? CHECK_HELP[check.name]}
+        </p>
+        {check.escalate && (
+          <p className="mt-0.5 flex items-center gap-1 text-status-waiting">
+            <AlertTriangle className="size-3" /> Escalated: a human has to review and merge this
+          </p>
+        )}
+      </div>
+      <span className="shrink-0 text-3xs text-muted-foreground">{ago(check.at)}</span>
+    </div>
+  );
+}
 
 /** The first step's result: the bug's reproduction or the feature's analysis. */
 export function InvestigationCard({ item }: { item: FactoryItem }) {
