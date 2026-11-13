@@ -6,6 +6,8 @@ import { EmptyState } from "@/components/common/bits";
 import { useChatColumn, useNow, useWide } from "@/components/factory-view/hooks";
 import { ItemSheet } from "@/components/factory-view/item-sheet";
 import { PipelineBoard } from "@/components/factory-view/pipeline-board";
+import { PixelScene } from "@/components/factory-view/pixel/pixel-scene";
+import { usePixelMode } from "@/components/factory-view/pixel/use-pixel-mode";
 import { QuickChat } from "@/components/factory-view/quick-chat";
 import { type SessionInfo, type ViewCard, viewPipeline } from "@/components/factory-view/stages";
 import { StatsStrip } from "@/components/factory-view/stats-strip";
@@ -64,6 +66,7 @@ export function FactoryViewPage({ projectId }: { projectId: string }) {
   const chatColumn = useChatColumn();
   const [chatOpen, setChatOpen] = useChatOpen();
   const [chatSheet, setChatSheet] = useState(false);
+  const pixel = usePixelMode();
   // The open card by id, so its sheet follows the card as it moves.
   const [selected, setSelected] = useState<ViewCard | null>(null);
   const current = useMemo(() => {
@@ -127,20 +130,35 @@ export function FactoryViewPage({ projectId }: { projectId: string }) {
           f={f}
           needsPerson={pipeline.needsPerson}
           failed={pipeline.failed}
+          pixel={pixel}
         />
         <div className="flex min-h-0 flex-1">
-          <main
-            className={
-              wide
-                ? // Scrolls only when the window is too short for the figures, the lane and a
-                  // usable pipeline together.
-                  "flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-y-auto p-3 scroll-thin"
-                : "flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-y-auto p-3 pb-20"
-            }
-          >
-            <StatsStrip f={f} />
-            <PipelineBoard f={f} pipeline={pipeline} now={now} onOpen={setSelected} />
-          </main>
+          {pixel.on ? (
+            // Pixel mode: the floor fills the space; its gauge and counter board stand in for
+            // the figures.
+            <main
+              className={
+                wide
+                  ? "flex min-h-0 min-w-0 flex-1 flex-col p-3"
+                  : "flex min-h-0 min-w-0 flex-1 flex-col p-3 pb-16"
+              }
+            >
+              <PixelScene f={f} pipeline={pipeline} onOpen={setSelected} />
+            </main>
+          ) : (
+            <main
+              className={
+                wide
+                  ? // Scrolls only when the window is too short for the figures, the lane and a
+                    // usable pipeline together.
+                    "flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-y-auto p-3 scroll-thin"
+                  : "flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-y-auto p-3 pb-20"
+              }
+            >
+              <StatsStrip f={f} />
+              <PipelineBoard f={f} pipeline={pipeline} now={now} onOpen={setSelected} />
+            </main>
+          )}
           {chatColumn && chatOpen && (
             <aside
               className="flex w-[340px] shrink-0 flex-col border-l border-border bg-surface/40 2xl:w-[400px]"

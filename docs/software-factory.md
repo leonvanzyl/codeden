@@ -67,6 +67,22 @@ Open it with **Factory view** on the project page or the factory panel, or **Fac
 
 On tablets and phones the stages stack as sections you can fold, the figures wrap, and the PM chat opens from a button as a sheet from the bottom. Each stage is a labelled region and each card a button named after its number, title and state. A screen reader hears cards move politely ("#142 moved to Reviewing"), and with reduced motion on, cards don't animate.
 
+#### Pixel mode
+
+**Pixel mode** in the header swaps the figures and the pipeline for a small pixel-art factory floor, seen from above, that works along with the factory. It's just for fun and off by default. The board stays the full view, and your browser remembers which one you picked.
+
+- New and sorted issues are a pile of tickets at the **IN** door. When a build starts, a worker carries a ticket to a bench.
+- Each build has a worker at a workbench, hammering while its agent works, with a "?" when the agent asks you something. Each review has a worker with a clipboard inspecting a crate.
+- The merge queue is a row of crates on the conveyor to the **SHIP** door, in merge order, flagged when one waits on you. A merge sends a crate out with a sparkle. Today's merges stack on the dock.
+- Failed and escalated work sits on broken machines along the bottom: a red lamp and smoke for a failure, an amber lamp for an escalation, and a flag above each.
+- In a dark factory, the scout walks the floor with a magnifying glass during a round, and its area reviewers write on notepads in the corner.
+- On the wall, a gauge shows spend against the daily budget, and a counter board shows today's merges.
+- With the kill switch on or the loop stopped, the lights dim and everyone sits down.
+
+Hover a worker, ticket, crate or machine to see its issue number and title (a builder also shows its latest progress line). Click it to open the same side sheet as on the board. Workers, crates and machines can also be reached with Tab. Under the scene, a line says what it shows ("4 building, 1 in review, 3 merged today, 2 need you") and updates for screen readers.
+
+The scene is one small canvas drawn about 12 times a second. It stops drawing while the tab is hidden, and with reduced motion on it shows a still frame that changes only when the factory does. Pixel mode isn't offered on phones (narrower than 640 pixels), where the scene would be too small to tap; they always show the board.
+
 ### Finished work cleans up after itself
 
 Once a work item is finished (merged, reverted, rejected or failed), the factory [archives](workbench.md#archiving-and-worktree-cleanup) its sessions: the builder and its reviewers leave the sidebar and their worktrees are removed, so a busy factory fills neither your session list nor your disk. Nothing is lost. The branch, the checkpoints and the transcript stay, archived sessions are under the project's **Archived** filter, clicking the item on the panel still opens its session, and messaging an archived session brings it back with its worktree. A worktree with uncommitted changes is kept, as with any archive.
