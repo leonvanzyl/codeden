@@ -1,4 +1,5 @@
 import { mkdirSync, writeFileSync } from "node:fs";
+import { type AddressInfo, createServer, type Socket } from "node:net";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import {
@@ -36,7 +37,7 @@ function newHome(): string {
 }
 
 /** Run the link against `home` with piped stdio; collects everything it writes. */
-function link(home: string) {
+function link(home: string, signal?: AbortSignal) {
   const stdin = new PassThrough();
   const stdout = new PassThrough();
   const stderr = new PassThrough();
@@ -51,7 +52,7 @@ function link(home: string) {
   stderr.on("data", (chunk: Buffer) => {
     log += chunk.toString();
   });
-  const exit = runRunnerLink({ home, stdin, stdout, stderr });
+  const exit = runRunnerLink({ home, stdin, stdout, stderr, signal });
   return {
     exit,
     send: (message: ServerToRunnerMessage) => stdin.write(encodeLinkFrame(message)),
@@ -114,21 +115,10 @@ describe("runner-link", () => {
   it("exits 4 when the runner refuses the token, without logging it", async () => {
     const live = newHome();
     runner = await startRunner({ home: live, enableFakeProvider: true });
-    // A lock that points at the live runner with the wrong token (alive pid: this process).
+    // A lock that points at the live runner with the wrong token.
     const home = newHome();
     const wrong = "0".repeat(64);
-    const lock: RunnerLock = {
-      pid: process.pid,
-      port: runner.port,
-      token: wrong,
-      version: "test",
-      protocolVersion: RUNNER_PROTOCOL_VERSION,
-      runnerId: "someone-else",
-      startedAt: new Date().toISOString(),
-      providers: [],
-    };
-    mkdirSync(join(home, "runner"), { recursive: true });
-    writeFileSync(join(home, "runner", "runner.json"), JSON.stringify(lock));
+    writeLock(home, runner.port, wrong);
     const l = link(home);
     expect(await l.exit).toBe(RunnerLinkExit.rejected);
     expect(l.stdout()).toBe("");
@@ -147,4 +137,52 @@ describe("runner-link", () => {
     expect(await l.exit).toBe(RunnerLinkExit.failed);
     expect(l.log()).toContain("the runner closed the link");
   });
+
+  it("aborting while the upgrade is still pending drops the socket and ends the link", async () => {
+    // A listener that accepts the connection but never answers the WebSocket upgrade.
+    const accepted: Socket[] = [];
+    let onConnection: () => void = () => undefined;
+    const connected = new Promise<void>((resolve) => {
+      onConnection = resolve;
+    });
+    const stall = createServer((socket) => {
+      socket.on("error", () => undefined);
+      accepted.push(socket);
+      onConnection();
+    });
+    await new Promise<void>((resolve) => stall.listen(0, "127.0.0.1", resolve));
+    try {
+      const home = newHome();
+      writeLock(home, (stall.address() as AddressInfo).port, "s".repeat(64));
+      const abort = new AbortController();
+      const l = link(home, abort.signal);
+      await connected;
+      const socket = accepted[0] as Socket;
+      const dropped = new Promise<void>((resolve) => socket.once("close", () => resolve()));
+      abort.abort();
+      // Settles without the upgrade ever finishing, and the attempted socket is closed.
+      expect(await l.exit).toBe(RunnerLinkExit.failed);
+      await dropped;
+      expect(l.stdout()).toBe("");
+    } finally {
+      for (const socket of accepted) socket.destroy();
+      await new Promise<void>((resolve) => stall.close(() => resolve()));
+    }
+  });
 });
+
+/** A lock file in `home` pointing at `port` with `token`, owned by this (live) process. */
+function writeLock(home: string, port: number, token: string): void {
+  const lock: RunnerLock = {
+    pid: process.pid,
+    port,
+    token,
+    version: "test",
+    protocolVersion: RUNNER_PROTOCOL_VERSION,
+    runnerId: "someone-else",
+    startedAt: new Date().toISOString(),
+    providers: [],
+  };
+  mkdirSync(join(home, "runner"), { recursive: true });
+  writeFileSync(join(home, "runner", "runner.json"), JSON.stringify(lock));
+}

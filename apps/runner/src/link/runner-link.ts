@@ -44,26 +44,42 @@ export async function runRunnerLink(opts: RunnerLinkOptions): Promise<RunnerLink
     log(`no runner is running in ${opts.home}`);
     return RunnerLinkExit.noRunner;
   }
-  if (opts.signal?.aborted) return RunnerLinkExit.failed;
-  const opened = await connect(lock);
+  const opened = await connect(lock, opts.signal);
   if ("exit" in opened) {
-    log(opened.message);
+    if (opened.message) log(opened.message);
     return opened.exit;
   }
   log(`linked to runner ${lock.runnerId} (pid ${lock.pid})`);
   return splice(opened.ws, opts, log);
 }
 
-type Opened = { ws: WebSocket } | { exit: RunnerLinkExitCode; message: string };
+/** An open socket, or how the attempt ended (no message when it was aborted). */
+type Opened = { ws: WebSocket } | { exit: RunnerLinkExitCode; message: string | null };
 
-function connect(lock: RunnerLock): Promise<Opened> {
+/**
+ * Open the runner's WebSocket. Every way the attempt ends settles it once and releases what it
+ * holds: a failed or refused attempt drops its socket, and aborting `signal` drops it at once,
+ * even while the upgrade is still pending.
+ */
+function connect(lock: RunnerLock, signal?: AbortSignal): Promise<Opened> {
   return new Promise((resolve) => {
+    if (signal?.aborted) return resolve({ exit: RunnerLinkExit.failed, message: null });
     const ws = new WebSocket(`ws://127.0.0.1:${lock.port}/runner`, {
       headers: { authorization: `Bearer ${lock.token}` },
     });
+    let settled = false;
+    const settle = (result: Opened) => {
+      if (settled) return;
+      settled = true;
+      signal?.removeEventListener("abort", onAbort);
+      if ("exit" in result) ws.terminate();
+      resolve(result);
+    };
+    const onAbort = () => settle({ exit: RunnerLinkExit.failed, message: null });
+    signal?.addEventListener("abort", onAbort, { once: true });
     // Kept for the socket's whole life: an `error` without a listener would throw.
     ws.on("error", (error) =>
-      resolve({
+      settle({
         exit: RunnerLinkExit.noRunner,
         message: `cannot reach the runner on 127.0.0.1:${lock.port}: ${error.message}`,
       }),
@@ -72,7 +88,7 @@ function connect(lock: RunnerLock): Promise<Opened> {
       const status = res.statusCode ?? 0;
       res.resume();
       req.destroy();
-      resolve(
+      settle(
         status === 401 || status === 403
           ? {
               exit: RunnerLinkExit.rejected,
@@ -81,7 +97,7 @@ function connect(lock: RunnerLock): Promise<Opened> {
           : { exit: RunnerLinkExit.failed, message: `the runner answered HTTP ${status}` },
       );
     });
-    ws.once("open", () => resolve({ ws }));
+    ws.once("open", () => settle({ ws }));
   });
 }
 
