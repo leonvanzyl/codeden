@@ -18,8 +18,9 @@ The long-lived CodeDen server (design §4.1): Hono HTTP API and UI WebSocket, th
 | `finish` | agent | Structured `session.result` |
 | `browser_navigate` | agent | Open a URL in the session browser (opens it on first use) |
 | `browser_snapshot` | agent | Aria snapshot (YAML) with element refs |
-| `browser_click` / `browser_type` / `browser_press` | agent | Act on a ref / press a key or chord |
-| `browser_screenshot` | agent | PNG -> `screenshot` artifact, returned as MCP image content; `share: true` posts it to the chat |
+| `browser_click` / `browser_type` / `browser_press` | agent | Act on a ref / press a key or chord; `browser_type` without a ref types at the focused element (at most 2,000 characters) |
+| `browser_mouse` | agent | `click` / `hover` / `drag` / `scroll` at viewport CSS pixels (the pixels of a viewport screenshot); flat input checked per action by the contracts' `checkBrowserMouse` |
+| `browser_screenshot` | agent | PNG -> `screenshot` artifact, returned as MCP image content; `share: true` posts it to the chat. Viewport shots name their size as the `browser_mouse` coordinate space |
 | `browser_logs` | agent | Console and network entries (`since` paging) |
 | `browser_wait` | agent | Selector, text or network idle |
 | `browser_evaluate` | agent | Guarded JS evaluation (5 s timeout, result size cap, can be disabled in the runner) |

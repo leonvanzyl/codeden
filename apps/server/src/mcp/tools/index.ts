@@ -11,6 +11,7 @@ import {
   browserType,
   browserWait,
 } from "./browser";
+import { browserMouse } from "./browser-mouse";
 import { browserScreenshot } from "./browser-screenshot";
 import { factoryTools } from "./factory";
 import { finish } from "./finish";
@@ -35,6 +36,7 @@ export const allTools: AnyServerTool[] = [
   browserClick,
   browserType,
   browserPress,
+  browserMouse,
   browserScreenshot,
   browserLogs,
   browserWait,

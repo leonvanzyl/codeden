@@ -356,6 +356,15 @@ export class BrowserSession {
     if (this.native) await this.measure();
   }
 
+  /**
+   * The viewport an agent's coordinates refer to, now: the emulated size, or a native view's
+   * size measured fresh (agent actions are few, and the desktop panel may have just resized).
+   */
+  async currentViewport(): Promise<ViewportMetrics> {
+    this.assertOpen();
+    return this.native ? this.measure() : { ...this.viewport };
+  }
+
   /** The native view's size for input, measured at most once a second (pointer moves are many). */
   private async nativeViewport(): Promise<ViewportMetrics> {
     if (Date.now() - this.measuredAt > NATIVE_MEASURE_MS) return this.measure();

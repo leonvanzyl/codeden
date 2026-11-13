@@ -546,8 +546,10 @@ node-pty sessions owned by the runner, so they survive server restarts, with bou
   - navigate
   - accessibility snapshot
   - click and type
+  - pointer actions at page coordinates (click, hover, drag, scroll) and typing at whatever has focus: computer use, step 1, for what the snapshot can't reach (canvases, maps, charts, drag handles, custom sliders, games, hover menus)
   - screenshot
   - console and network logs
+- **Coordinates.** Viewport CSS pixels, origin top-left: the pixels of a viewport screenshot (agent screenshots are taken at `scale: "css"`) and the units of `getBoundingClientRect`. They are stateless, the same on either engine, and points outside the current viewport are refused.
 - **Screenshots.** They can be posted to the chat with `share_to_chat` or attached as PR evidence.
 - **Isolation.** One browser context per session in the runner's Chromium; one in-memory session partition per session for native views (`codeden-browser:<sessionId>`, never the window's own session). Cookies and storage never cross sessions.
 - **Dev servers.** CodeDen discovers running dev servers so agents and you can open them in one click.

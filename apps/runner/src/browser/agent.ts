@@ -1,5 +1,6 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, extname, isAbsolute } from "node:path";
+import { MAX_FOCUS_TYPE_CHARS } from "@codeden/contracts";
 import type { Locator, Page } from "playwright-core";
 import { CommandError } from "../errors";
 import { pngSize } from "./images";
@@ -82,14 +83,35 @@ export async function click(
   );
 }
 
-/** Replace the value of an editable element; `submit` presses Enter afterwards. */
+/**
+ * Replace the value of an editable element; `submit` presses Enter afterwards. Without a ref,
+ * type the text as key presses into whatever has focus (a canvas editor, a game, a field
+ * clicked at coordinates).
+ */
 export async function type(
   session: BrowserSession,
-  ref: string,
+  ref: string | undefined,
   text: string,
   opts: { tabId?: string; submit?: boolean } = {},
 ): Promise<void> {
-  await withRef(session.page(opts.tabId), ref, async (locator) => {
+  const page = session.page(opts.tabId);
+  if (ref === undefined) {
+    if (text.length > MAX_FOCUS_TYPE_CHARS) {
+      throw new CommandError(
+        "invalid_text",
+        `Without a ref, type at most ${MAX_FOCUS_TYPE_CHARS} characters`,
+      );
+    }
+    try {
+      await page.keyboard.type(text);
+      if (opts.submit) await page.keyboard.press("Enter");
+    } catch (error) {
+      const message = error instanceof Error ? error.message.split("\n")[0] : String(error);
+      throw new CommandError("action_failed", `Typing at the focused element failed: ${message}`);
+    }
+    return;
+  }
+  await withRef(page, ref, async (locator) => {
     await locator.fill(text);
     if (opts.submit) await locator.press("Enter");
   });

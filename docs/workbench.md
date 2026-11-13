@@ -113,7 +113,8 @@ The runner launches one Chromium (your installed **Edge** or **Chrome**; Edge fi
 |---|---|
 | `browser_navigate` | Open a URL (starts the browser on first use) |
 | `browser_snapshot` | An accessibility snapshot with element refs |
-| `browser_click`, `browser_type`, `browser_press` | Act on a ref, or press a key or chord |
+| `browser_click`, `browser_type`, `browser_press` | Act on a ref, or press a key or chord. Without a ref, `browser_type` types into whatever has focus |
+| `browser_mouse` | Click, hover, drag or scroll at screenshot coordinates, for canvases, maps, drag handles, sliders and hover menus that have no useful ref |
 | `browser_screenshot` | Viewport, full page or one element; `share: true` posts it to the chat |
 | `browser_logs` | Console and network entries |
 | `browser_wait` | For a selector, text or network idle |
