@@ -4,6 +4,7 @@ import type {
   FactoryItemSource,
   FactoryItemStage,
   FactoryLoopState,
+  FactoryPrState,
   MergeCheckName,
   PipelineStep,
   WorkType,
@@ -83,6 +84,51 @@ export const STAGE_LABEL: Record<FactoryItemStage, { label: string; tone: Tone }
   rejected: { label: "Stopped", tone: "idle" },
   failed: { label: "Failed", tone: "failed" },
   escalated: { label: "Needs you", tone: "waiting" },
+};
+
+/** A factory PR's state on the panel's merge queue card, with what it means. */
+export const PR_STATE_LABEL: Record<FactoryPrState, { label: string; tone: Tone; help: string }> = {
+  checking: {
+    label: "Checking",
+    tone: "running",
+    help: "The merge checks are running: the review, tests and evidence.",
+  },
+  waiting_ci: {
+    label: "Waiting for CI",
+    tone: "running",
+    help: "CI is running, or yet to start, on the newest commit.",
+  },
+  queued: {
+    label: "Queued",
+    tone: "waiting",
+    help: "Every check passed. The factory merges one pull request at a time, oldest approved first.",
+  },
+  updating: {
+    label: "Updating",
+    tone: "running",
+    help: "Next to merge, but behind the default branch: GitHub merges the default branch in, then CI runs on the new head. No agent is needed.",
+  },
+  rebasing: {
+    label: "Rebasing",
+    tone: "running",
+    help: "Merge conflicts with the default branch: the author (or an integrator, when the author's session is gone) rebases it. This isn't a revise round.",
+  },
+  rebuilding: {
+    label: "Rebuilding",
+    tone: "running",
+    help: "It still conflicted after three requests to rebase, so the work is redone from the default branch. The new pull request replaces this one.",
+  },
+  merged: { label: "Merged", tone: "done", help: "Merged today." },
+  waiting_for_you: {
+    label: "Waiting for you",
+    tone: "waiting",
+    help: "A person merges this one (auto-merge is off, a protected area, an untrusted author, or checks that failed). The factory keeps it free of merge conflicts meanwhile.",
+  },
+  stuck: {
+    label: "Stuck",
+    tone: "failed",
+    help: "The factory can't settle this by itself: it was already rebuilt once, or CI can never run. It is in your inbox.",
+  },
 };
 
 export const SOURCE_LABEL: Record<FactoryItemSource, string> = {

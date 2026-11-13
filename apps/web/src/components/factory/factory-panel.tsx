@@ -16,6 +16,7 @@ import { ChecksColumn, IgnoredColumn, RecentColumn } from "./factory-columns";
 import { KillSwitchButton } from "./kill-switch";
 import { LOOP_LABEL, MODE_LABEL } from "./meta";
 import { PipelineDiagram } from "./pipeline-diagram";
+import { PullRequestsCard } from "./pull-requests-card";
 
 function Meter(props: {
   label: string;
@@ -221,6 +222,7 @@ export function FactoryPanel({ project }: { project: Project }) {
             display={`${f.consecutiveFailures} / ${f.limits.pauseAfterConsecutiveFailures}`}
           />
         </div>
+        <PullRequestsCard projectId={projectId} pullRequests={f.pullRequests} />
         <div className="grid grid-cols-[minmax(0,1fr)] gap-3 lg:grid-cols-3">
           <ChecksColumn projectId={projectId} checks={f.mergeChecks} />
           <RecentColumn projectId={projectId} recent={f.recent} />

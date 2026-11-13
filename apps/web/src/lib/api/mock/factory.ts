@@ -131,6 +131,8 @@ export function mockFactoryApi(world: MockWorld): FactoryApi {
       review: null,
       checks: s.mergeChecks.find((c) => c.itemId === itemId)?.checks ?? [],
       attempts: w.attempts,
+      failureKind: null,
+      rebuiltFrom: null,
       mergeSha: null,
       revertOf: null,
       triageRequestedAt: null,
