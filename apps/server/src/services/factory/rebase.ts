@@ -2,12 +2,12 @@ import type { FactoryItem, FactoryLoop, Project, Session } from "@codeden/contra
 import type { FactoryContext } from "./context";
 import type { FactoryPr } from "./github-port";
 import { failItem } from "./outcomes";
-import { freeSlots } from "./policy";
 import { REBASE_WHY, rebasePrompt } from "./prompts";
 import { type IntegratorTask, integratorPrompt } from "./prompts-integration";
 import { rebuild } from "./rebuild";
 import { owedRecheck, recheckOf, settleRecheck } from "./recheck";
 import { isBusy } from "./sessions";
+import { claimSlot } from "./slots";
 import { FINISHED_STAGES } from "./store";
 
 /**
@@ -119,6 +119,21 @@ export function settleConflict(
   return { ...rest, ...owedRecheck(old, at) };
 }
 
+/**
+ * A slot for work on the item's PR by `agent` (a rebase, a revise round, the audit's worktree):
+ * an agent mid-turn gets the request after that turn and needs none; one between turns is woken
+ * with a free slot left after the reviews waiting for one (`slots.ts`).
+ */
+export function repairSlot(
+  ctx: FactoryContext,
+  project: Project,
+  item: FactoryItem,
+  agent: Session,
+): boolean {
+  if (isBusy(agent)) return true;
+  return claimSlot(ctx, project, "repair", `repair:${item.id}`, agent.id);
+}
+
 /** The session that answers for the item's PR (its builder or integrator), while it exists. */
 export function prAgent(ctx: FactoryContext, item: FactoryItem): Session | undefined {
   return item.builderSessionId ? ctx.repo.find(item.builderSessionId)?.session : undefined;
@@ -171,7 +186,7 @@ export async function startIntegrator(
     task === "conflicts"
       ? `Merge conflicts with ${base}`
       : "CI never started on its head and its author's session is gone";
-  if (freeSlots(ctx.sessions.activeCount(project.id), project.factoryLimits) === 0) {
+  if (!claimSlot(ctx, project, "repair", `repair:${item.id}`)) {
     ctx.store.updateItem(item.id, (i) => ({
       ...i,
       note: `${what}: waiting for a free agent to take the pull request over`,
@@ -246,6 +261,13 @@ export async function advanceConflicting(
     await startIntegrator(ctx, project, item, pr, "conflicts", [`${REBASE}${asked + 1}`, ...also]);
     return loop;
   }
+  // A request to an agent between turns starts a turn: it waits for a free agent, after the
+  // reviews (`slots.ts`). One mid-turn gets it after that turn.
+  if (!repairSlot(ctx, project, item, agent)) {
+    const waiting = `Merge conflicts with ${branch}: waiting for a free agent to rebase it`;
+    ctx.store.updateItem(item.id, (i) => ({ ...i, note: waiting }), { touch: false });
+    return loop;
+  }
   const note = `Merge conflicts with ${branch}: the author is rebasing (not a revise round)`;
   await askToRebase(ctx, project, item, agent, REBASE_WHY.conflicts(branch), note, also);
   return loop;
@@ -268,6 +290,12 @@ export async function restoreForAudit(
   const key = `${RESTORE}${headSha ?? "unknown"}`;
   const asked = item.nudges[key];
   if (!asked) {
+    if (!repairSlot(ctx, project, item, builder)) {
+      const waiting =
+        "The builder's worktree was cleaned up: waiting for a free agent to bring it back for the audit";
+      ctx.store.updateItem(item.id, (i) => ({ ...i, note: waiting }), { touch: false });
+      return loop;
+    }
     const note = "The builder's worktree was cleaned up: bringing it back for the audit";
     await askToRebase(ctx, project, item, builder, REBASE_WHY.worktree, note, [key]);
     return loop;

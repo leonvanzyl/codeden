@@ -4,11 +4,11 @@ import { isTransientRunnerError, isTurnRunningError } from "../sessions/outbox-h
 import { CI_KICK_NUDGE } from "./ci-kick";
 import type { FactoryContext } from "./context";
 import { markStuck } from "./outcomes";
-import { freeSlots } from "./policy";
 import { continuePrompt } from "./prompts-integration";
 import { prAgent } from "./rebase";
 import { isRecheckObligation } from "./recheck";
 import { isBusy } from "./sessions";
+import { claimSlot } from "./slots";
 import { ownsTurnRaceFailure } from "./turn-race";
 
 /**
@@ -86,24 +86,33 @@ function freshNudges(nudges: FactoryItem["nudges"], at: string): FactoryItem["nu
   };
 }
 
+/**
+ * Put back what failed for a reason outside its code. The tick runs it twice: first with
+ * `resume` off, which only moves items (back to verification or to the queue, no agent turn),
+ * so the verify step sees them in the same tick; then, after reviews, fixes and rebases had
+ * their turn at the free agents, with `resume` on and `only` the items that were failed when
+ * the tick began, which tells their builders to carry on (a build in the slot order,
+ * `slots.ts`). Work that fails during a tick goes back on the next one.
+ */
 export async function recoverInfraFailures(
   ctx: FactoryContext,
   project: Project,
   loop: FactoryLoop,
+  opts: { resume: boolean; only?: ReadonlySet<string> } = { resume: true },
 ): Promise<FactoryLoop> {
   // A paused loop (budget, failures in a row) starts no agent turns; resuming it recovers.
   if (loop.state === "paused") return loop;
   let next = loop;
   const providers = ctx.sessions.providers();
   for (const item of ctx.store.items(project.id, ["failed"])) {
-    if (!recoverable(item)) continue;
+    if (!recoverable(item) || (opts.only && !opts.only.has(item.id))) continue;
     // A builder that lost a message race to its own turn is told to carry on by `turn-race.ts`.
     if (ownsTurnRaceFailure(ctx, item)) continue;
     // A person merged or closed its PR meanwhile: ownership finishes the item instead.
     const state = item.pr ? (ctx.github.prRef(project.id, item.pr.number) ?? item.pr).state : null;
     if (state === "merged" || state === "closed") continue;
     try {
-      next = await recoverOne(ctx, project, next, item, providers);
+      next = await recoverOne(ctx, project, next, item, providers, opts.resume);
     } catch (error) {
       ctx.log?.(`factory: ${item.id}: recovery: ${errorMessage(error)}`);
     }
@@ -117,6 +126,7 @@ async function recoverOne(
   loop: FactoryLoop,
   item: FactoryItem,
   providers: string[],
+  resume: boolean,
 ): Promise<FactoryLoop> {
   const builder = prAgent(ctx, item);
   // The cause is gone: the runner offers the builder's provider, and nothing of it is busy.
@@ -168,8 +178,9 @@ async function recoverOne(
     ctx.log?.(`factory: ${item.id}: back in verification after an infrastructure failure`);
     return loop;
   }
-  if (builder && builder.status !== "stopped")
-    return resumeBuilder(ctx, project, loop, item, builder);
+  if (builder && builder.status !== "stopped") {
+    return resume ? resumeBuilder(ctx, project, loop, item, builder) : loop;
+  }
   // The builder is gone: a fresh one picks the work up from the queue.
   ctx.store.updateItem(item.id, (i) => ({
     ...i,
@@ -200,7 +211,8 @@ async function resumeBuilder(
   item: FactoryItem,
   builder: Session,
 ): Promise<FactoryLoop> {
-  if (freeSlots(ctx.sessions.activeCount(project.id), project.factoryLimits) === 0) {
+  // A build: after the reviews, fixes and rebases waiting for an agent (`slots.ts`).
+  if (!claimSlot(ctx, project, "build", `build:${item.id}`, builder.id)) {
     ctx.store.updateItem(item.id, (i) => ({ ...i, note: WAITING_FOR_AGENT }), { touch: false });
     return loop;
   }

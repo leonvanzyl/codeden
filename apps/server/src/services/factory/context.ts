@@ -16,7 +16,9 @@ import type { ProjectService } from "../projects/project-service";
 import type { SessionRepo } from "../sessions/repo";
 import type { RateLimitReading } from "./availability";
 import type { FactoryGithub } from "./github-port";
+import type { PrFiles } from "./overlap";
 import type { FactorySessions } from "./sessions";
+import type { SlotBoard } from "./slots";
 import type { FactoryStore } from "./store";
 import { readVision } from "./vision";
 
@@ -48,6 +50,10 @@ export interface FactoryContext {
    * worktrees (see `cleanup.ts`). Sessions gone, archived or busy by then are left alone.
    */
   archiveSessions: (sessionIds: string[]) => void;
+  /** Who gets the next free agent slot (`slots.ts`), in memory. */
+  slots: SlotBoard;
+  /** Files changed by the factory's open PRs as last read, for overlap-aware scheduling. */
+  prFiles: PrFiles;
   now: () => Date;
   /**
    * How long CI may take to start on a commit (a PR's new head, a merge on the default branch)

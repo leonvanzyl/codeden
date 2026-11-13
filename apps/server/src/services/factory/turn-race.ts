@@ -6,9 +6,9 @@ import {
   TURN_RUNNING_TEXT,
 } from "../sessions/outbox-holds";
 import type { FactoryContext } from "./context";
-import { freeSlots } from "./policy";
 import { BUILDER_RESUME } from "./prompts";
 import { isBusy } from "./sessions";
+import { claimSlot } from "./slots";
 
 /**
  * Builders hit by a message racing their turn. Before the session service queued such a
@@ -49,10 +49,19 @@ export function turnRaceFailure(ctx: FactoryContext, session: Session): InboxIte
   return latest?.body && TURN_RUNNING_TEXT.test(latest.body) ? latest : undefined;
 }
 
-/** Whether a builder may be told to carry on now: the loop runs and an agent is free. */
-function mayResume(ctx: FactoryContext, project: Project, loop: FactoryLoop): boolean {
+/**
+ * Whether a builder may be told to carry on now: the loop runs and an agent is free, after the
+ * reviews, fixes and rebases waiting for one (a build, `slots.ts`).
+ */
+function mayResume(
+  ctx: FactoryContext,
+  project: Project,
+  loop: FactoryLoop,
+  item: FactoryItem,
+  s: Session,
+): boolean {
   if (loop.state === "paused") return false;
-  return freeSlots(ctx.sessions.activeCount(project.id), project.factoryLimits) > 0;
+  return claimSlot(ctx, project, "build", `build:${item.id}`, s.id);
 }
 
 /**
@@ -74,7 +83,7 @@ export async function awaitTurnRaceResume(
   const asked = item.nudges[TOLD_PREFIX + failure.id];
   if (asked) return Date.parse(s.updatedAt) <= Date.parse(asked);
   if (s.status !== "failed" && !item.nudges[RECOVERING_PREFIX + failure.id]) return false;
-  if (!mayResume(ctx, project, loop)) {
+  if (!mayResume(ctx, project, loop, item, s)) {
     ctx.store.updateItem(item.id, (i) => ({ ...i, note: WAITING_NOTE }), { touch: false });
     return true;
   }
@@ -117,7 +126,7 @@ export async function recoverTurnRaceFailures(
       ctx.log?.(`factory: ${item.id}: back to building after a message raced its builder's turn`);
       continue;
     }
-    if (!mayResume(ctx, project, loop)) {
+    if (!mayResume(ctx, project, loop, item, s)) {
       ctx.store.updateItem(item.id, (i) => ({ ...i, note: WAITING_NOTE }), { touch: false });
       continue;
     }

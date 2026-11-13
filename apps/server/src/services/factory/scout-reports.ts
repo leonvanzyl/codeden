@@ -13,10 +13,12 @@ import { badRequest, conflict, errorMessage } from "../errors";
 import { TYPE_LABEL } from "./classify";
 import { type FactoryContext, visionOf } from "./context";
 import { FACTORY_LABEL } from "./intake";
-import { freeSlots, slugify } from "./policy";
+import { slugify } from "./policy";
 import { lensPrompt } from "./prompts-scout";
-import { defaultBranch, knownTitles } from "./scout";
+import { defaultBranch, knownTitles, SCOUT_SLOT } from "./scout";
+import { busySlots, slotsFor } from "./slots";
 import { ACTIVE_STAGES, WAITING_STAGES } from "./store";
+import { wipOf, wipText } from "./wip";
 
 /**
  * What the scout and its area reviewers (`lenses` in the code) report (§10.1): the scout's plan
@@ -101,10 +103,15 @@ function dropNote(
     );
   }
   if (dropped.no_slot.length > 0) {
+    const free = Math.max(0, opts.maxConcurrent - opts.busy);
+    const waiting =
+      free > opts.slots
+        ? `, ${free - opts.slots} free one${free - opts.slots === 1 ? " goes" : "s go"} to reviews, fixes or builds waiting for an agent`
+        : "";
     const given =
       opts.slots > 0 ? ` and this round's area reviewers get the other ${opts.slots}` : "";
     parts.push(
-      `${list(dropped.no_slot)}: no free agent slot (Agents at once is ${opts.maxConcurrent}; other factory sessions hold ${opts.busy}${given}). Raising Agents at once in the factory limits allows more area reviewers.`,
+      `${list(dropped.no_slot)}: no free agent slot (Agents at once is ${opts.maxConcurrent}; other factory sessions hold ${opts.busy}${waiting}${given}). Raising Agents at once in the factory limits allows more area reviewers.`,
     );
   }
   if (dropped.failed.length > 0) {
@@ -126,9 +133,10 @@ export async function planRound(
   }
   const project = ctx.projects.get(projectId);
   // The scout ends its turn right after planning, so the slot it holds now goes to a reviewer;
-  // builders, reviewers and every other factory session keep theirs (§10.1).
-  const busy = ctx.sessions.activeCount(projectId, session.id);
-  const slots = freeSlots(busy, project.factoryLimits);
+  // builders, reviewers and every other factory session keep theirs, and work waiting for an
+  // agent (reviews, fixes, rebases, builds) gets free ones first (§10.1, `slots.ts`).
+  const busy = busySlots(ctx, projectId, session.id);
+  const slots = slotsFor(ctx, project, "scout", SCOUT_SLOT, session.id);
   const { picked, dropped } = pickLenses(req.lenses, {
     areas: loop.tuning.areas,
     perRound: loop.tuning.discoveryPerRound,
@@ -276,6 +284,14 @@ export async function fileIssue(
     throw conflict(
       `This round's limit of ${loop.tuning.maxIssuesPerRound} issues is reached; end your turn`,
       "round_limit",
+    );
+  }
+  // At the work-in-progress limit the factory finishes open work before it takes on more.
+  const wip = wipOf(ctx, ctx.projects.get(projectId), loop);
+  if (wip.holding) {
+    throw conflict(
+      `${wipText(wip)}: the factory files no new issues until open pull requests merge; end your turn`,
+      "wip_limit",
     );
   }
   const slug = slugify(req.title);
