@@ -16,6 +16,22 @@ for (const name of process.platform === "win32" ? ["TEMP", "TMP"] : ["TMPDIR"]) 
 }
 
 /**
+ * Variables CodeDen sets on the processes it starts (the runner's home, the desktop app's
+ * installer, a restart's launch info). A shell that inherited them from a running CodeDen would
+ * point the suites at its real home and the npm registry instead of their temp homes and fake
+ * npm, so every worker starts without them; a test that needs one sets it itself. Switches a
+ * developer sets on purpose (`CODEDEN_LIVE`, `CODEDEN_REQUIRE_CLI_DIST`) are kept.
+ */
+for (const name of [
+  "CODEDEN_HOME",
+  "CODEDEN_DEPS_INSTALLER",
+  "CODEDEN_LAUNCHED_BY",
+  "CODEDEN_NO_SWITCH",
+]) {
+  delete process.env[name];
+}
+
+/**
  * Suites that drive real processes with timing-sensitive waits: Chromium, terminals, Fake
  * turns in worktrees, dev-server discovery and detached runner processes. They compete for
  * CPU and process start-up (PowerShell, netstat, tsx) and their waits time out on a loaded
