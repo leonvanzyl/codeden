@@ -132,6 +132,16 @@ describe("Diff review comments from the keyboard", () => {
     expect(stop?.getAttribute("aria-label")).toContain(path);
   });
 
+  it("puts the card's buttons in the file's header, beside its name and counts, not over them", async () => {
+    renderPanel();
+    const card = await fileCard();
+    const comment = commentStop(card);
+    const restore = screen.getByRole("button", { name: `Restore ${path}` });
+    for (const button of [comment, restore]) {
+      expect(button?.closest('[slot="header-metadata"]')).not.toBeNull();
+    }
+  });
+
   it("starts a comment on a line picked with the arrow keys and Enter", async () => {
     const { user } = await openLines();
 
