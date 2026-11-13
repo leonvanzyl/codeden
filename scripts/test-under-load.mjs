@@ -5,8 +5,8 @@
  *
  *   node scripts/test-under-load.mjs [--runs 5] [--load <threads>] [-- <vitest args>]
  *
- * `--load` is the number of busy threads (default: one per CPU, about what a second
- * `pnpm test` in another worktree costs); `--load 0` measures the suite on its own.
+ * `--load` is the number of busy threads (default: half the CPUs, roughly a second
+ * `pnpm test` in another worktree); `--load 0` measures the suite on its own.
  * Anything after `--` goes to vitest, e.g. `-- --project @codeden/server`.
  * Exits non-zero when any run failed.
  */
@@ -23,7 +23,7 @@ const option = (name, fallback) => {
   return i === -1 ? fallback : Number(own[i + 1]);
 };
 const runs = option("--runs", 5);
-const load = option("--load", availableParallelism());
+const load = option("--load", Math.max(1, Math.floor(availableParallelism() / 2)));
 
 const burners = Array.from({ length: load }, () => new Worker("for (;;) {}", { eval: true }));
 
