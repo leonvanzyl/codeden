@@ -9,7 +9,7 @@ import {
   launchChromium,
 } from "../src/browser";
 import { isAlive, killTree } from "../src/process/tree";
-import { TestSite } from "./browser-helpers";
+import { StreamRecorder, TestSite } from "./browser-helpers";
 
 const hasBrowser = findInstalledChannels().length > 0;
 
@@ -65,6 +65,7 @@ function dialogSuite(engine: "runner" | "native") {
   let app: LaunchedBrowser | undefined;
   let manager: BrowserManager;
   let browser: BrowserCommandHandlers;
+  const recorder = new StreamRecorder();
   const clients: Browser[] = [];
   const sessionId = `dialogs-${engine}`;
 
@@ -81,9 +82,9 @@ function dialogSuite(engine: "runner" | "native") {
         if (!context) throw new Error("no context");
         return { browser: client, context };
       };
-      manager = new BrowserManager({ stream: () => {}, connect });
+      manager = new BrowserManager({ stream: recorder.push, connect });
     } else {
-      manager = new BrowserManager({ stream: () => {} });
+      manager = new BrowserManager({ stream: recorder.push });
     }
     browser = createBrowserCommandHandlers({ manager });
     await browser.execute({
@@ -164,6 +165,90 @@ function dialogSuite(engine: "runner" | "native") {
     const { answer } = await answerNextDialog(page(), { accept: true });
     await browser.execute({ name: "browser.click", sessionId, ref });
     expect(await answer).toMatchObject({ type: "alert", message: "Saved!", answered: true });
+  });
+
+  const lastDialogs = () =>
+    recorder.items.filter((i) => i.kind === "browser.dialogs" && i.sessionId === sessionId).at(-1);
+
+  it("an agent sees the dialog its click opened, and answers it with browser.dialog", async () => {
+    await page().goto(`${site.url}/dialogs`);
+    const ref = await refFor(/"Delete"/);
+    const clicked = await browser.handlers["browser.click"]({
+      name: "browser.click",
+      sessionId,
+      ref,
+    });
+    const dialog = { tabId: "t1", type: "confirm", message: "Delete this item?" };
+    expect(clicked).toEqual({ dialog });
+    expect(lastDialogs()).toEqual({ kind: "browser.dialogs", sessionId, dialogs: [dialog] });
+    // The page is paused: a snapshot shows the dialog, and acting on the page is refused.
+    const snap = await browser.handlers["browser.snapshot"]({
+      name: "browser.snapshot",
+      sessionId,
+    });
+    expect(snap).toMatchObject({ dialog, snapshot: "" });
+    await expect(browser.execute({ name: "browser.click", sessionId, ref })).rejects.toMatchObject({
+      code: "dialog_open",
+    });
+
+    const answered = await browser.execute({ name: "browser.dialog", sessionId, accept: true });
+    expect(answered).toEqual({ dialog });
+    expect(lastDialogs()).toMatchObject({ dialogs: [], closed: { by: "agent", accepted: true } });
+    expect(await page().textContent("#out")).toBe("deleted");
+  });
+
+  it("a viewer cancels a confirm the panel opened, and a prompt gets the agent's text", async () => {
+    await page().goto(`${site.url}/dialogs`);
+    const { width, height } = await manager.get(sessionId).currentViewport();
+    const pointer = { x: 200, y: 120, frameWidth: width, frameHeight: height };
+    for (const type of ["mouse.move", "mouse.down", "mouse.up"] as const) {
+      await browser.execute({
+        name: "browser.input",
+        sessionId,
+        input: { type, ...pointer, button: "left", clickCount: 1 },
+      });
+    }
+    expect(lastDialogs()).toMatchObject({ dialogs: [{ type: "confirm" }] });
+    await browser.execute({ name: "browser.dialog", sessionId, accept: false, by: "viewer" });
+    expect(lastDialogs()).toMatchObject({ closed: { by: "viewer", accepted: false } });
+    expect(await page().textContent("#out")).toBe("kept");
+
+    const ref = await refFor(/"Rename"/);
+    const clicked = await browser.handlers["browser.click"]({
+      name: "browser.click",
+      sessionId,
+      ref,
+    });
+    expect(clicked.dialog).toMatchObject({ type: "prompt", defaultValue: "draft" });
+    await browser.execute({
+      name: "browser.dialog",
+      sessionId,
+      accept: true,
+      promptText: "Renamed",
+    });
+    expect(await page().textContent("#out")).toBe("name: Renamed");
+  });
+
+  it("CodeDen's own navigation is never held up by a page's 'Leave site?'", async () => {
+    const asked: string[] = [];
+    page().on("dialog", (d) => asked.push(d.type()));
+    const touch = async () => {
+      // beforeunload only asks after the user touched the page.
+      await browser.execute({ name: "browser.click", sessionId, ref: await refFor(/textbox/) });
+    };
+    await page().goto(`${site.url}/leave`);
+    await touch();
+    const result = await browser.handlers["browser.navigate"]({
+      name: "browser.navigate",
+      sessionId,
+      url: `${site.url}/page2`,
+    });
+    expect(result.url).toBe(`${site.url}/page2`);
+    await page().goto(`${site.url}/leave`);
+    await touch();
+    await browser.execute({ name: "browser.history", sessionId, action: "reload" });
+    expect(asked).toEqual(["beforeunload", "beforeunload"]);
+    expect(manager.get(sessionId).dialogs.list()).toEqual([]);
   });
 }
 

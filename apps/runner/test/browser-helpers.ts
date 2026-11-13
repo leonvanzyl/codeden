@@ -69,6 +69,10 @@ export class TestSite {
           return res.end("<title>Second page</title><h1>Second</h1>");
         case "/dialogs":
           return res.end(DIALOGS_PAGE);
+        case "/leave":
+          return res.end(
+            "<title>Unsaved</title><input aria-label=Draft><script>addEventListener('beforeunload', (e) => { e.preventDefault(); e.returnValue = ''; })</script>",
+          );
         default:
           res.statusCode = 404;
           return res.end("not found");
