@@ -1,0 +1,136 @@
+===== BEFORE the fix (pre-fix sources, new regression suite) =====
+     × reach the credential files on POSIX 7ms
+     × reach the credential files from Git Bash on Windows 2ms
+     × each element is checked, in PowerShell and when the shell is unknown 1ms
+     × Read, Write and Claude's Read guard all three files 3ms
+     × searches, globs and shell commands reach them too 1ms
+     × a wildcard the agent writes below a bracketed folder still matches 1ms
+     × Claude 1ms
+     × OpenCode 1ms
+     × Codex 1ms
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 9 ⎯⎯⎯⎯⎯⎯⎯
+ FAIL  test/codeden-credentials-bypasses.test.ts > search options with attached values or in clusters > reach the credential files on POSIX
+AssertionError: grep -e. /home/me/.codeden/install-token: expected null to be 'secrets' // Object.is equality
+ FAIL  test/codeden-credentials-bypasses.test.ts > search options with attached values or in clusters > reach the credential files from Git Bash on Windows
+AssertionError: grep -e. C:\Users\me\.codeden\install-token: expected false to be true // Object.is equality
+ FAIL  test/codeden-credentials-bypasses.test.ts > PowerShell path lists > each element is checked, in PowerShell and when the shell is unknown
+AssertionError: powershell: Get-Content -LiteralPath C:\Users\me\.codeden\install-token,C:\Users\me\.codeden\runner\runner.json: expected false to be true // Object.is equality
+ FAIL  test/codeden-credentials-bypasses.test.ts > a CodeDen home with glob characters in its name > Read, Write and Claude's Read guard all three files
+AssertionError: /tmp/CodeDen [dev]/install-token: expected { risky: false } to match object { risky: true, codeden: true }
+ FAIL  test/codeden-credentials-bypasses.test.ts > a CodeDen home with glob characters in its name > searches, globs and shell commands reach them too
+AssertionError: /tmp/CodeDen [dev]: Grep: expected { risky: false } to match object { codeden: true }
+ FAIL  test/codeden-credentials-bypasses.test.ts > a CodeDen home with glob characters in its name > a wildcard the agent writes below a bracketed folder still matches
+AssertionError: cat ~/.code*/install-token: expected false to be true // Object.is equality
+ FAIL  test/codeden-credentials-bypasses.test.ts > every level asks, read-only refuses, Codex never auto-approves > Claude
+AssertionError: supervised: grep -e. /home/me/.codeden/install-token: expected { ask: true, action: 'command', …(1) } to match object { ask: true, action: 'secrets' }
+ FAIL  test/codeden-credentials-bypasses.test.ts > every level asks, read-only refuses, Codex never auto-approves > OpenCode
+AssertionError: grep -e. /home/me/.codeden/install-token: expected { Object (kind, action, ...) } to match object { kind: 'ask', action: 'secrets' }
+ FAIL  test/codeden-credentials-bypasses.test.ts > every level asks, read-only refuses, Codex never auto-approves > Codex
+AssertionError: auto: grep -e. /home/me/.codeden/install-token: expected true to be false // Object.is equality
+ Test Files  1 failed (1)
+      Tests  9 failed | 4 passed (13)
+
+===== AFTER the fix (policy suites, verbose) =====
+ ✓ test/claude-policy.test.ts > ClaudePolicy > maps autonomy to permission modes 1ms
+ ✓ test/claude-policy.test.ts > ClaudePolicy > supervised asks for every edit and command 2ms
+ ✓ test/claude-policy.test.ts > ClaudePolicy > auto asks only for risky actions 1ms
+ ✓ test/claude-policy.test.ts > ClaudePolicy > auto: searching and listing are not secrets reads, and writing an env file in the worktree is fine 1ms
+ ✓ test/claude-policy.test.ts > ClaudePolicy > full asks only for writes outside the worktree (temp counts as inside, but not its secrets) 1ms
+ ✓ test/claude-policy.test.ts > ClaudePolicy > resolves relative paths from a shell directory Claude reports in Git Bash form (Windows) 2ms
+ ✓ test/claude-policy.test.ts > ClaudePolicy > auto and supervised treat temp writes by their own rules 0ms
+ ✓ test/claude-policy.test.ts > ClaudePolicy > switches level for the next call and keeps allow_session decisions 1ms
+ ✓ test/risk-approvals.test.ts > today's approvals > Write to %TEMP%\codeden-probe: asked (outside the worktree), now allowed (temp) 2ms
+ ✓ test/risk-approvals.test.ts > today's approvals > grep with a quoted \| pattern: false positive (split inside quotes, `>\` read as a write) 2ms
+ ✓ test/risk-approvals.test.ts > today's approvals > pnpm build > /tmp/…: asked (outside the worktree), now allowed (Git Bash /tmp is temp) 1ms
+ ✓ test/risk-approvals.test.ts > today's approvals > node -e with a multi-line script: false positive (JSX `row.key` read as a key file) 0ms
+ ✓ test/risk-approvals.test.ts > today's approvals > git add + git commit with here-string messages: false positive (message lines read as commands) 1ms
+ ✓ test/risk-approvals.test.ts > today's approvals > PowerShell $x = @(…) staging: false positive (here-string lines), and its %TEMP% write is now allowed 1ms
+ ✓ test/risk-approvals.test.ts > today's approvals > cp … ../../x.bak && sed -i …: false positive (the shell was in apps/web after an earlier cd) 2ms
+ ✓ test/risk-approvals.test.ts > today's approvals > pnpm e2e > /c/Users/me/scratch-ref/…: correct, still asks (outside the worktree, not temp) 0ms
+ ✓ test/risk-approvals.test.ts > today's approvals > Write to %TEMP%\codeden-issue6: asked (outside the worktree), now allowed (temp) 0ms
+ ✓ test/risk-approvals.test.ts > today's approvals > gh pr view > /tmp/pr7.md && sed -i …: asked (outside the worktree), now allowed (temp) 0ms
+ ✓ test/opencode-policy.test.ts > OpenCode policy > auto: safe calls run, risky ones ask 5ms
+ ✓ test/opencode-policy.test.ts > OpenCode policy > supervised: every edit and command asks, other calls run 1ms
+ ✓ test/opencode-policy.test.ts > OpenCode policy > full: only writes outside the worktree ask; secrets reads still ask 0ms
+ ✓ test/opencode-policy.test.ts > OpenCode policy > read-only roles refuse edits and writing commands, allow read-only commands 2ms
+ ✓ test/opencode-policy.test.ts > OpenCode policy > external directories: reads run; writes wait for the edit ask that follows 0ms
+ ✓ test/opencode-policy.test.ts > OpenCode policy > asks the user for actions only the user's own rules make ask 0ms
+ ✓ test/opencode-policy.test.ts > OpenCode policy > allow_session matches the exact command or path, for this policy only 0ms
+ ✓ test/opencode-policy.test.ts > OpenCode policy > a remembered approval never outlives a switch to read-only 0ms
+ ✓ test/opencode-policy.test.ts > OpenCode policy > an autonomy change applies to the next decision 0ms
+ ✓ test/risk.test.ts > classifyCommand > lets normal worktree commands run 4ms
+ ✓ test/risk.test.ts > classifyCommand > flags force pushes 0ms
+ ✓ test/risk.test.ts > classifyCommand > flags branch, tag and remote branch deletion 1ms
+ ✓ test/risk.test.ts > classifyCommand > lets the session force-push its own branch with a lease 1ms
+ ✓ test/risk.test.ts > classifyCommand > flags rm outside the worktree 0ms
+ ✓ test/risk.test.ts > classifyCommand > flags deletes outside the worktree on Windows 0ms
+ ✓ test/risk.test.ts > classifyCommand > flags global installs 0ms
+ ✓ test/risk.test.ts > classifyCommand > flags piping downloads into a shell 0ms
+ ✓ test/risk.test.ts > classifyCommand > flags downloads that reach an interpreter reading its program from stdin 1ms
+ ✓ test/risk.test.ts > classifyCommand > lets downloads be piped into interpreters that only read them as data 1ms
+ ✓ test/risk.test.ts > classifyCommand > runs a multi-step temp-directory spike that pipes a local endpoint into node -e 1ms
+ ✓ test/risk.test.ts > classifyCommand > flags reading secrets 0ms
+ ✓ test/risk.test.ts > classifyCommand > lets agents read global git config and single variables 1ms
+ ✓ test/risk.test.ts > classifyCommand > flags writes outside the worktree via redirects and copies 1ms
+ ✓ test/risk.test.ts > classifyCommand > finds commands inside substitutions, subshells and inline shell scripts 1ms
+ ✓ test/risk.test.ts > quoting, heredocs and here-strings > keeps quoted text and heredoc bodies out of the command list 0ms
+ ✓ test/risk.test.ts > quoting, heredocs and here-strings > treats PowerShell here-strings as data 0ms
+ ✓ test/risk.test.ts > quoting, heredocs and here-strings > does not read code or prose as secrets file names 0ms
+ ✓ test/risk.test.ts > secrets: patterns, data and writes are not reads > lets agents search for env usage, mention .env and create env files in the worktree 1ms
+ ✓ test/risk.test.ts > secrets: patterns, data and writes are not reads > still asks for reading secrets, and for writing them outside the worktree 1ms
+ ✓ test/risk.test.ts > secrets: patterns, data and writes are not reads > reads code expressions as code, not file names 0ms
+ ✓ test/risk.test.ts > relative paths after cd > resolves relative paths from where a cd moved 0ms
+ ✓ test/risk.test.ts > relative paths after cd > starts from the shell's current directory when known 0ms
+ ✓ test/risk.test.ts > relative paths after cd > does not let a cd inside a subshell or substitution leak out 0ms
+ ✓ test/risk.test.ts > the OS temp directory > lets agents write and delete inside temp 1ms
+ ✓ test/risk.test.ts > the OS temp directory > still asks for secrets in temp, the temp root itself and other folders 1ms
+ ✓ test/risk.test.ts > the OS temp directory > lets agents copy files into a temp directory itself, but not secrets 1ms
+ ✓ test/risk.test.ts > the OS temp directory > reads $tmp and $temp as the agent's own variables, not the temp directory 0ms
+ ✓ test/risk.test.ts > the OS temp directory > empties the current directory only where it may write 0ms
+ ✓ test/risk.test.ts > the OS temp directory > maps Git Bash paths on Windows 0ms
+ ✓ test/risk.test.ts > temp roots > never accepts a filesystem root or the home directory as temp 0ms
+ ✓ test/risk.test.ts > temp roots > finds the running platform's temp directory 1ms
+ ✓ test/risk.test.ts > classifyWrite / classifyRead / classifyFetch > flags writes outside the worktree and to secrets files 0ms
+ ✓ test/risk.test.ts > classifyWrite / classifyRead / classifyFetch > flags only secret reads 0ms
+ ✓ test/risk.test.ts > classifyWrite / classifyRead / classifyFetch > checks hosts only against an allowlist 0ms
+ ✓ test/risk.test.ts > isSecretPath > recognizes credential files 0ms
+ ✓ test/codeden-credentials-bypasses.test.ts > search options with attached values or in clusters > reach the credential files on POSIX 8ms
+ ✓ test/codeden-credentials-bypasses.test.ts > search options with attached values or in clusters > leaves the options of tools whose -f takes no value as written 0ms
+ ✓ test/codeden-credentials-bypasses.test.ts > search options with attached values or in clusters > reach the credential files from Git Bash on Windows 2ms
+ ✓ test/codeden-credentials-bypasses.test.ts > search options with attached values or in clusters > ordinary searches in the project stay safe 4ms
+ ✓ test/codeden-credentials-bypasses.test.ts > PowerShell path lists > each element is checked, in PowerShell and when the shell is unknown 5ms
+ ✓ test/codeden-credentials-bypasses.test.ts > PowerShell path lists > commas inside a quoted literal stay part of one name 1ms
+ ✓ test/codeden-credentials-bypasses.test.ts > a CodeDen home with glob characters in its name > Read, Write and Claude's Read guard all three files 2ms
+ ✓ test/codeden-credentials-bypasses.test.ts > a CodeDen home with glob characters in its name > searches, globs and shell commands reach them too 3ms
+ ✓ test/codeden-credentials-bypasses.test.ts > a CodeDen home with glob characters in its name > a wildcard the agent writes below a bracketed folder still matches 1ms
+ ✓ test/codeden-credentials-bypasses.test.ts > a CodeDen home with glob characters in its name > other files in and next to that home stay safe 1ms
+ ✓ test/codeden-credentials-bypasses.test.ts > every level asks, read-only refuses, Codex never auto-approves > Claude 4ms
+ ✓ test/codeden-credentials-bypasses.test.ts > every level asks, read-only refuses, Codex never auto-approves > OpenCode 4ms
+ ✓ test/codeden-credentials-bypasses.test.ts > every level asks, read-only refuses, Codex never auto-approves > Codex 2ms
+ ✓ test/codeden-credentials.test.ts > CodeDen's own credential files: the classifier > a Claude Read or Grep of the install token, the runner lock or the remote access store 4ms
+ ✓ test/codeden-credentials.test.ts > CodeDen's own credential files: the classifier > a Claude Glob that reaches them asks; ordinary globbing doesn't 3ms
+ ✓ test/codeden-credentials.test.ts > CodeDen's own credential files: the classifier > classifyRead and classifyWrite flag them (Codex and OpenCode paths) 0ms
+ ✓ test/codeden-credentials.test.ts > CodeDen's own credential files: the classifier > POSIX shell reads, by path, through CODEDEN_HOME, a wildcard or the folder 4ms
+ ✓ test/codeden-credentials.test.ts > CodeDen's own credential files: the classifier > PowerShell and cmd reads, by path or through CODEDEN_HOME 1ms
+ ✓ test/codeden-credentials.test.ts > CodeDen's own credential files: the classifier > writes and deletes ask too 1ms
+ ✓ test/codeden-credentials.test.ts > CodeDen's own credential files: the classifier > an earlier ordinary risk can't hide them, nested or inline 1ms
+ ✓ test/codeden-credentials.test.ts > CodeDen's own credential files: the classifier > a search pattern that repeats a file operand doesn't hide the file 2ms
+ ✓ test/codeden-credentials.test.ts > CodeDen's own credential files: the classifier > a recursive search, or a listing that feeds a command, from a folder above them 5ms
+ ✓ test/codeden-credentials.test.ts > CodeDen's own credential files: the classifier > leaves same-named files elsewhere, the rest of the home and other commands alone 2ms
+ ✓ test/codeden-credentials.test.ts > CodeDen's own credential files: every level > Claude asks under Supervised, Auto and Full 5ms
+ ✓ test/codeden-credentials.test.ts > CodeDen's own credential files: every level > Claude refuses them at Read-only and for the orchestrator and PMs 4ms
+ ✓ test/codeden-credentials.test.ts > CodeDen's own credential files: every level > a session approval covers them only as given: same call, same directory 1ms
+ ✓ test/codeden-credentials.test.ts > CodeDen's own credential files: every level > OpenCode > asks at every level 3ms
+ ✓ test/codeden-credentials.test.ts > CodeDen's own credential files: every level > OpenCode > refuses read-only sessions, the orchestrator and PMs 2ms
+ ✓ test/codeden-credentials.test.ts > CodeDen's own credential files: every level > OpenCode > a command approved for the session covers it in that directory only 0ms
+ ✓ test/codeden-credentials.test.ts > CodeDen's own credential files: every level > Codex: requests that reach CodeDen are never approved by policy 2ms
+ ✓ test/codex-policy.test.ts > Codex requests under CodeDen's policy (§11.2) > approves what Auto allows by policy, and records it 8ms
+ ✓ test/codex-policy.test.ts > Codex requests under CodeDen's policy (§11.2) > asks the user for what Auto flags as risky, with the classifier's reason 1ms
+ ✓ test/codex-policy.test.ts > Codex requests under CodeDen's policy (§11.2) > checks the command as sent as well as Codex's parsed actions 1ms
+ ✓ test/codex-policy.test.ts > Codex requests under CodeDen's policy (§11.2) > under Full asks only for writes outside the worktree 0ms
+ ✓ test/codex-policy.test.ts > Codex requests under CodeDen's policy (§11.2) > asks for everything under Supervised and Read-only 0ms
+ ✓ test/codex-policy.test.ts > Codex requests under CodeDen's policy (§11.2) > approves patches and permissions inside the worktree, and asks outside it 1ms
+ ✓ test/codex-policy.test.ts > Codex requests under CodeDen's policy (§11.2) > puts Full on on-request, so escalations reach the policy instead of failing 0ms
+ ✓ test/codex-policy.test.ts > Codex policy with the app-server (fake) > approves a commit and an install by policy and asks the user for a force push 158ms
+ Test Files  7 passed (7)
+      Tests  101 passed (101)
