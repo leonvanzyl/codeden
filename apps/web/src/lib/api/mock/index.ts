@@ -157,7 +157,14 @@ export function createMockClient(opts: MockClientOptions = {}): CodeDenClient {
           s.workKey === workKey &&
           ["running", "waiting", "starting", "queued"].includes(s.status),
       );
-      if (clash) {
+      // Like the server, a decision settles the conflict (wait and force start at once here).
+      const decision = clash ? input.conflict : undefined;
+      if (decision?.resolution === "skip") return { status: "skipped" };
+      if (decision?.resolution === "join") {
+        await client.sendMessage(decision.sessionId, { text: prompt }, "queue");
+        return { status: "joined", sessionId: decision.sessionId };
+      }
+      if (clash && !decision) {
         return {
           status: "conflict",
           existing: [
