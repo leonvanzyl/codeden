@@ -155,6 +155,23 @@ A **`RunnerTransport`** on the server replaces the hard-wired `ws` client: `send
 
 **Runner identity.** `runnerId` stays the journal's id. The server records each sandbox runner in a `runners` table (§8) with its backend and sandbox reference. The `welcome` message gains `platform`, `arch`, `home` and `backend`, so the server never guesses paths or separators.
 
+**Built in Phase 2.**
+- **Server.** `RunnerTransport` (`apps/server/src/runner/transport.ts`) is `send(message)`, `close()` and an optional `linkPid`. Each transport is opened with its handlers (`onMessage`, `onClose(detail)`), so nothing it receives and no way it ends is missed. `RunnerClient` runs the handshake, acks and reconnects on top of it.
+  - `loopback` (`transport-loopback.ts`) is the old `ws` code; the client still finds or starts the runner through its lock file.
+  - `exec` (`transport-exec.ts`) runs over a `LinkProcess`: `stdin`, `stdout`, `stderr`, `pid?`, `kill()` and `onExit(code)`. `spawnLinkProcess` and `execLink(command, args)` make a local child process, the shape `docker exec -i` needs. A cloud exec session can implement the same interface.
+  - A runner gets the exec transport through `RunnerSpec.link`. Every reconnect opens a new link, and the client resumes by `seq` as after a server restart.
+  - A transport whose handshake fails (a `reject`, or a link that ends before `welcome`) is closed, so failed attempts leave no sockets or processes behind.
+- **Wire format.** It lives in `packages/contracts/src/runner/link.ts`. Each frame is one compact JSON message per line, at most `RUNNER_LINK_MAX_LINE_BYTES` (16 MiB, without the `\n`).
+  - `LinkFrameDecoder` reassembles lines split across chunks. It drops a longer line without buffering it, drops a line that is not JSON, and reports each drop.
+  - A command too large for a frame fails at once with `too_large` instead of timing out.
+- **Link.** `codeden runner-link [--home <dir>]` lives in `apps/runner/src/link/runner-link.ts`, exported as `@codeden/runner/link`.
+  - It reads `<home>/runner/runner.json` and connects to the runner's loopback WebSocket with the lock's token.
+  - It splices stdin and stdout to that socket, pausing the socket while stdout is full.
+  - It loads no server code, so starting it is quick.
+  - Exit codes (`RunnerLinkExit`): 0 when stdin ended, 1 when the link failed or the runner closed it, 2 for bad arguments, 3 when no live runner is in the home, 4 when the runner refused the token. The server's close reason names the code and adds the link's last stderr line.
+- **Welcome.** The runner reports `process.platform`, `process.arch`, its resolved home and its backend (`--backend`, default `local`); the client keeps them as `hostInfo`.
+- **Not added.** No runner `--port` or `--host`, and no new listener.
+
 ## 7. Reachability and the network rule: **Needs the user's decision**
 
 The locked rule (§3 "Network exposure", §15): the runner, its MCP proxy and the server's `/mcp` answer on 127.0.0.1 only, always; the UI listener moves to `0.0.0.0` only with opt-in network access.

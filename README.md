@@ -236,6 +236,8 @@ codeden update         Install the latest version and switch to it (--rollback: 
 codeden stop           Stop the server and the runner
 codeden password       Set the network access password (--generate: make one up)
 codeden network on|off Let phones on your network open CodeDen, or stop it
+codeden runner-link    Connect stdin/stdout to the runner in --home (run by the server
+                       inside a sandbox; stdout carries only protocol frames)
 
 Options:
   --port <n>     Port to listen on (default 4317)
