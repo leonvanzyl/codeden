@@ -158,7 +158,7 @@ describe("Codex interrupt", { timeout: 30_000 }, () => {
 
   /**
    * A session on the fake app-server whose turn sends `script`, ready once `ready` holds.
-   * Returns the session, its events and the `turn/interrupt` requests it made.
+   * Returns the session, its events and the `turn/interrupt` requests it made (`interrupts`).
    */
   async function scriptedSession(
     script: object[],
@@ -176,13 +176,19 @@ describe("Codex interrupt", { timeout: 30_000 }, () => {
     await session.start();
     await session.send({ text: "go", attachments: [] });
     await waitFor(() => ready(events));
-    const interrupts = () =>
+    const logged = () =>
       readFileSync(join(dir, "requests.log"), "utf8")
         .trim()
         .split("\n")
         .map((line) => JSON.parse(line))
         .filter((r) => r.method === "turn/interrupt")
         .map((r) => r.params);
+    // The fake app-server logs a request a moment after the session sent it, which can be
+    // after the session's own deadline closed the turn on a busy machine: wait for `count`.
+    const interrupts = async (count: number) => {
+      await waitFor(() => logged().length >= count);
+      return logged();
+    };
     return { session, events, interrupts };
   }
 
@@ -254,7 +260,7 @@ describe("Codex interrupt", { timeout: 30_000 }, () => {
     await session.interrupt();
     // The root confirms at once; the child never does, so its deadline closes it.
     await waitFor(() => childEnded(events));
-    expect(interrupts()).toEqual(
+    expect(await interrupts(2)).toEqual(
       expect.arrayContaining([
         { threadId: "child-1", turnId: "ct-1" },
         { threadId: "thread-1", turnId: "turn-1" },
@@ -290,7 +296,7 @@ describe("Codex interrupt", { timeout: 30_000 }, () => {
     await waitFor(() =>
       events.some((e) => e.type === "turn.interrupted" && e.threadId === "s1:thread-root"),
     );
-    expect(interrupts()).toEqual([{ threadId: "thread-1", turnId: "turn-1" }]);
+    expect(await interrupts(1)).toEqual([{ threadId: "thread-1", turnId: "turn-1" }]);
   });
 
   it("stops the agent of a pending spawn that starts after Stop", async () => {
@@ -316,7 +322,7 @@ describe("Codex interrupt", { timeout: 30_000 }, () => {
     await waitFor(() =>
       events.some((e) => e.type === "turn.interrupted" && e.threadId === "s1:thread-call-2"),
     );
-    expect(interrupts()).toEqual(
+    expect(await interrupts(2)).toEqual(
       expect.arrayContaining([
         { threadId: "thread-1", turnId: "turn-1" },
         { threadId: "child-2", turnId: "ct-2" },
@@ -334,7 +340,7 @@ describe("Codex interrupt", { timeout: 30_000 }, () => {
     );
     await session.interrupt();
     await waitFor(() => childEnded(events));
-    expect(interrupts()).toEqual([{ threadId: "child-1", turnId: "ct-1" }]);
+    expect(await interrupts(1)).toEqual([{ threadId: "child-1", turnId: "ct-1" }]);
     expect(
       events.filter((e) => e.type === "item.completed" && e.item.kind === "subagent").at(-1),
     ).toMatchObject({ item: { status: "cancelled" } });
