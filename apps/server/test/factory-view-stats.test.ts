@@ -178,22 +178,116 @@ describe("finished work the Factory view keeps (§10.1)", () => {
 
   it("keeps escalations, recent or open failures and today's merges", () => {
     const openPr = { number: 9, url: "https://github.com/acme/app/pull/9", state: "open" as const };
+    const original = {
+      number: 5,
+      url: "https://github.com/acme/app/pull/5",
+      state: "open" as const,
+    };
+    const owns = (i: FactoryItem) =>
+      i.pr?.state === "open" || (i.pr === null && i.rebuiltFrom?.state === "open");
     const kept = viewRecentItems(
       [
         item("esc", { stage: "escalated", finishedAt: at(24 * 30) }),
         item("fail-new", { stage: "failed", finishedAt: at(3) }),
         item("fail-open", { stage: "failed", finishedAt: at(24 * 5), pr: openPr }),
+        // A rebuild that failed without a PR of its own: the original is still the factory's.
+        item("rebuild", {
+          stage: "failed",
+          failureKind: "stuck",
+          finishedAt: at(24 * 3),
+          rebuiltFrom: original,
+        }),
         item("fail-old", { stage: "failed", finishedAt: at(30) }),
         item("merged-today", { stage: "merged", mergedAt: at(2) }),
         item("merged-old", { stage: "merged", mergedAt: at(24 * 2) }),
         item("rejected", { stage: "rejected", finishedAt: at(1) }),
       ],
       NOW,
+      owns,
     ).map((i) => i.id);
-    expect(kept).toEqual(["esc", "fail-new", "fail-open", "merged-today"]);
+    expect(kept).toEqual(["esc", "fail-new", "fail-open", "rebuild", "merged-today"]);
   });
 
-  it("lists them even after more than 30 newer results fill the recent list", async () => {
+  it("lists them however much newer history there is, beyond 500 finished items", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    let clock = Date.parse("2026-11-13T06:00:00.000Z");
+    const tick = () => {
+      clock += 30_000;
+      vi.setSystemTime(new Date(clock));
+    };
+    tick();
+    env = createFactoryEnv();
+    const store = env.factory.data;
+    const base = { projectId: env.project.id, summary: "", source: "issue" as const };
+    const daysAgo = (d: number) => new Date(clock - d * 24 * 60 * 60 * 1000).toISOString();
+    tick();
+    const escalated = store.createItem({
+      ...base,
+      workKey: "issue:1",
+      title: "Touches payments",
+      stage: "escalated",
+      finishedAt: daysAgo(9),
+    });
+    tick();
+    const failed = store.createItem({
+      ...base,
+      workKey: "issue:2",
+      title: "Checks failed twice",
+      stage: "failed",
+      failureKind: "checks",
+      pr: { number: 7, url: "https://github.com/acme/app/pull/7", state: "open" },
+      finishedAt: daysAgo(3),
+    });
+    tick();
+    // A rebuild that failed before it opened a PR: no PR of its own, the original still open.
+    const rebuild = store.createItem({
+      ...base,
+      workKey: "issue:3",
+      title: "Kept conflicting",
+      stage: "failed",
+      failureKind: "stuck",
+      rebuiltFrom: { number: 5, url: "https://github.com/acme/app/pull/5", state: "open" },
+      finishedAt: daysAgo(2),
+    });
+    // More newer finished history than the item list reads (500), all of it old news.
+    for (let n = 0; n < 501; n++) {
+      tick();
+      store.createItem({
+        ...base,
+        workKey: `issue:${1000 + n}`,
+        title: `Shipped ${n}`,
+        stage: "merged",
+        mergedAt: daysAgo(3),
+      });
+    }
+    tick();
+    const today = store.createItem({
+      ...base,
+      workKey: "issue:4",
+      title: "Shipped today",
+      stage: "merged",
+      mergedAt: new Date(clock).toISOString(),
+    });
+    expect(store.items(env.project.id)).toHaveLength(500);
+
+    const status = await env.factory.status(env.project.id);
+    const ids = (list: { id: string }[]) => list.map((w) => w.id);
+    expect(status.recent).toHaveLength(30);
+    for (const gone of [escalated.id, failed.id, rebuild.id])
+      expect(ids(status.recent)).not.toContain(gone);
+    expect(ids(status.viewRecent).sort()).toEqual(
+      [escalated.id, failed.id, rebuild.id, today.id].sort(),
+    );
+    // The rebuild's original PR is the one it owns, as the PR list says.
+    expect(status.viewRecent.find((w) => w.id === rebuild.id)).toMatchObject({
+      pr: null,
+      ownedPr: { number: 5 },
+      failureKind: "stuck",
+    });
+    expect(status.viewRecent.find((w) => w.id === failed.id)?.ownedPr?.number).toBe(7);
+  });
+
+  it("owns a failed rebuild's original PR as the PR list does, after 30 newer results", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     let clock = Date.parse("2026-11-13T09:00:00.000Z");
     const tick = () => {
@@ -205,42 +299,30 @@ describe("finished work the Factory view keeps (§10.1)", () => {
     const store = env.factory.data;
     const base = { projectId: env.project.id, summary: "", source: "issue" as const };
     tick();
-    const escalated = store.createItem({
+    const rebuild = store.createItem({
       ...base,
-      workKey: "issue:1",
-      title: "Touches payments",
-      stage: "escalated",
-      finishedAt: new Date(clock).toISOString(),
-    });
-    tick();
-    const failed = store.createItem({
-      ...base,
-      workKey: "issue:2",
-      title: "Checks failed twice",
+      workKey: "issue:3",
+      title: "Kept conflicting",
       stage: "failed",
       failureKind: "stuck",
-      pr: { number: 7, url: "https://github.com/acme/app/pull/7", state: "open" },
-      finishedAt: new Date(clock - 3 * 24 * 60 * 60 * 1000).toISOString(),
+      rebuiltFrom: { number: 5, url: "https://github.com/acme/app/pull/5", state: "open" },
+      finishedAt: new Date(clock - 2 * 24 * 60 * 60 * 1000).toISOString(),
     });
     for (let n = 0; n < 31; n++) {
       tick();
       store.createItem({
         ...base,
         workKey: `issue:${100 + n}`,
-        title: `Out of scope ${n}`,
+        title: `No ${n}`,
         stage: "rejected",
       });
     }
     const status = await env.factory.status(env.project.id);
-    const ids = (list: { id: string }[]) => list.map((w) => w.id);
-    expect(status.recent).toHaveLength(30);
-    expect(ids(status.recent)).not.toContain(escalated.id);
-    expect(ids(status.recent)).not.toContain(failed.id);
-    expect(ids(status.viewRecent)).toEqual(expect.arrayContaining([escalated.id, failed.id]));
-    expect(status.viewRecent).toHaveLength(2);
-    expect(status.viewRecent.find((w) => w.id === failed.id)).toMatchObject({
-      failureKind: "stuck",
-      checks: null,
+    expect(status.recent.map((w) => w.id)).not.toContain(rebuild.id);
+    expect(status.pullRequests.find((p) => p.itemId === rebuild.id)).toMatchObject({
+      pr: { number: 5 },
+      state: "stuck",
     });
+    expect(status.viewRecent.find((w) => w.id === rebuild.id)?.ownedPr?.number).toBe(5);
   });
 });

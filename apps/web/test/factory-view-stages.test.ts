@@ -56,6 +56,7 @@ function w(id: string, n: number, patch: Partial<FactoryWorkItem>): FactoryWorkI
     mergedAt: null,
     finishedAt: null,
     checks: null,
+    ownedPr: null,
     updatedAt: minutesAgo(1),
     ...patch,
   };
@@ -177,8 +178,8 @@ describe("the Factory view's pipeline (#181)", () => {
     expect(state("escalated")).toBe("person");
     expect(state("failed")).toBe("failed");
     expect(state("watching")).toBe("running");
-    // Merged work needs nothing more: no marker.
-    expect(state("merged")).toBeNull();
+    // Merged and done: nobody has to act, nothing runs.
+    expect(state("merged")).toBe("waiting");
     expect(p.needsPerson).toBe(3);
     expect(p.failed).toBe(2);
   });
@@ -462,5 +463,65 @@ describe("the quick chat's latest turns (#181)", () => {
     expect(cut.threads.root?.itemIds).toEqual(["t3-u", "t3-a", "t4-u", "t4-a", "t5-u", "t5-a"]);
     // Short chats are left alone.
     expect(latestTurns(transcript, "root", 5)).toEqual({ transcript, hidden: 0 });
+  });
+});
+
+describe("work the capped PR list leaves out (#181)", () => {
+  it("keeps an open failure the PR list doesn't have, from the item's own PR", () => {
+    const open = w("open-fail", 60, {
+      stage: "failed",
+      step: "stopped",
+      failureKind: "checks",
+      pr: prRef(60),
+      ownedPr: prRef(60),
+      finishedAt: minutesAgo(60 * 24 * 3),
+    });
+    // Listed by the server as still mattering, with no PR-list entry.
+    const fromViewRecent = viewPipeline(status({ viewRecent: [open] }), new Map(), NOW);
+    expect(fromViewRecent.needsYou.map((c) => [c.item.id, c.state])).toEqual([
+      ["open-fail", "failed"],
+    ]);
+    expect(fromViewRecent.failed).toBe(1);
+    // Only in `recent` (an older server): its own open PR still keeps it.
+    const fromRecent = viewPipeline(
+      status({ recent: [{ ...open, ownedPr: null }] }),
+      new Map(),
+      NOW,
+    );
+    expect(fromRecent.needsYou.map((c) => c.item.id)).toEqual(["open-fail"]);
+  });
+
+  it("treats a failed rebuild that owns its original PR as stuck in the merge queue", () => {
+    // The rebuild failed before opening a PR: no PR of its own, the original still the factory's.
+    const rebuild = w("rebuild", 61, {
+      stage: "failed",
+      step: "stopped",
+      failureKind: "stuck",
+      pr: null,
+      ownedPr: prRef(52),
+      finishedAt: minutesAgo(60 * 24 * 2),
+    });
+    const p = viewPipeline(status({ viewRecent: [rebuild] }), new Map(), NOW);
+    expect(p.stages.merge.map((c) => [c.item.id, c.state])).toEqual([["rebuild", "person"]]);
+    expect(p.needsPerson).toBe(1);
+    expect(p.failed).toBe(1);
+    // With its PR-list entry, that entry decides.
+    const listed = viewPipeline(
+      status({ viewRecent: [rebuild], pullRequests: [pr("rebuild", 52, { state: "stuck" })] }),
+      new Map(),
+      NOW,
+    );
+    expect(listed.stages.merge[0]?.pr?.pr.number).toBe(52);
+  });
+
+  it("leaves out an old failure that owns nothing and that the server no longer lists", () => {
+    const old = w("old", 62, {
+      stage: "failed",
+      step: "stopped",
+      finishedAt: minutesAgo(60 * 24 * 4),
+    });
+    const p = viewPipeline(status({ recent: [old] }), new Map(), NOW);
+    expect(p.needsYou).toEqual([]);
+    expect(p.failed).toBe(0);
   });
 });

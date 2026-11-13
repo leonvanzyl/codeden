@@ -54,9 +54,12 @@ export type ViewPlace = ViewStageId | "needs_you";
 export const NEEDS_YOU_LABEL = "Needs you";
 
 /**
- * A card's state marker: an agent is working (`running`), it waits on the factory (a free
- * agent, CI, its turn to merge: `waiting`), it waits on a person (`person`), or it failed.
- * Merged work has no marker (`null`): the Merged stage says what happened to it.
+ * A card's state marker, one of four on every card:
+ * - `running`: an agent is working on it, or CI is watched right after its automatic merge;
+ * - `waiting`: nobody has to act and no agent is busy with it: it waits for a free agent, CI or
+ *   its turn to merge, or it merged and is done;
+ * - `person`: it waits on a person (an escalation, a PR to merge, a stuck PR, an agent's question);
+ * - `failed`: it, or its agent's session, failed.
  */
 export type CardState = "running" | "waiting" | "person" | "failed";
 
@@ -77,9 +80,8 @@ export interface SessionInfo {
 export interface ViewCard {
   item: FactoryWorkItem;
   place: ViewPlace;
-  /** Null for merged work, which needs nothing more. */
-  state: CardState | null;
-  /** The entry the factory keeps for its current pull request, if any. */
+  state: CardState;
+  /** The entry the factory keeps for its current pull request, if the PR list has one. */
   pr: FactoryPrEntry | null;
   /** What it is doing now, in a few words. */
   activity: string;
@@ -125,20 +127,35 @@ export function currentPr(
   );
 }
 
-/** A failed item still worth a person's look: it failed in the last day or still owns a PR. */
-function failedRecently(w: FactoryWorkItem, pr: FactoryPrEntry | null, now: number): boolean {
-  if (pr && !CLOSED_PR.has(pr.state)) return true;
-  return now - Date.parse(w.finishedAt ?? w.updatedAt) < DAY_MS;
+/**
+ * Whether the factory still holds an open PR for it. The PR list (capped) says so when it has
+ * the item; otherwise the item's own `ownedPr`, or its PR while open, does.
+ */
+function ownsOpenPr(w: FactoryWorkItem, pr: FactoryPrEntry | null): boolean {
+  if (pr) return !CLOSED_PR.has(pr.state);
+  return w.ownedPr !== null || w.pr?.state === "open" || w.pr?.state === "draft";
 }
 
-/** The stage a work item is drawn on, or null when the view leaves it out. */
+/**
+ * Stuck: it already used its rebuild, or CI can never run, so it needs a person. The PR list's
+ * state says so when it lists the item; otherwise the item's failure kind does.
+ */
+function isStuck(w: FactoryWorkItem, pr: FactoryPrEntry | null): boolean {
+  return pr ? pr.state === "stuck" : w.stage === "failed" && w.failureKind === "stuck";
+}
+
+/**
+ * The stage a work item is drawn on, or null when the view leaves it out. `kept`: the server
+ * listed it in `viewRecent`, so it still matters (a failure it judged still open, an escalation).
+ */
 export function placeOf(
   w: FactoryWorkItem,
   pr: FactoryPrEntry | null,
   now: number,
+  kept = false,
 ): ViewPlace | null {
   // A stuck pull request stays in the merge queue, marked as waiting on a person.
-  if (pr?.state === "stuck") return "merge";
+  if (isStuck(w, pr) && ownsOpenPr(w, pr)) return "merge";
   switch (w.stage) {
     case "candidate":
       return "intake";
@@ -154,8 +171,10 @@ export function placeOf(
       return sameLocalDay(w.mergedAt ?? w.updatedAt, now) ? "merged" : null;
     case "escalated":
       return "needs_you";
-    case "failed":
-      return failedRecently(w, pr, now) ? "needs_you" : null;
+    case "failed": {
+      const recent = now - Date.parse(w.finishedAt ?? w.updatedAt) < DAY_MS;
+      return kept || recent || ownsOpenPr(w, pr) ? "needs_you" : null;
+    }
     default:
       // Ignored (counted on Intake), rejected and reverted (counted in the stats).
       return null;
@@ -167,10 +186,11 @@ export function stateOf(
   w: FactoryWorkItem,
   pr: FactoryPrEntry | null,
   session: SessionInfo | undefined,
-): CardState | null {
-  if (w.stage === "escalated" || pr?.state === "stuck") return "person";
+): CardState {
+  if (w.stage === "escalated" || isStuck(w, pr)) return "person";
   if (w.stage === "failed") return "failed";
-  if (w.stage === "merged") return null;
+  // Done: nothing left for anyone to do.
+  if (w.stage === "merged") return "waiting";
   if (pr?.state === "waiting_for_you") return "person";
   if (w.stage === "watching") return "running";
   if (session?.status === "waiting") return "person";
@@ -212,11 +232,12 @@ export function viewPipeline(
   const needsYou: ViewCard[] = [];
   const seen = new Set<string>();
   // `viewRecent` holds the finished work the view needs beyond the capped `recent` list.
+  const kept = new Set(f.viewRecent.map((w) => w.id));
   for (const w of [...f.backlog, ...f.inProgress, ...f.viewRecent, ...f.recent]) {
     if (seen.has(w.id)) continue;
     seen.add(w.id);
     const pr = currentPr(w, f.pullRequests);
-    const place = placeOf(w, pr, now);
+    const place = placeOf(w, pr, now, kept.has(w.id));
     if (!place) continue;
     const sessionId = w.activeSessionId ?? w.sessionId;
     const session = sessionId ? sessions.get(sessionId) : undefined;
@@ -270,9 +291,10 @@ export function cardNumber(w: FactoryWorkItem): string {
   return w.title.slice(0, 18);
 }
 
-/** The card's state in words, for its accessible name and the sheet. */
-export function cardStateLabel(card: Pick<ViewCard, "state">): string {
-  return card.state ? CARD_STATE_LABEL[card.state] : "Merged";
+/** The card's state in words, for its accessible name and the sheet ("Waiting, merged"). */
+export function cardStateLabel(card: Pick<ViewCard, "state" | "item">): string {
+  const state = CARD_STATE_LABEL[card.state];
+  return card.item.stage === "merged" ? `${state}, merged` : state;
 }
 
 /**

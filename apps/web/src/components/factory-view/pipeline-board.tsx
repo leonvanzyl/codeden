@@ -166,7 +166,12 @@ function NeedsYou({
   return (
     <section
       aria-labelledby={headingId}
-      className="rounded-xl border border-status-waiting/40 bg-status-waiting/[0.04] p-2"
+      // On wide screens the lane takes at most about a third of the height and scrolls, so a
+      // long list never pushes the pipeline out of reach.
+      className={cn(
+        "flex flex-col rounded-xl border border-status-waiting/40 bg-status-waiting/[0.04] p-2",
+        wide && "max-h-[min(34vh,20rem)] shrink-0",
+      )}
       data-testid="factory-view-needs-you"
     >
       <h2
@@ -182,7 +187,13 @@ function NeedsYou({
           Failed or escalated work that waits for a person
         </span>
       </h2>
-      <ul className={cn("grid gap-1.5", wide ? "grid-cols-4" : "grid-cols-1 sm:grid-cols-2")}>
+      <ul
+        className={cn(
+          "grid gap-1.5",
+          wide ? "min-h-0 grid-cols-4 overflow-y-auto scroll-thin" : "grid-cols-1 sm:grid-cols-2",
+        )}
+        data-testid="factory-view-needs-you-list"
+      >
         {cards.map((c) => (
           <li key={c.item.id}>
             <ViewCardButton card={c} now={now} onOpen={onOpen} />
@@ -226,7 +237,7 @@ export function PipelineBoard({
         // scrolls sideways instead.
         className={cn(
           wide
-            ? "grid min-h-0 flex-1 grid-cols-[repeat(6,minmax(9rem,1fr))] gap-2 overflow-x-auto scroll-thin"
+            ? "grid min-h-[20rem] flex-1 grid-cols-[repeat(6,minmax(9rem,1fr))] gap-2 overflow-x-auto scroll-thin"
             : "flex flex-col gap-2",
         )}
         data-testid="factory-view-pipeline"

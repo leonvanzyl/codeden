@@ -85,6 +85,8 @@ function Body({ projectId, card }: { projectId: string; card: ViewCard }) {
   if (error) return <p className="px-4 text-2xs text-muted-foreground">{error.message}</p>;
   if (!item) return <Skeleton className="mx-4 h-48 rounded-xl" />;
   const passed = item.checks.filter((c) => c.state === "pass").length;
+  // A rebuild has no PR of its own until it opens one: the factory still owns the original.
+  const pr = item.pr ?? card.pr?.pr ?? card.item.ownedPr;
   return (
     <div className="flex flex-col gap-5 px-4 pb-6">
       {(item.reason || card.activity) && (
@@ -115,11 +117,13 @@ function Body({ projectId, card }: { projectId: string; card: ViewCard }) {
             "—"
           )}
         </Fact>
-        <Fact label="Pull request">
-          {item.pr ? (
-            <ExternalButton url={item.pr.url}>
-              <GitPullRequest className="size-3" />#{item.pr.number}
-              {card.pr ? ` · ${PR_STATE_LABEL[card.pr.state].label}` : ` · ${item.pr.state}`}
+        <Fact label={!item.pr && pr ? "Pull request (rebuilt)" : "Pull request"}>
+          {pr ? (
+            <ExternalButton url={pr.url}>
+              <GitPullRequest className="size-3" />#{pr.number}
+              {card.pr?.pr.number === pr.number
+                ? ` · ${PR_STATE_LABEL[card.pr.state].label}`
+                : ` · ${pr.state}`}
             </ExternalButton>
           ) : (
             "—"
@@ -204,7 +208,7 @@ export function ItemSheet({
                 <span>{card.item.title}</span>
               </SheetTitle>
               <SheetDescription className="flex items-center gap-1.5 text-2xs">
-                {card.state && <StateMarker state={card.state} />}
+                <StateMarker state={card.state} />
                 {cardStateLabel(card)}
                 <TypeBadge type={card.item.type} />
               </SheetDescription>

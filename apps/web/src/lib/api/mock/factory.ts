@@ -22,6 +22,7 @@ const now = () => new Date().toISOString();
 const minutesAgo = (m: number) => new Date(Date.now() - m * 60_000).toISOString();
 
 const FINISHED = ["merged", "reverted", "rejected", "failed", "escalated"];
+const OWNING = ["backlog", "building", "verifying", "escalated", "failed"];
 
 function work(w: FixtureWorkItem): FactoryWorkItem {
   const done = ["merged", "reverted", "rejected"].includes(w.stage);
@@ -56,6 +57,9 @@ function work(w: FixtureWorkItem): FactoryWorkItem {
         ? "Ready to merge: every check passed (auto-merge is off)"
         : null),
     failureKind: w.failureKind ?? null,
+    // Owned while open, in the stages the factory keeps its PRs.
+    ownedPr:
+      OWNING.includes(w.stage) && (w.pr?.state === "open" || w.pr?.state === "draft") ? w.pr : null,
     checks: w.checks ?? null,
     stepSince: since,
     mergedAt: w.stage === "merged" || w.stage === "watching" ? since : null,
@@ -94,6 +98,10 @@ export function mockFactoryApi(world: MockWorld): FactoryApi {
         return { ...w, checks: { passed, failed, total: c.length } };
       }),
       recent: f.recent.map(work),
+      // What a server keeps for the view beyond the capped recent list.
+      viewRecent: f.recent
+        .map(work)
+        .filter((w) => ["escalated", "failed", "merged"].includes(w.stage)),
       ignored: f.ignored.map(work),
       githubLogin: "hearth-co",
       scout:

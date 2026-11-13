@@ -157,6 +157,41 @@ export class FactoryStore {
       .map((r) => withItemDefaults(r.item));
   }
 
+  /**
+   * Finished items the Factory view may still show (`status.ts` narrows them with
+   * `viewRecentItems`): every escalated item; failed items that failed since `failedSince`, still
+   * have an open PR, or are rebuilds without a PR of their own (whose original may still be
+   * open); and items merged since `mergedSince`. Not capped like `items`, so no amount of newer
+   * history hides an unresolved one.
+   */
+  viewCandidates(projectId: string, failedSince: string, mergedSince: string): FactoryItem[] {
+    const field = (path: string) => sql`json_extract(${factoryItems.item}, ${path})`;
+    const failed = and(
+      eq(factoryItems.stage, "failed"),
+      or(
+        sql`${field("$.finishedAt")} >= ${failedSince}`,
+        sql`${field("$.pr.state")} in ('open', 'draft')`,
+        and(sql`${field("$.pr")} is null`, sql`${field("$.rebuiltFrom")} is not null`),
+      ),
+    );
+    const merged = and(
+      eq(factoryItems.stage, "merged"),
+      sql`${field("$.mergedAt")} >= ${mergedSince}`,
+    );
+    return this.db
+      .select()
+      .from(factoryItems)
+      .where(
+        and(
+          eq(factoryItems.projectId, projectId),
+          or(eq(factoryItems.stage, "escalated"), failed, merged),
+        ),
+      )
+      .orderBy(desc(factoryItems.updatedAt))
+      .all()
+      .map((r) => withItemDefaults(r.item));
+  }
+
   /** The item a builder, reviewer or revert session works on. */
   itemForSession(projectId: string, sessionId: string): FactoryItem | undefined {
     return this.items(projectId, [...ACTIVE_STAGES, ...WAITING_STAGES]).find(

@@ -38,19 +38,32 @@ export function factoryStats(items: FactoryItem[], now: Date): FactoryStats {
   };
 }
 
+/** Bounds of `viewRecentItems`, for narrowing the query first (`FactoryStore.viewCandidates`). */
+export function viewWindow(now: Date): { failedSince: string; mergedSince: string } {
+  const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  return {
+    failedSince: new Date(now.getTime() - DAY_MS).toISOString(),
+    mergedSince: midnight.toISOString(),
+  };
+}
+
 /**
  * The finished items the Factory view keeps showing (`FactoryStatus.viewRecent`), whatever their
  * place in the capped recent list: every escalated item, failed items that failed in the last
- * 24 hours or still own an open pull request, and items merged today (by the local day).
+ * 24 hours or still own an open pull request (`ownsOpenPr`: their own, or a rebuild's original
+ * the factory still holds), and items merged today (by the local day).
  */
-export function viewRecentItems(items: FactoryItem[], now: Date): FactoryItem[] {
+export function viewRecentItems(
+  items: FactoryItem[],
+  now: Date,
+  ownsOpenPr: (item: FactoryItem) => boolean,
+): FactoryItem[] {
   const today = localDay(now);
   return items.filter((i) => {
     if (i.stage === "escalated") return true;
     if (i.stage === "failed") {
-      const open = i.pr?.state === "open" || i.pr?.state === "draft";
       const at = Date.parse(i.finishedAt ?? i.updatedAt);
-      return open || now.getTime() - at < DAY_MS;
+      return ownsOpenPr(i) || now.getTime() - at < DAY_MS;
     }
     if (i.stage === "merged")
       return i.mergedAt !== null && localDay(new Date(i.mergedAt)) === today;

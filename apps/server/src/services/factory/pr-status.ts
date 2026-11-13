@@ -3,6 +3,7 @@ import {
   type FactoryItem,
   type FactoryPrEntry,
   type FactoryPrState,
+  type GitHubPrRef,
   type Project,
 } from "@codeden/contracts";
 import type { FactoryContext } from "./context";
@@ -123,6 +124,17 @@ const OWNING_STAGES: FactoryItem["stage"][] = [
   "escalated",
   "failed",
 ];
+
+/**
+ * The open PR the factory still owns for an item, as `pullRequests` lists it: its own while
+ * open, or, without one, a rebuild's original that is still open. Null outside the owning
+ * stages. The Factory view uses it where the capped list may have left the item out.
+ */
+export function ownedPr(ctx: FactoryContext, i: FactoryItem): GitHubPrRef | null {
+  if (!OWNING_STAGES.includes(i.stage)) return null;
+  if (i.pr) return isOpen(i) ? i.pr : null;
+  return unreplacedOriginal(ctx, i);
+}
 
 /** Most PRs the panel lists (the queue comes first, so it is never cut). */
 const MAX_ENTRIES = 40;

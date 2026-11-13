@@ -351,8 +351,15 @@ describe("factory API contracts (§10.1)", () => {
       finishedAt: null,
       failureKind: null,
       checks: null,
+      ownedPr: null,
     });
     expect(before.viewRecent).toEqual([]);
+    const owning = FactoryStatus.parse({
+      ...status,
+      viewRecent: [{ ...work, pr: null, ownedPr: item.pr }],
+    });
+    expect(FactoryStatus.parse(JSON.parse(JSON.stringify(owning)))).toEqual(owning);
+    expect(owning.viewRecent[0]?.ownedPr?.number).toBe(4);
     const withChecks = FactoryStatus.parse({
       ...status,
       viewRecent: [{ ...work, checks: { passed: 5, failed: 1, total: 8 } }],

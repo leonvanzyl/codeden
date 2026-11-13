@@ -124,7 +124,7 @@ export function ViewCardButton({
       onClick={() => onOpen(card)}
       aria-label={`${number} ${w.title}, ${cardStateLabel(card)}`}
       data-testid="factory-view-card"
-      data-state={card.state ?? "merged"}
+      data-state={card.state}
       className={cn(
         "group @container w-full animate-rise rounded-lg border bg-card px-2.5 py-2 text-left shadow-xs transition-colors hover:border-primary/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
         card.state === "person" && "border-status-waiting/50 bg-status-waiting/[0.05]",
@@ -133,7 +133,7 @@ export function ViewCardButton({
       )}
     >
       <div className="flex min-w-0 items-center gap-1 overflow-hidden">
-        {card.state && <StateMarker state={card.state} />}
+        <StateMarker state={card.state} />
         <span className="shrink-0 font-mono text-[11px] text-muted-foreground">{number}</span>
         <TypeBadge type={w.type} fit />
         {w.trust === "admitted" && (

@@ -522,6 +522,12 @@ export const FactoryWorkItem = z.object({
   mergedAt: Timestamp.nullable().default(null),
   finishedAt: Timestamp.nullable().default(null),
   /**
+   * The open pull request the factory still owns for it: its own, or, while a rebuild has no PR
+   * of its own yet (or failed without one), the PR the rebuild replaces. Null when it owns none.
+   * Unlike `FactoryStatus.pullRequests`, never cut short.
+   */
+  ownedPr: GitHubPrRef.nullable().default(null),
+  /**
    * Its merge checks so far: passed (passed or skipped), failed and all recorded; null before
    * any ran.
    */
