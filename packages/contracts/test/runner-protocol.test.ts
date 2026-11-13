@@ -129,6 +129,9 @@ describe("runner protocol", () => {
     expect(detect.name === "provider.detect" && detect.waitForModels).toBe(true);
     // Older servers send neither field.
     roundTrip(RunnerCommand, { name: "provider.detect" });
+    // The factory's periodic availability check only detects.
+    const quick = roundTrip(RunnerCommand, { name: "provider.detect", refreshModels: false });
+    expect(quick.name === "provider.detect" && quick.refreshModels).toBe(false);
     const result = roundTrip(RunnerCommandResults["provider.detect"], {
       statuses: [],
       providers: [],

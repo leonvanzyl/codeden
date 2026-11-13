@@ -14,11 +14,12 @@ import { GitHubPrRef, Id } from "./common";
  * - `infrastructure`: something outside its code, such as the builder or reviewer session dying
  *   or CI never starting while Actions can run. The loop puts it back by itself on the next
  *   tick after the cause is gone, at most three times;
- * - `stuck`: it needs a person: it already used its rebuild, or CI can never run on the
- *   repository (Actions off, no active workflow).
+ * - `stuck`: it needs a person: it already used its rebuild (or its rebuild ended without a new
+ *   PR), CI can never run on the repository (Actions off, no active workflow), or it touches a
+ *   protected area (an `escalated` item, which carries this kind too).
  *
- * Null on items that never failed, and on failures recorded before this existed (the loop
- * reads those from their reason).
+ * Null on items that never failed or were escalated, and on failures recorded before this
+ * existed (the loop reads those from their reason).
  */
 export const FactoryFailureKind = z.enum(["checks", "infrastructure", "stuck"]);
 export type FactoryFailureKind = z.infer<typeof FactoryFailureKind>;

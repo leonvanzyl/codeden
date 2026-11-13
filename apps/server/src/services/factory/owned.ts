@@ -1,4 +1,4 @@
-import type { FactoryItem, FactoryLoop, Project } from "@codeden/contracts";
+import type { FactoryItem, FactoryLoop, GitHubPrRef, Project } from "@codeden/contracts";
 import { errorMessage } from "../errors";
 import type { FactoryContext } from "./context";
 import type { FactoryPr } from "./github-port";
@@ -13,7 +13,7 @@ import {
   rebaseAsks,
   trackHead,
 } from "./rebase";
-import { adoptAgentPr } from "./rebuild";
+import { adoptAgentPr, rebuildOriginal } from "./rebuild";
 import { recoverable } from "./recover";
 import { isBusy } from "./sessions";
 
@@ -23,7 +23,8 @@ import { isBusy } from "./sessions";
  * PRs of items that ended `failed` or `escalated`, which wait for a person. A person merging or
  * closing one finishes its item; one that becomes conflicting is rebased (not a revise round),
  * or rebuilt after three requests, so nobody ever opens a factory PR that rotted into conflicts.
- * The factory never merges these: a person does.
+ * A rebuild that ended without its new PR leaves the PR it was replacing with the item. The
+ * factory never merges these: a person does.
  */
 
 /** How often an owned PR outside verification is read from GitHub (its mergeability). */
@@ -41,7 +42,11 @@ export async function advanceOwned(
   loop: FactoryLoop,
   item: FactoryItem,
 ): Promise<FactoryLoop> {
-  if (!item.pr) return loop;
+  if (!item.pr) {
+    const original = rebuildOriginal(item);
+    if (original) await advanceOriginal(ctx, project, item, original);
+    return loop;
+  }
   // An integrator that opened a new PR for the work: the item follows it (still a person's to
   // merge), and the old one is closed with a link (`closeReplacedPrs`).
   const before = item.pr.number;
@@ -99,6 +104,35 @@ export async function advanceOwned(
     }
   }
   return advanceConflicting(ctx, project, loop, current, pr);
+}
+
+/**
+ * A rebuild that ended before its replacement PR was opened: the PR it was replacing is still
+ * the item's. The loop does nothing more to it (the rebuild was the last resort, so the item is
+ * stuck with the user), but a person merging or closing it finishes the item.
+ */
+async function advanceOriginal(
+  ctx: FactoryContext,
+  project: Project,
+  item: FactoryItem,
+  original: NonNullable<FactoryItem["pr"]>,
+): Promise<void> {
+  const decided = (ref: GitHubPrRef | null): ref is GitHubPrRef =>
+    ref?.state === "merged" || ref?.state === "closed";
+  // The synced PR says so without an API call; GitHub itself is read every few minutes.
+  let ref = ctx.github.prRef(project.id, original.number);
+  if (!decided(ref)) {
+    if (!due(ctx, item)) return;
+    try {
+      ref = (await ctx.github.prDetails(project.id, original.number)).ref;
+    } catch (error) {
+      note(ctx, item, `Could not read #${original.number}: ${errorMessage(error)}`);
+      return;
+    }
+    const at = ctx.now().toISOString();
+    ctx.store.updateItem(item.id, (i) => ({ ...i, nudges: { ...i.nudges, [CHECKED]: at } }));
+  }
+  if (decided(ref)) prDecidedOutside(ctx, item, ref);
 }
 
 /**

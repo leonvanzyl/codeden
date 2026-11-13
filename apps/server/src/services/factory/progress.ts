@@ -4,6 +4,7 @@ import { type FactoryContext, factoryNotice, pauseLoop, raiseInbox } from "./con
 import { stoppedSinceNudge } from "./idle";
 import { failItem } from "./outcomes";
 import { ANALYZE_NUDGE, BUILDER_NUDGE, REPRODUCE_NUDGE } from "./prompts";
+import { rebuildFailed, unreplacedOriginal } from "./rebuild";
 import { awaitTurnRaceResume, BUILDER_FAILED_REASON } from "./turn-race";
 
 const BUSY = new Set(["created", "queued", "starting", "running", "waiting"]);
@@ -23,6 +24,10 @@ export async function advanceBuilding(
   const s = item.builderSessionId ? ctx.repo.find(item.builderSessionId)?.session : undefined;
   // Outside the work's code: the loop puts it back by itself (`recover.ts`).
   const infra = { kind: "infrastructure" } as const;
+  // A rebuild that ends without its new PR leaves the PR it was replacing stuck with the user.
+  const original = unreplacedOriginal(ctx, item);
+  const fail = (reason: string) =>
+    original ? rebuildFailed(ctx, loop, item, original, reason) : failItem(ctx, loop, item, reason);
   if (!s) return failItem(ctx, loop, item, "The builder session is gone", infra);
   if (BUSY.has(s.status)) return loop;
   const fixAt = item.attempts > 0 ? item.nudges[`fix_${item.attempts}`] : undefined;
@@ -46,7 +51,7 @@ export async function advanceBuilding(
     // A session that died otherwise (an error, a runner restart) is no fault of the work
     // either; one a person stopped is their call.
     if (s.status === "failed") return failItem(ctx, loop, item, BUILDER_FAILED_REASON, infra);
-    return failItem(ctx, loop, item, "The builder session stopped without a pull request");
+    return fail("The builder session stopped without a pull request");
   }
   const investigating = !item.investigation && (item.type === "bug" || item.type === "feature");
   if (investigating) {
@@ -62,7 +67,7 @@ export async function advanceBuilding(
       return loop;
     }
     if (stoppedSinceNudge(s, asked, ctx.now(), loop.tuning)) {
-      return failItem(ctx, loop, item, `The builder ended without reporting its ${step}`);
+      return fail(`The builder ended without reporting its ${step}`);
     }
     return loop;
   }
@@ -75,7 +80,7 @@ export async function advanceBuilding(
   }
   if (stoppedSinceNudge(s, nudged, ctx.now(), loop.tuning)) {
     const why = s.result ? `${s.result.outcome}: ${s.result.summary}` : "no pull request";
-    return failItem(ctx, loop, item, `The builder finished without a pull request (${why})`);
+    return fail(`The builder finished without a pull request (${why})`);
   }
   return loop;
 }

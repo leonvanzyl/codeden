@@ -33,6 +33,7 @@ import type { ProjectService } from "../projects/project-service";
 import type { RunnerPort } from "../runner-port";
 import type { SessionRepo } from "../sessions/repo";
 import type { SessionService } from "../sessions/session-service";
+import { ProviderAvailability } from "./availability";
 import { SessionArchiver } from "./cleanup";
 import type { FactoryContext } from "./context";
 import { assertCanEnter, haltProject } from "./controls";
@@ -118,6 +119,12 @@ export class FactoryService {
         sessions: deps.sessions,
         repo: deps.repo,
         runner: deps.runner,
+        availability: new ProviderAvailability({
+          runner: deps.runner,
+          rateLimits: () => deps.usage.rateLimitWindows?.() ?? [],
+          now: deps.options?.now ?? (() => new Date()),
+          log: deps.log,
+        }),
         log: deps.log,
       }),
       projects: deps.projects,

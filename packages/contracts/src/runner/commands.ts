@@ -65,6 +65,11 @@ export const RunnerCommand = z.discriminatedUnion("name", [
     providerId: ProviderId.optional(),
     /** Answer only once the model lists are refreshed, and include them as `providers`. */
     waitForModels: z.boolean().optional(),
+    /**
+     * `false`: only detect (installed, signed in), leaving the model lists alone; for periodic
+     * availability checks, which must not start provider CLIs to list models. Default true.
+     */
+    refreshModels: z.boolean().optional(),
   }),
   /** One tool-less utility-model call (§7.4) through a provider's `utilityModel()`. */
   z.object({

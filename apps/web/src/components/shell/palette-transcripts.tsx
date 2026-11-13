@@ -6,7 +6,13 @@ import { StatusDot } from "@/components/common/status-dot";
 import { SnippetText } from "@/components/search/snippet-text";
 import { CommandGroup, CommandItem } from "@/components/ui/command";
 import { ageShort } from "@/lib/format";
-import { canSearchTranscripts, hitKindLabel, roleBadge, useTranscriptSearch } from "@/lib/search";
+import {
+  canSearchTranscripts,
+  hitKindLabel,
+  hitLinkSearch,
+  roleBadge,
+  useTranscriptSearch,
+} from "@/lib/search";
 
 const HIT = "transcript-hit:";
 const ALL = "transcript-all:";
@@ -73,8 +79,8 @@ function HitRow({
 }
 
 /**
- * "Transcripts" in the command palette: the best transcript matches for what's typed (3+
- * characters), and a row that opens the full results.
+ * "Transcripts" in the command palette: the newest transcript matches for what's typed (3+
+ * characters), and a row that opens the full results with their filters and more pages.
  */
 export function PaletteTranscripts({
   search,
@@ -97,7 +103,7 @@ export function PaletteTranscripts({
     navigate({
       to: "/sessions/$sessionId",
       params: { sessionId: hit.sessionId },
-      search: { item: hit.anchorItemId },
+      search: hitLinkSearch(hit),
     });
   };
 

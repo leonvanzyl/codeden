@@ -58,6 +58,9 @@ describe("factory settings in the autonomy dialog", () => {
     expect(backlog.value).toBe("0");
     fireEvent.change(screen.getByLabelText("Revise rounds"), { target: { value: "4" } });
     fireEvent.change(screen.getByLabelText("Watch main CI (minutes)"), { target: { value: "45" } });
+    fireEvent.change(screen.getByLabelText("When the reviewer's provider is unavailable"), {
+      target: { value: "wait" },
+    });
     fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
 
     await waitFor(() => expect(setMode).toHaveBeenCalled());
@@ -71,10 +74,13 @@ describe("factory settings in the autonomy dialog", () => {
       maxIssuesPerRound: 3,
       maxChangedLines: 5000,
       requireCi: true,
+      reviewerFallback: "wait",
+      reviewerProvider: "auto",
+      reviewerModel: null,
     });
     // Knobs the editor doesn't show aren't sent, so the server keeps what it has.
     expect(tuning).not.toHaveProperty("areas");
-    expect(tuning).not.toHaveProperty("builderProvider");
+    expect(tuning).not.toHaveProperty("idleGraceMin");
     success.mockRestore();
   });
 });

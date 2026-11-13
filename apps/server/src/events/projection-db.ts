@@ -131,7 +131,7 @@ export function applyMutations(
           .values(row)
           .onConflictDoUpdate({ target: [items.sessionId, items.id], set: row })
           .run();
-        if (index) indexItem(tx, record);
+        if (index) indexItem(tx, record.sessionId, record.item);
         break;
       }
       case "session":

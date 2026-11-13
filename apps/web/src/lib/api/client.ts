@@ -25,6 +25,7 @@ import type {
   ResolveConflictResponse,
   RestoreFilesRequest,
   RestoreFilesResponse,
+  Role,
   RuntimeResponse,
   Session,
   SessionDetail,
@@ -72,10 +73,16 @@ export type TranscriptWatchMessage =
   | TranscriptMessage
   | { type: "transcript_resync"; sessionId: string; seq: number };
 
-/** A transcript search (`GET /api/search/transcripts`). */
+/** A transcript search (`GET /api/search/transcripts`): one page, newest matches first. */
 export interface TranscriptSearchRequest {
   q: string;
   projectId?: string;
+  /** Only sessions with this role. */
+  role?: Role;
+  /** False leaves out archived sessions (they are included by default). */
+  includeArchived?: boolean;
+  /** The previous page's `nextCursor`. */
+  cursor?: string;
   /** Most hits (1–100, default 20). */
   limit?: number;
 }

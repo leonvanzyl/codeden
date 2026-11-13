@@ -2,8 +2,19 @@ import { Bot } from "lucide-react";
 import { Transcript } from "@/components/thread/transcript";
 import { useTranscriptsStore } from "@/stores/transcripts";
 
-/** A subagent's child thread, shown beside its parent (§7.3). */
-export function ChildThreadPanel({ sessionId, threadId }: { sessionId: string; threadId: string }) {
+/**
+ * A subagent's child thread, shown beside its parent (§7.3); `focusItemId` (a search hit)
+ * opens it at that item.
+ */
+export function ChildThreadPanel({
+  sessionId,
+  threadId,
+  focusItemId,
+}: {
+  sessionId: string;
+  threadId: string;
+  focusItemId?: string;
+}) {
   const transcript = useTranscriptsStore((s) => s.byId[sessionId]);
   const thread = transcript?.threads[threadId];
   if (!transcript || !thread) return null;
@@ -24,6 +35,7 @@ export function ChildThreadPanel({ sessionId, threadId }: { sessionId: string; t
         transcript={transcript}
         threadId={threadId}
         sessionId={sessionId}
+        focusItemId={focusItemId}
         contentClassName="max-w-none px-4 pt-4"
       />
     </div>

@@ -87,4 +87,27 @@ describe("mock client", () => {
     );
     expect((await short).hits).toEqual([]);
   });
+
+  it("filters transcript search by role and archived state, newest first, a page at a time", async () => {
+    const client = createMockClient();
+    const all = client.searchTranscripts({ q: "the", limit: 3 });
+    const pms = client.searchTranscripts({ q: "the", role: "pm" });
+    await vi.advanceTimersByTimeAsync(500);
+    const first = TranscriptSearchResponse.parse(await all);
+    expect(first.hits).toHaveLength(3);
+    const times = first.hits.map((h) => h.ts);
+    expect(times).toEqual([...times].sort().reverse());
+    expect(first.nextCursor).not.toBeNull();
+    const next = client.searchTranscripts({ q: "the", limit: 3, cursor: first.nextCursor ?? "" });
+    await vi.advanceTimersByTimeAsync(500);
+    const second = TranscriptSearchResponse.parse(await next);
+    const ids = (r: typeof first) => r.hits.map((h) => `${h.sessionId}/${h.itemId}`);
+    expect(ids(second).some((id) => ids(first).includes(id))).toBe(false);
+
+    const snapshot = client.getSnapshot();
+    await vi.advanceTimersByTimeAsync(500);
+    const roleOf = new Map((await snapshot).sessions.map((s) => [s.id, s.role]));
+    const pmHits = TranscriptSearchResponse.parse(await pms).hits;
+    expect(pmHits.every((h) => roleOf.get(h.sessionId) === "pm")).toBe(true);
+  });
 });

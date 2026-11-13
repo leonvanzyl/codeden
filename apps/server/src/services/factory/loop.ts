@@ -6,6 +6,7 @@ import {
   type Project,
 } from "@codeden/contracts";
 import { errorMessage } from "../errors";
+import { earliestUntil, untilText } from "./availability";
 import { archiveFinished } from "./cleanup";
 import { budgetSpend, type FactoryContext, visionOf } from "./context";
 import { classifyPending, intakeFailedChecks, intakeIssues } from "./intake";
@@ -67,6 +68,8 @@ export async function runTick(
     }
   }
 
+  // Who is installed and signed in: detected again in the background every few minutes.
+  ctx.sessions.refreshAvailability();
   // Items that failed for a reason outside their code go back by themselves.
   loop = await recoverInfraFailures(ctx, project, loop);
   // Items already in flight move on even while paused (merges stay blocked, reverts excepted).
@@ -164,19 +167,54 @@ async function assignAgents(ctx: FactoryContext, project: Project, loop: Factory
         .filter((i) => mayAutoMerge(i, project.factoryLimits)).length;
       if (!mayBuild(loop.mergesToday, inFlight, project.factoryLimits)) continue;
     }
-    await startBuilder(ctx, item, vision, loop);
+    await startBuilder(ctx, project, item, vision, loop);
   }
+}
+
+/**
+ * The builder's provider and model (§10.1, Provider availability): `builderProvider` and
+ * `builderModel` when that provider is available; otherwise another available provider (the
+ * project's, then the agent default, then any), with its default model. `auto` stays `auto`
+ * while every provider is available. Nothing available: the build waits.
+ */
+function chooseBuilder(
+  ctx: FactoryContext,
+  project: Project,
+  loop: FactoryLoop,
+): { provider: string; model: string | null } | { waiting: string } {
+  const wanted = loop.tuning.builderProvider;
+  const available = ctx.sessions.providers();
+  const blocked = ctx.sessions.unavailable();
+  if (blocked.length === 0) {
+    return { provider: wanted, model: wanted === "auto" ? null : loop.tuning.builderModel };
+  }
+  if (available.length === 0) {
+    return { waiting: `Waiting: no build provider available${untilText(earliestUntil(blocked))}` };
+  }
+  if (wanted !== "auto" && available.includes(wanted)) {
+    return { provider: wanted, model: loop.tuning.builderModel };
+  }
+  const roleDefault = ctx.settings.get().providers.agent.provider;
+  const order = [wanted, project.defaultProvider, roleDefault, ...available];
+  const provider = order.find((p): p is string => Boolean(p) && available.includes(p as string));
+  return { provider: provider ?? (available[0] as string), model: null };
 }
 
 async function startBuilder(
   ctx: FactoryContext,
+  project: Project,
   item: FactoryItem,
   vision: string,
   loop: FactoryLoop,
 ): Promise<void> {
-  const provider = loop.tuning.builderProvider;
+  const choice = chooseBuilder(ctx, project, loop);
+  if ("waiting" in choice) {
+    ctx.store.updateItem(item.id, (i) => ({ ...i, note: choice.waiting }));
+    return;
+  }
+  const { provider, model } = choice;
   try {
-    const res = await ctx.sessions.startBuilder(item, vision, provider);
+    const res = await ctx.sessions.startBuilder(item, vision, provider, model);
     if (res.status === "conflict") {
       const other = res.existing.map((w) => w.workKey).join(", ");
       ctx.store.updateItem(item.id, (i) => ({

@@ -28,7 +28,14 @@ describe("the factory's opening briefs record their sender", () => {
     const sessions = env.factory.ctx.sessions;
     const item = backlogItem();
     await sessions.startBuilder(item, "Ship a counter app", "claude");
-    await sessions.startReviewer(item, "Ship a counter app", "codex", null, null, false);
+    await sessions.startReviewer(
+      item,
+      "Ship a counter app",
+      { provider: "codex", model: null },
+      null,
+      null,
+      false,
+    );
     await sessions.startRevert(env.project.id, { sha: "abc1234def", prNumber: 7, title: "Bad" });
     await sessions.startScout(env.project.id, "## Round 1\n\nReview **everything**.");
     await sessions.startLens(env.project.id, "ux", "## UX\n\nReview the `ux`.");

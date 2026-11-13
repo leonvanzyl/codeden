@@ -11,8 +11,9 @@ import { sessionsToArchive } from "./cleanup";
 import type { FactoryContext } from "./context";
 import { announceType } from "./intake";
 import { lateReviewPrompt } from "./prompts";
-import { recheckOf, withoutRecheck } from "./rebase";
+import { trackedHead } from "./rebase";
 import { ownershipAfterRetry } from "./rebuild";
+import { approveRecheck, recheckOf, recheckSentFor, withoutRecheck } from "./recheck";
 
 /**
  * Decisions on work items (§10.1): letting an untrusted issue in, correcting a type, retrying
@@ -173,17 +174,33 @@ export function submitReview(
       message: `Not recorded: the item is ${item.stage}${item.stage === "building" ? " (the author is revising it; you will be asked to review again)" : ""}.`,
     };
   }
-  // A re-check of a conflict resolution: an approval keeps the earlier verdict.
+  // A re-check of a conflict resolution: an approval keeps the earlier verdict, and answers only
+  // for the head it was asked about (the verify step settles it against the PR's head). Any
+  // other verdict replaces the earlier one, and nothing is owed any more.
   const recheck = Boolean(item.review && recheckOf(item));
+  const at = ctx.now().toISOString();
   ctx.store.updateItem(item.id, (i) => {
-    const { rereview_sent: _s, reviewer: _r, ...nudges } = withoutRecheck(i.nudges);
+    const { rereview_sent: _s, reviewer: _r, ...rest } = i.nudges;
     const keep = recheck && verdict.verdict === "approve" && i.review;
-    return { ...i, review: keep ? i.review : verdict, nudges };
+    return {
+      ...i,
+      review: keep ? i.review : verdict,
+      nudges: keep ? approveRecheck(rest, at) : withoutRecheck(rest),
+    };
   });
   return {
     recorded: true,
-    message: recheck
-      ? `Re-check recorded: ${verdict.verdict}.${verdict.verdict === "approve" ? " Your earlier verdict stands." : ""}`
-      : `Verdict recorded: ${verdict.verdict}.`,
+    message: recheck ? recheckRecorded(item, verdict) : `Verdict recorded: ${verdict.verdict}.`,
   };
+}
+
+/** What the reviewer is told about its re-check verdict. */
+function recheckRecorded(item: FactoryItem, verdict: ReviewVerdict): string {
+  if (verdict.verdict !== "approve") return `Re-check recorded: ${verdict.verdict}.`;
+  const head = recheckSentFor(item);
+  if (!head) {
+    return "Re-check recorded: approve. It isn't known which head it covers, so you will be asked to re-check the current head before it merges.";
+  }
+  if (head === trackedHead(item)) return "Re-check recorded: approve. Your earlier verdict stands.";
+  return `Re-check recorded: approve of ${head.slice(0, 7)}. The pull request has a newer head than the one you were asked about, so you will be asked to re-check that too before it merges.`;
 }

@@ -118,7 +118,7 @@ function renderPanel(opts: { turnDiff?: Promise<void> } = {}) {
   const client = {
     ...base,
     sendMessage,
-    getSnapshot: async () => ({ sessions: [session] }) as unknown as Snapshot,
+    getSnapshot: async () => ({ sessions: [session], projects: [] }) as unknown as Snapshot,
     gitStatus: async () => ({ branch: "b", baseBranch: "main", ahead: 0, behind: 0, files: [] }),
     getDiff: async (_id: string, scope: DiffResult["scope"]): Promise<DiffResult> => {
       if (scope.kind === "turn") await opts.turnDiff;

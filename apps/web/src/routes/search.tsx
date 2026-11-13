@@ -1,10 +1,11 @@
-import type { Project, Session, TranscriptSearchHit } from "@codeden/contracts";
+import type { Project, Role, Session, TranscriptSearchHit } from "@codeden/contracts";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { SearchX, TextSearch } from "lucide-react";
+import { Loader2, SearchX, TextSearch } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { EmptyState } from "@/components/common/bits";
 import { StatusDot } from "@/components/common/status-dot";
 import { SnippetText } from "@/components/search/snippet-text";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -14,19 +15,27 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Switch } from "@/components/ui/switch";
 import { ago } from "@/lib/format";
 import { useSnapshotData } from "@/lib/queries";
 import {
   canSearchTranscripts,
   hitKindLabel,
+  hitLinkSearch,
   roleBadge,
+  type TranscriptSearchFilters,
   useDebouncedValue,
-  useTranscriptSearch,
+  useTranscriptSearchPages,
 } from "@/lib/search";
 import { PageHeader } from "./page-header";
 
-const LIMIT = 50;
-const ALL_PROJECTS = "all";
+const PAGE = 50;
+const ALL = "all";
+const ROLES: { value: Role; label: string }[] = [
+  { value: "agent", label: "Agents" },
+  { value: "pm", label: "PMs" },
+  { value: "orchestrator", label: "Orchestrator" },
+];
 
 function Badge({ children }: { children: string }) {
   return (
@@ -49,7 +58,7 @@ function HitRow({
     <Link
       to="/sessions/$sessionId"
       params={{ sessionId: hit.sessionId }}
-      search={{ item: hit.anchorItemId }}
+      search={hitLinkSearch(hit)}
       className="block rounded-lg px-3 py-2.5 transition-colors hover:bg-accent/50 focus-visible:bg-accent/50 focus-visible:outline-none"
     >
       <div className="flex min-w-0 items-center gap-2 text-[13px]">
@@ -74,14 +83,11 @@ function HitRow({
   );
 }
 
-function Results({ q, projectId }: { q: string; projectId?: string }) {
+function Results({ q, filters }: { q: string; filters: TranscriptSearchFilters }) {
   const sessions = useSnapshotData((s) => s.sessions, []);
   const projects = useSnapshotData((s) => s.projects, []);
-  const { data, error, searching } = useTranscriptSearch(q, {
-    limit: LIMIT,
-    projectId,
-    debounceMs: 0,
-  });
+  const { hits, query, error, searching, hasMore, loadingMore, loadMore } =
+    useTranscriptSearchPages(q, { ...filters, limit: PAGE });
 
   if (!q.trim()) {
     return (
@@ -105,7 +111,7 @@ function Results({ q, projectId }: { q: string; projectId?: string }) {
       </EmptyState>
     );
   }
-  if (!data) {
+  if (!hits) {
     return (
       <div className="space-y-4 px-3 pt-2">
         {[0, 1, 2].map((i) => (
@@ -117,17 +123,21 @@ function Results({ q, projectId }: { q: string; projectId?: string }) {
       </div>
     );
   }
-  if (data.hits.length === 0) {
+  if (hits.length === 0 && !hasMore) {
     return (
       <EmptyState icon={<SearchX />} title="No matches" className="py-16">
-        Nothing in any transcript contains every word of “{data.query}”.
+        Nothing in{" "}
+        {filters.projectId || filters.role || filters.includeArchived === false
+          ? "these sessions"
+          : "any transcript"}{" "}
+        contains every word of “{query}”.
       </EmptyState>
     );
   }
   return (
     <div className={searching ? "opacity-70 transition-opacity" : undefined}>
       <div className="divide-y divide-border/60">
-        {data.hits.map((hit) => {
+        {hits.map((hit) => {
           const session = sessions.find((s) => s.id === hit.sessionId);
           return (
             <HitRow
@@ -139,22 +149,93 @@ function Results({ q, projectId }: { q: string; projectId?: string }) {
           );
         })}
       </div>
-      {data.truncated && (
-        <p className="px-3 pt-4 text-2xs text-muted-foreground">
-          Showing the best {data.hits.length} matches. Add a word to narrow them down.
-        </p>
+      {hasMore && (
+        <div className="flex justify-center pt-4">
+          <Button variant="outline" size="sm" onClick={loadMore} disabled={loadingMore}>
+            {loadingMore && <Loader2 className="animate-spin" />}
+            {hits.length === 0 ? "Search older transcripts" : "Load more"}
+          </Button>
+        </div>
       )}
     </div>
   );
 }
 
-/**
- * Transcript search results (§13): every match for `q` with its session, project, role,
- * archived state, a highlighted snippet and when it was said. A match opens its session there.
- */
-export function SearchPage({ q, projectId }: { q: string; projectId?: string }) {
-  const navigate = useNavigate();
+/** The `/search` URL parameters for a query and its filters. */
+function toSearch(q: string, f: TranscriptSearchFilters) {
+  return {
+    q: q || undefined,
+    project: f.projectId,
+    role: f.role,
+    archived: f.includeArchived === false ? (false as const) : undefined,
+  };
+}
+
+/** Project, role and archived filters for the results. */
+function Filters({
+  filters,
+  onChange,
+}: {
+  filters: TranscriptSearchFilters;
+  onChange: (next: TranscriptSearchFilters) => void;
+}) {
   const projects = useSnapshotData((s) => s.projects, []);
+  return (
+    <div className="mb-4 flex flex-wrap items-center gap-2">
+      <Select
+        value={filters.projectId ?? ALL}
+        onValueChange={(v) => onChange({ ...filters, projectId: v === ALL ? undefined : v })}
+      >
+        <SelectTrigger size="sm" className="w-44" aria-label="Project">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value={ALL}>All projects</SelectItem>
+          {projects.map((p) => (
+            <SelectItem key={p.id} value={p.id}>
+              {p.name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <Select
+        value={filters.role ?? ALL}
+        onValueChange={(v) => onChange({ ...filters, role: v === ALL ? undefined : (v as Role) })}
+      >
+        <SelectTrigger size="sm" className="w-36" aria-label="Role">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value={ALL}>All roles</SelectItem>
+          {ROLES.map((r) => (
+            <SelectItem key={r.value} value={r.value}>
+              {r.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <span className="ml-1 flex items-center gap-2">
+        <Switch
+          id="search-archived"
+          checked={filters.includeArchived !== false}
+          onCheckedChange={(includeArchived) => onChange({ ...filters, includeArchived })}
+        />
+        <label htmlFor="search-archived" className="text-xs text-muted-foreground">
+          Archived sessions
+        </label>
+      </span>
+    </div>
+  );
+}
+
+/**
+ * Transcript search results (§13): every match for `q`, newest first, a page at a time, with
+ * its session, project, role, archived state, a highlighted snippet and when it was said.
+ * Filters by project and role and can leave out archived sessions. A match opens its session
+ * there (and a subagent's thread at the item).
+ */
+export function SearchPage({ q, filters }: { q: string; filters: TranscriptSearchFilters }) {
+  const navigate = useNavigate();
   const [text, setText] = useState(q);
   const settled = useDebouncedValue(text, 250);
   const lastSettled = useRef(settled);
@@ -164,12 +245,8 @@ export function SearchPage({ q, projectId }: { q: string; projectId?: string }) 
     if (settled === lastSettled.current) return;
     lastSettled.current = settled;
     if (settled.trim() === q) return;
-    void navigate({
-      to: "/search",
-      search: { q: settled.trim() || undefined, project: projectId },
-      replace: true,
-    });
-  }, [settled, q, projectId, navigate]);
+    void navigate({ to: "/search", search: toSearch(settled.trim(), filters), replace: true });
+  }, [settled, q, filters, navigate]);
   // biome-ignore lint/correctness/useExhaustiveDependencies: only follow outside URL changes.
   useEffect(() => {
     if (q !== text.trim()) setText(q);
@@ -180,35 +257,11 @@ export function SearchPage({ q, projectId }: { q: string; projectId?: string }) 
       <PageHeader
         icon={<TextSearch />}
         title="Search transcripts"
-        meta="Messages, replies, commands and file paths across every session"
-        actions={
-          <Select
-            value={projectId ?? ALL_PROJECTS}
-            onValueChange={(v) =>
-              navigate({
-                to: "/search",
-                search: { q: q || undefined, project: v === ALL_PROJECTS ? undefined : v },
-                replace: true,
-              })
-            }
-          >
-            <SelectTrigger size="sm" className="w-44" aria-label="Project">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={ALL_PROJECTS}>All projects</SelectItem>
-              {projects.map((p) => (
-                <SelectItem key={p.id} value={p.id}>
-                  {p.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        }
+        meta="Messages, replies, commands and file paths across every session, newest first"
       />
       <div className="min-h-0 flex-1 overflow-y-auto scroll-thin">
         <div className="mx-auto w-full max-w-3xl px-4 py-5 sm:px-6 sm:py-6">
-          <div className="relative mb-4">
+          <div className="relative mb-3">
             <TextSearch className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               autoFocus
@@ -220,7 +273,13 @@ export function SearchPage({ q, projectId }: { q: string; projectId?: string }) 
               className="h-10 pl-9"
             />
           </div>
-          <Results q={q} projectId={projectId} />
+          <Filters
+            filters={filters}
+            onChange={(next) =>
+              navigate({ to: "/search", search: toSearch(q, next), replace: true })
+            }
+          />
+          <Results q={q} filters={filters} />
         </div>
       </div>
     </>
