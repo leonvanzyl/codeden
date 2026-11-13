@@ -15,7 +15,12 @@ const fakeAgent = {
 };
 
 afterEach(() => {
-  for (const key of ["FAKE_ACP_STATUS", "FAKE_ACP_NO_ACP", "FAKE_ACP_VERSION"]) {
+  for (const key of [
+    "FAKE_ACP_STATUS",
+    "FAKE_ACP_NO_ACP",
+    "FAKE_ACP_VERSION",
+    "FAKE_ACP_SUBAGENTS",
+  ]) {
     delete process.env[key];
   }
   clearExecutableCache();
@@ -125,18 +130,27 @@ describe("detectCursor", () => {
 
   it("lists the account's models through a short-lived ACP server, without a session", async () => {
     const adapter = new CursorAdapter({ executable: fakeAgent });
+    expect(adapter.capabilities().subagents).toBe(false);
     await adapter.refreshModels();
     expect(adapter.models().map((m) => m.id)).toEqual(["default", "gpt-5", "sonnet-4.5"]);
-    // What the CLI reported in `initialize` refines the flags.
+    // What the CLI reported in `initialize` refines the flags; the probe opts into subagents
+    // as sessions do, so it learns whether they run as child sessions.
     expect(adapter.capabilities()).toMatchObject({
       images: true,
       mcp: true,
       planMode: true,
       resume: true,
       userQuestions: true,
-      subagents: false,
+      subagents: true,
       fork: false,
       steer: false,
     });
+  });
+
+  it("reports no subagents for a CLI that doesn't run them as child sessions", async () => {
+    process.env.FAKE_ACP_SUBAGENTS = "0";
+    const adapter = new CursorAdapter({ executable: fakeAgent });
+    await adapter.refreshModels();
+    expect(adapter.capabilities().subagents).toBe(false);
   });
 });

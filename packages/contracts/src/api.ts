@@ -94,6 +94,8 @@ export const UpdateProjectRequest = z.object({
   defaultBranch: z.string().nullable().optional(),
   /** Pin or unpin the project in the project list (§13). */
   pinned: z.boolean().optional(),
+  /** Run this project's agent sessions with `CI=true`, or not (`Project.agentCiEnv`, §4.2). */
+  agentCiEnv: z.boolean().optional(),
 });
 export type UpdateProjectRequest = z.infer<typeof UpdateProjectRequest>;
 

@@ -65,4 +65,24 @@ describe("agent session environment", () => {
     expect(agentSessionOptions(options, { CI: "" }).env).toEqual({ CI: "true" });
     expect(agentSessionOptions(options, {})).toEqual({ ...options, env: { CI: "true" } });
   });
+
+  // #221: `CI=true` changes how the user's own tools behave (Playwright's
+  // `reuseExistingServer: !process.env.CI`, Yarn Berry's immutable installs, builds that treat
+  // warnings as errors). A project can turn it off; the runner then adds no `CI` at all.
+  it("leaves CI unset when the project turns it off (ciEnv: false)", async () => {
+    vi.stubEnv("CI", undefined);
+    expect(await openedEnv({ ...options, ciEnv: false })).toBeUndefined();
+    const off: SessionOptions = { ...options, ciEnv: false };
+    expect(agentSessionOptions(off, {})).toEqual(off);
+  });
+
+  it("keeps the session's own variables when the project turns CI off", () => {
+    const opts: SessionOptions = { ...options, ciEnv: false, env: { EXTRA: "kept" } };
+    expect(agentSessionOptions(opts, {}).env).toEqual({ EXTRA: "kept" });
+    expect(agentSessionOptions(opts, { CI: "true" }).env).toEqual({ EXTRA: "kept" });
+  });
+
+  it("still adds CI=true when the project leaves the setting on", () => {
+    expect(agentSessionOptions({ ...options, ciEnv: true }, {}).env).toEqual({ CI: "true" });
+  });
 });

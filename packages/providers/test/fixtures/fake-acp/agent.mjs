@@ -7,12 +7,17 @@
 // FAKE_ACP_LOG: every message the client sends, and every answer to the agent's requests
 // (`{ method: "answer:<method>", params }`), one JSON line each.
 // FAKE_ACP_SCRIPT: a JSON file of steps each `session/prompt` runs in order:
-//   { "update": {...} }                   a session/update notification
+//   { "update": {...}, "session"? }       a session/update notification (`session`: a child's id)
 //   { "request": "<method>", "params" }   an agent request, waiting for the client's answer
+//                                         (`params.sessionId` sends it from a child session)
 //   { "notify": "<method>", "params" }    an agent notification
 //   { "hang": true }                      wait for session/cancel (the prompt then ends cancelled)
 //   { "stopReason": "...", "usage": {} }  how the prompt ends (default end_turn)
-// FAKE_ACP_LOAD=fail makes session/load fail; otherwise it replays a short history first.
+// FAKE_ACP_LOAD=fail makes session/load fail; otherwise it replays a short history first,
+// a subagent's child session included.
+// Subagents: a client that opts in (`clientCapabilities.subagents` or `_meta.subagents`) gets
+// `sessionCapabilities.subagents` back, as Cursor 2026.09.15+ does; FAKE_ACP_SUBAGENTS=0 acts
+// like an older CLI that never reports it.
 import { appendFileSync, readFileSync } from "node:fs";
 import { createInterface } from "node:readline";
 
@@ -77,7 +82,8 @@ function ask(method, params) {
   });
 }
 
-const update = (u) => send({ method: "session/update", params: { sessionId: session, update: u } });
+const update = (u, sessionId = session) =>
+  send({ method: "session/update", params: { sessionId, update: u } });
 
 async function prompt(msg) {
   let cancelled = false;
@@ -90,7 +96,7 @@ async function prompt(msg) {
   let end = { stopReason: "end_turn" };
   for (const step of script) {
     if (cancelled) break;
-    if (step.update) update(step.update);
+    if (step.update) update(step.update, step.session);
     else if (step.notify) send({ method: step.notify, params: { sessionId: session, ...step.params } });
     else if (step.request) await ask(step.request, step.params ?? {});
     else if (step.hang) await hang;
@@ -108,7 +114,10 @@ createInterface({ input: process.stdin }).on("line", (line) => {
   }
   record({ method: msg.method, params: msg.params });
   switch (msg.method) {
-    case "initialize":
+    case "initialize": {
+      const caps = msg.params?.clientCapabilities ?? {};
+      const subagents =
+        process.env.FAKE_ACP_SUBAGENTS !== "0" && !!(caps.subagents || caps._meta?.subagents);
       return send({
         id: msg.id,
         result: {
@@ -117,10 +126,12 @@ createInterface({ input: process.stdin }).on("line", (line) => {
             loadSession: true,
             promptCapabilities: { image: true },
             mcpCapabilities: { http: true },
+            sessionCapabilities: { list: {}, ...(subagents ? { subagents: {} } : {}) },
           },
           authMethods: [{ id: "cursor_login", name: "Cursor" }],
         },
       });
+    }
     case "session/new":
       return send({ id: msg.id, result: { sessionId: session, modes, configOptions: [modelOption()] } });
     case "session/load":
@@ -130,6 +141,13 @@ createInterface({ input: process.stdin }).on("line", (line) => {
       session = msg.params.sessionId;
       update({ sessionUpdate: "user_message_chunk", content: { type: "text", text: "old question" } });
       update({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: "old answer" } });
+      // An old subagent's run, child session included: history, never news.
+      update({ sessionUpdate: "subagent_spawned", subagentSessionId: "sub-old", name: "Old task" });
+      update(
+        { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "old child" } },
+        "sub-old",
+      );
+      update({ sessionUpdate: "subagent_state_update", subagentSessionId: "sub-old", state: "completed" });
       // The replay includes the mode the old session ended in.
       update({ sessionUpdate: "current_mode_update", currentModeId: "agent" });
       return send({ id: msg.id, result: { modes, configOptions: [modelOption()] } });

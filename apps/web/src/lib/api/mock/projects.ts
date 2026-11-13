@@ -53,6 +53,7 @@ export function mockProjectApi(world: MockWorld): MockProjectApi {
         factoryLimits: defaultFactoryLimits,
         killSwitch: false,
         timezone: null,
+        agentCiEnv: true,
         pinned: false,
         sortOrder: last + 1,
         createdAt: now,

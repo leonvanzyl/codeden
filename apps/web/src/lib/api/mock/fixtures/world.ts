@@ -28,6 +28,7 @@ function project(
     factoryLimits: limits,
     killSwitch: false,
     timezone: null,
+    agentCiEnv: true,
     pinned: false,
     sortOrder: 0,
     createdAt: ago(60 * 24 * 12),
@@ -438,7 +439,6 @@ export const providers: ProviderInfo[] = [
     capabilities: {
       ...caps,
       steer: false,
-      subagents: false,
       rollback: false,
       fork: false,
       reasoningEffort: false,

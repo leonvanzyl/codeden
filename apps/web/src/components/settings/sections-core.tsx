@@ -9,6 +9,7 @@ import { Switch } from "@/components/ui/switch";
 import { useSnapshotData } from "@/lib/queries";
 import { cn } from "@/lib/utils";
 import { type ThemePreference, useThemeStore } from "@/stores/theme";
+import { AgentEnvironmentSettings } from "./agent-environment";
 import { CustomModelSettings } from "./custom-models";
 import { ModelVisibilitySettings } from "./model-visibility";
 import { Segmented, SettingRow, SettingsSection, useSettings } from "./settings-ui";
@@ -79,6 +80,7 @@ export function GeneralSettings() {
           />
         </SettingRow>
       </SettingsSection>
+      <AgentEnvironmentSettings />
       <SettingsSection title="Background work">
         <SettingRow
           label="Automations"

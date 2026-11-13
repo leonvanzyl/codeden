@@ -77,6 +77,7 @@ describe("issue triage (§10)", () => {
       factoryLimits: FactoryLimits.parse({}),
       killSwitch: false,
       timezone: null,
+      agentCiEnv: true,
       pinned: false,
       sortOrder: 0,
       createdAt: ts,

@@ -1,12 +1,15 @@
 import { randomUUID } from "node:crypto";
 import type {
   AgentEvent,
+  GeneratedImage,
   Item,
   ItemOf,
+  JsonValue,
   ProviderCommand,
   Usage,
   UserInput,
 } from "@codeden/contracts";
+import { count as int } from "../util/text";
 import type { AcpTurnOutcome } from "./errors";
 import {
   type AcpToolContext,
@@ -22,6 +25,9 @@ import type {
   AcpSessionUpdate,
   AcpToolCall,
 } from "./protocol";
+import { mergeTodos, planTodos, type Todo } from "./todos";
+
+export { planTodos, type Todo, todoStatus } from "./todos";
 
 /** Where an item lives. */
 export interface ThreadCtx {
@@ -29,27 +35,45 @@ export interface ThreadCtx {
   turnId: string;
 }
 
-export type Todo = ItemOf<"todo_list">["todos"][number];
-
 export interface AcpMapperOptions {
   sessionId: string;
   emit: (event: AgentEvent) => void;
   tools: AcpToolContext;
+  /** The thread it writes to; default the session's root thread. */
+  threadId?: string;
+  /**
+   * A subagent's child session: its mode, config, command and usage updates are its own and
+   * never change the CodeDen session.
+   */
+  child?: boolean;
   /** The agent switched mode on its own (`current_mode_update`). */
   onMode?: (modeId: string) => void;
   /** The agent's config options changed (`config_option_update`). */
   onConfigOptions?: (options: AcpConfigOption[]) => void;
+  /** The turn is about to end (`ok`: it completed): close what hangs off it first. */
+  beforeEnd?: (ok: boolean) => void;
+  /** A tool call finished (completed or failed). */
+  onToolDone?: (state: AcpToolState) => void;
 }
+
+/** Updates that describe the whole session, ignored from a subagent's child session. */
+const SESSION_WIDE = new Set([
+  "current_mode_update",
+  "config_option_update",
+  "available_commands_update",
+  "usage_update",
+]);
 
 /**
  * Translates one ACP session's `session/update` notifications into normalized `AgentEvent`s
  * (§7.3). A CodeDen turn is one `session/prompt`; message and thought chunks stream into
  * items that close when something else starts, tool calls are upserted by `toolCallId`, and
  * the agent's plan becomes the turn's todo list. Updates outside a turn (the history replay of
- * `session/load`) are dropped: CodeDen keeps its own transcript.
+ * `session/load`) are dropped: CodeDen keeps its own transcript. A subagent's child session
+ * has a mapper of its own, writing to its child thread.
  */
 export class AcpEventMapper {
-  readonly rootThreadId: string;
+  readonly threadId: string;
   /** While `session/load` replays the history: every update is dropped. */
   replaying = false;
   private turnId: string | undefined;
@@ -63,7 +87,7 @@ export class AcpEventMapper {
   private lastCost: number | undefined;
 
   constructor(private readonly opts: AcpMapperOptions) {
-    this.rootThreadId = `${opts.sessionId}:thread-root`;
+    this.threadId = opts.threadId ?? `${opts.sessionId}:thread-root`;
   }
 
   get currentTurnId(): string | undefined {
@@ -72,7 +96,13 @@ export class AcpEventMapper {
 
   /** The current turn's context, while one runs. */
   ctx(): ThreadCtx | undefined {
-    return this.turnId ? { threadId: this.rootThreadId, turnId: this.turnId } : undefined;
+    return this.turnId ? { threadId: this.threadId, turnId: this.turnId } : undefined;
+  }
+
+  /** A tool call of this turn that has started and not finished yet. */
+  hasOpenTool(toolCallId: string): boolean {
+    const status = this.tools.get(toolCallId)?.status;
+    return this.tools.has(toolCallId) && status !== "completed" && status !== "failed";
   }
 
   /**
@@ -96,12 +126,13 @@ export class AcpEventMapper {
     this.turnId = turnId;
     this.usage = {};
     this.costAtStart = this.lastCost;
-    this.opts.emit({ type: "turn.started", threadId: this.rootThreadId, turnId });
+    this.opts.emit({ type: "turn.started", threadId: this.threadId, turnId });
   }
 
   handle(update: AcpSessionUpdate): void {
     if (this.replaying) return;
     const kind = update.sessionUpdate;
+    if (this.opts.child && SESSION_WIDE.has(kind)) return;
     if (kind === "current_mode_update") {
       const mode = (update as { currentModeId?: unknown }).currentModeId;
       if (typeof mode === "string") this.opts.onMode?.(mode);
@@ -197,6 +228,41 @@ export class AcpEventMapper {
     this.opts.emit({ type: "item.completed", ...ctx, item });
   }
 
+  /** Start an item in the current turn (after any message that was streaming); its context. */
+  startItem(item: Item): ThreadCtx | undefined {
+    const ctx = this.ctx();
+    if (!ctx) return undefined;
+    this.closeText();
+    this.opts.emit({ type: "item.started", ...ctx, item });
+    return ctx;
+  }
+
+  /**
+   * Images a tool call created: they go on the agent's own call with that id while it runs
+   * (shown once it completes), else on a finished call of their own (§7.3 `generatedImages`).
+   */
+  imagesCreated(toolCallId: string, images: GeneratedImage[], input: JsonValue): void {
+    const ctx = this.ctx();
+    if (!ctx || !images.length) return;
+    const state = this.tools.get(toolCallId);
+    if (state && this.hasOpenTool(toolCallId)) {
+      state.generatedImages = images;
+      const item = toolCallItem(state, this.opts.tools, this.toolItemId(toolCallId));
+      this.opts.emit({ type: "item.updated", ...ctx, item });
+      return;
+    }
+    this.emitItem({
+      id: this.toolItemId(`image-${toolCallId}`),
+      kind: "tool_call",
+      toolKind: "other",
+      status: "completed",
+      toolName: "generate_image",
+      title: "Generate image",
+      input,
+      generatedImages: images,
+    });
+  }
+
   /** A notice in the current turn. */
   notice(level: "info" | "warning", message: string, code: string): void {
     const ctx = this.ctx();
@@ -216,8 +282,9 @@ export class AcpEventMapper {
     const turnId = this.turnId;
     if (!turnId) return;
     const ok = outcome.type === "completed";
+    this.opts.beforeEnd?.(ok);
     this.closeText();
-    const ctx = { threadId: this.rootThreadId, turnId };
+    const ctx = { threadId: this.threadId, turnId };
     for (const state of this.tools.values()) {
       if (state.status === "completed" || state.status === "failed") continue;
       const item = toolCallItem(state, this.opts.tools, this.toolItemId(state.toolCallId));
@@ -309,12 +376,14 @@ export class AcpEventMapper {
     this.tools.set(call.toolCallId, state);
     if (!known) this.closeText();
     const done = state.status === "completed" || state.status === "failed";
+    const finished = done && state.endedAt === undefined;
     if (done) state.endedAt ??= Date.now();
     const item = toolCallItem(state, this.opts.tools, this.toolItemId(state.toolCallId));
     const type = done ? "item.completed" : known ? "item.updated" : "item.started";
     if (done && !known)
       this.opts.emit({ type: "item.started", ...ctx, item: { ...item, status: "in_progress" } });
     this.opts.emit({ type, ...ctx, item });
+    if (finished) this.opts.onToolDone?.(state);
   }
 
   private commands(update: { availableCommands?: unknown }): void {
@@ -349,37 +418,9 @@ export class AcpEventMapper {
     if (!Object.keys(this.usage).length) return;
     this.opts.emit({
       type: "usage.updated",
-      threadId: this.rootThreadId,
+      threadId: this.threadId,
       ...(this.turnId ? { turnId: this.turnId } : {}),
       usage: { ...this.usage },
     });
   }
-}
-
-function int(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) && value >= 0
-    ? Math.round(value)
-    : undefined;
-}
-
-/** An agent plan's entries as todos (unknown statuses count as pending). */
-export function planTodos(entries: readonly AcpPlanEntry[]): Todo[] {
-  return entries
-    .filter((e) => typeof e?.content === "string" && e.content.trim())
-    .map((e, i) => ({ id: String(i + 1), text: e.content, status: todoStatus(e.status) }));
-}
-
-export function todoStatus(status: unknown): Todo["status"] {
-  return status === "in_progress" || status === "completed" ? status : "pending";
-}
-
-/** Update `current` by id with `next`; new ids are appended. */
-function mergeTodos(current: readonly Todo[], next: readonly Todo[]): Todo[] {
-  const out = [...current];
-  for (const todo of next) {
-    const at = todo.id ? out.findIndex((t) => t.id === todo.id) : -1;
-    if (at >= 0) out[at] = todo;
-    else out.push(todo);
-  }
-  return out;
 }

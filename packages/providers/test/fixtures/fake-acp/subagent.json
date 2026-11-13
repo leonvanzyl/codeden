@@ -1,0 +1,114 @@
+[
+  {
+    "update": {
+      "sessionUpdate": "tool_call",
+      "toolCallId": "task-1",
+      "title": "Explore auth",
+      "kind": "other",
+      "status": "in_progress",
+      "rawInput": { "description": "Explore auth", "prompt": "Find where auth is handled" }
+    }
+  },
+  {
+    "update": {
+      "sessionUpdate": "subagent_spawned",
+      "subagentSessionId": "sub-1",
+      "name": "Explore auth",
+      "task": "Find where auth is handled",
+      "capabilities": {},
+      "_meta": { "cursor": { "toolCallId": "task-1", "subagentType": "explore" } }
+    }
+  },
+  {
+    "session": "sub-1",
+    "update": { "sessionUpdate": "current_mode_update", "currentModeId": "ask" }
+  },
+  {
+    "session": "sub-1",
+    "update": {
+      "sessionUpdate": "available_commands_update",
+      "availableCommands": [{ "name": "child-only" }]
+    }
+  },
+  {
+    "session": "sub-1",
+    "update": { "sessionUpdate": "usage_update", "used": 500, "size": 1000 }
+  },
+  {
+    "session": "sub-1",
+    "update": {
+      "sessionUpdate": "tool_call",
+      "toolCallId": "c1",
+      "title": "git push",
+      "kind": "execute",
+      "status": "pending",
+      "rawInput": { "command": "git push --force origin main" }
+    }
+  },
+  {
+    "request": "session/request_permission",
+    "params": {
+      "sessionId": "sub-1",
+      "toolCall": {
+        "toolCallId": "c1",
+        "kind": "execute",
+        "title": "git push",
+        "rawInput": { "command": "git push --force origin main" }
+      },
+      "options": [
+        { "optionId": "allow-once", "name": "Allow once", "kind": "allow_once" },
+        { "optionId": "allow-always", "name": "Always allow", "kind": "allow_always" },
+        { "optionId": "reject-once", "name": "Reject", "kind": "reject_once" }
+      ]
+    }
+  },
+  {
+    "session": "sub-1",
+    "update": {
+      "sessionUpdate": "tool_call_update",
+      "toolCallId": "c1",
+      "status": "completed",
+      "content": [{ "type": "content", "content": { "type": "text", "text": "pushed" } }]
+    }
+  },
+  {
+    "session": "sub-1",
+    "update": {
+      "sessionUpdate": "agent_message_chunk",
+      "content": { "type": "text", "text": "Auth lives in src/auth.ts." }
+    }
+  },
+  {
+    "update": {
+      "sessionUpdate": "subagent_state_update",
+      "subagentSessionId": "sub-1",
+      "state": "completed"
+    }
+  },
+  {
+    "notify": "cursor/task",
+    "params": {
+      "toolCallId": "task-1",
+      "description": "Explore auth",
+      "prompt": "Find where auth is handled",
+      "subagentType": "explore",
+      "durationMs": 1200
+    }
+  },
+  {
+    "update": {
+      "sessionUpdate": "tool_call_update",
+      "toolCallId": "task-1",
+      "status": "completed",
+      "content": [
+        { "type": "content", "content": { "type": "text", "text": "Auth lives in src/auth.ts." } }
+      ]
+    }
+  },
+  {
+    "update": {
+      "sessionUpdate": "agent_message_chunk",
+      "content": { "type": "text", "text": "The subagent found it." }
+    }
+  }
+]

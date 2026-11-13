@@ -64,6 +64,8 @@ export const projects = sqliteTable(
     factoryLimits: json<FactoryLimits>("factory_limits"),
     killSwitch: integer("kill_switch", { mode: "boolean" }).notNull().default(false),
     timezone: text("timezone"),
+    /** Agent sessions run with `CI=true` (§4.2); the migration keeps it on for every project. */
+    agentCiEnv: integer("agent_ci_env", { mode: "boolean" }).notNull().default(true),
     pinned: integer("pinned", { mode: "boolean" }).notNull().default(false),
     /** Manual list position (§13); the migration backfills it from the alphabetical order. */
     sortOrder: integer("sort_order").notNull().default(0),
