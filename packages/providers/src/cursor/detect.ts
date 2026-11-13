@@ -130,7 +130,8 @@ export function parseCursorStatus(
 ): { loggedIn: boolean | null; authMethod: string | null; account: string | null } {
   // biome-ignore lint/suspicious/noControlCharactersInRegex: strips ANSI colour codes.
   const text = output.replace(/\x1b\[[0-9;]*m/g, "");
-  const viaEnv = env.CURSOR_API_KEY ? "api_key" : env.CURSOR_AUTH_TOKEN ? "auth_token" : null;
+  // Both bill the user's Cursor plan, like a login.
+  const viaEnv = env.CURSOR_API_KEY ? "cursor_key" : env.CURSOR_AUTH_TOKEN ? "cursor_token" : null;
   if (
     /not (logged|signed) in|logged out|unauthenticated|please (log|sign) ?in|no (active )?session/i.test(
       text,

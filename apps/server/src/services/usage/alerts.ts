@@ -101,6 +101,7 @@ const PROVIDER_NAMES: Record<string, string> = {
   claude: "Claude",
   codex: "Codex",
   opencode: "OpenCode",
+  cursor: "Cursor",
 };
 
 /** Alerts for current windows at or above `warnPercent` (or flagged by the provider). */

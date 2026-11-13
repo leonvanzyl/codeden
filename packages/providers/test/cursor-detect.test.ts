@@ -43,7 +43,7 @@ describe("parseCursorStatus", () => {
   it("counts an API key in the environment as signed in, without reading it", () => {
     expect(parseCursorStatus("Not logged in", 1, { CURSOR_API_KEY: "secret" })).toEqual({
       loggedIn: true,
-      authMethod: "api_key",
+      authMethod: "cursor_key",
       account: null,
     });
   });

@@ -327,6 +327,15 @@ export const setupChecks: SetupCheck[] = [
     message: "Connected: Anthropic, OpenAI",
   }),
   check({
+    id: "cursor",
+    label: "Cursor",
+    version: "2026.10.22-1a2b3c4",
+    loggedIn: true,
+    authMethod: "cursor",
+    account: "leon@example.com",
+    message: "Signed in",
+  }),
+  check({
     id: "gh",
     label: "GitHub CLI",
     loggedIn: true,

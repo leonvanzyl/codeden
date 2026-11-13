@@ -163,6 +163,9 @@ describe("ledger deltas", () => {
   it("maps auth methods to billing modes", () => {
     expect(billingFromAuthMethod("claude.ai")).toBe("subscription");
     expect(billingFromAuthMethod("chatgpt")).toBe("subscription");
+    // A Cursor login or key bills the Cursor plan.
+    expect(billingFromAuthMethod("cursor")).toBe("subscription");
+    expect(billingFromAuthMethod("cursor_key")).toBe("subscription");
     expect(billingFromAuthMethod("api_key")).toBe("api");
     expect(billingFromAuthMethod("an API key")).toBe("api");
     expect(billingFromAuthMethod(null)).toBe("unknown");
