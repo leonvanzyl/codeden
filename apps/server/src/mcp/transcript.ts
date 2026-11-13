@@ -1,6 +1,7 @@
 import { type Artifact, agentEventToNewEvent, type Item } from "@codeden/contracts";
-import { and, desc, eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { turns } from "../db/schema";
+import { turnsNewestFirst } from "../db/turn-order";
 import { sharedArtifactNotice } from "../services/artifacts";
 import type { AppServices } from "../services/container";
 import { ToolError } from "./define";
@@ -19,7 +20,7 @@ export function currentTurn(services: AppServices, sessionId: string): TurnRef {
     .select()
     .from(turns)
     .where(and(eq(turns.sessionId, sessionId), eq(turns.threadId, threadId)))
-    .orderBy(desc(turns.startedAt))
+    .orderBy(...turnsNewestFirst)
     .limit(5)
     .all();
   const turn = rows.find((t) => t.status === "running") ?? rows[0];

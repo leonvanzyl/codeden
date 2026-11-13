@@ -29,7 +29,7 @@ export interface ThreadState {
   agentType: string | null;
   /** Item ids in display order. */
   itemIds: string[];
-  /** Turn ids in order. */
+  /** Turn ids in start order: the last one is the thread's latest turn. */
   turnIds: string[];
 }
 
@@ -87,7 +87,9 @@ export function transcriptFromSnapshot(snap: SessionSnapshot): TranscriptState {
       turnIds: [],
     };
   }
-  for (const turn of snap.turns) {
+  // Turn ids are random, so never rely on the order they arrive in. The sort is stable, so turns
+  // that started together keep the server's order.
+  for (const turn of [...snap.turns].sort(byStart)) {
     state.turns[turn.id] = { ...turn };
     ensureThread(state, turn.threadId).turnIds.push(turn.id);
   }
@@ -105,6 +107,11 @@ export function transcriptFromSnapshot(snap: SessionSnapshot): TranscriptState {
     state.rootThreadId = Object.values(state.threads).find((t) => !t.parentThreadId)?.id ?? null;
   }
   return state;
+}
+
+/** Compare turns by when they started (ISO timestamps sort as strings). */
+export function byStart(a: { startedAt: string }, b: { startedAt: string }): number {
+  return a.startedAt < b.startedAt ? -1 : a.startedAt > b.startedAt ? 1 : 0;
 }
 
 function ensureThread(state: TranscriptState, id: string): ThreadState {

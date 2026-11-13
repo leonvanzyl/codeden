@@ -19,6 +19,7 @@ import { and, asc, type Column, desc, eq, gt, inArray, lt, or, type SQL, sql } f
 import type { Db } from "../../db/client";
 import { rowToItemRecord, rowToSession, rowToTurn } from "../../db/rows";
 import { automationRuns, checkpoints, items, sessions, turns } from "../../db/schema";
+import { turnsOldestFirst } from "../../db/turn-order";
 import type { EventStore } from "../../events/store";
 import { notFound } from "../errors";
 import { ACTIVE_RUN_STATUSES, ACTIVE_SESSION_STATUSES } from "./conflicts";
@@ -224,7 +225,7 @@ export class SessionRepo {
       .select()
       .from(turns)
       .where(and(eq(turns.sessionId, sessionId), eq(turns.status, "running")))
-      .orderBy(asc(turns.startedAt))
+      .orderBy(...turnsOldestFirst)
       .all();
     const ended = new Set(running.map((t) => t.id));
     const requests = this.db
@@ -356,7 +357,7 @@ export class SessionRepo {
       .select({ id: turns.id })
       .from(turns)
       .where(and(eq(turns.sessionId, session.id), eq(turns.threadId, session.rootThreadId)))
-      .orderBy(asc(turns.startedAt), asc(sql`rowid`))
+      .orderBy(...turnsOldestFirst)
       .all()
       .map((r) => r.id);
   }

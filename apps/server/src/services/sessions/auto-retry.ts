@@ -6,10 +6,11 @@ import {
   type Settings,
   type UserInput,
 } from "@codeden/contracts";
-import { and, desc, eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import type { Db } from "../../db/client";
 import { rowToTurnRecord } from "../../db/rows";
 import { turns } from "../../db/schema";
+import { turnsNewestFirst } from "../../db/turn-order";
 import { awaitsRetryDecision } from "../../events/reducer/retry";
 import type { TurnRecord } from "../../events/reducer/types";
 import type { EventStore } from "../../events/store";
@@ -191,7 +192,7 @@ export class AutoRetry {
       .select()
       .from(turns)
       .where(and(eq(turns.sessionId, sessionId), eq(turns.threadId, session.rootThreadId)))
-      .orderBy(desc(turns.startedAt))
+      .orderBy(...turnsNewestFirst)
       .limit(10)
       .all()
       .map(rowToTurnRecord);

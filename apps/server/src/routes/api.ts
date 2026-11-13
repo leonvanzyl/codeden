@@ -13,6 +13,7 @@ import { asc, eq, inArray } from "drizzle-orm";
 import { Hono } from "hono";
 import { rowToAutomation, rowToItemRecord, rowToSession, rowToThread, rowToTurn } from "../db/rows";
 import { automations, inboxItems, items, sessions, threads, turns } from "../db/schema";
+import { turnsOldestFirst } from "../db/turn-order";
 import type { AppServices } from "../services/container";
 import { badRequest, notFound } from "../services/errors";
 import { clientItemRecord } from "../services/sessions/client-items";
@@ -174,7 +175,14 @@ function buildSessionSnapshot(s: AppServices, sessionId: string): SessionSnapsho
       .where(eq(threads.sessionId, sessionId))
       .all()
       .map(rowToThread),
-    turns: s.db.select().from(turns).where(eq(turns.sessionId, sessionId)).all().map(rowToTurn),
+    // Oldest first, so a thread's last turn is its latest one.
+    turns: s.db
+      .select()
+      .from(turns)
+      .where(eq(turns.sessionId, sessionId))
+      .orderBy(...turnsOldestFirst)
+      .all()
+      .map(rowToTurn),
     items: s.db
       .select()
       .from(items)

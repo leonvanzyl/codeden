@@ -1,6 +1,7 @@
-import type { AgentEvent } from "@codeden/contracts";
+import type { AgentEvent, Item, ItemRecord, SessionSnapshot, Turn } from "@codeden/contracts";
 import { describe, expect, it } from "vitest";
 import { MockWorld } from "@/lib/api/mock/world";
+import { applyTranscriptMessage } from "@/lib/transcript/apply-transcript";
 import {
   activeTurn,
   applyAgentEvent,
@@ -126,6 +127,90 @@ describe("applyAgentEvent", () => {
     expect(threadItems(t, "t-checkout").length).toBe(
       threadItems(world.transcript("s-checkout"), "t-checkout").length,
     );
+  });
+});
+
+describe("turn order", () => {
+  // Turn ids are random, so a snapshot's turns can arrive in any order: here "a" is the latest.
+  const at = (minute: number) => `2026-11-07T10:0${minute}:00.000Z`;
+  const turn = (id: string, minute: number): Turn => ({
+    id,
+    threadId: T,
+    sessionId: "s1",
+    status: "completed",
+    startedAt: at(minute),
+    completedAt: at(minute),
+    error: null,
+    forkPoint: `fp-${id}`,
+  });
+  const record = (turnId: string, position: number, item: Item): ItemRecord => ({
+    sessionId: "s1",
+    threadId: T,
+    turnId,
+    position,
+    item,
+    createdAt: at(0),
+    updatedAt: at(0),
+  });
+  const turnItems = (turnId: string, position: number): ItemRecord[] => [
+    record(turnId, position, {
+      id: `m-${turnId}`,
+      kind: "assistant_message",
+      status: "completed",
+      text: turnId,
+    }),
+    record(turnId, position + 1, {
+      id: `f-${turnId}`,
+      kind: "followups",
+      status: "completed",
+      source: "agent",
+      suggestions: [{ prompt: `after ${turnId}` }],
+    }),
+  ];
+  const base = new MockWorld().sessionSnapshot("s-checkout");
+  const snap: SessionSnapshot = {
+    seq: 1,
+    session: { ...base.session, id: "s1", rootThreadId: T },
+    threads: [
+      {
+        id: T,
+        sessionId: "s1",
+        parentThreadId: null,
+        parentItemId: null,
+        title: null,
+        agentType: null,
+        createdAt: at(0),
+      },
+    ],
+    turns: [turn("a", 3), turn("b", 1), turn("c", 2)],
+    items: [...turnItems("b", 0), ...turnItems("c", 2), ...turnItems("a", 4)],
+  };
+
+  it("builds a snapshot's turns in start order, whatever their ids", () => {
+    const s = transcriptFromSnapshot(snap);
+    expect(s.threads[T]?.turnIds).toEqual(["b", "c", "a"]);
+    expect(latestFollowups(s, T)?.map((f) => f.prompt)).toEqual(["after a"]);
+    const ends = buildTimeline(s, T).flatMap((r) =>
+      r.type === "turn-end" ? [[r.turn.id, r.latest]] : [],
+    );
+    expect(ends).toEqual([
+      ["b", false],
+      ["c", false],
+      ["a", true],
+    ]);
+  });
+
+  it("places turns from a transcript message by start time", () => {
+    const first = transcriptFromSnapshot({ ...snap, turns: [turn("b", 1)], items: [] });
+    const s = applyTranscriptMessage(first, {
+      type: "transcript",
+      sessionId: "s1",
+      seq: 2,
+      threads: [],
+      turns: [turn("a", 3), turn("c", 2)],
+      items: [],
+    });
+    expect(s.threads[T]?.turnIds).toEqual(["b", "c", "a"]);
   });
 });
 
