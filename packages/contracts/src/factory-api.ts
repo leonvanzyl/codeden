@@ -177,7 +177,7 @@ export const FactoryItem = z.object({
   attempts: z.int().nonnegative(),
   /** Why it was rejected, failed or escalated. */
   reason: z.string().nullable(),
-  /** Why it failed: its own work, the infrastructure, or stuck until a person looks (see `FactoryFailureKind`). */
+  /** Why it failed or was escalated: its own work, the infrastructure, or stuck until a person looks (see `FactoryFailureKind`). */
   failureKind: FactoryFailureKind.nullable().default(null),
   /**
    * The pull request a rebuild replaced: after three requests to rebase it still conflicted, so

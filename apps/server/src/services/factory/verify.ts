@@ -17,7 +17,6 @@ import { joinQueue, leaveQueue } from "./queue";
 import {
   advanceConflicting,
   baseBranchOf,
-  recheckOf,
   restoreForAudit,
   settleConflict,
   trackedHead,
@@ -26,6 +25,7 @@ import {
   worktreeSettled,
 } from "./rebase";
 import { adoptAgentPr } from "./rebuild";
+import { recheckOf } from "./recheck";
 import { ensureReviewer, reviewerStalled } from "./reviewer";
 import { mayAutoMerge } from "./trust";
 
