@@ -4,6 +4,7 @@ import { basename, isAbsolute, relative, resolve } from "node:path";
 import type { GitHubRepo, Session } from "@codeden/contracts";
 import { type ArtifactService, MAX_ATTACHMENT_BYTES } from "../artifacts";
 import { badRequest, forbidden, notFound } from "../errors";
+import { assertNotSecret } from "../secret-files";
 import { sessionWorkdir } from "../sessions/workdir";
 import type { GithubClient } from "./client";
 import { commitEvidence, type EvidenceFile, evidenceComment } from "./evidence";
@@ -44,12 +45,15 @@ function isInside(root: string, path: string): boolean {
 
 /**
  * Read evidence sources, confined to the session's worktree, the temp folder and its own
- * artifacts (by id, or by the path `browser_screenshot` prints).
+ * artifacts (by id, or by the path `browser_screenshot` prints). Secrets files and CodeDen's
+ * own credential files (in `home`, its data directory) are refused wherever they are, since
+ * evidence is published to GitHub.
  */
 export function readEvidence(
   session: Session,
   artifacts: ArtifactService,
   sources: EvidenceSource[],
+  home?: string,
 ): EvidenceFile[] {
   if (sources.length > MAX_EVIDENCE_FILES) {
     throw badRequest(`Attach at most ${MAX_EVIDENCE_FILES} files at once`);
@@ -69,6 +73,7 @@ export function readEvidence(
       if (!sameOwner) throw forbidden(`Artifact ${source.artifactId} belongs to another project`);
       file = artifacts.filePath(artifact);
       name = source.name ?? artifact.name;
+      assertNotSecret({ realPath: file, names: [artifact.name, name] }, home);
     } else if (source.path) {
       const absolute = resolve(cwd, source.path);
       if (!existsSync(absolute) || !statSync(absolute).isFile()) {
@@ -81,6 +86,9 @@ export function readEvidence(
         );
       }
       name = source.name ?? basename(file);
+      // A stored artifact's file has a generated name; its original name counts too.
+      const stored = artifacts.artifactForPath(file)?.name;
+      assertNotSecret({ realPath: file, names: [source.path, stored, name] }, home);
     } else {
       throw badRequest("Each file needs a path or an artifactId");
     }
@@ -100,6 +108,7 @@ export async function attachEvidence(
   session: Session,
   repo: GitHubRepo,
   input: AttachEvidenceInput,
+  home?: string,
 ): Promise<AttachEvidenceResult> {
   const target =
     input.target ??
@@ -111,7 +120,7 @@ export async function attachEvidence(
   if (!target) {
     throw badRequest("This session has no pull request or issue yet; pass target", "no_target");
   }
-  const files = readEvidence(session, artifacts, input.files ?? []);
+  const files = readEvidence(session, artifacts, input.files ?? [], home);
   if (files.length === 0 && !input.summary && !input.testOutput) {
     throw badRequest("Pass files, a summary or test output");
   }

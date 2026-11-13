@@ -170,6 +170,8 @@ export function createGithubEnv(): GithubEnv {
     inbox,
     exec,
     secrets,
+    // The data directory holds `artifacts/` like a real home, and is the sessions' worktree.
+    home: dir,
     fetch: gh.fetch,
     baseUrl: "https://api.github.test",
   });

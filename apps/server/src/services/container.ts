@@ -254,6 +254,7 @@ export function createServices(opts: ServicesOptions): AppServices {
     inbox,
     exec,
     secrets: opts.secrets,
+    home: opts.paths.home,
     ...opts.github,
     log: opts.log,
   });

@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { basename, extname, isAbsolute, relative, resolve } from "node:path";
 import { z } from "zod";
 import { MAX_ATTACHMENT_BYTES } from "../../services/artifacts";
+import { assertNotSecret } from "../../services/secret-files";
 import { defineTool, ToolError } from "../define";
 import { postSharedArtifact } from "../transcript";
 
@@ -64,10 +65,13 @@ export const shareToChat = defineTool({
           "Only files inside your working directory, the temp folder or your own CodeDen artifacts can be shared",
         );
       }
+      name = input.name ?? basename(real);
+      // Artifacts can be published with attach_evidence, so secrets never become one.
+      const stored = services.artifacts.artifactForPath(real)?.name;
+      assertNotSecret({ realPath: real, names: [input.path, stored, name] }, services.paths.home);
       if (statSync(real).size > MAX_ATTACHMENT_BYTES)
         throw new ToolError("File is larger than 20 MB");
       bytes = readFileSync(real);
-      name = input.name ?? basename(real);
       mediaType =
         input.mediaType ?? MEDIA_TYPES[extname(real).toLowerCase()] ?? "application/octet-stream";
     } else {
@@ -76,6 +80,7 @@ export const shareToChat = defineTool({
       if (bytes.length > MAX_ATTACHMENT_BYTES) throw new ToolError("Image is larger than 20 MB");
       mediaType = input.mediaType ?? "image/png";
       name = input.name ?? `image${extensionFor(mediaType)}`;
+      assertNotSecret({ names: [name] }, services.paths.home);
     }
     const isImage = mediaType.startsWith("image/");
     const artifact = services.artifacts.save({
