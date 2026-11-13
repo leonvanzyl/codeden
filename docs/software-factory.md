@@ -53,7 +53,7 @@ The loop runs its regular check every 30 seconds: it moves work in progress, pic
 
 Once a work item is finished (merged, reverted, rejected or failed), the factory [archives](workbench.md#archiving-and-worktree-cleanup) its sessions: the builder and its reviewers leave the sidebar and their worktrees are removed, so a busy factory fills neither your session list nor your disk. Nothing is lost. The branch, the checkpoints and the transcript stay, archived sessions are under the project's **Archived** filter, clicking the item on the panel still opens its session, and messaging an archived session brings it back with its worktree. A worktree with uncommitted changes is kept, as with any archive.
 
-Work that isn't finished keeps its sessions: a pull request escalated to you, a merge whose CI on the default branch is still being watched, and an item that failed only on the size limit while its pull request is open (the PM may still allow it). A session still finishing a turn is never cut off; it is archived once the turn ends. After a **Retry**, the earlier attempt's sessions are archived the same way, unless they were archived already. The factory archives an item's sessions only once, so a session you unarchive stays, even through a retry. The scout and its area reviewers are long-lived and never archived this way.
+Work that isn't finished keeps its sessions: a pull request escalated to you, a merge whose CI on the default branch is still being watched, and an item that failed only on the size limit while its pull request is open (the PM may still allow it). A session still finishing a turn is never cut off; it is archived once the turn ends. After a **Retry**, the earlier attempt's sessions are archived the same way, unless they were archived already. Its pull request (and any the factory still had to close) is closed with a link once the new attempt's pull request is open; until then the panel lists it as superseded. The factory archives an item's sessions only once, so a session you unarchive stays, even through a retry. The scout and its area reviewers are long-lived and never archived this way.
 
 ## Who the factory works for
 
@@ -218,6 +218,8 @@ An item that failed for a reason outside its code goes back by itself on the nex
 - the builder or reviewer session died: an error, a runner restart, a message that raced a running turn. It goes back once the runner offers that provider again;
 - the builder session is gone: a fresh builder picks the work up, or an integrator looks after its open PR;
 - CI never started on the head commit although GitHub Actions are on. The factory starts it again: it updates the branch when the PR is behind the default branch, otherwise the builder pushes an empty commit. When the builder's session is gone, an integrator takes the PR over to push it, once an agent is free. CI isn't timed out until that happened.
+
+What the item still owes comes back with it. If the reviewer hadn't re-checked a conflict resolution yet, a fresh reviewer does, and the earlier approval doesn't count until that re-check approves.
 
 Items that failed this way before this was added are recognised by their reason and recovered too.
 

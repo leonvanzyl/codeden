@@ -92,7 +92,9 @@ export function pullRequests(
         pr: ref,
         state: "superseded",
         queuePosition: null,
-        note: i.pr ? `Superseded by #${i.pr.number}: closing it` : "Superseded: closing it",
+        note: i.pr
+          ? `Superseded by #${i.pr.number}: closing it`
+          : "Superseded: closes once the new pull request is open",
       });
     }
     if (position.has(i.id)) continue;

@@ -89,13 +89,14 @@ export async function rebuild(
 /** A PR the item no longer stands for and the factory still has to close. */
 export interface ReplacedPr {
   number: number;
-  /** Why it was replaced: a rebuild, or an integrator's new PR. */
-  by: "rebuild" | "integrator";
+  /** Why it was replaced: a rebuild, or a newer PR (an integrator's, or a retry's). */
+  by: "rebuild" | "newer";
 }
 
 /**
- * The item's PRs waiting to be closed because a newer one replaced them: a rebuild's old PR
- * once the new one is open, and PRs an integrator replaced (`supersede_<number>`).
+ * The item's PRs waiting to be closed because a newer one replaced them: a rebuild's old PR,
+ * and PRs replaced by an integrator's new PR or by a retry (`supersede_<number>`). Each is
+ * closed once the item has its new PR, with a link to it.
  */
 export function replacedPrs(item: FactoryItem): ReplacedPr[] {
   const out: ReplacedPr[] = [];
@@ -105,7 +106,7 @@ export function replacedPrs(item: FactoryItem): ReplacedPr[] {
   }
   for (const k of Object.keys(item.nudges)) {
     const n = Number(k.slice(SUPERSEDE.length));
-    if (k.startsWith(SUPERSEDE) && Number.isInteger(n)) out.push({ number: n, by: "integrator" });
+    if (k.startsWith(SUPERSEDE) && Number.isInteger(n)) out.push({ number: n, by: "newer" });
   }
   return out;
 }
@@ -116,27 +117,45 @@ export function pendingClosures(nudges: FactoryItem["nudges"]): FactoryItem["nud
 }
 
 /**
+ * The PR ownership a retried item keeps (Retry starts a fresh attempt with empty nudges): the
+ * PRs still to be closed, whether a rebuild's old PR was closed already, and its own open PR,
+ * which the new attempt replaces. They are closed with a link once the new PR is open, so
+ * none is left behind.
+ */
+export function ownershipAfterRetry(ctx: FactoryContext, item: FactoryItem): FactoryItem["nudges"] {
+  const keep = pendingClosures(item.nudges);
+  const closed = item.nudges[REPLACED_CLOSED];
+  if (closed) keep[REPLACED_CLOSED] = closed;
+  if (item.pr) {
+    const state = ctx.github.prRef(item.projectId, item.pr.number)?.state ?? item.pr.state;
+    if (isOpen(state)) keep[`${SUPERSEDE}${item.pr.number}`] = ctx.now().toISOString();
+  }
+  return keep;
+}
+
+/**
  * Close the PRs the factory's items replaced, with a link to the replacement. Its own loop step,
  * whatever the item's stage, so a replacement that merges (or an item that fails) never leaves
  * the old PR open: a close GitHub refused is tried again on the next tick until it succeeds.
+ * Until the item has its new PR (after a retry or a rebuild), they wait, listed as superseded.
  */
 export async function closeReplacedPrs(ctx: FactoryContext, project: Project): Promise<void> {
   for (const item of ctx.store.items(project.id)) {
     const current = item.pr;
+    if (!current) continue;
     for (const old of replacedPrs(item)) {
+      if (old.number === current.number) continue;
       const state = ctx.github.prRef(project.id, old.number)?.state ?? "open";
       if (isOpen(state)) {
         const why =
           old.by === "rebuild"
             ? "which redoes this work from the latest default branch"
-            : "which resolves this pull request's merge conflicts";
-        // Only after a rebuild of an adopted PR is there no newer PR yet to link to.
-        const by = current ? `#${current.number} (${current.url}), ${why}` : "a newer pull request";
+            : "which carries on this work";
         try {
           await ctx.github.closePr(
             project.id,
             old.number,
-            `Superseded by ${by}. Closed by the CodeDen factory.`,
+            `Superseded by #${current.number} (${current.url}), ${why}. Closed by the CodeDen factory.`,
           );
         } catch (error) {
           ctx.log?.(`factory: closing #${old.number}: ${errorMessage(error)}`);
@@ -145,7 +164,7 @@ export async function closeReplacedPrs(ctx: FactoryContext, project: Project): P
       }
       const at = ctx.now().toISOString();
       ctx.store.updateItem(item.id, (i) => {
-        if (old.by === "integrator") {
+        if (old.by === "newer") {
           const { [`${SUPERSEDE}${old.number}`]: _done, ...nudges } = i.nudges;
           return { ...i, nudges };
         }

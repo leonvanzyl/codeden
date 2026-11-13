@@ -62,7 +62,13 @@ function openPr(ctx: FactoryContext, project: Project, item: FactoryItem, builde
   return open(builder.pr ?? ctx.github.prForSession(project.id, builder.id, builder.branch));
 }
 
-/** Nudges of the earlier attempt that would stop the fresh one at once. */
+/**
+ * The nudges a recovered item starts from: the earlier attempt's waits and reminders are
+ * dropped (they would stop the fresh one at once), but every obligation it still owes is kept:
+ * its recoveries, revise rounds and rebase requests, a conflict resolution the reviewer still
+ * has to re-check (`recheck_<old head>`, sent again to whichever reviewer takes it), and PRs
+ * still to be closed.
+ */
 function freshNudges(nudges: FactoryItem["nudges"], at: string): FactoryItem["nudges"] {
   const keep = Object.entries(nudges).filter(
     ([k]) =>
@@ -70,6 +76,7 @@ function freshNudges(nudges: FactoryItem["nudges"], at: string): FactoryItem["nu
       k.startsWith("fix_") ||
       k.startsWith("rebase_") ||
       k.startsWith("conflict_from_") ||
+      (k.startsWith("recheck_") && k !== "recheck_sent") ||
       k.startsWith("supersede_"),
   );
   return {
@@ -145,7 +152,9 @@ async function recoverOne(
       pr,
       // A builder that is gone is no PR agent any more: conflicts and CI go to an integrator.
       builderSessionId: builder ? i.builderSessionId : null,
-      reviewerSessionId: reviewerDead && !i.review ? null : i.reviewerSessionId,
+      // A dead reviewer is let go; a fresh one takes whatever review is still owed (the
+      // whole review, or only a pending re-check, with the earlier verdict kept).
+      reviewerSessionId: reviewerDead ? null : i.reviewerSessionId,
       note: "Back in verification after a failure outside its code",
       // A fresh CI clock: the head is timed again from now. CI that never started is started
       // again by the verify step (`ci-kick.ts`).
