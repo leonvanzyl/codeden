@@ -1,4 +1,4 @@
-import type { FactoryStats } from "@codeden/contracts";
+import type { FactoryPrEntry, FactoryStats } from "@codeden/contracts";
 import type { FixtureWorkItem } from "./factory-fixture-types";
 import { gh } from "./helpers";
 
@@ -84,6 +84,39 @@ export const factoryViewRecent: FixtureWorkItem[] = [
     stepMinutesAgo: 140,
     reason: "Review requested changes twice: the estimate ignores the warehouse cut-off time",
     failureKind: "checks",
+  },
+  {
+    id: "fw-21",
+    title: "Retry failed card payments",
+    workKey: "issue:140",
+    issue: sf.issue(140, "Payment retries"),
+    pr: sf.pr(62, "Payment retries", "open"),
+    stage: "failed",
+    type: "bug",
+    step: "stopped",
+    stepMinutesAgo: 60 * 26,
+    reason: "Rebuilt once and still conflicting with main",
+    failureKind: "stuck",
+  },
+];
+
+/** A stuck pull request, and a superseded one listed after its item's current PR. */
+export const factoryViewPrs: FactoryPrEntry[] = [
+  {
+    itemId: "fw-21",
+    title: "Retry failed card payments",
+    pr: sf.pr(62, "Payment retries", "open"),
+    state: "stuck",
+    queuePosition: null,
+    note: "Rebuilt once and still conflicting: in your inbox",
+  },
+  {
+    itemId: "fw-15",
+    title: "Wishlist button on product cards",
+    pr: sf.pr(49, "Wishlist (first try)", "open"),
+    state: "superseded",
+    queuePosition: null,
+    note: "Superseded by #61: closing it",
   },
 ];
 

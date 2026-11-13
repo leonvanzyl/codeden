@@ -1,4 +1,4 @@
-import type { FactoryItem, PipelineStep, WorkType } from "@codeden/contracts";
+import type { FactoryItem } from "@codeden/contracts";
 import { Link } from "@tanstack/react-router";
 import { Check, CircleDot, ExternalLink, GitPullRequest } from "lucide-react";
 import type { ReactNode } from "react";
@@ -17,49 +17,15 @@ import { useFactoryItem } from "@/lib/factory";
 import { ago } from "@/lib/format";
 import { platform } from "@/lib/platform";
 import { cn } from "@/lib/utils";
-import { CARD_STATE_LABEL, cardNumber, type ViewCard } from "./stages";
+import { cardNumber, cardStateLabel, type ViewCard } from "./stages";
+import { stepTrail } from "./step-trail";
 import { StateMarker, TypeBadge } from "./view-card";
 
-/** The steps of each pipeline, in order (§10.1). */
-const PIPELINE_STEPS: Record<WorkType, PipelineStep[]> = {
-  bug: ["intake", "reproduce", "implement", "review", "merge"],
-  feature: ["intake", "analyze", "implement", "review", "merge"],
-  docs: ["intake", "implement", "review", "merge"],
-};
-
-type StepMark = "done" | "current" | "next";
-
-/**
- * Each step of the item's pipeline marked done, current or still to come, from the step the
- * status reports (the one the board draws it on). A queued item has passed Identify type and
- * waits on its first step; a merged one has passed them all.
- */
-export function stepTrail(item: {
-  type: WorkType | null;
-  step: PipelineStep;
-  mergedAt: string | null;
-}): Array<{ step: PipelineStep; mark: StepMark }> {
-  const steps = PIPELINE_STEPS[item.type ?? "feature"];
-  const step = item.step;
-  const at =
-    step === "done" || item.mergedAt
-      ? steps.length
-      : step === "queued"
-        ? 1
-        : step === "stopped" || step === "ignored"
-          ? -1
-          : steps.indexOf(step);
-  return steps.map((s, i) => ({
-    step: s,
-    mark: at === -1 ? "next" : i < at ? "done" : i === at && step !== "queued" ? "current" : "next",
-  }));
-}
-
 function Trail({ item, card }: { item: FactoryItem; card: ViewCard }) {
-  const trail = stepTrail({ type: item.type, step: card.item.step, mergedAt: item.mergedAt });
+  const trail = stepTrail({ type: item.type, step: card.item.step, stage: card.item.stage });
   return (
     <ol className="flex flex-col gap-1" aria-label="Pipeline steps">
-      {trail.map(({ step, mark }) => (
+      {trail.map(({ step, mark, note }) => (
         <li
           key={step}
           className={cn(
@@ -80,7 +46,12 @@ function Trail({ item, card }: { item: FactoryItem; card: ViewCard }) {
               )}
             />
           )}
-          {stepLabel(step, item.type)}
+          <span>
+            {stepLabel(step, item.type)}
+            {note && (
+              <span className="block text-2xs font-normal text-muted-foreground">{note}</span>
+            )}
+          </span>
           {mark === "current" && <span className="sr-only">(current step)</span>}
         </li>
       ))}
@@ -233,8 +204,8 @@ export function ItemSheet({
                 <span>{card.item.title}</span>
               </SheetTitle>
               <SheetDescription className="flex items-center gap-1.5 text-2xs">
-                <StateMarker state={card.state} />
-                {CARD_STATE_LABEL[card.state]}
+                {card.state && <StateMarker state={card.state} />}
+                {cardStateLabel(card)}
                 <TypeBadge type={card.item.type} />
               </SheetDescription>
             </SheetHeader>

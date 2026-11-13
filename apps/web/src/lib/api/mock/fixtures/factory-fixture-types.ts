@@ -45,6 +45,8 @@ export interface FixtureWorkItem {
   note?: string;
   reason?: string;
   failureKind?: FactoryFailureKind;
+  /** Merge check counts, when its PR has no `mergeChecks` fixture. */
+  checks?: { passed: number; failed: number; total: number };
 }
 
 export type FixtureCheckName =

@@ -37,7 +37,7 @@ export const VIEW_STAGES = [
   {
     id: "merge",
     label: "Merge queue",
-    hint: "Every check passed. With auto-merge on they merge one at a time, in this order; otherwise they wait for you.",
+    hint: "Every check passed. With auto-merge on they merge one at a time, in this order; otherwise they wait for you. Stuck pull requests wait here for a person too.",
   },
   {
     id: "merged",
@@ -55,17 +55,16 @@ export const NEEDS_YOU_LABEL = "Needs you";
 
 /**
  * A card's state marker: an agent is working (`running`), it waits on the factory (a free
- * agent, CI, its turn to merge: `waiting`), it waits on a person (`person`), it failed, or it
- * merged (`done`).
+ * agent, CI, its turn to merge: `waiting`), it waits on a person (`person`), or it failed.
+ * Merged work has no marker (`null`): the Merged stage says what happened to it.
  */
-export type CardState = "running" | "waiting" | "person" | "failed" | "done";
+export type CardState = "running" | "waiting" | "person" | "failed";
 
 export const CARD_STATE_LABEL: Record<CardState, string> = {
   running: "Running",
   waiting: "Waiting",
   person: "Needs a person",
   failed: "Failed",
-  done: "Merged",
 };
 
 /** What the view knows about a session from the snapshot. */
@@ -78,8 +77,9 @@ export interface SessionInfo {
 export interface ViewCard {
   item: FactoryWorkItem;
   place: ViewPlace;
-  state: CardState;
-  /** The pull request entry the factory keeps for it, if any. */
+  /** Null for merged work, which needs nothing more. */
+  state: CardState | null;
+  /** The entry the factory keeps for its current pull request, if any. */
   pr: FactoryPrEntry | null;
   /** What it is doing now, in a few words. */
   activity: string;
@@ -94,6 +94,7 @@ export interface ViewPipeline {
   needsYou: ViewCard[];
   /** Cards that wait on a person, wherever they are drawn. */
   needsPerson: number;
+  /** Failed work (the item, or its agent's session), wherever it is drawn. */
   failed: number;
 }
 
@@ -104,6 +105,24 @@ const CLOSED_PR = new Set(["merged", "superseded"]);
 
 function sameLocalDay(iso: string, now: number): boolean {
   return new Date(iso).toDateString() === new Date(now).toDateString();
+}
+
+/**
+ * The entry for an item's current pull request. An item can have several: superseded ones stay
+ * listed (after the current one) until the factory has closed them, and a rebuild lists the PR it
+ * replaces. The one matching the item's PR wins, else the first that isn't superseded.
+ */
+export function currentPr(
+  w: Pick<FactoryWorkItem, "id" | "pr">,
+  entries: readonly FactoryPrEntry[],
+): FactoryPrEntry | null {
+  const mine = entries.filter((p) => p.itemId === w.id);
+  return (
+    mine.find((p) => w.pr !== null && p.pr.number === w.pr.number) ??
+    mine.find((p) => p.state !== "superseded") ??
+    mine[0] ??
+    null
+  );
 }
 
 /** A failed item still worth a person's look: it failed in the last day or still owns a PR. */
@@ -118,6 +137,8 @@ export function placeOf(
   pr: FactoryPrEntry | null,
   now: number,
 ): ViewPlace | null {
+  // A stuck pull request stays in the merge queue, marked as waiting on a person.
+  if (pr?.state === "stuck") return "merge";
   switch (w.stage) {
     case "candidate":
       return "intake";
@@ -146,11 +167,11 @@ export function stateOf(
   w: FactoryWorkItem,
   pr: FactoryPrEntry | null,
   session: SessionInfo | undefined,
-): CardState {
+): CardState | null {
+  if (w.stage === "escalated" || pr?.state === "stuck") return "person";
   if (w.stage === "failed") return "failed";
-  if (w.stage === "escalated") return "person";
-  if (w.stage === "merged") return "done";
-  if (pr?.state === "waiting_for_you" || pr?.state === "stuck") return "person";
+  if (w.stage === "merged") return null;
+  if (pr?.state === "waiting_for_you") return "person";
   if (w.stage === "watching") return "running";
   if (session?.status === "waiting") return "person";
   if (session?.status === "failed") return "failed";
@@ -180,8 +201,6 @@ export function viewPipeline(
   sessions: ReadonlyMap<string, SessionInfo>,
   now: number = Date.now(),
 ): ViewPipeline {
-  const prs = new Map(f.pullRequests.map((p) => [p.itemId, p]));
-  const prOrder = new Map(f.pullRequests.map((p, i) => [p.itemId, i]));
   const stages: Record<ViewStageId, ViewCard[]> = {
     intake: [],
     type: [],
@@ -192,10 +211,11 @@ export function viewPipeline(
   };
   const needsYou: ViewCard[] = [];
   const seen = new Set<string>();
-  for (const w of [...f.backlog, ...f.inProgress, ...f.recent]) {
+  // `viewRecent` holds the finished work the view needs beyond the capped `recent` list.
+  for (const w of [...f.backlog, ...f.inProgress, ...f.viewRecent, ...f.recent]) {
     if (seen.has(w.id)) continue;
     seen.add(w.id);
-    const pr = prs.get(w.id) ?? null;
+    const pr = currentPr(w, f.pullRequests);
     const place = placeOf(w, pr, now);
     if (!place) continue;
     const sessionId = w.activeSessionId ?? w.sessionId;
@@ -215,15 +235,19 @@ export function viewPipeline(
   const oldest = (a: ViewCard, b: ViewCard) => Date.parse(a.since) - Date.parse(b.since);
   stages.building.sort(oldest);
   stages.reviewing.sort(oldest);
-  // The merge queue in the order it merges, then the PRs that aren't queued.
+  // The merge queue in the order it merges, then the other PRs in the server's order.
+  const inf = Number.POSITIVE_INFINITY;
+  const listed = (c: ViewCard) => {
+    const at = c.pr ? f.pullRequests.indexOf(c.pr) : -1;
+    return at === -1 ? inf : at;
+  };
   stages.merge.sort((a, b) => {
-    const qa = a.pr?.queuePosition ?? Number.POSITIVE_INFINITY;
-    const qb = b.pr?.queuePosition ?? Number.POSITIVE_INFINITY;
+    const qa = a.pr?.queuePosition ?? inf;
+    const qb = b.pr?.queuePosition ?? inf;
     if (qa !== qb) return qa - qb;
-    return (
-      (prOrder.get(a.item.id) ?? Number.POSITIVE_INFINITY) -
-      (prOrder.get(b.item.id) ?? Number.POSITIVE_INFINITY)
-    );
+    const la = listed(a);
+    const lb = listed(b);
+    return la === lb ? 0 : la - lb;
   });
   stages.merged.sort(
     (a, b) =>
@@ -235,7 +259,7 @@ export function viewPipeline(
     stages,
     needsYou,
     needsPerson: all.filter((c) => c.state === "person").length,
-    failed: all.filter((c) => c.state === "failed").length,
+    failed: all.filter((c) => c.state === "failed" || c.item.stage === "failed").length,
   };
 }
 
@@ -244,6 +268,23 @@ export function cardNumber(w: FactoryWorkItem): string {
   if (w.issue) return `#${w.issue.number}`;
   if (w.pr) return `PR #${w.pr.number}`;
   return w.title.slice(0, 18);
+}
+
+/** The card's state in words, for its accessible name and the sheet. */
+export function cardStateLabel(card: Pick<ViewCard, "state">): string {
+  return card.state ? CARD_STATE_LABEL[card.state] : "Merged";
+}
+
+/**
+ * The pull request's place and state in a few words, e.g. "Queued #2" or "Updating · #1".
+ * Null when it says nothing the card doesn't (checking, merged, superseded).
+ */
+export function prLabel(pr: FactoryPrEntry | null, labels: Record<string, string>): string | null {
+  if (!pr || pr.state === "checking" || pr.state === "merged" || pr.state === "superseded")
+    return null;
+  if (pr.state === "queued") return pr.queuePosition ? `Queued #${pr.queuePosition}` : "Queued";
+  const label = labels[pr.state] ?? pr.state;
+  return pr.queuePosition ? `${label} · #${pr.queuePosition}` : label;
 }
 
 /** Where each card is now, for announcing moves. */

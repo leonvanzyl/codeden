@@ -56,6 +56,7 @@ function work(w: FixtureWorkItem): FactoryWorkItem {
         ? "Ready to merge: every check passed (auto-merge is off)"
         : null),
     failureKind: w.failureKind ?? null,
+    checks: w.checks ?? null,
     stepSince: since,
     mergedAt: w.stage === "merged" || w.stage === "watching" ? since : null,
     finishedAt: FINISHED.includes(w.stage) ? since : null,
@@ -84,7 +85,14 @@ export function mockFactoryApi(world: MockWorld): FactoryApi {
       tuning: FactoryTuning.parse({}),
       activeSessions: Math.min(f.inProgress.length, f.limits.maxConcurrentSessions),
       backlog: f.backlog.map(work),
-      inProgress: f.inProgress.map(work),
+      inProgress: f.inProgress.map(work).map((w) => {
+        // Check counts from the fixture's merge checks of the same pull request.
+        const c = f.mergeChecks.find((m) => m.prNumber === w.pr?.number)?.checks;
+        if (!c) return w;
+        const passed = c.filter((x) => x.state === "pass" || x.state === "skipped").length;
+        const failed = c.filter((x) => x.state === "fail").length;
+        return { ...w, checks: { passed, failed, total: c.length } };
+      }),
       recent: f.recent.map(work),
       ignored: f.ignored.map(work),
       githubLogin: "hearth-co",

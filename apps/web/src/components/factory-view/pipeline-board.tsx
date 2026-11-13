@@ -222,7 +222,13 @@ export function PipelineBoard({
       </div>
       <NeedsYou cards={pipeline.needsYou} now={now} onOpen={onOpen} wide={wide} />
       <div
-        className={cn(wide ? "grid min-h-0 flex-1 grid-cols-6 gap-2" : "flex flex-col gap-2")}
+        // Six columns that never squeeze a card below a readable width: past that the pipeline
+        // scrolls sideways instead.
+        className={cn(
+          wide
+            ? "grid min-h-0 flex-1 grid-cols-[repeat(6,minmax(9rem,1fr))] gap-2 overflow-x-auto scroll-thin"
+            : "flex flex-col gap-2",
+        )}
         data-testid="factory-view-pipeline"
       >
         {VIEW_STAGES.map((stage, i) => {

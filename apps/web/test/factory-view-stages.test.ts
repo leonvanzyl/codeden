@@ -5,13 +5,16 @@ import {
   type FactoryWorkItem,
 } from "@codeden/contracts";
 import { describe, expect, it } from "vitest";
-import { stepTrail } from "@/components/factory-view/item-sheet";
+import { latestTurns } from "@/components/factory-view/latest-turns";
 import {
+  currentPr,
   describeMoves,
   placesOf,
+  prLabel,
   type SessionInfo,
   viewPipeline,
 } from "@/components/factory-view/stages";
+import { stepTrail } from "@/components/factory-view/step-trail";
 import { openPrs, shortDuration, viewStats } from "@/components/factory-view/view-stats";
 
 /**
@@ -52,6 +55,7 @@ function w(id: string, n: number, patch: Partial<FactoryWorkItem>): FactoryWorkI
     stepSince: minutesAgo(10),
     mergedAt: null,
     finishedAt: null,
+    checks: null,
     updatedAt: minutesAgo(1),
     ...patch,
   };
@@ -173,7 +177,8 @@ describe("the Factory view's pipeline (#181)", () => {
     expect(state("escalated")).toBe("person");
     expect(state("failed")).toBe("failed");
     expect(state("watching")).toBe("running");
-    expect(state("merged")).toBe("done");
+    // Merged work needs nothing more: no marker.
+    expect(state("merged")).toBeNull();
     expect(p.needsPerson).toBe(3);
     expect(p.failed).toBe(2);
   });
@@ -265,29 +270,197 @@ describe("the Factory view's figures (#181)", () => {
 
 describe("the item sheet's steps (#181)", () => {
   const marks = (item: Parameters<typeof stepTrail>[0]) =>
-    stepTrail(item).map((s) => `${s.step}:${s.mark}`);
+    stepTrail(item).map((s) => `${s.step}:${s.mark}${s.note ? ` (${s.note})` : ""}`);
 
   it("marks the steps of the item's pipeline done, current or next", () => {
-    expect(marks({ type: "bug", step: "implement", mergedAt: null })).toEqual([
+    expect(marks({ type: "bug", step: "implement", stage: "building" })).toEqual([
       "intake:done",
       "reproduce:done",
       "implement:current",
       "review:next",
       "merge:next",
     ]);
-    // Queued: typed, waiting on its first step.
-    expect(marks({ type: "docs", step: "queued", mergedAt: null })).toEqual([
+  });
+
+  it("marks the waiting step of a queued item and keeps Merge current while CI is watched", () => {
+    // Queued: typed, waiting for an agent on its first step.
+    expect(marks({ type: "docs", step: "queued", stage: "backlog" })).toEqual([
       "intake:done",
-      "implement:next",
+      "implement:current (Waiting for a free agent)",
       "review:next",
       "merge:next",
     ]);
-    expect(marks({ type: "feature", step: "merge", mergedAt: minutesAgo(3) })).toEqual([
+    // Merged automatically, main CI still watched: not done yet.
+    expect(marks({ type: "feature", step: "merge", stage: "watching" })).toEqual([
       "intake:done",
       "analyze:done",
       "implement:done",
       "review:done",
-      "merge:done",
+      "merge:current (Merged; watching CI on the default branch)",
     ]);
+    expect(
+      marks({ type: "feature", step: "done", stage: "merged" }).every((m) => m.endsWith(":done")),
+    ).toBe(true);
+    // A stopped item has no current step.
+    expect(
+      stepTrail({ type: "bug", step: "stopped", stage: "failed" }).some(
+        (s) => s.mark === "current",
+      ),
+    ).toBe(false);
+  });
+});
+
+describe("the factory's pull requests on the view (#181)", () => {
+  it("keeps an item's current PR and queue place when a superseded PR is listed after it", () => {
+    // As the server lists them: the queue first, then the others, superseded ones among them.
+    const prs = [
+      pr("a", 11, { state: "updating", queuePosition: 1 }),
+      pr("b", 12, { state: "queued", queuePosition: 2 }),
+      pr("a", 9, { state: "superseded", note: "Superseded by #11: closing it" }),
+    ];
+    const items = [
+      w("a", 1, { stage: "verifying", step: "merge", pr: prRef(11) }),
+      w("b", 2, { stage: "verifying", step: "merge", pr: prRef(12) }),
+    ];
+    expect(currentPr(items[0] as FactoryWorkItem, prs)?.pr.number).toBe(11);
+    const p = viewPipeline(status({ inProgress: items, pullRequests: prs }), new Map(), NOW);
+    expect(p.stages.merge.map((c) => [c.item.id, c.pr?.pr.number, c.pr?.queuePosition])).toEqual([
+      ["a", 11, 1],
+      ["b", 12, 2],
+    ]);
+    // A rebuild has no PR of its own yet: the replaced PR it lists is the one that counts.
+    expect(
+      currentPr(w("r", 3, { pr: null }), [
+        pr("r", 7, { state: "superseded" }),
+        pr("r", 8, { state: "rebuilding" }),
+      ])?.state,
+    ).toBe("rebuilding");
+  });
+
+  it("keeps a stuck PR in the merge queue as waiting on a person, and counts it", () => {
+    // How the server shows one: the item failed for good (`stuck`), its PR still open.
+    const stuck = w("stuck", 30, {
+      stage: "failed",
+      step: "stopped",
+      failureKind: "stuck",
+      pr: prRef(30),
+      reason: "Rebuilt once and still conflicting",
+      finishedAt: minutesAgo(60 * 48),
+    });
+    const p = viewPipeline(
+      status({
+        recent: [stuck],
+        pullRequests: [pr("stuck", 30, { state: "stuck", note: "In your inbox" })],
+      }),
+      new Map(),
+      NOW,
+    );
+    expect(p.needsYou).toEqual([]);
+    expect(p.stages.merge.map((c) => [c.item.id, c.state])).toEqual([["stuck", "person"]]);
+    expect(p.needsPerson).toBe(1);
+    // It still failed: the header counts it there too.
+    expect(p.failed).toBe(1);
+  });
+
+  it("says the PR's state with its queue place", () => {
+    const labels = { updating: "Updating", rebasing: "Rebasing", waiting_ci: "Waiting for CI" };
+    expect(prLabel(pr("a", 1, { state: "updating", queuePosition: 1 }), labels)).toBe(
+      "Updating · #1",
+    );
+    expect(prLabel(pr("a", 1, { state: "queued", queuePosition: 2 }), labels)).toBe("Queued #2");
+    expect(prLabel(pr("a", 1, { state: "rebasing" }), labels)).toBe("Rebasing");
+    expect(prLabel(pr("a", 1, { state: "checking" }), labels)).toBeNull();
+    expect(prLabel(null, labels)).toBeNull();
+  });
+});
+
+describe("finished work beyond the recent list (#181)", () => {
+  it("shows escalations, open failures and today's merges that 30 newer results pushed out", () => {
+    const newer = Array.from({ length: 30 }, (_, n) =>
+      w(`rejected-${n}`, 200 + n, { stage: "rejected", step: "stopped" }),
+    );
+    const viewRecent = [
+      w("escalated", 40, {
+        stage: "escalated",
+        step: "merge",
+        finishedAt: minutesAgo(60 * 24 * 9),
+      }),
+      w("open-fail", 41, {
+        stage: "failed",
+        step: "stopped",
+        pr: prRef(41),
+        finishedAt: minutesAgo(60 * 24 * 3),
+      }),
+      w("merged", 42, { stage: "merged", step: "done", mergedAt: minutesAgo(90) }),
+    ];
+    const p = viewPipeline(
+      status({
+        recent: newer,
+        viewRecent,
+        pullRequests: [pr("open-fail", 41, { state: "waiting_for_you" })],
+      }),
+      new Map(),
+      NOW,
+    );
+    expect(p.needsYou.map((c) => c.item.id)).toEqual(["escalated", "open-fail"]);
+    expect(p.stages.merged.map((c) => c.item.id)).toEqual(["merged"]);
+    expect(p.needsPerson).toBe(1);
+    expect(p.failed).toBe(1);
+  });
+
+  it("passes each item's check counts to its card", () => {
+    const p = viewPipeline(
+      status({
+        inProgress: [
+          w("rev", 50, {
+            stage: "verifying",
+            step: "review",
+            checks: { passed: 5, failed: 1, total: 8 },
+          }),
+        ],
+      }),
+      new Map(),
+      NOW,
+    );
+    expect(p.stages.reviewing[0]?.item.checks).toEqual({ passed: 5, failed: 1, total: 8 });
+  });
+});
+
+describe("the quick chat's latest turns (#181)", () => {
+  it("keeps the latest turns of the thread and counts the ones it cut", () => {
+    const turnIds = ["t1", "t2", "t3", "t4", "t5"];
+    const items = Object.fromEntries(
+      turnIds.flatMap((t) => [
+        [`${t}-u`, { turnId: t, threadId: "root", item: { id: `${t}-u` } }],
+        [`${t}-a`, { turnId: t, threadId: "root", item: { id: `${t}-a` } }],
+      ]),
+    );
+    const transcript = {
+      sessionId: "s",
+      seq: 1,
+      rootThreadId: "root",
+      threads: {
+        root: {
+          id: "root",
+          parentThreadId: null,
+          parentItemId: null,
+          title: null,
+          agentType: null,
+          itemIds: Object.keys(items),
+          turnIds,
+        },
+      },
+      turns: {},
+      items,
+      usage: null,
+      title: null,
+      model: null,
+    } as unknown as Parameters<typeof latestTurns>[0];
+    const { transcript: cut, hidden } = latestTurns(transcript, "root", 3);
+    expect(hidden).toBe(2);
+    expect(cut.threads.root?.turnIds).toEqual(["t3", "t4", "t5"]);
+    expect(cut.threads.root?.itemIds).toEqual(["t3-u", "t3-a", "t4-u", "t4-a", "t5-u", "t5-a"]);
+    // Short chats are left alone.
+    expect(latestTurns(transcript, "root", 5)).toEqual({ transcript, hidden: 0 });
   });
 });

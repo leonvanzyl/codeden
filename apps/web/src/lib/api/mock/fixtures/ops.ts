@@ -1,6 +1,11 @@
 import { FactoryLimits, type FsListResponse, type SetupCheck } from "@codeden/contracts";
 import type { FactoryFixture } from "./factory-fixture-types";
-import { factoryViewInProgress, factoryViewRecent, factoryViewStats } from "./factory-view";
+import {
+  factoryViewInProgress,
+  factoryViewPrs,
+  factoryViewRecent,
+  factoryViewStats,
+} from "./factory-view";
 import { gh } from "./helpers";
 
 const sf = gh("hearth-co/storefront");
@@ -124,6 +129,7 @@ export function factoryFor(
         type: "bug",
         step: "review",
         attempts: 1,
+        checks: { passed: 5, failed: 0, total: 8 },
       },
       {
         id: "fw-7",
@@ -258,6 +264,7 @@ export function factoryFor(
         queuePosition: null,
         note: "Merged; watching CI on the default branch",
       },
+      ...factoryViewPrs,
     ],
     ignored: [
       {

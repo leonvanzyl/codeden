@@ -1,6 +1,7 @@
 import type { Session } from "@codeden/contracts";
 import { Link } from "@tanstack/react-router";
 import { ArrowUpRight, Bot } from "lucide-react";
+import { useMemo } from "react";
 import { SessionComposer } from "@/components/composer/composer";
 import { StartComposer, useRoleSession } from "@/components/orchestration/role-chat";
 import { QueuedMessages } from "@/components/thread/queued-messages";
@@ -8,20 +9,38 @@ import { Transcript } from "@/components/thread/transcript";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useTranscript } from "@/lib/queries";
 import { activeTurn } from "@/lib/transcript/reducer";
+import { latestTurns } from "./latest-turns";
 
-/** The PM session's latest messages, streamed like any session, and its composer. */
-function PmThread({ session }: { session: Session }) {
+/** Turns the quick chat shows; the full chat has the rest. */
+const LATEST_TURNS = 3;
+
+/** The PM session's latest turns, streamed like any session, and its composer. */
+function PmThread({ session, projectId }: { session: Session; projectId: string }) {
   const { transcript, isLoading } = useTranscript(session.id);
   const threadId = transcript?.rootThreadId ?? session.rootThreadId ?? null;
   const running = Boolean(transcript && threadId && activeTurn(transcript, threadId));
+  const latest = useMemo(
+    () => (transcript && threadId ? latestTurns(transcript, threadId, LATEST_TURNS) : null),
+    [transcript, threadId],
+  );
   const hasItems = Boolean(
-    transcript && threadId && (transcript.threads[threadId]?.itemIds.length ?? 0) > 0,
+    latest && threadId && (latest.transcript.threads[threadId]?.itemIds.length ?? 0) > 0,
   );
   return (
     <>
-      {hasItems && transcript && threadId ? (
+      {latest && latest.hidden > 0 && (
+        <Link
+          to="/projects/$projectId/pm"
+          params={{ projectId }}
+          className="shrink-0 border-b border-border px-3 py-1.5 text-center text-3xs text-muted-foreground hover:text-foreground"
+          data-testid="factory-view-chat-earlier"
+        >
+          {latest.hidden} earlier {latest.hidden === 1 ? "turn" : "turns"} in the full chat
+        </Link>
+      )}
+      {hasItems && latest && threadId ? (
         <Transcript
-          transcript={transcript}
+          transcript={latest.transcript}
           threadId={threadId}
           sessionId={session.id}
           contentClassName="max-w-none px-3 pt-3 pb-2 text-[13px]"
@@ -81,7 +100,7 @@ export function QuickChat({
         )}
       </header>
       {session ? (
-        <PmThread session={session} />
+        <PmThread session={session} projectId={projectId} />
       ) : (
         <>
           <p className="flex-1 p-3 text-2xs text-muted-foreground">

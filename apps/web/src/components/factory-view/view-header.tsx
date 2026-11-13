@@ -159,7 +159,8 @@ export function ViewHeader({
             size="sm"
             variant="ghost"
             onClick={full.toggle}
-            aria-pressed={full.on}
+            // The text hides on phones; the name stays.
+            aria-label={full.on ? "Exit full screen" : "Full screen"}
             data-testid="factory-view-fullscreen"
           >
             {full.on ? <Minimize /> : <Maximize />}

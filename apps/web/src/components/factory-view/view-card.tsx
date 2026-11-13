@@ -1,9 +1,14 @@
 import type { WorkType } from "@codeden/contracts";
-import { AlertTriangle, Check, RotateCcw, ShieldAlert, UserRound } from "lucide-react";
+import { AlertTriangle, ListChecks, RotateCcw, ShieldAlert, UserRound } from "lucide-react";
+import type { ReactNode } from "react";
 import { PR_STATE_LABEL, TYPE_LABEL } from "@/components/factory/meta";
 import { ageShort } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import { CARD_STATE_LABEL, type CardState, cardNumber, type ViewCard } from "./stages";
+import { type CardState, cardNumber, cardStateLabel, prLabel, type ViewCard } from "./stages";
+
+const PR_LABELS = Object.fromEntries(
+  Object.entries(PR_STATE_LABEL).map(([state, meta]) => [state, meta.label]),
+);
 
 const TYPE_CLASS: Record<WorkType, string> = {
   bug: "bg-status-failed/10 text-status-failed",
@@ -58,8 +63,6 @@ export function StateMarker({ state, className }: { state: CardState; className?
     return (
       <AlertTriangle className={cn("size-3 shrink-0 text-status-failed", className)} aria-hidden />
     );
-  if (state === "done")
-    return <Check className={cn("size-3 shrink-0 text-status-done", className)} aria-hidden />;
   return (
     <span
       aria-hidden
@@ -71,6 +74,31 @@ export function StateMarker({ state, className }: { state: CardState; className?
         className,
       )}
     />
+  );
+}
+
+/** A small rounded label on a card: a revise round, the PR's state, the checks. */
+function Pill({
+  tone,
+  title,
+  children,
+}: {
+  tone?: "person" | "failed";
+  title?: string;
+  children: ReactNode;
+}) {
+  return (
+    <span
+      title={title}
+      className={cn(
+        "inline-flex shrink-0 items-center gap-0.5 rounded-full border px-1.5 text-[10px] leading-4",
+        tone === "person" && "border-status-waiting/40 text-status-waiting",
+        tone === "failed" && "border-status-failed/40 text-status-failed",
+        !tone && "border-border text-muted-foreground",
+      )}
+    >
+      {children}
+    </span>
   );
 }
 
@@ -86,21 +114,17 @@ export function ViewCardButton({
 }) {
   const w = card.item;
   const number = cardNumber(w);
-  const pr = card.pr;
-  const prLabel =
-    pr && card.place === "merge"
-      ? pr.queuePosition
-        ? `Queued #${pr.queuePosition}`
-        : PR_STATE_LABEL[pr.state].label
-      : null;
+  const pr = prLabel(card.pr, PR_LABELS);
+  // The checks matter while it's reviewed and queued; elsewhere they're old news.
+  const checks = card.place === "reviewing" || card.place === "merge" ? w.checks : null;
   const since = ageShort(card.since, now);
   return (
     <button
       type="button"
       onClick={() => onOpen(card)}
-      aria-label={`${number} ${w.title}, ${CARD_STATE_LABEL[card.state]}`}
+      aria-label={`${number} ${w.title}, ${cardStateLabel(card)}`}
       data-testid="factory-view-card"
-      data-state={card.state}
+      data-state={card.state ?? "merged"}
       className={cn(
         "group @container w-full animate-rise rounded-lg border bg-card px-2.5 py-2 text-left shadow-xs transition-colors hover:border-primary/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
         card.state === "person" && "border-status-waiting/50 bg-status-waiting/[0.05]",
@@ -109,12 +133,12 @@ export function ViewCardButton({
       )}
     >
       <div className="flex min-w-0 items-center gap-1 overflow-hidden">
-        <StateMarker state={card.state} />
+        {card.state && <StateMarker state={card.state} />}
         <span className="shrink-0 font-mono text-[11px] text-muted-foreground">{number}</span>
         <TypeBadge type={w.type} fit />
         {w.trust === "admitted" && (
           <ShieldAlert
-            className="size-3 text-status-waiting"
+            className="size-3 shrink-0 text-status-waiting"
             aria-label="Let in from an untrusted author"
           />
         )}
@@ -126,30 +150,35 @@ export function ViewCardButton({
         </span>
       </div>
       <div className="mt-1 line-clamp-2 text-[12.5px] leading-snug font-medium">{w.title}</div>
-      <div className="mt-0.5 flex items-center gap-1.5 text-2xs text-muted-foreground">
-        {w.attempts > 0 && (
-          <span
-            className="flex shrink-0 items-center gap-0.5 text-[10px] text-status-waiting"
-            title={`Revise round ${w.attempts}`}
-          >
-            <RotateCcw className="size-2.5" aria-hidden />
-            {w.attempts}
-          </span>
-        )}
-        {prLabel && (
-          <span
-            className={cn(
-              "shrink-0 rounded-full border px-1.5 text-[10px] leading-4",
-              card.state === "person"
-                ? "border-status-waiting/40 text-status-waiting"
-                : "border-border",
-            )}
-          >
-            {prLabel}
-          </span>
-        )}
-        <span className="truncate">{card.activity}</span>
-      </div>
+      {(w.attempts > 0 || pr || checks) && (
+        <div className="mt-1 flex flex-wrap items-center gap-1">
+          {w.attempts > 0 && (
+            <Pill tone="person" title={`Revise round ${w.attempts}`}>
+              <RotateCcw className="size-2.5" aria-hidden /> {w.attempts}
+            </Pill>
+          )}
+          {pr && (
+            <Pill
+              tone={
+                card.pr?.state === "stuck" || card.pr?.state === "waiting_for_you"
+                  ? "person"
+                  : undefined
+              }
+            >
+              {pr}
+            </Pill>
+          )}
+          {checks && (
+            <Pill
+              tone={checks.failed > 0 ? "failed" : undefined}
+              title={`${checks.passed} of ${checks.total} merge checks passed${checks.failed ? `, ${checks.failed} failed` : ""}`}
+            >
+              <ListChecks className="size-2.5" aria-hidden /> {checks.passed}/{checks.total}
+            </Pill>
+          )}
+        </div>
+      )}
+      <div className="mt-0.5 truncate text-2xs text-muted-foreground">{card.activity}</div>
     </button>
   );
 }

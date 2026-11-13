@@ -1,21 +1,31 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 
-const WIDE = "(min-width: 1024px)";
-
-/**
- * True at `lg` and wider: the stages sit side by side and the PM chat is a column. Below it
- * the stages stack and the chat opens as a bottom sheet.
- */
-export function useWide(): boolean {
+function useMedia(query: string, fallback: boolean): boolean {
   return useSyncExternalStore(
     (onChange) => {
-      const media = window.matchMedia(WIDE);
+      const media = window.matchMedia(query);
       media.addEventListener("change", onChange);
       return () => media.removeEventListener("change", onChange);
     },
-    () => window.matchMedia(WIDE).matches,
-    () => true,
+    () => window.matchMedia(query).matches,
+    () => fallback,
   );
+}
+
+/**
+ * True at `lg` (1024 px) and wider: the stages sit side by side. Below it they stack and the
+ * chat opens as a bottom sheet.
+ */
+export function useWide(): boolean {
+  return useMedia("(min-width: 1024px)", true);
+}
+
+/**
+ * True at `xl` (1280 px) and wider: the PM chat can sit beside the pipeline as a column and the
+ * six stages keep cards wide enough to read. Narrower, it opens as a sheet.
+ */
+export function useChatColumn(): boolean {
+  return useMedia("(min-width: 1280px)", true);
 }
 
 /**
