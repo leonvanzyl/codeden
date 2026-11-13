@@ -78,10 +78,17 @@ export async function startHarness(
     ...extra,
   });
   const api = async (method: string, path: string, body?: unknown) => {
-    const res = await fetch(`${server.url}/api${path}`, {
-      method,
-      headers: { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
-      body: body === undefined ? undefined : JSON.stringify(body),
+    const send = () =>
+      fetch(`${server.url}/api${path}`, {
+        method,
+        headers: { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      });
+    // On a busy machine the server can close an idle keep-alive connection just as fetch
+    // reuses it: the request fails with ECONNRESET before it was read, so send it again.
+    const res = await send().catch((error: unknown) => {
+      if ((error as { cause?: { code?: string } }).cause?.code === "ECONNRESET") return send();
+      throw error;
     });
     return { status: res.status, body: (await res.json()) as unknown };
   };
