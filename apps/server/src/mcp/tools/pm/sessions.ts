@@ -11,6 +11,7 @@ import {
 import { z } from "zod";
 import { defineTool, ToolError } from "../../define";
 import { agentSessionOf, compactSession, compactWork, projectFor } from "../shared/helpers";
+import { assertMayStartOnIssues, issuesNamed } from "./issue-trust";
 
 const ENDED = new Set(["completed", "failed", "stopped"]);
 
@@ -43,7 +44,7 @@ export const listSessions = defineTool({
 export const startSession = defineTool({
   name: "start_session",
   description:
-    "Start an agent session in its own worktree to do one piece of work. Always pass a workKey (issue:<n>, pr:<n>, automation:<name> or request:<slug>) and a one-line purpose; add scope (paths or area) when known. If matching work is already running or queued, nothing starts and the result is 'conflict' with the existing work: choose the resolution yourself and call again with conflict = {resolution: 'wait'} (queue behind it), {resolution: 'skip'} (it is the same work), {resolution: 'join', sessionId} (send the prompt to the existing session) or {resolution: 'force', reason}.",
+    "Start an agent session in its own worktree to do one piece of work. Always pass a workKey (issue:<n>, pr:<n>, automation:<name> or request:<slug>) and a one-line purpose; add scope (paths or area) when known. For an issue whose author isn't trusted (not a trusted author, not CodeDen's GitHub account, no write access), it starts only in a turn the user's own message started; otherwise it is refused and you put the issue in the user's inbox with report_triage (decision 'ready'). If matching work is already running or queued, nothing starts and the result is 'conflict' with the existing work: choose the resolution yourself and call again with conflict = {resolution: 'wait'} (queue behind it), {resolution: 'skip'} (it is the same work), {resolution: 'join', sessionId} (send the prompt to the existing session) or {resolution: 'force', reason}.",
   roles: ["pm"],
   scope: "project",
   alwaysLoad: true,
@@ -73,8 +74,9 @@ export const startSession = defineTool({
         "'orchestrator' when the orchestrator passed this work on: its finish or failure also reaches the orchestrator, so it can tell the user",
       ),
   }),
-  handler: async (input, { services, projectId, sessionId }) => {
+  handler: async (input, { services, projectId, sessionId, caller }) => {
     const project = projectFor(services, projectId);
+    await assertMayStartOnIssues(services, { caller, sessionId }, project, issuesNamed(input));
     const issue =
       input.issueNumber && project.kind === "github"
         ? {

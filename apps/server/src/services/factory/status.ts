@@ -8,6 +8,7 @@ import {
 } from "@codeden/contracts";
 import { budgetSpend, type FactoryContext, visionOf } from "./context";
 import { localDay, queueOrder } from "./policy";
+import { pullRequests } from "./pr-status";
 import { scoutStatus } from "./scout";
 import { ACTIVE_STAGES, DONE_STAGES, WAITING_STAGES } from "./store";
 
@@ -83,6 +84,7 @@ export async function buildStatus(ctx: FactoryContext, projectId: string): Promi
     backlog: waiting.map(workItem),
     inProgress: active.map(workItem),
     mergeChecks: [...active, ...done].flatMap((i) => mergeChecks(i) ?? []).slice(0, 20),
+    pullRequests: pullRequests(ctx, project, all),
     recent: done.map(workItem),
     ignored: ignored.map(workItem),
     githubLogin,

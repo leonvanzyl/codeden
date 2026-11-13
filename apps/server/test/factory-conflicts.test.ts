@@ -180,7 +180,7 @@ describe("factory PRs without CI (merge conflicts, a new head)", () => {
     expect(item(id).review?.summary).toBe(CHANGES.summary);
   });
 
-  it("asks again while the conflicts remain, and fails with a clear reason after three asks", async () => {
+  it("asks again while the conflicts remain, and rebuilds the work after three asks", async () => {
     env = createFactoryEnv();
     enable();
     const { id, pr, builder } = await verifying();
@@ -198,8 +198,11 @@ describe("factory PRs without CI (merge conflicts, a new head)", () => {
     }
     await env.setStatus(builder, "idle");
     await tick();
-    expect(item(id).stage).toBe("failed");
-    expect(item(id).reason).toMatch(/still has merge conflicts with main after 3 requests/);
+    // Not failed: the same item is redone from main by a fresh builder.
+    expect(item(id).stage).not.toBe("failed");
+    expect(item(id).rebuiltFrom?.number).toBe(pr.ref.number);
+    expect(item(id).builderSessionId).not.toBe(builder);
+    expect(env.gh.comments.at(-1)?.body).toMatch(/still had merge conflicts with main after 3/);
   });
 
   it("keeps a review verdict that arrives while the item is being revised", async () => {
@@ -260,7 +263,7 @@ describe("factory PRs without CI (merge conflicts, a new head)", () => {
     await tick();
     expect(item(id)).toMatchObject({ stage: "verifying", reason: null });
     expect(env.messages.filter((m) => m.sessionId === builder)).toHaveLength(1);
-    expect(lastMessageTo(builder)).toMatch(/\*\*Rebase\*\*.*failed earlier because no CI reported/);
+    expect(lastMessageTo(builder)).toMatch(/\*\*Rebase\*\*.*has merge conflicts with `main`/);
     // The request brought the builder and its worktree back; nothing ran in a missing directory.
     expect(env.repo.get(builder)).toMatchObject({ archivedAt: null, worktreeRemovedAt: null });
     expect(existsSync(worktree)).toBe(true);

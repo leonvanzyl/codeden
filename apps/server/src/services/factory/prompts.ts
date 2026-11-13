@@ -154,11 +154,18 @@ export function builderPrompt(item: FactoryItem, vision: string): string {
           ? implementStep(item)
           : analyzeStep()
         : docsStep(item);
+  const old = item.rebuiltFrom;
   return [
     `You are an agent of this project's software factory, working on ${issueLine(item)}`,
     `Pipeline: ${PIPELINE[type]}.`,
     "",
     issueBlock(item),
+    ...(old
+      ? [
+          "",
+          `**Rebuild**: pull request #${old.number} (${old.url}) did this work before, but it kept conflicting with the default branch after three requests to rebase it. Redo the work in this fresh worktree, which starts from the latest default branch: look at #${old.number} for what it did, but write the change against the current code and open a new pull request. The factory closes #${old.number} once yours is open.`,
+        ]
+      : []),
     "",
     visionBlock(vision),
     "",
@@ -241,8 +248,6 @@ export function fixPrompt(
 export const REBASE_WHY = {
   conflicts: (branch: string) =>
     `has merge conflicts with \`${branch}\` (another change merged first), so GitHub runs no CI on it and it can't merge.`,
-  recovered:
-    "failed earlier because no CI reported on it, which is what GitHub does while a PR has merge conflicts. It is back in verification.",
   worktree:
     "is in verification and your worktree had been cleaned up; this message brings it back, because the factory's audit runs there.",
 } as const;

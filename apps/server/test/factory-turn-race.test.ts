@@ -132,7 +132,7 @@ function realDelivery() {
     hosted: new Set<string>(),
     /** Sessions whose turn the runner started, in order. */
     turns: [] as string[],
-    /** An error code the runner answers every send with (a session it can't start). */
+    /** An error code the runner answers every send and resume with (a session it can't start). */
     refuse: null as string | null,
     /**
      * Runs inside `session.start` / `session.send`, before the runner answers: where the
@@ -158,6 +158,7 @@ function realDelivery() {
   const launcher = {
     resume: async (session: Session) => {
       if (!runner.up) throw away();
+      if (runner.refuse) throw new RunnerCommandError(runner.refuse, "The provider refused");
       await runner.opening(session.id);
       runner.hosted.add(session.id);
       runner.turns.push(session.id);
@@ -223,16 +224,25 @@ describe("factory builders hit by 'turn already running' (#96)", () => {
     expect(resumes()).toHaveLength(1);
   });
 
-  it("leaves items that failed for other reasons alone", async () => {
+  it("leaves builders that failed for other reasons to the infrastructure recovery (#159)", async () => {
     factory();
     const { id, builderId } = await building();
     await env.setStatus(builderId, "failed");
     env.inbox.raiseRunFailed(env.repo.get(builderId), "start", "Could not open the session");
     await tick();
-    expect(item(id)).toMatchObject({ stage: "failed", reason: BUILDER_FAILED_REASON });
+    expect(item(id)).toMatchObject({
+      stage: "failed",
+      reason: BUILDER_FAILED_REASON,
+      failureKind: "infrastructure",
+    });
+    // Not told it lost a race: the general recovery resumes it with its own brief.
     await tick();
-    expect(item(id).stage).toBe("failed");
+    expect(item(id).stage).toBe("building");
     expect(resumes()).toEqual([]);
+    expect(env.messages.at(-1)).toMatchObject({
+      sessionId: builderId,
+      text: expect.stringMatching(/^\*\*Continue\*\*/),
+    });
   });
 
   it("recovers failed items only as agents free up, oldest first", async () => {
@@ -353,7 +363,7 @@ describe("telling a builder to carry on, through the real session service (#96)"
     expect(runner.turns).toEqual([builderId]);
   });
 
-  it("fails the item once when its builder can't be started at all", async () => {
+  it("fails the item once when its builder can't be started at all, then leaves it to the infrastructure recovery", async () => {
     factory(1);
     const { id, builderId } = await building();
     const { runner } = realDelivery();
@@ -364,12 +374,16 @@ describe("telling a builder to carry on, through the real session service (#96)"
 
     await tick();
     expect(item(id)).toMatchObject({ stage: "failed", reason: BUILDER_FAILED_REASON });
-    // Recovery doesn't try it again: it was told once, and that failed.
+    // While the builder still can't start, each attempt uses up one of its three recoveries.
+    await tick();
+    expect(item(id)).toMatchObject({ stage: "failed", nudges: { infra_1: expect.any(String) } });
+    expect(runner.turns).toEqual([]);
+    // Once it can, it goes back to building (#159), without another "carry on".
     runner.refuse = null;
     await tick();
-    await tick();
-    expect(item(id).stage).toBe("failed");
-    expect(runner.turns).toEqual([]);
+    expect(item(id).stage).toBe("building");
+    expect(runner.turns).toEqual([builderId]);
+    expect(resumes()).toEqual([]);
   });
 });
 

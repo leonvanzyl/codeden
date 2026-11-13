@@ -5,31 +5,36 @@ import {
   type Project,
 } from "@codeden/contracts";
 import { errorMessage } from "../errors";
-import {
-  codeFiles,
-  evaluateChecks,
-  failedChecks,
-  hasTestResults,
-  notAuthorFixable,
-  sameChecks,
-} from "./checks";
-import { type FactoryContext, factoryNotice, visionOf } from "./context";
+import { codeFiles, evaluateChecks, hasTestResults, sameChecks } from "./checks";
+import { type FactoryContext, visionOf } from "./context";
+import { failReview, handleFailure } from "./failures";
 import type { FactoryPr, PrEvidence } from "./github-port";
 import { stoppedSinceNudge } from "./idle";
-import { autoMerge, prDecidedOutside, readyForYou } from "./merge";
+import { prDecidedOutside, readyForYou } from "./merge";
 import { escalate, failItem, runAudit } from "./outcomes";
-import { isUiFile, mayMerge, pickReviewer } from "./policy";
-import { fixPrompt, REVIEWER_NUDGE, reReviewPrompt, tooLargePrompt } from "./prompts";
+import { isUiFile, pickReviewer } from "./policy";
+import { REVIEWER_NUDGE, reReviewPrompt } from "./prompts";
+import { recheckPrompt } from "./prompts-integration";
+import { joinQueue, leaveQueue } from "./queue";
 import {
   advanceConflicting,
   baseBranchOf,
+  recheckOf,
   restoreForAudit,
+  settleConflict,
+  trackedHead,
   trackHead,
+  UPDATE,
+  withoutRecheck,
   worktreeSettled,
 } from "./rebase";
+import { adoptAgentPr, closeReplaced } from "./rebuild";
 import { mayAutoMerge } from "./trust";
 
 const ENDED = new Set(["idle", "interrupted", "completed", "failed", "stopped"]);
+
+/** Times a reviewer session that died is replaced before the item fails (infrastructure). */
+const MAX_REVIEWER_RESTARTS = 3;
 
 /** Audit results per item and head commit (re-run after a restart is fine). */
 const auditCache = new Map<string, { ok: boolean; detail: string }>();
@@ -41,8 +46,9 @@ export const READY_RECHECK_MS = 5 * 60_000;
 
 /**
  * One verification step for an item with a PR (§10.1, Review and Merge): gather the inputs,
- * record the merge checks, start or nudge the independent reviewer, then merge (auto-merge on,
- * trusted work) or hand it to the user to merge, start a revise round, fail or escalate.
+ * record the merge checks, start or nudge the independent reviewer, then queue it to merge
+ * (auto-merge on, trusted work; `queue.ts` merges) or hand it to the user to merge, start a
+ * revise round, fail or escalate.
  */
 export async function advanceVerifying(
   ctx: FactoryContext,
@@ -51,8 +57,11 @@ export async function advanceVerifying(
   item: FactoryItem,
 ): Promise<FactoryLoop> {
   if (!item.pr) return failItem(ctx, loop, item, "The item has no pull request");
+  await closeReplaced(ctx, project, item);
+  item = await adoptAgentPr(ctx, project, item);
+  if (!item.pr) return loop;
   // Ready and waiting for a person: the synced PR says when they merge or close it; GitHub
-  // itself is asked again only every few minutes (new commits, CI), or when auto-merge may act.
+  // itself is asked again only every few minutes (new commits, CI, conflicts).
   if (item.nudges.ready && !mayAutoMerge(item, project.factoryLimits)) {
     const ref = ctx.github.prRef(project.id, item.pr.number);
     if (ref && (ref.state === "merged" || ref.state === "closed")) {
@@ -86,6 +95,7 @@ export async function advanceVerifying(
   const worktree = builder?.worktreePath ?? null;
   const auditConfigured = Boolean(loop.tuning.auditCommand && worktree);
   const headKey = `${item.id}:${pr.headSha ?? ""}`;
+  carryAuditOver(item, pr, headKey);
   // The audit runs in the builder's settled worktree: not once cleanup removed it, not while
   // the builder is mid-turn, and not on a head a rebase is about to replace. Until then it is
   // pending (still required before a merge), never skipped.
@@ -95,11 +105,15 @@ export async function advanceVerifying(
   }
   const evidence = await gatherEvidence(ctx, project, item, pr, headKey);
   // CI gets its time from when this head first appeared, not from when verification began.
+  const nudgesFor = (n: FactoryItem["nudges"], reviewed: boolean) =>
+    settleConflict(trackHead(n, pr, now.toISOString()).nudges, pr, reviewed);
   const head = trackHead(item.nudges, pr, now.toISOString());
+  const recheck = recheckOf({ ...item, nudges: nudgesFor(item.nudges, Boolean(item.review)) });
   const { checks, outcome } = evaluateChecks({
     pr,
     issueTitle: item.issue?.title ?? item.title,
     review: item.review,
+    recheck: recheck !== null,
     reviewer: item.reviewerProvider,
     type: item.type,
     evidence: evidence.screenshots,
@@ -117,7 +131,7 @@ export async function advanceVerifying(
     ...i,
     pr: pr.ref,
     checks: sameChecks(i.checks, checks) ? i.checks : checks,
-    nudges: trackHead(i.nudges, pr, now.toISOString()).nudges,
+    nudges: nudgesFor(i.nudges, Boolean(i.review)),
   }));
 
   if (outcome === "escalate") return escalate(ctx, loop, current, checks);
@@ -125,39 +139,38 @@ export async function advanceVerifying(
     return handleFailure(ctx, project, loop, current, conflicting ? baseBranchOf(project) : null);
   }
   if (outcome === "pending") {
-    // Merge conflicts (another merge came first): the builder rebases, then CI runs again.
+    // Merge conflicts (another merge came first): the PR's agent rebases, then CI runs again.
     // A review in progress still counts; a new one waits for the rebased head.
-    if (conflicting) return advanceConflicting(ctx, project, loop, current);
+    if (conflicting) return advanceConflicting(ctx, project, loop, current, pr);
     // The audit is due but cleanup removed the builder's worktree: bring it back first.
     if (auditConfigured && builder?.worktreeRemovedAt && !auditCache.has(headKey)) {
       return restoreForAudit(ctx, project, loop, current, builder, pr.headSha);
     }
     const reviewed = checks.find((c) => c.name === "review")?.state !== "skipped";
     if (!reviewed) return loop;
-    current = await ensureReviewer(ctx, current, vision.text);
+    current = await ensureReviewer(ctx, project, current, vision.text, pr);
     return reviewerStalled(ctx, project, loop, current);
   }
 
-  // Every check passed.
+  // Every check passed: the merge queue merges it in its turn, or a person does.
   if (!mayAutoMerge(current, project.factoryLimits) || !isFactoryMode(project.autonomyMode)) {
+    current = leaveQueue(ctx, current);
     await readyForYou(ctx, project, current);
     return loop;
   }
-  if (loop.state === "paused" && current.source !== "revert") {
-    ctx.store.updateItem(current.id, (i) => ({
-      ...i,
-      note: "Checks passed; waiting while the loop is paused",
-    }));
-    return loop;
-  }
-  if (!mayMerge(loop.mergesToday, project.factoryLimits)) {
-    ctx.store.updateItem(current.id, (i) => ({
-      ...i,
-      note: "Checks passed; the daily merge limit is reached",
-    }));
-    return loop;
-  }
-  return autoMerge(ctx, project, loop, current, pr, checks);
+  joinQueue(ctx, current);
+  return loop;
+}
+
+/**
+ * A head the merge queue made with GitHub's update-branch only merged the default branch in:
+ * the audit result of the head before it still holds (it ran in the builder's worktree).
+ */
+function carryAuditOver(item: FactoryItem, pr: FactoryPr, headKey: string): void {
+  const prev = trackedHead(item);
+  if (!prev || prev === pr.headSha || !item.nudges[`${UPDATE}${prev}`]) return;
+  const was = auditCache.get(`${item.id}:${prev}`);
+  if (was && !auditCache.has(headKey)) auditCache.set(headKey, was);
 }
 
 /** Screenshots (UI changes) and test output (code changes), cached once found. */
@@ -186,12 +199,19 @@ async function gatherEvidence(
   };
 }
 
-/** Start the independent reviewer (another provider when possible), or ask it to look again. */
+/**
+ * Start the independent reviewer (another provider when possible), ask it to look again, or
+ * ask it to re-check only a conflict resolution an agent made since it approved.
+ */
 async function ensureReviewer(
   ctx: FactoryContext,
+  project: Project,
   item: FactoryItem,
   vision: string,
+  pr: FactoryPr,
 ): Promise<FactoryItem> {
+  const old = recheckOf(item);
+  if (item.review && old) return requestRecheck(ctx, project, item, old, pr.headSha ?? "HEAD");
   if (item.review) return item;
   if (item.reviewerSessionId) {
     if (!item.nudges.rereview_pending) return item;
@@ -201,7 +221,6 @@ async function ensureReviewer(
       return { ...i, nudges: { ...rest, rereview_sent: ctx.now().toISOString() } };
     });
   }
-  const project = ctx.projects.get(item.projectId);
   if (ctx.sessions.activeCount(item.projectId) >= project.factoryLimits.maxConcurrentSessions) {
     return ctx.store.updateItem(item.id, (i) => ({
       ...i,
@@ -210,13 +229,9 @@ async function ensureReviewer(
   }
   const choice = pickReviewer(item.builderProvider, ctx.sessions.providers());
   // No builder worktree (a revert PR opened through the API): review the PR's head locally.
-  let head: { headBranch: string; baseBranch: string } | null = null;
-  if (!item.builderSessionId && item.pr) {
-    const details = await ctx.github.prDetails(project.id, item.pr.number).catch(() => null);
-    if (details) {
-      head = { headBranch: details.headBranch, baseBranch: project.defaultBranch ?? "main" };
-    }
-  }
+  const head = item.builderSessionId
+    ? null
+    : { headBranch: pr.headBranch, baseBranch: project.defaultBranch ?? "main" };
   const res = await ctx.sessions.startReviewer(
     item,
     vision,
@@ -241,8 +256,49 @@ async function ensureReviewer(
 }
 
 /**
- * While checks are pending: nudge a reviewer that ended its turn without a verdict, and fail
- * the review once it ends again without one and stays idle past the grace period.
+ * An agent rebased the PR to resolve conflicts after the reviewer approved: the reviewer
+ * re-checks only the resolution (`git range-diff`). When the reviewer session can't take the
+ * message any more, a fresh reviewer reviews the whole PR instead.
+ */
+async function requestRecheck(
+  ctx: FactoryContext,
+  project: Project,
+  item: FactoryItem,
+  oldHead: string,
+  newHead: string,
+): Promise<FactoryItem> {
+  if (item.nudges.recheck_sent) return item;
+  const reviewer = item.reviewerSessionId
+    ? ctx.repo.find(item.reviewerSessionId)?.session
+    : undefined;
+  if (!reviewer || reviewer.status === "failed" || reviewer.archivedAt) {
+    return ctx.store.updateItem(item.id, (i) => ({
+      ...i,
+      review: null,
+      reviewerSessionId: null,
+      note: "Rebased after the review, and the reviewer is gone: a fresh review follows",
+      nudges: withoutRecheck(i.nudges),
+    }));
+  }
+  await ctx.sessions.message(
+    reviewer.id,
+    recheckPrompt(item, oldHead, newHead, baseBranchOf(project)),
+  );
+  const at = ctx.now().toISOString();
+  return ctx.store.updateItem(item.id, (i) => {
+    const { reviewer: _nudged, ...nudges } = i.nudges;
+    return {
+      ...i,
+      note: "Rebased after the review: the reviewer re-checks the conflict resolution",
+      nudges: { ...nudges, recheck_sent: at },
+    };
+  });
+}
+
+/**
+ * While checks are pending: nudge a reviewer that ended its turn without a verdict (or without
+ * its re-check), and fail the review once it ends again without one and stays idle past the
+ * grace period. A reviewer session that died is replaced, up to `MAX_REVIEWER_RESTARTS` times.
  */
 async function reviewerStalled(
   ctx: FactoryContext,
@@ -250,16 +306,20 @@ async function reviewerStalled(
   loop: FactoryLoop,
   item: FactoryItem,
 ): Promise<FactoryLoop> {
-  if (item.review || !item.reviewerSessionId || item.nudges.rereview_pending) return loop;
+  const rechecking = Boolean(item.review && recheckOf(item) && item.nudges.recheck_sent);
+  if ((item.review && !rechecking) || !item.reviewerSessionId || item.nudges.rereview_pending)
+    return loop;
   const s = ctx.repo.find(item.reviewerSessionId)?.session;
   if (!s || !ENDED.has(s.status)) return loop;
-  if (s.status === "failed" || s.status === "stopped") {
+  if (s.status === "failed") return reviewerDied(ctx, loop, item);
+  if (s.status === "stopped") {
     if (item.nudges.reviewer_restarted)
-      return failReview(ctx, project, loop, item, `The reviewer session ${s.status}`);
+      return failReview(ctx, project, loop, item, "The reviewer session stopped");
     ctx.store.updateItem(item.id, (i) => ({
       ...i,
       reviewerSessionId: null,
-      nudges: { ...i.nudges, reviewer_restarted: ctx.now().toISOString() },
+      nudges: { ...withoutRecheck(i.nudges), reviewer_restarted: ctx.now().toISOString() },
+      review: rechecking ? null : i.review,
     }));
     return loop;
   }
@@ -276,113 +336,25 @@ async function reviewerStalled(
   return loop;
 }
 
-function failReview(
-  ctx: FactoryContext,
-  project: Project,
-  loop: FactoryLoop,
-  item: FactoryItem,
-  reason: string,
-): Promise<FactoryLoop> {
-  const at = ctx.now().toISOString();
-  const current = ctx.store.updateItem(item.id, (i) => ({
-    ...i,
-    checks: i.checks.map((c) =>
-      c.name === "review" ? { ...c, state: "fail" as const, detail: reason, at } : c,
-    ),
-  }));
-  return handleFailure(ctx, project, loop, current);
-}
-
 /**
- * Failed checks: a revise round if allowed, otherwise the item fails (and may pause). CI that
- * never started is no code problem, so it alone fails the item without a revise round.
+ * The reviewer session died (an error, not a verdict): a fresh reviewer takes over, without a
+ * revise round. After `MAX_REVIEWER_RESTARTS` the item fails as an infrastructure failure.
  */
-async function handleFailure(
-  ctx: FactoryContext,
-  project: Project,
-  loop: FactoryLoop,
-  item: FactoryItem,
-  /** The base branch, when the PR also has merge conflicts with it. */
-  conflictsWith: string | null = null,
-): Promise<FactoryLoop> {
-  const failed = failedChecks(item.checks);
-  // A revise round can't make work smaller without cutting scope: the PM splits or allows it.
-  if (failed.some((c) => c.name === "size")) return tooLarge(ctx, project, loop, item);
-  const builder = item.builderSessionId ? ctx.repo.find(item.builderSessionId)?.session : undefined;
-  const fixable =
-    failed.some((c) => !notAuthorFixable(c)) &&
-    item.attempts < loop.tuning.maxFixAttempts &&
-    builder !== undefined &&
-    builder.status !== "failed" &&
-    builder.status !== "stopped" &&
-    item.review?.verdict !== "reject";
-  if (fixable && builder) {
-    const at = ctx.now().toISOString();
-    ctx.store.updateItem(item.id, (i) => {
-      const { ready: _ready, ...nudges } = i.nudges;
-      return {
-        ...i,
-        stage: "building",
-        attempts: i.attempts + 1,
-        review: null,
-        note: `Revise round ${i.attempts + 1}: ${failed.map((c) => c.name).join(", ")}`,
-        nudges: {
-          ...nudges,
-          [`fix_${i.attempts + 1}`]: at,
-          ...(i.reviewerSessionId ? { rereview_pending: at } : {}),
-        },
-      };
+function reviewerDied(ctx: FactoryContext, loop: FactoryLoop, item: FactoryItem): FactoryLoop {
+  let n = 0;
+  while (item.nudges[`reviewer_failed_${n + 1}`]) n++;
+  if (n >= MAX_REVIEWER_RESTARTS) {
+    return failItem(ctx, loop, item, `The reviewer session failed ${n + 1} times`, {
+      kind: "infrastructure",
     });
-    await ctx.sessions.message(builder.id, fixPrompt(item, failed, conflictsWith));
-    return loop;
   }
-  const reason =
-    failed.map((c) => `${c.name}: ${c.detail ?? "failed"}`).join("; ") || "Merge checks failed";
-  const next = failItem(ctx, loop, item, reason);
-  if (item.pr) {
-    await ctx.github
-      .comment(
-        project.id,
-        item.pr.number,
-        `The CodeDen factory's checks failed, so this PR is left for a human:\n\n${failed.map((c) => `- **${c.name}**: ${c.detail ?? "failed"}`).join("\n")}`,
-      )
-      .catch((error: unknown) => ctx.log?.(`factory: comment: ${errorMessage(error)}`));
-  }
-  return next;
-}
-
-/**
- * The size check failed. That isn't a quality failure, so it doesn't count towards pausing
- * the loop, and no revise round runs. The PM is woken to split the work into smaller issues
- * or, when it can't be split, to allow it with `factory_allow_large_change`. The PR stays open.
- */
-async function tooLarge(
-  ctx: FactoryContext,
-  project: Project,
-  loop: FactoryLoop,
-  item: FactoryItem,
-): Promise<FactoryLoop> {
-  const failed = failedChecks(item.checks);
-  const size = failed.find((c) => c.name === "size");
-  const reason = failed.map((c) => `${c.name}: ${c.detail ?? "failed"}`).join("; ");
-  const next = failItem(ctx, loop, item, reason, { countsAsFailure: false, notify: false });
-  factoryNotice(ctx, {
-    id: `factory.too-large:${item.id}:${item.pr?.number ?? ""}`,
-    projectId: item.projectId,
-    target: "pm",
-    event: "failed",
-    title: `Too large for the factory: ${item.title}`,
-    text: tooLargePrompt(item, size?.detail ?? "over the size limit", failed),
-    itemIds: [item.id],
-  });
-  if (item.pr) {
-    await ctx.github
-      .comment(
-        project.id,
-        item.pr.number,
-        `This PR is larger than the CodeDen factory's size limit (${size?.detail ?? "over the limit"}). The project manager will split the work into smaller issues or allow it as one change.`,
-      )
-      .catch((error: unknown) => ctx.log?.(`factory: comment: ${errorMessage(error)}`));
-  }
-  return next;
+  const at = ctx.now().toISOString();
+  ctx.store.updateItem(item.id, (i) => ({
+    ...i,
+    reviewerSessionId: null,
+    // A re-check falls back to a whole review by the fresh reviewer.
+    review: recheckOf(i) ? null : i.review,
+    nudges: { ...withoutRecheck(i.nudges), [`reviewer_failed_${n + 1}`]: at },
+  }));
+  return loop;
 }

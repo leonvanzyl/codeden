@@ -23,6 +23,7 @@ export * from "./events";
 export * from "./factory";
 export * from "./factory-api";
 export * from "./factory-pipeline";
+export * from "./factory-prs";
 export * from "./github";
 export * from "./images-api";
 export * from "./input";

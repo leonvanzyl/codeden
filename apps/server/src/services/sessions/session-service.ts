@@ -397,7 +397,7 @@ export class SessionService {
       try {
         await this.deliver(session, this.forRunner(session, decorated.input));
       } catch (error) {
-        decorated.failed?.();
+        decorated.failed?.(error);
         throw error;
       }
       decorated.delivered?.();

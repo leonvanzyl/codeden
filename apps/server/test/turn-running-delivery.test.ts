@@ -6,7 +6,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { type Database, openDatabase } from "../src/db/client";
 import { EventStore } from "../src/events/store";
 import { RunnerCommandError } from "../src/runner/client";
+import { LoopGuard } from "../src/services/orchestration/loop-guard";
+import { WakeScheduler } from "../src/services/orchestration/wake-scheduler";
 import type { RunnerPort } from "../src/services/runner-port";
+import { mayHaveStarted } from "../src/services/sessions/input-decorator";
 import type { SessionLauncher } from "../src/services/sessions/launcher";
 import { Outbox } from "../src/services/sessions/outbox";
 import { SessionRepo } from "../src/services/sessions/repo";
@@ -181,6 +184,54 @@ describe("deliveries racing a running turn (#96)", () => {
     await settle();
     expect(sent).toEqual(["first", "second"]);
     expect(texts()).toEqual([]);
+  });
+
+  it("delivers what queued behind a PM's delivery when its turn ends before the answer (#137)", async () => {
+    // The orchestration decorator's turn-origin tracking holds the delivery open until the
+    // runner answers; the turn's end must not strand what queued meanwhile.
+    repo.update("s1", (s) => ({ ...s, role: "pm", projectId: "p1" }));
+    const { sessions, sent, state, request } = providerLike();
+    const guard = new LoopGuard({
+      wakes: new WakeScheduler(async () => "empty"),
+      notices: { create: () => undefined, undelivered: () => [] },
+      wakePm: async () => "empty",
+    });
+    sessions.setInputDecorator((session, raw, from) => {
+      const turn = guard.beginTurn(session, from, raw);
+      return {
+        input: raw,
+        delivered: () => turn.accepted(),
+        failed: (error) => turn.failed(mayHaveStarted(error)),
+      };
+    });
+    let answer = () => {};
+    request.mockImplementationOnce(async (command) => {
+      state.turn = true;
+      sent.push(command.input?.text ?? "");
+      await new Promise<void>((resolve) => {
+        answer = resolve;
+      });
+      return {};
+    });
+    const first = sessions.send("s1", { input: input("first"), whenBusy: "queue" }, "automation");
+    await settle();
+    await expect(
+      sessions.send("s1", { input: input("second"), whenBusy: "queue" }, "user"),
+    ).resolves.toEqual({ status: "queued" });
+    // The turn completes before 'first' is acknowledged: the flush its end triggers skips.
+    state.turn = false;
+    repo.update("s1", (s) => ({ ...s, status: "idle" }));
+    await sessions.flushOutbox("s1");
+    expect(texts()).toEqual(["second"]);
+
+    answer();
+    await expect(first).resolves.toEqual({ status: "sent" });
+    await settle();
+    expect(sent).toEqual(["first", "second"]);
+    expect(texts()).toEqual([]);
+    // The turn running now is the user's.
+    expect(guard.humanLed({ caller: "mcp", sessionId: "s1" })).toBe(true);
+    guard.dispose();
   });
 
   it("keeps arrival order when a busy runner refuses a send while another message arrives", async () => {

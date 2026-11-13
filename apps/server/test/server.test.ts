@@ -4,12 +4,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   agentEventToNewEvent,
+  type NewEvent,
   type ServerToClientMessage,
   SessionSnapshot,
   Settings,
   Snapshot,
 } from "@codeden/contracts";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import WebSocket from "ws";
 import { type RunningServer, startServer } from "../src";
 import { sampleSessionEvent } from "./helpers";
@@ -136,6 +137,37 @@ describe("api", () => {
     expect(
       (await fetch(`${server.url}/api/sessions/nope/snapshot`, { headers: auth })).status,
     ).toBe(404);
+  });
+
+  it("returns a session's turns in the order they started, not by id", async () => {
+    const [created, thread] = sampleSessionEvent();
+    server.store.append([created as NewEvent, thread as NewEvent]);
+    // Turn ids are random UUIDs in practice, so their sort order says nothing about time. The
+    // last append starts two turns, which then share a start time and keep insertion order.
+    const appends = [
+      ["2026-11-07T10:01:00.000Z", ["c-turn"]],
+      ["2026-11-07T10:02:00.000Z", ["a-turn"]],
+      ["2026-11-07T10:03:00.000Z", ["d-turn", "b-turn"]],
+    ] as const;
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      for (const [at, turnIds] of appends) {
+        vi.setSystemTime(new Date(at));
+        server.store.append(
+          turnIds.flatMap((turnId) => [
+            agentEventToNewEvent("s1", { type: "turn.started", threadId: "t1", turnId }),
+            agentEventToNewEvent("s1", { type: "turn.completed", threadId: "t1", turnId }),
+          ]),
+        );
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+    const res = await fetch(`${server.url}/api/sessions/s1/snapshot`, { headers: auth });
+    const snap = SessionSnapshot.parse(await res.json());
+    expect(snap.turns.map((t) => [t.id, t.startedAt])).toEqual(
+      appends.flatMap(([at, turnIds]) => turnIds.map((id) => [id, at])),
+    );
   });
 });
 

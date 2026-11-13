@@ -4,14 +4,15 @@ import { type FactoryContext, factoryNotice, pauseLoop, raiseInbox } from "./con
 import { stoppedSinceNudge } from "./idle";
 import { failItem } from "./outcomes";
 import { ANALYZE_NUDGE, BUILDER_NUDGE, REPRODUCE_NUDGE } from "./prompts";
-import { awaitTurnRaceResume } from "./turn-race";
+import { awaitTurnRaceResume, BUILDER_FAILED_REASON } from "./turn-race";
 
 const BUSY = new Set(["created", "queued", "starting", "running", "waiting"]);
 
 /**
  * Building (§10.1): wait for the builder's turn to end with its first step reported (bugs and
- * features) and then an open PR; nudge it once when it ends without, fail the item when the
- * session dies, or ends again without and stays idle past the grace period (`idleGraceMin`).
+ * features) and then an open PR; nudge it once when it ends without, fail the item when it ends
+ * again without and stays idle past the grace period (`idleGraceMin`). A builder session that
+ * dies or is gone fails it as an infrastructure failure, which the loop recovers by itself.
  */
 export async function advanceBuilding(
   ctx: FactoryContext,
@@ -20,7 +21,9 @@ export async function advanceBuilding(
   item: FactoryItem,
 ): Promise<FactoryLoop> {
   const s = item.builderSessionId ? ctx.repo.find(item.builderSessionId)?.session : undefined;
-  if (!s) return failItem(ctx, loop, item, "The builder session is gone");
+  // Outside the work's code: the loop puts it back by itself (`recover.ts`).
+  const infra = { kind: "infrastructure" } as const;
+  if (!s) return failItem(ctx, loop, item, "The builder session is gone", infra);
   if (BUSY.has(s.status)) return loop;
   const fixAt = item.attempts > 0 ? item.nudges[`fix_${item.attempts}`] : undefined;
   // After a fix request, wait until the builder has taken a turn since.
@@ -40,7 +43,10 @@ export async function advanceBuilding(
   if (s.status === "failed" || s.status === "stopped") {
     // Failed only because a message raced its turn: told to carry on instead.
     if (await awaitTurnRaceResume(ctx, project, loop, item, s)) return loop;
-    return failItem(ctx, loop, item, `The builder session ${s.status} without a pull request`);
+    // A session that died otherwise (an error, a runner restart) is no fault of the work
+    // either; one a person stopped is their call.
+    if (s.status === "failed") return failItem(ctx, loop, item, BUILDER_FAILED_REASON, infra);
+    return failItem(ctx, loop, item, "The builder session stopped without a pull request");
   }
   const investigating = !item.investigation && (item.type === "bug" || item.type === "feature");
   if (investigating) {

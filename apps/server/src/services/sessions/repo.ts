@@ -19,6 +19,7 @@ import { and, asc, type Column, desc, eq, gt, inArray, lt, or, type SQL, sql } f
 import type { Db } from "../../db/client";
 import { rowToItemRecord, rowToSession, rowToTurn } from "../../db/rows";
 import { automationRuns, checkpoints, items, sessions, turns } from "../../db/schema";
+import { turnsOldestFirst } from "../../db/turn-order";
 import type { EventStore } from "../../events/store";
 import { notFound } from "../errors";
 import { ACTIVE_RUN_STATUSES, ACTIVE_SESSION_STATUSES } from "./conflicts";
@@ -31,12 +32,19 @@ export interface PendingStart {
 }
 
 /**
- * Start metadata as stored: the public `SessionStartMeta` plus a pending start, and the PR
- * feedback already sent per PR number (`PrFeedbackService`).
+ * Start metadata as stored: the public `SessionStartMeta` plus a pending start, the PR
+ * feedback already sent per PR number (`PrFeedbackService`) and, for the orchestrator and PMs,
+ * whether their latest turn carries the user's request (`LoopGuard`).
  */
 export type StoredStartMeta = SessionStartMeta & {
   pending?: PendingStart | null;
   prFeedback?: Record<string, { rounds: number; keys: string[] }>;
+  /**
+   * Whether the turn this role session's last accepted delivery started carries the user's
+   * request (false while a delivery is in flight), so a turn that outlives a server restart
+   * keeps it. Absent: never recorded, treated as not the user's.
+   */
+  turnFromUser?: boolean;
   /** A fork's workspace plan (§9): prepared before any start until the worktree exists. */
   forkStart?: ForkStart | null;
 };
@@ -224,7 +232,7 @@ export class SessionRepo {
       .select()
       .from(turns)
       .where(and(eq(turns.sessionId, sessionId), eq(turns.status, "running")))
-      .orderBy(asc(turns.startedAt))
+      .orderBy(...turnsOldestFirst)
       .all();
     const ended = new Set(running.map((t) => t.id));
     const requests = this.db
@@ -356,7 +364,7 @@ export class SessionRepo {
       .select({ id: turns.id })
       .from(turns)
       .where(and(eq(turns.sessionId, session.id), eq(turns.threadId, session.rootThreadId)))
-      .orderBy(asc(turns.startedAt), asc(sql`rowid`))
+      .orderBy(...turnsOldestFirst)
       .all()
       .map((r) => r.id);
   }

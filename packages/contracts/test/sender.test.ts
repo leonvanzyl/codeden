@@ -4,6 +4,7 @@ import {
   Item,
   MessageSender,
   messageFrom,
+  QueuedMessage,
   QueueSender,
   RunnerCommand,
   SENDER_LINES,
@@ -75,6 +76,23 @@ describe("message senders", () => {
       text: "Message from your project manager:\nShip it",
       attachments: [],
     });
+  });
+
+  it("round-trips an orchestrator message relayed for the user, queued or delivered", () => {
+    const input = roundTrip(UserInput, {
+      ...messageFrom("orchestrator", "Fix #4"),
+      relayedForUser: true,
+    });
+    expect(input).toMatchObject({ from: "orchestrator", relayedForUser: true });
+    const queued = roundTrip(QueuedMessage, {
+      id: "q1",
+      sessionId: "s1",
+      input,
+      from: "orchestrator",
+      createdAt: ts,
+    });
+    expect(queued.input.relayedForUser).toBe(true);
+    expect(UserInput.parse({ text: "hi" }).relayedForUser).toBeUndefined();
   });
 
   it("rejects an unknown sender", () => {

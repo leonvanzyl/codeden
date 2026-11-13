@@ -3,6 +3,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import type { Db } from "../db/client";
 import { rowToItemRecord, rowToThread, rowToTurn } from "../db/rows";
 import { items, sessions, threads, turns } from "../db/schema";
+import { turnsOldestFirst } from "../db/turn-order";
 import { type ArtifactLookup, clientItemRecord } from "../services/sessions/client-items";
 
 /** Transcript rows of one session touched by events, waiting to be sent. */
@@ -102,6 +103,7 @@ export function loadTranscript(
             .select()
             .from(turns)
             .where(and(eq(turns.sessionId, sessionId), inArray(turns.id, ids(dirty.turns))))
+            .orderBy(...turnsOldestFirst)
             .all()
             .map(rowToTurn),
     items:

@@ -62,6 +62,8 @@ const item: FactoryItem = {
   checks: [{ name: "ci", state: "pass", detail: null, escalate: false, at: ts }],
   attempts: 0,
   reason: null,
+  failureKind: null,
+  rebuiltFrom: null,
   note: null,
   mergeSha: null,
   revertOf: null,
@@ -119,6 +121,15 @@ describe("factory API contracts (§10.1)", () => {
       earlierSessionIds: ["s1", "s2"],
     };
     expect(FactoryItem.parse(JSON.parse(JSON.stringify(finished)))).toEqual(finished);
+    // A rebuilt item that failed for a reason outside its code.
+    const rebuilt = {
+      ...item,
+      stage: "failed" as const,
+      failureKind: "infrastructure" as const,
+      rebuiltFrom: { number: 4, url: "https://github.com/acme/app/pull/4", state: "closed" },
+    };
+    expect(FactoryItem.parse(JSON.parse(JSON.stringify(rebuilt)))).toEqual(rebuilt);
+    expect(FactoryItem.safeParse({ ...item, failureKind: "flaky" }).success).toBe(false);
     const loop = FactoryLoop.parse({
       projectId: "p1",
       state: "building",
@@ -159,9 +170,13 @@ describe("factory API contracts (§10.1)", () => {
       author: _a,
       admittedBy: _ab,
       investigation: _i,
+      failureKind: _fk,
+      rebuiltFrom: _rf,
       ...old
     } = item;
     expect(FactoryItem.parse(old)).toMatchObject({
+      failureKind: null,
+      rebuiltFrom: null,
       largeChange: null,
       sessionsArchivedAt: null,
       earlierSessionIds: [],
@@ -278,6 +293,39 @@ describe("factory API contracts (§10.1)", () => {
       lastTickAt: null,
     });
     expect(status.tuning.requireCi).toBe(true);
+    // A status from before the merge queue still parses; its entries round-trip.
+    expect(status.pullRequests).toEqual([]);
+    const pullRequests = [
+      {
+        itemId: "i1",
+        title: "Add a counter",
+        pr: item.pr,
+        state: "queued",
+        queuePosition: 1,
+        note: "Queued to merge",
+      },
+      {
+        itemId: "i2",
+        title: "Fix the header",
+        pr: { number: 5, url: "https://github.com/acme/app/pull/5", state: "open" },
+        state: "rebasing",
+        queuePosition: null,
+        note: null,
+      },
+    ];
+    const withQueue = FactoryStatus.parse({ ...status, pullRequests });
+    expect(FactoryStatus.parse(JSON.parse(JSON.stringify(withQueue)))).toEqual(withQueue);
+    expect(withQueue.pullRequests.map((p) => p.state)).toEqual(["queued", "rebasing"]);
+    expect(
+      FactoryStatus.safeParse({
+        ...status,
+        pullRequests: [{ ...pullRequests[0], queuePosition: 0 }],
+      }).success,
+    ).toBe(false);
+    expect(
+      FactoryStatus.safeParse({ ...status, pullRequests: [{ ...pullRequests[0], state: "idle" }] })
+        .success,
+    ).toBe(false);
     // The scout: a status from before "Run scout now" still parses; the reason round-trips.
     const scout = {
       phase: "idle",

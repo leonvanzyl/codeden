@@ -11,6 +11,7 @@ import {
   WorkTrust,
   WorkType,
 } from "./factory-pipeline";
+import { FactoryFailureKind, FactoryPrEntry } from "./factory-prs";
 
 /**
  * The factory loop of software-factory and dark-factory projects (§10.1): work items, merge
@@ -176,6 +177,14 @@ export const FactoryItem = z.object({
   attempts: z.int().nonnegative(),
   /** Why it was rejected, failed or escalated. */
   reason: z.string().nullable(),
+  /** Why it failed: its own work, the infrastructure, or stuck until a person looks (see `FactoryFailureKind`). */
+  failureKind: FactoryFailureKind.nullable().default(null),
+  /**
+   * The pull request a rebuild replaced: after three requests to rebase it still conflicted, so
+   * the work was redone from the default branch and that PR is closed once the new one opens.
+   * Set means the item's one rebuild is used.
+   */
+  rebuiltFrom: GitHubPrRef.nullable().default(null),
   /** Last thing the loop noted about it (waiting on a conflict, merge budget, ...). */
   note: z.string().nullable(),
   mergeSha: z.string().nullable(),
@@ -511,6 +520,11 @@ export const FactoryStatus = z.object({
   backlog: z.array(FactoryWorkItem),
   inProgress: z.array(FactoryWorkItem),
   mergeChecks: z.array(FactoryMergeChecks),
+  /**
+   * The pull requests the factory owns: the merge queue first, in the order they merge, then
+   * the rest (being checked, rebased, rebuilt, waiting for you) and today's merges.
+   */
+  pullRequests: z.array(FactoryPrEntry).default([]),
   /** Merged, reverted, failed, rejected and escalated items, newest first. */
   recent: z.array(FactoryWorkItem),
   /** Issues by untrusted authors, newest first; nothing runs on them until let in. */

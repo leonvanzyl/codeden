@@ -183,18 +183,52 @@ Every check must pass before a pull request is ready to merge. Results are recor
 |---|---|
 | **Protected areas** | No changed path matches a protected glob, the vision file or a deploy file, and no protected topic is mentioned. A failure escalates the PR to you |
 | **Size** | The change is within **Largest change** (`maxChangedLines`, default 5,000 added + deleted lines) and **Most files changed** (`maxChangedFiles`, no limit by default). Lockfiles and generated or vendored files don't count. The PM can allow a bigger change that can't be split |
-| **CI** | The PR's checks are green. While the PR has merge conflicts it waits for the builder to rebase (GitHub runs no CI on a conflicting PR). No checks on the head commit wait 10 minutes from when that head appeared, then fail with "CI never started", unless `requireCi` is off |
+| **CI** | The PR's checks are green. While the PR has merge conflicts it waits for them to be rebased away (GitHub runs no CI on a conflicting PR). No checks on the head commit wait 10 minutes from when that head appeared, then count as "CI never started" (see [below](#failures-outside-the-work)), unless `requireCi` is off |
 | **Review** | The independent reviewer approves against the issue, the spec and the vision. Skipped for docs-only changes in the docs pipeline |
 | **Tests** | Test files changed (or the change is only docs or config), and the reviewer agrees the tests the change needs exist |
 | **Test results** | The PR description has a `## Test results` section, or test output was attached with `attach_evidence`. Skipped when no code changed |
 | **Security** | Your `auditCommand`, run in the builder's worktree, passes, and the reviewer raised no security concerns |
 | **Screenshots** | If UI files changed, screenshots were attached with `attach_evidence` |
 
-A failed check (other than size) starts a **revise round**: the builder gets the failures and fixes them in the same branch, up to `maxFixAttempts` rounds; after that the item fails and counts towards the pause limit. CI that never started is no code problem, so on its own it fails the item without a revise round. A review verdict that arrives after a revise round started goes to the builder as part of that round; one that arrives after the item failed is kept on the item.
-
-**Merge conflicts are the factory's own job.** When another merge leaves a PR conflicting with the default branch, the builder is asked to rebase onto it and resolve the conflicts. That isn't a revise round. It is asked again while the conflicts remain, up to three times, and only then does the item fail. CI is then awaited on the rebased head, and a review already given still counts. If cleanup archived the builder in the meantime, the request brings it and its worktree back. The audit (`auditCommand`) only runs in the builder's worktree once it is there again and the builder is between turns. Until then the audit is pending, and it is still required before a merge.
+A failed check (other than size) starts a **revise round**: the builder gets the failures and fixes them in the same branch, up to `maxFixAttempts` rounds; after that the item fails and counts towards the pause limit. A builder session that died is resumed by the revise message. CI that never started is no code problem, so it never starts a revise round (see [Failures outside the work](#failures-outside-the-work)). A review verdict that arrives after a revise round started goes to the builder as part of that round; one that arrives after the item failed is kept on the item.
 
 **Too large is different.** A revise round can't make work smaller without cutting scope, so a size failure skips it and doesn't count towards the pause limit. Instead the PM is woken to split the work into smaller issues, or, when it can't be split (an initial scaffold, a stack migration), allow it with `factory_allow_large_change`.
+
+## The factory looks after its pull requests
+
+Merging is mechanical, so the server loop does it on every check, not an agent and not the PM. An agent only gets involved when a merge conflict needs judgement. The **Pull requests** card on the factory panel shows where each PR stands: the merge queue first, in the order it merges (numbered), then every other PR the factory owns, then today's merges. Each has a state: **Checking**, **Waiting for CI**, **Queued**, **Updating**, **Rebasing**, **Rebuilding**, **Waiting for you**, **Stuck** or **Merged**.
+
+**Every factory PR is owned until it merges or closes**, whatever its item's stage. A PR that waits for a person (auto-merge off, a protected area, an untrusted author, checks that failed after the revise rounds) is still read every few minutes and kept free of merge conflicts, so you never open a factory PR that rotted into conflicts. When you merge or close it on GitHub, its item is done. The factory never merges these itself.
+
+**The merge queue.** With auto-merge on, a PR whose checks all pass doesn't merge on the spot: it joins the queue. The factory merges one PR at a time, oldest approved first (a revert goes ahead of everything), and at most one per check.
+- Only the PR at the head of the queue acts, so CI doesn't run on every queued PR at once. The others wait their turn.
+- When the head is behind the default branch, GitHub brings it up to date (**Update branch**, with the head commit pinned): no agent is needed. CI then runs on the new head, and the PR merges once it passes. Merging the default branch in like this needs no new review.
+- The daily merge limit and a paused loop hold the queue, as before. A revert may still merge while the loop is paused.
+
+**Merge conflicts are the factory's own job.** When another merge leaves a PR conflicting with the default branch, its builder is asked to rebase onto it and resolve the conflicts. That isn't a revise round.
+- If cleanup archived the builder meanwhile, the request brings it and its worktree back, and the factory archives it again once its turn is over. When the builder's session is gone, a fresh **integrator** session takes the PR over. It works on the PR's own branch and is briefed with the issue, the PR description and the review history.
+- The agent is asked again while the conflicts remain, up to three times. CI is then awaited on the rebased head. If the reviewer had approved already, it re-checks only the conflict resolution (`git range-diff` of the old head against the new one); its approval stands if the resolution is right.
+- The audit (`auditCommand`) only runs in the builder's worktree once it is there again and the builder is between turns. Until then the audit is pending, and it is still required before a merge.
+
+**Rebuild instead of fail.** A PR that still conflicts after three requests to rebase is usually cheaper to redo than to rescue. The same item goes back to the queue with its reproduction or spec, and a fresh builder redoes the work from the latest default branch. Once the new PR is open, the old one is closed with a link to it. An item gets one rebuild.
+
+### Failures outside the work
+
+An item that failed for a reason outside its code goes back by itself on the next check after the cause is gone: to verification when its PR is open (the PR is picked up again, not redone), otherwise to building, with a message to the builder to carry on. These failures never count towards pausing the loop, and an item is put back at most three times. They are:
+- the builder or reviewer session died: an error, a runner restart, a message that raced a running turn. It goes back once the runner offers that provider again;
+- the builder session is gone: a fresh builder picks the work up, or an integrator looks after its open PR;
+- CI never started on the head commit although GitHub Actions are on. The factory starts it again: it updates the branch when the PR is behind the default branch, otherwise the builder pushes an empty commit.
+
+Items that failed this way before this was added are recognised by their reason and recovered too.
+
+### Only what is truly stuck reaches you
+
+Three things go to your inbox and to the project manager, because the factory can't settle them by itself:
+- an item whose PR still conflicts after its one rebuild;
+- a protected area;
+- CI that can never run: GitHub Actions turned off, or no active workflow. Turn them on and retry the item, or turn off **Require CI**.
+
+In a dark factory each one arrives as a [recorded decision](#nobody-waits-on-you-in-a-dark-factory) flagged for you, so the daily digest lists it. Nothing waits silently on a PR.
 
 ## Settings and limits
 

@@ -20,6 +20,8 @@ export interface FakePr extends FactoryPr {
   evidence: boolean;
   /** Test output attached with `attach_evidence`. */
   testOutput: boolean;
+  /** The default branch's head the PR's branch is based on (behind once main moves). */
+  baseSha: string;
 }
 
 /**
@@ -40,6 +42,14 @@ export class FakeFactoryGithub implements FactoryGithub {
   canRevertViaApi = true;
   /** The account CodeDen uses on GitHub (always trusted); null: unknown. */
   viewer: string | null = "codeden";
+  /** `update-branch` calls, in order. */
+  updates: Array<{ number: number; expectedHeadSha: string }> = [];
+  /** PRs closed through `closePr`, with their comment. */
+  closed: Array<{ number: number; comment: string }> = [];
+  /** CI state of the new head an `update-branch` makes (it starts running). */
+  ciAfterUpdate: ChecksState = "pending";
+  /** What `actionsAvailable` answers. */
+  actions: boolean | null = true;
   /** Issue authors' relation to the repository by issue number (default `none`). */
   associations = new Map<number, GithubAuthorAssociation>();
   private next = 100;
@@ -174,13 +184,55 @@ export class FakeFactoryGithub implements FactoryGithub {
       sessionId: opts.sessionId,
       evidence: opts.evidence ?? false,
       testOutput: opts.testOutput ?? false,
+      baseSha: this.main.sha,
     };
     this.prs.set(number, pr);
     return pr;
   }
 
-  prForSession(_projectId: string, sessionId: string): GitHubPrRef | null {
-    return [...this.prs.values()].find((p) => p.sessionId === sessionId)?.ref ?? null;
+  /** What a rebase by an agent does: a new head on the current main, without conflicts. */
+  rebase(pr: FakePr, headSha: string, checks: ChecksState = "success"): void {
+    Object.assign(pr, { headSha, baseSha: this.main.sha, mergeable: "mergeable", checks });
+  }
+
+  async behindBy(_projectId: string, number: number): Promise<number> {
+    const pr = this.prs.get(number);
+    if (!pr) throw new Error(`no PR ${number}`);
+    return pr.baseSha === this.main.sha ? 0 : 1;
+  }
+
+  async updateBranch(_projectId: string, number: number, expectedHeadSha: string): Promise<void> {
+    const pr = this.prs.get(number);
+    if (!pr) throw new Error(`no PR ${number}`);
+    if (pr.headSha !== expectedHeadSha)
+      throw new Error("expected head sha didn't match current head");
+    if (pr.mergeable === "conflicting") throw new Error("merge conflict between base and head");
+    this.updates.push({ number, expectedHeadSha });
+    Object.assign(pr, {
+      headSha: `${pr.headSha}-up${this.updates.length}`,
+      baseSha: this.main.sha,
+      checks: this.ciAfterUpdate,
+    });
+  }
+
+  async closePr(_projectId: string, number: number, comment: string): Promise<void> {
+    const pr = this.prs.get(number);
+    if (!pr) throw new Error(`no PR ${number}`);
+    this.comments.push({ number, body: comment });
+    this.closed.push({ number, comment });
+    pr.ref = { ...pr.ref, state: "closed" };
+  }
+
+  async actionsAvailable(): Promise<boolean | null> {
+    return this.actions;
+  }
+
+  prForSession(_projectId: string, sessionId: string, branch: string | null): GitHubPrRef | null {
+    return (
+      [...this.prs.values()].find(
+        (p) => p.sessionId === sessionId || (branch !== null && p.headBranch === branch),
+      )?.ref ?? null
+    );
   }
 
   async prDetails(_projectId: string, number: number): Promise<FactoryPr> {
@@ -197,6 +249,8 @@ export class FakeFactoryGithub implements FactoryGithub {
   async merge(_projectId: string, number: number, opts: { sha: string | null; title: string }) {
     const pr = this.prs.get(number);
     if (!pr) throw new Error(`no PR ${number}`);
+    // Like GitHub: a merge pinned to a head that moved is refused.
+    if (opts.sha && opts.sha !== pr.headSha) throw new Error("Head branch was modified");
     pr.ref = { ...pr.ref, state: "merged" };
     const sha = `merge${number}`;
     this.merges.push({ number, sha, title: opts.title });

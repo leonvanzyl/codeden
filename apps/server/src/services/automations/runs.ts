@@ -8,6 +8,7 @@ import {
 import { and, desc, eq, gte, inArray, isNotNull, lt, type SQL } from "drizzle-orm";
 import type { Db } from "../../db/client";
 import { automationRuns, turns } from "../../db/schema";
+import { turnsNewestFirst } from "../../db/turn-order";
 import type { EventStore } from "../../events/store";
 import { notFound } from "../errors";
 import { localDay } from "./cron";
@@ -24,7 +25,7 @@ export function lastTurnStatus(db: Db, session: Session): TurnStatus | null {
     .select({ status: turns.status })
     .from(turns)
     .where(and(eq(turns.sessionId, session.id), eq(turns.threadId, session.rootThreadId)))
-    .orderBy(desc(turns.startedAt))
+    .orderBy(...turnsNewestFirst)
     .limit(1)
     .get();
   return (row?.status as TurnStatus | undefined) ?? null;

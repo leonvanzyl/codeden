@@ -9,11 +9,13 @@ import { errorMessage } from "../errors";
 import { archiveFinished } from "./cleanup";
 import { budgetSpend, type FactoryContext, visionOf } from "./context";
 import { classifyPending, intakeFailedChecks, intakeIssues } from "./intake";
-import { advanceEscalated } from "./merge";
+import { advanceOwned } from "./owned";
 import { budgetExceeded, freeSlots, localDay, mayBuild, queueOrder } from "./policy";
 import { advanceBuilding, advanceWatching } from "./progress";
-import { recoverNoCiFailures } from "./rebase";
+import { advanceQueue } from "./queue";
+import { recoverInfraFailures } from "./recover";
 import { advanceScout } from "./scout";
+import { OWNED_STAGES } from "./store";
 import { mayAutoMerge } from "./trust";
 import { recoverTurnRaceFailures } from "./turn-race";
 import { advanceVerifying } from "./verify";
@@ -64,28 +66,24 @@ export async function runTick(
     }
   }
 
-  // Items that failed only because their conflicting PR got no CI go back to verification.
-  await recoverNoCiFailures(ctx, project);
+  // Items that failed for a reason outside their code go back by themselves.
+  loop = await recoverInfraFailures(ctx, project, loop);
   // Items already in flight move on even while paused (merges stay blocked, reverts excepted).
   // Watch merges first, then builds, then verification, so a PR found while building is
-  // verified in the same step and a fresh merge is watched from the next one.
-  for (const stage of ["watching", "building", "verifying"] as const) {
+  // verified in the same step and a fresh merge is watched from the next one. Then the merge
+  // queue takes one step (at most one merge per tick), and the PRs of failed and escalated
+  // items, which wait for a person, are kept free of conflicts.
+  for (const stage of ["watching", "building", "verifying", ...OWNED_STAGES] as const) {
     for (const item of ctx.store.items(projectId, [stage])) {
-      try {
-        if (stage === "building") loop = await advanceBuilding(ctx, project, loop, item);
-        else if (stage === "verifying") loop = await advanceVerifying(ctx, project, loop, item);
-        else loop = await advanceWatching(ctx, project, loop, item);
-      } catch (error) {
-        ctx.log?.(`factory: ${item.id}: ${errorMessage(error)}`);
-        ctx.store.updateItem(item.id, (i) => ({
-          ...i,
-          note: `Loop error: ${errorMessage(error)}`,
-        }));
-      }
+      loop = await step(ctx, item, loop, () => {
+        if (stage === "building") return advanceBuilding(ctx, project, loop, item);
+        if (stage === "verifying") return advanceVerifying(ctx, project, loop, item);
+        if (stage === "watching") return advanceWatching(ctx, project, loop, item);
+        return advanceOwned(ctx, project, loop, item);
+      });
     }
+    if (stage === "verifying") loop = await advanceQueue(ctx, project, loop);
   }
-  for (const item of ctx.store.items(projectId, ["escalated"]))
-    advanceEscalated(ctx, project, item);
   // Finished work gives back its sessions and worktrees, also while paused.
   archiveFinished(ctx, projectId);
 
@@ -105,6 +103,22 @@ export async function runTick(
   await assignAgents(ctx, project, loop);
   if (project.autonomyMode === "dark_factory") loop = await advanceScout(ctx, project, loop);
   return save(ctx, { ...loop, state: deriveState(ctx, projectId, loop) }, now);
+}
+
+/** One item's step: an error is noted on the item and never stops the tick. */
+async function step(
+  ctx: FactoryContext,
+  item: FactoryItem,
+  loop: FactoryLoop,
+  run: () => Promise<FactoryLoop>,
+): Promise<FactoryLoop> {
+  try {
+    return await run();
+  } catch (error) {
+    ctx.log?.(`factory: ${item.id}: ${errorMessage(error)}`);
+    ctx.store.updateItem(item.id, (i) => ({ ...i, note: `Loop error: ${errorMessage(error)}` }));
+    return loop;
+  }
 }
 
 /** Ticks that change nothing append nothing (the status shows the tick time from memory). */

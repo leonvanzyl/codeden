@@ -2,6 +2,7 @@ import type {
   AutonomyMode,
   FactoryLimits,
   FactoryLoopState,
+  FactoryPrEntry,
   GitHubIssueRef,
   GitHubPrRef,
   PipelineStep,
@@ -69,5 +70,7 @@ export interface FactoryFixture {
   mergeChecks: FixtureChecks[];
   recent: FixtureWorkItem[];
   ignored: FixtureWorkItem[];
+  /** The PRs the factory owns, merge queue first (`FactoryStatus.pullRequests`). */
+  pullRequests?: FactoryPrEntry[];
   visionExists: boolean;
 }

@@ -160,6 +160,32 @@ export class FactorySessions {
     });
   }
 
+  /**
+   * Start an integrator: a fresh session on a factory PR's head branch (fetched by CodeDen) that
+   * resolves its merge conflicts because the session that wrote it is gone. Its worktree's
+   * branch is the PR's, so `create_pull_request` updates the same pull request.
+   */
+  startIntegrator(
+    item: FactoryItem,
+    pr: { number: number; headBranch: string },
+    text: string,
+  ): Promise<StartSessionResponse> {
+    return this.start({
+      projectId: item.projectId,
+      purpose: `Factory integration: resolve the conflicts of #${pr.number}`,
+      workKey: `factory:integrate:${pr.number}`,
+      title: `Integrate #${pr.number}: ${item.title}`.slice(0, 200),
+      issue: item.issue ?? undefined,
+      workspace: {
+        mode: "worktree",
+        branch: pr.headBranch,
+        baseRef: `origin/${pr.headBranch}`,
+        fetch: true,
+      },
+      input: brief(text),
+    });
+  }
+
   startRevert(
     projectId: string,
     merge: { sha: string; prNumber: number; title: string },
