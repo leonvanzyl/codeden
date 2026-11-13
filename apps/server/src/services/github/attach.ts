@@ -8,7 +8,7 @@ import { realPathOf } from "../files/path-guard";
 import { assertNotSecret } from "../secret-files";
 import { sessionWorkdir } from "../sessions/workdir";
 import type { GithubClient } from "./client";
-import { commitEvidence, type EvidenceFile, evidenceComment } from "./evidence";
+import { commitEvidence, type EvidenceFile, evidenceComment, evidenceFileNames } from "./evidence";
 import { commentOnIssue } from "./issues";
 
 /** One evidence file: a path in the session's worktree, or an artifact (e.g. a screenshot). */
@@ -63,7 +63,7 @@ export function readEvidence(
   const roots = [cwd, tmpdir(), artifacts.sessionDir(session.id)].flatMap(
     (p) => realPathOf(p) ?? [],
   );
-  return sources.map((source) => {
+  const files = sources.map((source): EvidenceFile => {
     // Every check and the read use the real file (links, junctions and short names resolved).
     let file: string;
     let name: string;
@@ -78,7 +78,11 @@ export function readEvidence(
       // Its file may be a link to another artifact's file; that one's original name counts too.
       const target = artifacts.artifactForFile(file)?.name;
       assertNotSecret(
-        { realPath: file, names: [artifacts.filePath(artifact), artifact.name, target, name] },
+        {
+          realPath: file,
+          paths: [artifacts.filePath(artifact)],
+          names: [artifact.name, target, name],
+        },
         home,
       );
     } else if (source.path) {
@@ -94,7 +98,7 @@ export function readEvidence(
       name = source.name ?? basename(file);
       // A stored artifact's file has a generated name; its original name counts too.
       const stored = artifacts.artifactForFile(file)?.name;
-      assertNotSecret({ realPath: file, names: [source.path, stored, name] }, home);
+      assertNotSecret({ realPath: file, paths: [source.path], names: [stored, name] }, home);
     } else {
       throw badRequest("Each file needs a path or an artifactId");
     }
@@ -102,6 +106,11 @@ export function readEvidence(
       throw badRequest(`${name} is larger than 20 MB`);
     return { name, bytes: readFileSync(file), caption: source.caption };
   });
+  // The exact names they go out under: `-2` for a repeated name can make one look secret.
+  for (const name of evidenceFileNames(files.map((f) => f.name))) {
+    assertNotSecret({ names: [name] }, home);
+  }
+  return files;
 }
 
 /**

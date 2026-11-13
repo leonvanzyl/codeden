@@ -1,5 +1,0 @@
----
-section: fixed
----
-
-- **On touch screens, Fork from here and the diff card buttons no longer cover what they belong to.** On a phone, **Fork from here** sat on top of the end of a turn's summary. It now follows the summary on the same line, which wraps when it's long. When forking isn't possible yet, pressing it (a tap, a click, Enter or Space) shows why in a toast, for example "Answer what it's waiting on first", and screen readers announce the reason with the button. Before, the reason was only in a tooltip that never appears on touch or keyboard focus, so the press did nothing visible. **Comment** and **Restore file** now sit in each diff file's sticky header next to the file name and the -/+ counts, instead of on top of them. That fixes phones, where they hid the name and counts, and desktop, where they hid the counts while the pointer was over the card. On narrow cards, such as phones and the side panel at its default width, they show as icon buttons that keep their tooltips and screen reader names.

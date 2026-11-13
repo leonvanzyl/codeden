@@ -85,7 +85,12 @@ export function RightPanel({ sessionId, width }: { sessionId: string; width: num
         {active === "github" && <GitHubPanel sessionId={sessionId} />}
         {active === "details" && session && <DetailsPanel session={session} />}
         {active === "thread" && showChild && (
-          <ChildThreadPanel sessionId={sessionId} threadId={child.threadId} />
+          <ChildThreadPanel
+            key={`${child.threadId}:${child.focusItemId ?? ""}`}
+            sessionId={sessionId}
+            threadId={child.threadId}
+            focusItemId={child.focusItemId}
+          />
         )}
       </div>
     </aside>

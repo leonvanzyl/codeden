@@ -7,6 +7,7 @@ import {
   type FactoryLoop,
   FactoryTuning,
   LEGACY_SIZE_LIMITS,
+  pipelineStep,
   ScoutState,
 } from "@codeden/contracts";
 import { and, asc, desc, eq, inArray, or, sql } from "drizzle-orm";
@@ -156,6 +157,41 @@ export class FactoryStore {
       .map((r) => withItemDefaults(r.item));
   }
 
+  /**
+   * Finished items the Factory view may still show (`status.ts` narrows them with
+   * `viewRecentItems`): every escalated item; failed items that failed since `failedSince`, still
+   * have an open PR, or are rebuilds without a PR of their own (whose original may still be
+   * open); and items merged since `mergedSince`. Not capped like `items`, so no amount of newer
+   * history hides an unresolved one.
+   */
+  viewCandidates(projectId: string, failedSince: string, mergedSince: string): FactoryItem[] {
+    const field = (path: string) => sql`json_extract(${factoryItems.item}, ${path})`;
+    const failed = and(
+      eq(factoryItems.stage, "failed"),
+      or(
+        sql`${field("$.finishedAt")} >= ${failedSince}`,
+        sql`${field("$.pr.state")} in ('open', 'draft')`,
+        and(sql`${field("$.pr")} is null`, sql`${field("$.rebuiltFrom")} is not null`),
+      ),
+    );
+    const merged = and(
+      eq(factoryItems.stage, "merged"),
+      sql`${field("$.mergedAt")} >= ${mergedSince}`,
+    );
+    return this.db
+      .select()
+      .from(factoryItems)
+      .where(
+        and(
+          eq(factoryItems.projectId, projectId),
+          or(eq(factoryItems.stage, "escalated"), failed, merged),
+        ),
+      )
+      .orderBy(desc(factoryItems.updatedAt))
+      .all()
+      .map((r) => withItemDefaults(r.item));
+  }
+
   /** The item a builder, reviewer or revert session works on. */
   itemForSession(projectId: string, sessionId: string): FactoryItem | undefined {
     return this.items(projectId, [...ACTIVE_STAGES, ...WAITING_STAGES]).find(
@@ -192,6 +228,7 @@ export class FactoryStore {
       finishedAt: null,
       ...draft,
       id: randomUUID(),
+      stepSince: now,
       createdAt: now,
       updatedAt: now,
     };
@@ -202,6 +239,7 @@ export class FactoryStore {
   /**
    * Apply a change to an item; writes only when something changed. `touch: false` keeps
    * `updatedAt`, for bookkeeping that isn't progress (the digest and the recent list go by it).
+   * A change that moves the item to another pipeline step restarts `stepSince`.
    */
   updateItem(
     id: string,
@@ -212,8 +250,10 @@ export class FactoryStore {
     if (!current) throw new Error(`No factory item ${id}`);
     const changed = change(current);
     if (JSON.stringify(changed) === JSON.stringify(current)) return current;
-    const next =
-      opts.touch === false ? changed : { ...changed, updatedAt: new Date().toISOString() };
+    const now = new Date().toISOString();
+    const stepped =
+      pipelineStep(changed) === pipelineStep(current) ? changed : { ...changed, stepSince: now };
+    const next = opts.touch === false ? stepped : { ...stepped, updatedAt: now };
     this.events.append([
       { type: "factory.item.updated", sessionId: null, payload: { item: next } },
     ]);
@@ -250,6 +290,7 @@ const ITEM_DEFAULTS = {
   earlierSessionIds: [],
   failureKind: null,
   rebuiltFrom: null,
+  stepSince: null,
 } satisfies Partial<FactoryItem>;
 
 /** An item as read from the projection, with the fields newer versions added. */

@@ -138,7 +138,10 @@ export function SetupPage() {
         description: error instanceof Error ? error.message : String(error),
       });
     }
-    void navigate(projectId ? { to: "/projects/$projectId", params: { projectId } } : { to: "/" });
+    // A first project leads straight into its first session: the New session view (§14).
+    void navigate(
+      projectId ? { to: "/projects/$projectId/new", params: { projectId } } : { to: "/" },
+    );
   };
 
   return (

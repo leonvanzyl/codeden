@@ -1,4 +1,4 @@
-import type { Session } from "@codeden/contracts";
+import { isFactoryMode, type Session } from "@codeden/contracts";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import {
   Bot,
@@ -7,6 +7,7 @@ import {
   Inbox,
   Keyboard,
   MessageSquarePlus,
+  MonitorPlay,
   Moon,
   PanelLeft,
   PanelRight,
@@ -182,6 +183,23 @@ export function CommandPalette() {
                 )}
               />
             ))}
+            {data?.projects
+              .filter((p) => isFactoryMode(p.autonomyMode))
+              .map((p) => (
+                <Row
+                  key={`factory-view:${p.id}`}
+                  icon={<MonitorPlay />}
+                  label={`Factory view · ${p.name}`}
+                  hint="Full screen, live"
+                  value={`factory view ${p.name} pipeline full screen`}
+                  onSelect={run(() =>
+                    navigate({
+                      to: "/projects/$projectId/factory/view",
+                      params: { projectId: p.id },
+                    }),
+                  )}
+                />
+              ))}
           </CommandGroup>
           <CommandGroup heading="Sessions">
             {data?.sessions

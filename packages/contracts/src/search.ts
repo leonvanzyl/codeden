@@ -1,25 +1,54 @@
 import { z } from "zod";
-import { Id, Timestamp } from "./common";
+import { Id, Role, Timestamp } from "./common";
 import { ToolKind } from "./items";
 
 /**
  * Full-text search over transcripts (§6, §13): what was asked, answered and run in any session,
- * archived ones included. Served by the `item_search` projection and its FTS5 index.
+ * archived ones included unless left out. Served by the `item_search` projection and its FTS5
+ * index, newest match first, a page at a time.
  */
 
 /** Hits per request when `limit` is omitted. */
 export const TRANSCRIPT_SEARCH_DEFAULT_LIMIT = 20;
+/** Most hits one request returns; page with `cursor` for more. */
+export const TRANSCRIPT_SEARCH_MAX_LIMIT = 100;
 /** Search terms shorter than this can't use the index on their own (trigram index, §6). */
 export const TRANSCRIPT_SEARCH_MIN_TERM = 3;
 
+/** A boolean from a query string (`true`/`false`) or from code. */
+const QueryBoolean = z.union([
+  z.boolean(),
+  z.enum(["true", "false"]).transform((v) => v === "true"),
+]);
+
 /** `GET /api/search/transcripts` query. */
 export const TranscriptSearchQuery = z.object({
-  /** What to look for. Whitespace separates terms; every term must appear (in any order). */
+  /**
+   * What to look for. Whitespace separates terms; every term must appear (in any order),
+   * ignoring case and accents. Control characters are ignored.
+   */
   q: z.string().trim().min(1).max(200),
   /** Only sessions of this project. */
   projectId: Id.optional(),
-  /** Most hits to return (at most 3 per session). */
-  limit: z.coerce.number().int().min(1).max(100).default(TRANSCRIPT_SEARCH_DEFAULT_LIMIT),
+  /** Only sessions with this role (§8.1). */
+  role: Role.optional(),
+  /** Whether matches in archived sessions are included (they are by default). */
+  includeArchived: QueryBoolean.default(true),
+  /**
+   * Continue after the previous page: its `nextCursor`. Omit for the newest matches. Opaque to
+   * clients.
+   */
+  cursor: z
+    .string()
+    .regex(/^\d{1,16}$/)
+    .optional(),
+  /** Most hits to return. */
+  limit: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(TRANSCRIPT_SEARCH_MAX_LIMIT)
+    .default(TRANSCRIPT_SEARCH_DEFAULT_LIMIT),
 });
 export type TranscriptSearchQuery = z.infer<typeof TranscriptSearchQuery>;
 
@@ -37,8 +66,9 @@ export const TranscriptSearchHit = z.object({
   threadId: Id,
   itemId: Id,
   /**
-   * The root-thread item to open: the item itself, or for an item in a subagent's thread the
-   * subagent card in the root thread that started it.
+   * The root-thread item to scroll to: the item itself, or for an item in a subagent's thread
+   * the subagent card in the root thread that started it. Such a hit also opens `threadId` at
+   * `itemId`.
    */
   anchorItemId: Id,
   /** Item kind, e.g. `user_message`, `assistant_message`, `tool_call`. */
@@ -52,12 +82,16 @@ export const TranscriptSearchHit = z.object({
 });
 export type TranscriptSearchHit = z.infer<typeof TranscriptSearchHit>;
 
-/** `GET /api/search/transcripts` response: best matches first, then newest. */
+/** `GET /api/search/transcripts` response: newest matches first. */
 export const TranscriptSearchResponse = z.object({
-  /** The query as searched (trimmed). */
+  /** The query as searched (trimmed, without control characters). */
   query: z.string(),
   hits: z.array(TranscriptSearchHit),
-  /** True when more hits matched than `limit` allowed. */
-  truncated: z.boolean(),
+  /**
+   * Pass as `cursor` to get the next page; null when every match has been returned. A page can
+   * hold fewer than `limit` hits and still have a next one: each request looks at a bounded
+   * number of candidates so a search never holds up the server.
+   */
+  nextCursor: z.string().nullable(),
 });
 export type TranscriptSearchResponse = z.infer<typeof TranscriptSearchResponse>;

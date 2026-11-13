@@ -11,9 +11,17 @@ import type { ResolvedCommand } from "../src/util/exec";
 const exe: ResolvedCommand = { kind: "native", path: "/opt/claude/claude" };
 
 /**
+ * A context compaction's boundary in a stub transcript. Like the SDK, `getSessionMessages()`
+ * returns only the chain from the latest boundary on (it follows `parentUuid` links back from
+ * the newest message, and a boundary has none), while `forkSession()` slices the whole file.
+ */
+const COMPACTED = "compact-boundary";
+
+/**
  * An SDK stand-in: records `query()` options (an idle session), `forkSession()` calls, and the
  * order of transcript reads and copies (`calls`). `transcript` lists the message uuids a
- * conversation holds, as `getSessionMessages()` returns them.
+ * conversation's transcript file holds, oldest first; `forkSession()` refuses an `upToMessageId`
+ * the file doesn't hold, as the SDK does.
  */
 function stubSdk(
   fork: (id: string, opts?: ForkSessionOptions) => Promise<{ sessionId: string }>,
@@ -39,11 +47,21 @@ function stubSdk(
     calls.push(`fork ${id}`);
     forks.push(id);
     forkOptions.push(opts);
+    const upTo = opts?.upToMessageId;
+    if (upTo && transcript[id] && !transcript[id].includes(upTo)) {
+      throw new Error(`Message ${upTo} not found in session ${id}`);
+    }
     return fork(id, opts);
   }) as ClaudeSdkModule["forkSession"];
   const getSessionMessages = (async (id: string) => {
     calls.push(`read ${id}`);
-    return (transcript[id] ?? []).map((uuid) => ({ type: "assistant", uuid, session_id: id }));
+    const file = transcript[id] ?? [];
+    const chain = file.slice(Math.max(0, file.lastIndexOf(COMPACTED)));
+    return chain.map((uuid) => ({
+      type: uuid === COMPACTED ? "system" : "assistant",
+      uuid,
+      session_id: id,
+    }));
   }) as unknown as ClaudeSdkModule["getSessionMessages"];
   return {
     forks,
@@ -109,6 +127,56 @@ describe("ClaudeAdapter fork", () => {
     ).rejects.toMatchObject({ code: FORK_POINT_MISSING });
     expect(sdk.calls).toEqual(["read claude-source", "read replaced"]);
     expect(sdk.forks).toEqual([]);
+  });
+
+  it("forks at a turn from before the latest context compaction", async () => {
+    // Turn 1 ends at msg-2; the conversation was compacted after it, then went on.
+    const sdk = stubSdk(async () => ({ sessionId: "claude-fork-4" }), {
+      "claude-source": ["msg-1", "msg-2", COMPACTED, "summary", "msg-5", "msg-6"],
+    });
+    const adapter = new ClaudeAdapter({ executable: exe, loadSdk: sdk.load });
+    await expect(
+      adapter.forkConversation("claude-source", { cwd: tmpdir(), upTo: "msg-2" }),
+    ).resolves.toBe("claude-fork-4");
+    expect(sdk.calls).toEqual(["read claude-source", "fork claude-source"]);
+    expect(sdk.forkOptions).toEqual([{ upToMessageId: "msg-2" }]);
+  });
+
+  it("forks at a turn after the latest context compaction", async () => {
+    const sdk = stubSdk(async () => ({ sessionId: "claude-fork-5" }), {
+      "claude-source": ["msg-1", "msg-2", COMPACTED, "summary", "msg-5", "msg-6"],
+    });
+    const adapter = new ClaudeAdapter({ executable: exe, loadSdk: sdk.load });
+    await expect(
+      adapter.forkConversation("claude-source", { cwd: tmpdir(), upTo: "msg-5" }),
+    ).resolves.toBe("claude-fork-5");
+    expect(sdk.forkOptions).toEqual([{ upToMessageId: "msg-5" }]);
+  });
+
+  it("refuses a fork point a compacted conversation doesn't hold, never copying it whole", async () => {
+    const sdk = stubSdk(async () => ({ sessionId: "unexpected" }), {
+      "claude-source": ["msg-1", "msg-2", COMPACTED, "summary", "msg-5"],
+    });
+    const adapter = new ClaudeAdapter({ executable: exe, loadSdk: sdk.load });
+    await expect(
+      adapter.forkConversation("claude-source", { cwd: tmpdir(), upTo: "gone" }),
+    ).rejects.toMatchObject({ code: FORK_POINT_MISSING });
+    // The read can't see before the compaction, so forkSession decides: it was only ever asked
+    // for a copy ending at the fork point, and refused it.
+    expect(sdk.forkOptions).toEqual([{ upToMessageId: "gone" }]);
+  });
+
+  it("keeps other fork failures of a compacted conversation plain errors", async () => {
+    const sdk = stubSdk(
+      async () => {
+        throw new Error("disk full");
+      },
+      { "claude-source": ["msg-1", COMPACTED, "summary", "msg-4"] },
+    );
+    const adapter = new ClaudeAdapter({ executable: exe, loadSdk: sdk.load });
+    const fork = adapter.forkConversation("claude-source", { cwd: tmpdir(), upTo: "msg-1" });
+    await expect(fork).rejects.toThrow(/Could not fork the Claude conversation claude-source/);
+    await expect(fork).rejects.not.toMatchObject({ code: FORK_POINT_MISSING });
   });
 
   it("copies the whole conversation without reading it when no fork point is given", async () => {

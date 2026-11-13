@@ -177,7 +177,7 @@ export const FactoryItem = z.object({
   attempts: z.int().nonnegative(),
   /** Why it was rejected, failed or escalated. */
   reason: z.string().nullable(),
-  /** Why it failed: its own work, the infrastructure, or stuck until a person looks (see `FactoryFailureKind`). */
+  /** Why it failed or was escalated: its own work, the infrastructure, or stuck until a person looks (see `FactoryFailureKind`). */
   failureKind: FactoryFailureKind.nullable().default(null),
   /**
    * The pull request a rebuild replaced: after three requests to rebase it still conflicted, so
@@ -210,6 +210,12 @@ export const FactoryItem = z.object({
    * once none of them is busy (a turn is never cut off), then empties the list.
    */
   earlierSessionIds: z.array(Id).default([]),
+  /**
+   * When the item entered its current pipeline step (`pipelineStep`), for "how long has it been
+   * here" on the Factory view. Set on creation and whenever the step changes; null on items
+   * saved before it existed (readers fall back to `updatedAt`).
+   */
+  stepSince: Timestamp.nullable().default(null),
   createdAt: Timestamp,
   updatedAt: Timestamp,
   mergedAt: Timestamp.nullable(),
@@ -219,6 +225,17 @@ export type FactoryItem = z.infer<typeof FactoryItem>;
 
 /** Size limit defaults before 0.4.4, upgraded to the current defaults when a loop is read. */
 export const LEGACY_SIZE_LIMITS = { maxChangedLines: 800, maxChangedFiles: 40 } as const;
+
+/**
+ * What a review does when the provider chosen for it is unavailable (not installed, not signed
+ * in, at its usage limit, or it just failed to run):
+ * - `builder`: review on the builder's provider and model, in a fresh session;
+ * - `any`: review on any available provider;
+ * - `wait`: wait until the chosen provider is available again.
+ * With no provider available at all, every choice waits.
+ */
+export const ReviewerFallback = z.enum(["builder", "any", "wait"]);
+export type ReviewerFallback = z.infer<typeof ReviewerFallback>;
 
 /** Knobs of the loop beyond the required limits; all have safe defaults. */
 export const FactoryTuning = z.object({
@@ -251,8 +268,22 @@ export const FactoryTuning = z.object({
   maxIssuesPerRound: z.int().positive().default(3),
   /** Dark factory: the review areas the scout may use. */
   areas: z.array(DiscoveryArea).default(DiscoveryArea.options),
-  /** Provider for builders (`auto`: the project/role default). */
+  /**
+   * Provider for builders (`auto`: the project/role default). One that isn't available (not
+   * installed, not signed in, at its usage limit) is skipped for another available provider.
+   */
   builderProvider: z.union([z.literal("auto"), ProviderId]).default("auto"),
+  /** Model for builders on `builderProvider`; `null` (the default): that provider's default. */
+  builderModel: z.string().min(1).nullable().default(null),
+  /**
+   * Provider for the independent reviewer. `auto` (the default): a provider other than the
+   * builder's when one is available, which gives the most independent review.
+   */
+  reviewerProvider: z.union([z.literal("auto"), ProviderId]).default("auto"),
+  /** Model for reviewers on `reviewerProvider`; `null` (the default): that provider's default. */
+  reviewerModel: z.string().min(1).nullable().default(null),
+  /** What a review does when its chosen provider isn't available (see `ReviewerFallback`). */
+  reviewerFallback: ReviewerFallback.default("builder"),
   /** Minutes to wait for main CI after a merge before calling it done. */
   watchTimeoutMin: z.int().positive().default(120),
   /**
@@ -484,9 +515,54 @@ export const FactoryWorkItem = z.object({
   attempts: z.int().nonnegative().default(0),
   reason: z.string().nullable(),
   note: z.string().nullable(),
+  /** Why it failed, for items that did (see `FactoryFailureKind`). */
+  failureKind: FactoryFailureKind.nullable().default(null),
+  /** When it entered its current pipeline step; null when unknown (use `updatedAt`). */
+  stepSince: Timestamp.nullable().default(null),
+  mergedAt: Timestamp.nullable().default(null),
+  finishedAt: Timestamp.nullable().default(null),
+  /**
+   * The open pull request the factory still owns for it: its own, or, while a rebuild has no PR
+   * of its own yet (or failed without one), the PR the rebuild replaces. Null when it owns none.
+   * Unlike `FactoryStatus.pullRequests`, never cut short.
+   */
+  ownedPr: GitHubPrRef.nullable().default(null),
+  /**
+   * Its merge checks so far: passed (passed or skipped), failed and all recorded; null before
+   * any ran.
+   */
+  checks: z
+    .object({
+      passed: z.int().nonnegative(),
+      failed: z.int().nonnegative(),
+      total: z.int().nonnegative(),
+    })
+    .nullable()
+    .default(null),
   updatedAt: Timestamp,
 });
 export type FactoryWorkItem = z.infer<typeof FactoryWorkItem>;
+
+/**
+ * Throughput figures of the Factory view's stats strip, counted over the project's items by the
+ * server's local day (the same day the merge counter and the budget use).
+ */
+export const FactoryStats = z.object({
+  /** Factory items merged today, by CodeDen or by a person on GitHub. */
+  mergedToday: z.int().nonnegative().default(0),
+  /** Items that failed today. */
+  failedToday: z.int().nonnegative().default(0),
+  /** Items whose merge was reverted today. */
+  revertedToday: z.int().nonnegative().default(0),
+  /**
+   * Median time from the factory taking the issue in (`createdAt`) to its merge, over the items
+   * merged in the last 7 days, in milliseconds; null when none merged.
+   */
+  medianMergeMs7d: z.number().nonnegative().nullable().default(null),
+  /** How many merges the median is over. */
+  merged7d: z.int().nonnegative().default(0),
+});
+export type FactoryStats = z.infer<typeof FactoryStats>;
 
 /** Merge-check results of one item with a PR. */
 export const FactoryMergeChecks = z.object({
@@ -514,6 +590,8 @@ export const FactoryStatus = z.object({
   tuning: FactoryTuning,
   spendToday: z.object({ tokens: z.int().nonnegative(), usd: z.number().nonnegative() }),
   mergesToday: z.int().nonnegative(),
+  /** Today's merges, failures and reverts and the 7-day median time to merge. */
+  stats: FactoryStats.prefault({}),
   consecutiveFailures: z.int().nonnegative(),
   activeSessions: z.int().nonnegative(),
   /** Waiting: being classified (`candidate`) or for a free agent (`backlog`). */
@@ -525,8 +603,14 @@ export const FactoryStatus = z.object({
    * the rest (being checked, rebased, rebuilt, waiting for you) and today's merges.
    */
   pullRequests: z.array(FactoryPrEntry).default([]),
-  /** Merged, reverted, failed, rejected and escalated items, newest first. */
+  /** Merged, reverted, failed, rejected and escalated items, newest first (the latest 30). */
   recent: z.array(FactoryWorkItem),
+  /**
+   * Finished items the Factory view keeps showing, however many newer results `recent` holds:
+   * every escalated item, failed items that failed in the last 24 hours or still own an open
+   * pull request, and items merged today.
+   */
+  viewRecent: z.array(FactoryWorkItem).default([]),
   /** Issues by untrusted authors, newest first; nothing runs on them until let in. */
   ignored: z.array(FactoryWorkItem).default([]),
   /** The account CodeDen uses on GitHub (always trusted); null when unknown. */

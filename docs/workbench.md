@@ -45,7 +45,7 @@ At the end of every turn the runner snapshots the worktree into a hidden ref, `r
 - **Per turn:** exactly what one turn changed.
 - **Restore:** put files (one, or all of them) back to the session's starting point or to the state before a turn.
 
-The **git bar** at the top shows the branch, ahead/behind and the uncommitted count, with **Commit** and **Push**.
+The **git bar** at the top shows the branch, ahead/behind and the uncommitted count, with **Commit** and **Push**. In a GitHub project it also has **Open PR**, which asks the agent to open a pull request for the session's work (sent now, or queued behind a running turn). Once the session has an open PR, the button becomes **PR #N** and opens the Issue / PR tab. A successful push offers the same next step in its notification. **Open PR** is shown for sessions you started on their own branch; read-only and archived sessions don't get it, and sessions a PM, automation or the factory started open their own pull requests.
 
 ### Comment on lines
 

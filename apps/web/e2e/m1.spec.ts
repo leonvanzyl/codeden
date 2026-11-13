@@ -52,7 +52,10 @@ test("M1 flow with the Fake provider", async ({ page }) => {
     await path.fill(process.env.CODEDEN_E2E_REPO ?? "");
     await path.press("Enter");
     await dialog.getByRole("button", { name: "Add project" }).click();
-    await expect(page).toHaveURL(/\/projects\//);
+    // A new project opens its New session view, ready for the first task.
+    await expect(page).toHaveURL(/\/projects\/[^/]+\/new$/);
+    await expect(page.getByTestId("new-session")).toBeVisible();
+    await page.goto(page.url().replace(/\/new$/, ""));
     await expect(page.getByRole("heading", { name: "demo-repo" })).toBeVisible();
   });
 

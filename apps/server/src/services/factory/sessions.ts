@@ -11,6 +11,7 @@ import { errorMessage } from "../errors";
 import type { RunnerPort } from "../runner-port";
 import type { SessionRepo } from "../sessions/repo";
 import type { SessionService } from "../sessions/session-service";
+import type { ProviderAvailability, Unavailable } from "./availability";
 import { builderPrompt, revertPrompt, reviewerPrompt } from "./prompts";
 import { FACTORY_STARTER, isFactorySession } from "./starter";
 
@@ -43,6 +44,7 @@ export interface FactorySessionsDeps {
   sessions: SessionService;
   repo: SessionRepo;
   runner: RunnerPort;
+  availability: ProviderAvailability;
   log?: (message: string) => void;
 }
 
@@ -62,10 +64,50 @@ export class FactorySessions {
   }
 
   /** Providers the runner offers (the Fake provider only when nothing else is there). */
-  providers(): string[] {
+  registered(): string[] {
     const ids = this.deps.runner.providers().map((p) => p.id);
     const real = ids.filter((id) => id !== "fake");
     return real.length > 0 ? real : ids;
+  }
+
+  /**
+   * Providers new factory sessions may use: offered by the runner, installed, signed in and not
+   * at a usage limit (see `ProviderAvailability`).
+   */
+  providers(): string[] {
+    return this.registered().filter((id) => !this.deps.availability.unavailable(id));
+  }
+
+  /** Registered providers that can't take new work, and why. */
+  unavailable(): Array<{ provider: string } & Unavailable> {
+    return this.registered().flatMap((provider) => {
+      const u = this.deps.availability.unavailable(provider);
+      return u ? [{ provider, ...u }] : [];
+    });
+  }
+
+  /** The provider's name for notes ("Codex"), from the runner's provider list. */
+  displayName(id: string): string {
+    return this.deps.runner.providers().find((p) => p.id === id)?.displayName ?? id;
+  }
+
+  /** Detect providers again in the background when the last detection is old (never waits). */
+  refreshAvailability(): void {
+    this.deps.availability.refresh();
+  }
+
+  /** A factory session failed because of its provider: new work skips it for a while. */
+  providerFailed(provider: string, reason: string, until: string | null): void {
+    this.deps.availability.markFailed(provider, reason, until);
+  }
+
+  /** Stop one session; failures are only logged. */
+  async stop(sessionId: string): Promise<void> {
+    try {
+      await this.deps.sessions.stop(sessionId);
+    } catch (error) {
+      this.deps.log?.(`factory: stop ${sessionId}: ${errorMessage(error)}`);
+    }
   }
 
   /**
@@ -104,11 +146,17 @@ export class FactorySessions {
     });
   }
 
-  startBuilder(item: FactoryItem, vision: string, provider: string): Promise<StartSessionResponse> {
+  startBuilder(
+    item: FactoryItem,
+    vision: string,
+    provider: string,
+    model: string | null = null,
+  ): Promise<StartSessionResponse> {
     const step = item.type ? ` (${item.type})` : "";
     return this.start({
       projectId: item.projectId,
       provider,
+      ...(model ? { model } : {}),
       purpose: `Factory${step}: ${item.title}`.slice(0, 300),
       workKey: item.workKey,
       title: item.title.slice(0, 200),
@@ -125,7 +173,7 @@ export class FactorySessions {
   startReviewer(
     item: FactoryItem,
     vision: string,
-    provider: string,
+    reviewer: { provider: string; model: string | null },
     note: string | null,
     pr: { headBranch: string; baseBranch: string } | null,
     autoMerge: boolean,
@@ -153,7 +201,8 @@ export class FactorySessions {
     }
     return this.start({
       projectId: item.projectId,
-      provider,
+      provider: reviewer.provider,
+      ...(reviewer.model ? { model: reviewer.model } : {}),
       purpose: `Factory review: ${item.title}`.slice(0, 300),
       workKey: `factory:review:${item.pr?.number ?? item.id}`,
       title: `Review: ${item.title}`.slice(0, 200),

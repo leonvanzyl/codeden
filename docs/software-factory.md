@@ -49,6 +49,24 @@ Under the diagram: spend against the daily budget, agents working out of the lim
 
 The loop runs its regular check every 30 seconds: it moves work in progress, picks up new issues, starts free agents and, in a dark factory, starts the scout if it's due. **Check now** on the panel runs that check immediately. In a dark factory, **Run scout now** starts a [scout round](#the-dark-factory) right away.
 
+### The Factory view
+
+While the factory runs you mostly just want to glance at it. The **Factory view** is a calm, full-screen page for that, made to stay open on a second screen. It shows only the factory: no sidebar, no sessions list, no side panels. The factory panel stays where it is, for settings, limits and details.
+
+Open it with **Factory view** on the project page or the factory panel, or **Factory view · <project>** in the command palette (Ctrl K). It has its own address, `/projects/<projectId>/factory/view`, so you can bookmark it. **Full screen** in its header fills the screen (in the desktop app, F11 does the same), and **Exit** goes back to the project page. It's only offered for projects in software factory or dark factory mode.
+
+- **The header** shows the project, its mode and the loop state (with the reason when it's paused, or "stopped" when a kill switch is on). Two counters answer "is anything waiting on me?": how many items **need you** and how many **failed**. The kill switch, **Check now** and **Run scout now** work here as on the panel.
+- **The figures**, in one row: spend today against the daily budget, merges today (against the daily cap when auto-merge is on), agents working against the limit, the factory's open pull requests, failures and reverts today, and the median time from issue to merge over the last 7 days (from when the factory took the issue in). Where the panel shows the same figure, it's the same number.
+- **The pipeline**, left to right: **Intake** (new issues before their type is known, and in a dark factory the scout's round and its area reviewers), **Identify type** (sorted into bug, feature or docs, waiting for a free agent), **Building** (reproduce or analyze, then implement), **Reviewing** (the independent review, the merge checks and CI), **Merge queue** (in the order they merge, each pull request with its state and place, such as "Updating · #1" or "Queued #2", plus the ones rebasing, rebuilding, waiting for you or stuck) and **Merged** (today's merges).
+  - **Cards.** Each item is a card with its issue number and title, its type, what it's doing now (its agent's latest progress line), and how long it's been in its step. It also shows its pull request's state and, while it's reviewed or queued, how many merge checks passed (for example 5/8).
+  - **Markers.** Every card has one of four markers: running, waiting (nobody needs to act, as for a merge that's done), needs a person, or failed.
+  - **Live.** Cards move as the factory works, with no reload.
+- **Needs you** is a lane above the pipeline for escalated work, and for failures from the last day or older ones whose pull request is still open. However much newer history there is, an old escalation or failure stays there until it's settled; this includes a rebuild that failed while the factory still owns its original pull request. On wide screens the lane takes at most about a third of the height and scrolls, so the pipeline stays in view. A stuck pull request stays in the merge queue, outlined in amber like anything else waiting on a person (a pull request for you to merge, an agent's question). Failed cards are outlined in red.
+- **Click a card** to see its details in a side sheet without leaving the view: the steps of its pipeline with the current one marked (also "waiting for a free agent" and "watching CI on the default branch"), the issue and the pull request, the merge checks, the review, and links to the builder's and reviewer's sessions.
+- **The PM chat** shows the last three turns with the project's PM and its usual message box. Replies stream in as in any session, and **Open full chat** opens the PM's page. On screens 1280 pixels wide and up it sits beside the pipeline, and **Hide** folds it into a slim bar. Narrower, it opens from that bar as a side sheet.
+
+On tablets and phones the stages stack as sections you can fold, the figures wrap, and the PM chat opens from a button as a sheet from the bottom. Each stage is a labelled region and each card a button named after its number, title and state. A screen reader hears cards move politely ("#142 moved to Reviewing"), and with reduced motion on, cards don't animate.
+
 ### Finished work cleans up after itself
 
 Once a work item is finished (merged, reverted, rejected or failed), the factory [archives](workbench.md#archiving-and-worktree-cleanup) its sessions: the builder and its reviewers leave the sidebar and their worktrees are removed, so a busy factory fills neither your session list nor your disk. Nothing is lost. The branch, the checkpoints and the transcript stay, archived sessions are under the project's **Archived** filter, clicking the item on the panel still opens its session, and messaging an archived session brings it back with its worktree. A worktree with uncommitted changes is kept, as with any archive.
@@ -293,7 +311,7 @@ Everything in the UI is also available over the local API (with the install toke
 
 | Route | |
 |---|---|
-| `GET /api/projects/:id/factory` | Panel status (items with their pipeline step, ignored issues, the scout) |
+| `GET /api/projects/:id/factory` | Panel status (items with their pipeline step and how long they've been in it, ignored issues, the scout, and for the Factory view: its figures in `stats`, in `viewRecent` the escalations, open or recent failures and today's merges that the capped `recent` list can leave out, and each item's `ownedPr`) |
 | `PUT /api/projects/:id/autonomy` | `{ mode, limits?, tuning? }` (`mode`: `software_factory` or `dark_factory`; the old `autopilot` still reads as `software_factory`) |
 | `GET` / `PUT /api/projects/:id/vision` | Read or write the vision |
 | `POST /api/projects/:id/factory/admit` | `{ itemId, type? }`: let an ignored issue in |

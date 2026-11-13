@@ -64,6 +64,8 @@ Click **+** next to **Projects** in the sidebar and choose:
 - **Local folder.** Browse your disk with the built-in folder picker. Any folder works; GitHub features switch on when it has a GitHub remote, including one added later (by you or an agent, see [GitHub](github.md#when-a-folder-gets-a-github-remote-later)).
 - **Clone from GitHub.** Paste a repository URL or `owner/repo` and CodeDen clones it.
 
+CodeDen then opens the new project's **New session** view, ready for your first task (the last step of first-run setup lands there too).
+
 New projects get the **starter set** of automations added, all switched **off**. Turn on the ones you want later (see [Automations](automations.md)).
 
 ### Optional: `.codeden/project.json`
@@ -84,7 +86,7 @@ Commit this file to tell CodeDen how to prepare a fresh worktree:
 
 ## 5. Start your first session
 
-Open the project and click **New session** (or the **+** next to the project in the sidebar). A new session opens with the message box you use in every session: describe the task ("Add a README section describing this project and a tiny test for src/math.js"), attach or paste screenshots and files if they help, pick the provider, model, effort, permissions or **Plan** under the message box if you want something other than the defaults, and send. Nothing is created until you send: the first message starts the session, and the view becomes that session. A draft you leave is kept in the browser for when you come back.
+A project you just added opens here already. Later, open the project and click **New session** (or **Start a session** while it has none, or the **+** next to the project in the sidebar). A new session opens with the message box you use in every session: describe the task ("Add a README section describing this project and a tiny test for src/math.js"), attach or paste screenshots and files if they help, pick the provider, model, effort, permissions or **Plan** under the message box if you want something other than the defaults, and send. Nothing is created until you send: the first message starts the session, and the view becomes that session. A draft you leave is kept in the browser for when you come back.
 
 What happens next:
 
@@ -92,7 +94,7 @@ What happens next:
 2. The agent works. Tool calls are grouped into collapsible blocks with live output; plans, todos and subagents get their own cards.
 3. **Risky actions ask.** With the default autonomy level the agent edits files and runs normal commands freely, but writes outside the worktree, force pushes, global installs and the like arrive as approval cards (in the chat and in the inbox).
 4. When the turn ends you'll see the summary, the cost, and **follow-up chips** with suggested next prompts.
-5. Open the right panel (**Ctrl/Cmd+\\**) to review the **Diff**, browse **Files**, use the **Terminal** or watch the **Browser**. Commit and push from the git bar, or ask the agent to open a pull request.
+5. Open the right panel (**Ctrl/Cmd+\\**) to review the **Diff**, browse **Files**, use the **Terminal** or watch the **Browser**. Commit and push from the git bar. In a GitHub project, **Open PR** in the git bar (or in the **Issue / PR** tab) asks the agent to open a pull request: it commits what's left, pushes and writes the description, and the PR then shows in the Issue / PR tab.
 
 ![A finished turn: summary, follow-up chips and the diff](images/session.png)
 

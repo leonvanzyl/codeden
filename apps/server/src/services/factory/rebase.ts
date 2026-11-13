@@ -6,6 +6,7 @@ import { freeSlots } from "./policy";
 import { REBASE_WHY, rebasePrompt } from "./prompts";
 import { type IntegratorTask, integratorPrompt } from "./prompts-integration";
 import { rebuild } from "./rebuild";
+import { owedRecheck, recheckOf, settleRecheck } from "./recheck";
 import { isBusy } from "./sessions";
 import { FINISHED_STAGES } from "./store";
 
@@ -29,8 +30,6 @@ const HEAD = "head_";
 const RESTORE = "restore_";
 /** The head a conflict started on (`conflict_from_<sha>`), until the conflict is resolved. */
 const CONFLICT_FROM = "conflict_from_";
-/** A conflict an agent resolved, waiting for the reviewer's re-check (`recheck_<old head>`). */
-const RECHECK = "recheck_";
 /** `update_<sha>`: the merge queue asked GitHub to bring that head up to date. */
 export const UPDATE = "update_";
 
@@ -96,33 +95,28 @@ export function trackHead(
 }
 
 /**
- * Once a conflict an agent was asked about is resolved (the PR is mergeable on a new head), the
- * reviewer re-checks the resolution when the item was reviewed already (`reviewed`): the conflict's
- * starting head becomes `recheck_<old head>`. A conflict that went away by itself needs nothing.
+ * The re-check owed on the PR's current head (`recheck.ts`). An approved re-check is settled
+ * against it first. Then, once a conflict an agent was asked about is resolved (the PR is
+ * mergeable on a new head), the reviewer re-checks the resolution when the item was reviewed
+ * already (`reviewed`): the conflict's starting head becomes the one it is compared with,
+ * unless a re-check is owed already, which keeps comparing with the last approved head. A
+ * conflict that went away by itself needs nothing.
  */
 export function settleConflict(
   nudges: FactoryItem["nudges"],
   pr: Pick<FactoryPr, "headSha" | "mergeable">,
   reviewed: boolean,
 ): FactoryItem["nudges"] {
-  if (pr.mergeable !== "mergeable") return nudges;
-  const key = Object.keys(nudges).find((k) => k.startsWith(CONFLICT_FROM));
-  if (!key) return nudges;
+  const settled = settleRecheck(nudges, pr.headSha);
+  if (pr.mergeable !== "mergeable") return settled;
+  const key = Object.keys(settled).find((k) => k.startsWith(CONFLICT_FROM));
+  if (!key) return settled;
   const old = key.slice(CONFLICT_FROM.length);
-  const { [key]: at, ...rest } = nudges;
-  if (!reviewed || !at || old === (pr.headSha ?? "")) return rest;
-  return { ...rest, [`${RECHECK}${old}`]: at };
-}
-
-/** The head before the conflict resolution the reviewer still has to re-check; null when none. */
-export function recheckOf(item: FactoryItem): string | null {
-  const key = Object.keys(item.nudges).find((k) => k.startsWith(RECHECK));
-  return key ? key.slice(RECHECK.length) : null;
-}
-
-/** The nudges without the re-check marks (`recheck_*`, `recheck_sent`). */
-export function withoutRecheck(nudges: FactoryItem["nudges"]): FactoryItem["nudges"] {
-  return Object.fromEntries(Object.entries(nudges).filter(([k]) => !k.startsWith(RECHECK)));
+  const { [key]: at, ...rest } = settled;
+  if (!reviewed || !at || old === (pr.headSha ?? "") || recheckOf({ nudges: rest }) !== null) {
+    return rest;
+  }
+  return { ...rest, ...owedRecheck(old, at) };
 }
 
 /** The session that answers for the item's PR (its builder or integrator), while it exists. */
