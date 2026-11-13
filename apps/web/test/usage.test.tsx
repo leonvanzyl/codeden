@@ -208,6 +208,7 @@ describe("usage components", () => {
       label: "5-hour window",
       status: "ok",
       usedPercent: 91,
+      usedPercentAt: new Date().toISOString(),
       resetsAt: new Date(Date.now() + 3_600_000).toISOString(),
       observedAt: new Date().toISOString(),
       stale: false,
@@ -223,6 +224,37 @@ describe("usage components", () => {
     expect(screen.getByText("91% used")).toBeTruthy();
     expect(screen.getByText("reset since")).toBeTruthy();
     expect(screen.getByText("Subscription login")).toBeTruthy();
+  });
+
+  // #193: Claude often reports a window's status and reset time without a percentage.
+  it("shows the known status instead of '— used' and an empty bar when the percentage is unknown", () => {
+    const base: RateLimitWindow = {
+      provider: "claude",
+      windowId: "weekly",
+      label: "Weekly",
+      status: "ok",
+      usedPercent: null,
+      usedPercentAt: null,
+      resetsAt: new Date(Date.now() + 3 * 86_400_000).toISOString(),
+      observedAt: new Date().toISOString(),
+      stale: false,
+    };
+    const data: RateLimitsResponse = {
+      windows: [
+        base,
+        { ...base, windowId: "5h", label: "5-hour window", status: "warning" },
+        { ...base, windowId: "weekly-opus", label: "Weekly (Opus)", status: "limited" },
+      ],
+      warnPercent: 85,
+      billing: { claude: "subscription" },
+    };
+    renderWithClient(<RateLimitMeters data={data} />);
+    expect(screen.queryByText(/—/)).toBeNull();
+    expect(screen.queryAllByRole("meter")).toHaveLength(0);
+    expect(screen.getByText("Within limit")).toBeTruthy();
+    expect(screen.getByText("Close to the limit")).toBeTruthy();
+    expect(screen.getByText(/Limit reached/)).toBeTruthy();
+    expect(screen.getAllByText(/^Resets /)).toHaveLength(3);
   });
 
   it("explains empty rate limits", () => {

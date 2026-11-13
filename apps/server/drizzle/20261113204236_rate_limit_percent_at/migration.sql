@@ -1,0 +1,1 @@
+ALTER TABLE `rate_limit_windows` ADD `used_percent_at` text;

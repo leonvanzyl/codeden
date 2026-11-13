@@ -126,7 +126,9 @@ describe("migrations", { timeout: 30_000 }, () => {
     ["usage ledger only", (n: string) => trio(n) && !/_(github_sync|orchestration)$/.test(n)],
     [
       "everything before the usage ledger",
-      (n: string) => !/_(usage_ledger|factory_loop|automations)$/.test(n),
+      // Only migrations that existed then: later ones (e.g. `rate_limit_percent_at`) alter its tables.
+      (n: string) =>
+        n.slice(0, 14) <= "20261107130421" && !/_(usage_ledger|factory_loop|automations)$/.test(n),
     ],
     // The previous main: automations shipped first, so factory_loop arrives with an older timestamp.
     ["everything but the factory loop", (n: string) => !n.endsWith("_factory_loop")],

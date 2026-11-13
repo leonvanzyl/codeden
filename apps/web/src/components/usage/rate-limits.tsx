@@ -28,9 +28,24 @@ export function usedText(p: number | null): string {
   return `${Math.round(p)}%`;
 }
 
+/** What the provider said about a window whose percentage is not known. */
+const STATUS_TEXT: Record<RateLimitWindow["status"], string> = {
+  ok: "Within limit",
+  warning: "Close to the limit",
+  limited: "Limit reached",
+};
+
+function headline(w: RateLimitWindow, tone: Tone): string {
+  if (tone === "stale") return "reset since";
+  if (w.usedPercent === null) return STATUS_TEXT[w.status];
+  return tone === "limited" ? "Limit reached" : `${usedText(w.usedPercent)} used`;
+}
+
 function WindowMeter({ w, warnPercent }: { w: RateLimitWindow; warnPercent: number }) {
   const tone = toneOf(w, warnPercent);
-  const used = w.usedPercent ?? (tone === "limited" ? 100 : 0);
+  const used = w.usedPercent;
+  // "as of" dates the figure shown: the percentage's own reading when there is one.
+  const asOf = (used !== null ? w.usedPercentAt : null) ?? w.observedAt;
   return (
     <div className="space-y-1.5" data-testid="limit-window" data-tone={tone}>
       <div className="flex items-baseline justify-between gap-2 text-xs">
@@ -43,27 +58,26 @@ function WindowMeter({ w, warnPercent }: { w: RateLimitWindow; warnPercent: numb
         >
           {tone === "warning" && <AlertTriangle className="size-3 text-status-waiting" />}
           {tone === "limited" && <OctagonX className="size-3 text-status-failed" />}
-          {tone === "stale"
-            ? "reset since"
-            : tone === "limited"
-              ? "limit reached"
-              : `${usedText(w.usedPercent)} used`}
+          {headline(w, tone)}
         </span>
       </div>
-      {/* biome-ignore lint/a11y/useSemanticElements: a native <meter> cannot be themed consistently across browsers. */}
-      <div
-        role="meter"
-        aria-label={`${w.label} used`}
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-valuenow={Math.round(used)}
-        className="h-2 overflow-hidden rounded-full bg-muted"
-      >
+      {/* No bar until a percentage is known: an empty bar would read as "nothing used". */}
+      {used !== null && (
+        // biome-ignore lint/a11y/useSemanticElements: a native <meter> cannot be themed consistently across browsers.
         <div
-          className={cn("h-full rounded-full transition-[width]", BAR[tone])}
-          style={{ width: `${tone === "stale" ? 0 : Math.max(used, used > 0 ? 2 : 0)}%` }}
-        />
-      </div>
+          role="meter"
+          aria-label={`${w.label} used`}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={Math.round(used)}
+          className="h-2 overflow-hidden rounded-full bg-muted"
+        >
+          <div
+            className={cn("h-full rounded-full transition-[width]", BAR[tone])}
+            style={{ width: `${tone === "stale" ? 0 : Math.max(used, used > 0 ? 2 : 0)}%` }}
+          />
+        </div>
+      )}
       <div className="flex justify-between gap-2 text-2xs text-muted-foreground">
         <span>
           {w.resetsAt
@@ -72,7 +86,7 @@ function WindowMeter({ w, warnPercent }: { w: RateLimitWindow; warnPercent: numb
               : `Resets ${until(w.resetsAt)}`
             : "Reset time not reported"}
         </span>
-        <span title={new Date(w.observedAt).toLocaleString()}>as of {ago(w.observedAt)}</span>
+        <span title={new Date(asOf).toLocaleString()}>as of {ago(asOf)}</span>
       </div>
     </div>
   );

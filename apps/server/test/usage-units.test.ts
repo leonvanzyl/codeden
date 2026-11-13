@@ -277,7 +277,13 @@ describe("budgets and rate limits", () => {
       observedAt: "2026-11-07T09:59:00.000Z",
     };
     const current = toWindow(base, now);
-    expect(current).toMatchObject({ label: "5-hour window", stale: false });
+    // A row from before `used_percent_at` existed dates its figure with the reading.
+    expect(current).toMatchObject({
+      label: "5-hour window",
+      stale: false,
+      usedPercentAt: base.observedAt,
+    });
+    expect(toWindow({ ...base, windowId: "weekly-haiku" }, now).label).toBe("Weekly (Haiku)");
     const stale = toWindow({ ...base, resetsAt: "2026-11-07T09:00:00.000Z" }, now);
     expect(stale.stale).toBe(true);
     const alerts = rateLimitAlerts([current, stale], 85);
