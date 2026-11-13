@@ -22,11 +22,17 @@ export function readLiveRunnerLock(file: string): RunnerLock | undefined {
  * Stronger liveness check: the runner answers `/health` with the lock's token. A pid that
  * exists but doesn't answer is a stale lock (crash plus pid reuse) or a hung runner.
  */
-export async function probeRunnerLock(lock: RunnerLock, timeoutMs = 3_000): Promise<boolean> {
+export async function probeRunnerLock(
+  lock: RunnerLock,
+  timeoutMs = 3_000,
+  /** Cancels the probe early (it then counts as not answering). */
+  signal?: AbortSignal,
+): Promise<boolean> {
+  const timeout = AbortSignal.timeout(timeoutMs);
   try {
     const res = await fetch(`http://127.0.0.1:${lock.port}/health`, {
       headers: { authorization: `Bearer ${lock.token}` },
-      signal: AbortSignal.timeout(timeoutMs),
+      signal: signal ? AbortSignal.any([timeout, signal]) : timeout,
     });
     return res.ok;
   } catch {

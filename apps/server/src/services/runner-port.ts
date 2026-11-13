@@ -138,12 +138,15 @@ export async function refreshProviderModels(
 }
 
 /**
- * `RunnerPort` over a (possibly absent) `RunnerClient`. `name` names a runner other than the
- * home runner in errors.
+ * `RunnerPort` over a (possibly absent) `RunnerClient`. `describe` names a runner other than
+ * the home runner in errors.
  */
-export function runnerPort(get: () => RunnerClient | undefined, name?: string): RunnerPort {
+export function runnerPort(
+  get: () => RunnerClient | undefined,
+  describe?: () => string,
+): RunnerPort {
   return {
-    ...(name ? { describe: () => name } : {}),
+    ...(describe ? { describe } : {}),
     isConnected: () => get()?.status.state === "connected",
     runnerId: () => get()?.status.runnerId ?? null,
     providers: () => get()?.status.providers ?? [],
@@ -167,7 +170,7 @@ export function runnerPort(get: () => RunnerClient | undefined, name?: string): 
           new ServiceError(
             503,
             "runner_unavailable",
-            name ? `${name} is not available` : "No runner is configured",
+            describe ? `${describe()} is not available` : "No runner is configured",
           ),
         );
       }
