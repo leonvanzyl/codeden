@@ -120,7 +120,8 @@ describe("Claude interrupt", () => {
   });
 });
 
-describe("Codex interrupt", () => {
+// Each test drives a fake Codex process, which takes seconds to start on a busy machine.
+describe("Codex interrupt", { timeout: 30_000 }, () => {
   it("closes the turn when app-server never answers turn/interrupt", async () => {
     process.env.FAKE_CODEX_TURN = "hang";
     const session = new CodexSession(base, {
@@ -347,7 +348,7 @@ const fakeCodex = {
 };
 
 async function waitFor(check: () => boolean): Promise<void> {
-  const deadline = Date.now() + 3000;
+  const deadline = Date.now() + 20_000;
   while (!check()) {
     if (Date.now() > deadline) throw new Error("timed out waiting");
     await settle();

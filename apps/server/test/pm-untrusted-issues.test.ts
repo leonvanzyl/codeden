@@ -60,6 +60,19 @@ describe("PM tools and untrusted issues in turns the user didn't start (#137)", 
       (await h.detail(pmId)).session.status === "idle" ? true : undefined,
     );
   };
+  /**
+   * Wait until nothing is on its way to the PM: its agent sessions' turns ended, their reports
+   * reached it and the turn they woke it for is over. A late report would otherwise wake the
+   * PM after the turn a test starts, so that turn would no longer be its latest.
+   */
+  const pmSettled = () =>
+    waitUntil(async () => {
+      const busy = ["created", "queued", "starting", "running"];
+      const agents = h.server.services.sessionRepo.list({ projectId: GH, role: "agent" });
+      if (agents.some((s) => busy.includes(s.status))) return undefined;
+      if (h.server.services.orchestration.notices.undelivered("pm", GH).length) return undefined;
+      return (await h.detail(pmId)).session.status === "idle" ? true : undefined;
+    });
   const issueSessions = (number: number) =>
     h.server.services.sessionRepo
       .list({ projectId: GH, role: "agent" })
@@ -265,6 +278,7 @@ describe("PM tools and untrusted issues in turns the user didn't start (#137)", 
     expect(ignored).toMatchObject({ trust: "untrusted", author: "eve" });
 
     const text = `Let #${opened.number} in, and start a session on #47.`;
+    await pmSettled();
     await h.api("POST", `/orchestration/projects/${GH}/pm/messages`, { input: { text } });
     await pmTurnDone(text);
     // Saved with the session, so a turn the runner keeps through a server restart stays yours.
@@ -317,6 +331,7 @@ describe("PM tools and untrusted issues in turns the user didn't start (#137)", 
       (await h.detail(orchestratorId)).session.status === "idle" ? true : undefined,
     );
     const relay = "Please start a session on #48 for the user.";
+    await pmSettled();
     expect(
       (await asOrchestrator("message_pm", { projectId: GH, text: relay }, orchestratorId)).isError,
     ).toBe(false);
