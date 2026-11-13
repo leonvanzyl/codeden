@@ -161,14 +161,16 @@ A **`RunnerTransport`** on the server replaces the hard-wired `ws` client: `send
   - `exec` (`transport-exec.ts`) runs over a `LinkProcess`: `stdin`, `stdout`, `stderr`, `pid?`, `kill()` and `onExit(code)`. `spawnLinkProcess` and `execLink(command, args)` make a local child process, the shape `docker exec -i` needs. A cloud exec session can implement the same interface.
   - A runner gets the exec transport through `RunnerSpec.link`. Every reconnect opens a new link, and the client resumes by `seq` as after a server restart.
   - A transport whose handshake fails (a `reject`, or a link that ends before `welcome`) is closed, so failed attempts leave no sockets or processes behind.
-- **Wire format.** It lives in `packages/contracts/src/runner/link.ts`. Each frame is one compact JSON message per line, at most `RUNNER_LINK_MAX_LINE_BYTES` (16 MiB, without the `\n`).
+- **Wire format.** It lives in `packages/contracts/src/runner/link.ts`. Each frame is one compact JSON message per line, at most `RUNNER_LINK_MAX_LINE_BYTES` (16 MiB). Every byte except the `\n` counts, including a `\r` before it.
   - `LinkFrameDecoder` reassembles lines split across chunks. It drops a longer line without buffering it, drops a line that is not JSON, and reports each drop.
   - A command too large for a frame fails at once with `too_large` instead of timing out.
 - **Link.** `codeden runner-link [--home <dir>]` lives in `apps/runner/src/link/runner-link.ts`, exported as `@codeden/runner/link`.
   - It reads `<home>/runner/runner.json` and connects to the runner's loopback WebSocket with the lock's token.
   - It splices stdin and stdout to that socket, pausing the socket while stdout is full.
   - It loads no server code, so starting it is quick.
-  - Exit codes (`RunnerLinkExit`): 0 when stdin ended, 1 when the link failed or the runner closed it, 2 for bad arguments, 3 when no live runner is in the home, 4 when the runner refused the token. The server's close reason names the code and adds the link's last stderr line.
+  - Aborting it (in-process) drops its socket at once, even while the upgrade is still pending.
+  - Exit codes (`RunnerLinkExit`): 0 when stdin ended, 1 when the link failed or the runner closed it, 2 for bad arguments, 3 when no live runner is in the home, 4 when the runner refused the token.
+  - The server's close reason names the code and adds the end of the link's last stderr line. The server holds at most 300 characters of an unfinished stderr line, so a channel that never writes a newline can't grow its memory.
 - **Welcome.** The runner reports `process.platform`, `process.arch`, its resolved home and its backend (`--backend`, default `local`); the client keeps them as `hostInfo`.
 - **Not added.** No runner `--port` or `--host`, and no new listener.
 

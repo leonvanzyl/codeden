@@ -94,6 +94,61 @@ export function spawnLinkProcess(
 
 const CLOSE_GRACE_MS = 2_000;
 const MAX_MIB = RUNNER_LINK_MAX_LINE_BYTES / (1024 * 1024);
+/** Characters kept of a stderr line: its end, where errors usually say what went wrong. */
+const STDERR_LINE_CHARS = 300;
+
+/**
+ * A link's stderr as trimmed, non-empty lines of at most `max` characters, keeping each long
+ * line's end (marked with a leading "…"). An unfinished line holds at most `max` characters
+ * however long it grows, so a noisy channel that never writes a newline costs bounded memory.
+ */
+export class StderrLines {
+  private partial = "";
+  private cut = false;
+
+  constructor(private readonly max = STDERR_LINE_CHARS) {}
+
+  /** Characters of an unfinished line held so far. */
+  get pending(): number {
+    return this.partial.length;
+  }
+
+  /** Feed the next chunk; returns the lines it completed. */
+  push(text: string): string[] {
+    const lines: string[] = [];
+    let start = 0;
+    for (;;) {
+      const newline = text.indexOf("\n", start);
+      this.keep(text.slice(start, newline === -1 ? text.length : newline));
+      if (newline === -1) return lines;
+      const line = this.take();
+      if (line) lines.push(line);
+      start = newline + 1;
+    }
+  }
+
+  /** The unfinished line, once the stream has ended. */
+  flush(): string | undefined {
+    return this.take() || undefined;
+  }
+
+  private keep(piece: string): void {
+    if (!piece) return;
+    // Only the last `max` characters can survive, so never join more than that.
+    const tail = piece.length > this.max ? piece.slice(-this.max) : piece;
+    const joined = this.partial + tail;
+    if (tail.length < piece.length || joined.length > this.max) this.cut = true;
+    this.partial = joined.length > this.max ? joined.slice(-this.max) : joined;
+  }
+
+  private take(): string {
+    const text = this.partial.trim();
+    const line = text && this.cut ? `…${text}` : text;
+    this.partial = "";
+    this.cut = false;
+    return line;
+  }
+}
 
 /**
  * The `exec` transport: one link process, newline-delimited JSON on its stdin and stdout
@@ -126,25 +181,21 @@ export function openExecTransport(
   proc.stdin.on("error", (error) => log?.(`runner-link: writing failed: ${error.message}`));
 
   let lastLine = "";
-  let partial = "";
+  const stderr = new StderrLines();
   const stderrLine = (line: string) => {
-    const text = line.trim();
-    if (!text) return;
-    lastLine = text.length > 300 ? `${text.slice(0, 300)}…` : text;
-    log?.(`runner-link: ${lastLine}`);
+    lastLine = line;
+    log?.(`runner-link: ${line}`);
   };
   proc.stderr?.setEncoding("utf8");
   proc.stderr?.on("data", (text: string) => {
-    const lines = (partial + text).split(/\r?\n/);
-    partial = lines.pop() ?? "";
-    for (const line of lines) stderrLine(line);
+    for (const line of stderr.push(text)) stderrLine(line);
   });
   proc.stderr?.on("error", () => undefined);
 
   proc.onExit((code) => {
     exited = true;
-    stderrLine(partial);
-    partial = "";
+    const rest = stderr.flush();
+    if (rest) stderrLine(rest);
     for (const done of exitWaiters.splice(0)) done();
     const why = describeRunnerLinkExit(code);
     handlers.onClose(lastLine ? `${why} (${lastLine})` : why);
