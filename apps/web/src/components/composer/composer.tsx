@@ -123,7 +123,7 @@ export function Composer({
       combobox={{
         listId,
         open: suggestions.open,
-        activeId: activeItem && suggestionOptionId(listId, activeItem, suggestions.active),
+        activeId: activeItem && suggestionOptionId(listId, activeItem),
       }}
       menu={
         <>
@@ -139,7 +139,12 @@ export function Composer({
           )}
           {/* Always mounted, so screen readers pick up the count the moment the menu opens. */}
           <span role="status" className="sr-only">
-            {suggestionStatus(suggestions.open, suggestions.loading, suggestions.items.length)}
+            {suggestionStatus(
+              suggestions.open,
+              suggestions.loading,
+              suggestions.items.length,
+              suggestions.trigger,
+            )}
           </span>
         </>
       }
