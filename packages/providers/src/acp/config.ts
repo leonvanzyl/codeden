@@ -7,11 +7,21 @@ import type {
   AcpSessionSetup,
 } from "./protocol";
 
-/** What the agent said it supports in `initialize`: images, `session/load`, HTTP MCP servers. */
-export function agentCan(info: AcpInitializeResult, what: "images" | "load" | "http"): boolean {
+/**
+ * What the agent said it supports in `initialize`: images, `session/load`, HTTP MCP servers,
+ * and subagents as child sessions (only reported to clients that opted in).
+ */
+export function agentCan(
+  info: AcpInitializeResult,
+  what: "images" | "load" | "http" | "subagents",
+): boolean {
   const caps = info.agentCapabilities;
   if (what === "images") return caps?.promptCapabilities?.image === true;
   if (what === "load") return caps?.loadSession === true;
+  if (what === "subagents") {
+    const flag = caps?.sessionCapabilities?.subagents;
+    return flag === true || (typeof flag === "object" && flag !== null);
+  }
   return caps?.mcpCapabilities?.http === true;
 }
 

@@ -2,12 +2,18 @@ import type { ApprovalBroker } from "../approvals";
 import type { ResolvedCommand } from "../util/exec";
 import type { AcpEventMapper, ThreadCtx } from "./mapper";
 import type { AcpInitializeResult, AcpSessionSetup } from "./protocol";
+import type { AcpSubagents } from "./subagents";
 
 /** What a vendor extension can reach in its session. */
 export interface AcpExtensionHost {
   readonly cwd: string;
   readonly broker: ApprovalBroker;
+  /** The thread the call came from: the root's, or a subagent's child thread. */
   readonly mapper: AcpEventMapper;
+  /** The session's subagent runs. */
+  readonly subagents: AcpSubagents;
+  /** The agent runs subagents as child sessions (it accepted the `subagents` capability). */
+  readonly childSessions: boolean;
   /** The running turn's context, if a turn runs. */
   ctx(): ThreadCtx | undefined;
   /** Plan mode is on. */
@@ -19,11 +25,13 @@ export interface AcpExtensionHost {
   exitPlanMode(): Promise<void>;
 }
 
-/** A host from the session's parts; `planning` is read live. */
+/** A host from the session's parts; `planning` and `childSessions` are read live. */
 export function extensionHost(parts: {
   cwd: string;
   broker: ApprovalBroker;
   mapper: AcpEventMapper;
+  subagents: AcpSubagents;
+  childSessions: () => boolean;
   planning: () => boolean;
   exitPlanMode: () => Promise<void>;
 }): AcpExtensionHost {
@@ -31,6 +39,10 @@ export function extensionHost(parts: {
     cwd: parts.cwd,
     broker: parts.broker,
     mapper: parts.mapper,
+    subagents: parts.subagents,
+    get childSessions() {
+      return parts.childSessions();
+    },
     ctx: () => parts.mapper.ctx(),
     get planning() {
       return parts.planning();
@@ -49,7 +61,10 @@ export interface AcpExtensions {
   request?(method: string, params: unknown, host: AcpExtensionHost): Promise<unknown> | undefined;
   /** Handle a vendor notification. */
   notification?(method: string, params: unknown, host: AcpExtensionHost): void;
-  /** Extra `clientCapabilities` fields to advertise in `initialize` (vendor `_meta` flags). */
+  /**
+   * Extra `clientCapabilities` fields to advertise in `initialize` (vendor `_meta` flags), e.g.
+   * the `subagents` opt-in that makes the agent run subagents as child sessions.
+   */
   clientCapabilities?: Record<string, unknown>;
 }
 
