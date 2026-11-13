@@ -239,7 +239,7 @@ for (const size of SIZES) {
     const { context, page } = await openContext(browser, size);
     try {
       await page.goto(`${env("CODEDEN_E2E_URL")}/sessions/${sessionId}`);
-      const message = page.getByRole("textbox", { name: "Message" });
+      const message = page.getByLabel("Message", { exact: true });
       // A message being written grows the box; toasts must clear its actual height.
       await message.fill("First line\nSecond line\nThird line\nFourth line");
       // Toggling Plan raises a toast ("Plan mode on/off") while the composer is in use.
@@ -271,7 +271,7 @@ test("toasts follow the composer as the panel and terminal move it on a desktop"
   try {
     await page.goto(env("CODEDEN_E2E_LAUNCH_URL"));
     await page.goto(`${env("CODEDEN_E2E_URL")}/sessions/${sessionId}`);
-    const composer = page.getByRole("textbox", { name: "Message" }).locator("xpath=..");
+    const composer = page.getByLabel("Message", { exact: true }).locator("xpath=..");
     await composer.waitFor();
     const toast = page.locator('[data-sonner-toast][data-removed="false"]');
     /** Raise a toast and wait for it to settle in the corner or just above the composer. */

@@ -1,7 +1,7 @@
 import type { Session, UserInputInit } from "@codeden/contracts";
 import { useMutation } from "@tanstack/react-query";
 import { ArrowUp, ListPlus, Square, Zap } from "lucide-react";
-import { type KeyboardEvent, type ReactNode, useRef, useState } from "react";
+import { type KeyboardEvent, type ReactNode, useId, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { type SendMode, useClient } from "@/lib/api";
@@ -13,7 +13,7 @@ import { getDraft, useComposerStore } from "@/stores/composer";
 import { toInputAttachments } from "./attachments";
 import { ComposerBox, canSendDraft, composerPlaceholders, isSendKey } from "./composer-box";
 import { SessionOptions } from "./session-options";
-import { SuggestionMenu } from "./suggestion-menu";
+import { SuggestionMenu, suggestionOptionId, suggestionStatus } from "./suggestion-menu";
 import { applyTrigger } from "./trigger";
 import { type SuggestionSource, useSuggestions } from "./use-suggestions";
 
@@ -55,6 +55,8 @@ export function Composer({
   const [caret, setCaret] = useState(0);
   const [mode, setMode] = useState<Exclude<SendMode, "send">>("queue");
   const suggestions = useSuggestions(source, draft.text, caret);
+  const listId = useId();
+  const activeItem = suggestions.items[suggestions.active];
 
   const canSend = canSendDraft(draft);
   const submit = (override?: SendMode) => {
@@ -118,16 +120,28 @@ export function Composer({
       onKeyDown={onKeyDown}
       onCaret={setCaret}
       textareaRef={ref}
+      combobox={{
+        listId,
+        open: suggestions.open,
+        activeId: activeItem && suggestionOptionId(listId, activeItem, suggestions.active),
+      }}
       menu={
-        suggestions.open && (
-          <SuggestionMenu
-            title={suggestions.title}
-            items={suggestions.items}
-            active={suggestions.active}
-            onHover={suggestions.setActive}
-            onPick={(s) => pick(s.insert)}
-          />
-        )
+        <>
+          {suggestions.open && (
+            <SuggestionMenu
+              id={listId}
+              title={suggestions.title}
+              items={suggestions.items}
+              active={suggestions.active}
+              onHover={suggestions.setActive}
+              onPick={(s) => pick(s.insert)}
+            />
+          )}
+          {/* Always mounted, so screen readers pick up the count the moment the menu opens. */}
+          <span role="status" className="sr-only">
+            {suggestionStatus(suggestions.open, suggestions.loading, suggestions.items.length)}
+          </span>
+        </>
       }
       options={options}
       actions={

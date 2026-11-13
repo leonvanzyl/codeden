@@ -68,10 +68,13 @@ export function useSuggestions(source: SuggestionSource, text: string, caret: nu
   useEffect(() => setActive(0), [trigger?.kind, trigger?.query]);
 
   const open = Boolean(trigger) && dismissedAt !== trigger?.start;
+  const query = trigger?.kind === "mention" ? mentions : commands;
   return {
     trigger,
     items,
     open,
+    /** The active trigger's results have not arrived yet. */
+    loading: Boolean(trigger) && query.isPending,
     active,
     setActive,
     dismiss: () => setDismissedAt(trigger?.start ?? null),

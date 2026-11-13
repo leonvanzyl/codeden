@@ -46,6 +46,7 @@ export function ComposerBox({
   onKeyDown,
   onCaret,
   textareaRef,
+  combobox,
   menu,
   options,
   actions,
@@ -58,6 +59,12 @@ export function ComposerBox({
   onCaret?: (caret: number) => void;
   /** The textarea, for callers that move the caret. */
   textareaRef?: RefObject<HTMLTextAreaElement | null>;
+  /**
+   * Makes the box a combobox for a suggestion list in `menu`, so screen readers hear the list
+   * open and close and the highlighted option: the listbox's id, whether it is open, and the
+   * highlighted option's id (none when the list is empty).
+   */
+  combobox?: { listId: string; open: boolean; activeId?: string };
   /** Floating content above the box, such as the suggestion menu. */
   menu?: ReactNode;
   /** Controls after the attach button. */
@@ -124,6 +131,7 @@ export function ComposerBox({
             items={draft.attachments}
             onRemove={(id) => removeAttachment(draftKey, id)}
           />
+          {/* biome-ignore lint/a11y/useAriaPropsSupportedByRole: aria-expanded is only set with role="combobox", which supports it; the rule reads the textarea's implicit textbox role. */}
           <textarea
             ref={ref}
             value={draft.text}
@@ -137,6 +145,11 @@ export function ComposerBox({
             onPaste={onPaste}
             placeholder={placeholder}
             aria-label="Message"
+            role={combobox ? "combobox" : undefined}
+            aria-autocomplete={combobox ? "list" : undefined}
+            aria-expanded={combobox ? combobox.open : undefined}
+            aria-controls={combobox?.open ? combobox.listId : undefined}
+            aria-activedescendant={combobox?.open ? combobox.activeId : undefined}
             className="block max-h-64 min-h-[56px] w-full resize-none bg-transparent px-4 pt-3.5 pb-1 text-[14px] leading-relaxed outline-none [field-sizing:content] placeholder:text-muted-foreground/70"
           />
           <div className="flex flex-wrap items-center gap-0.5 gap-y-1 px-2 pb-2">
