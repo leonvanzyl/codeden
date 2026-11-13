@@ -233,6 +233,45 @@ describe("names that sanitise into a secret's name", () => {
     expect(env.artifacts.list({ sessionId: session.id }).map((a) => a.name)).toEqual([]);
     for (const outcome of outcomes) expect(outcome).toMatchObject(refused);
   });
+
+  // A separator becomes `-` too: these would go out as service-account.json.
+  it.each(["service/account.json", "service\\account.json"])(
+    "refuses %s as the name to publish or share under, and as an artifact's name",
+    async (name) => {
+      writeFileSync(join(env.dir, "notes.txt"), "notes\n");
+      const session = issueSession();
+      await expect(
+        env.service.attachEvidence(session.id, { files: [{ path: "notes.txt", name }] }),
+      ).rejects.toMatchObject({
+        ...refused,
+        message: expect.stringContaining(`${name} (published as service-account.json)`),
+      });
+      const shared = await share(session.id, { path: "notes.txt", name }).catch(
+        (error: unknown) => error,
+      );
+      expect(env.artifacts.list({ sessionId: session.id }).map((a) => a.name)).toEqual([]);
+      expect(shared).toMatchObject(refused);
+      const legacy = saveArtifact(session.id, name);
+      await expect(
+        env.service.attachEvidence(session.id, { files: [{ artifactId: legacy.id }] }),
+      ).rejects.toMatchObject(refused);
+      nothingPublished();
+    },
+  );
+
+  it("checks the final names, after `-2` tells repeated names apart", async () => {
+    writeFileSync(join(env.dir, "process.env"), "notes\n");
+    const session = issueSession();
+    // `process.env` is code, not a secrets file, but a second one would go out as process-2.env.
+    // Its real path is checked by file name only, so the file itself still attaches.
+    const file = { path: "process.env" };
+    await expect(
+      env.service.attachEvidence(session.id, { files: [file, file] }),
+    ).rejects.toMatchObject(refused);
+    nothingPublished();
+    const once = await env.service.attachEvidence(session.id, { files: [file] });
+    expect(once.files.map((f) => f.name)).toEqual(["process.env"]);
+  });
 });
 
 // #186: a file symlink to a legacy `.env` artifact's stored file (`<id>.txt`) must still be

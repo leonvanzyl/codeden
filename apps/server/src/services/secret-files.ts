@@ -9,7 +9,12 @@ import { safeFileName } from "./github/evidence";
 export interface OutgoingFile {
   /** Its real path (`realPathOf`: links and short names resolved), when it comes from disk. */
   realPath?: string;
-  /** Its other names: the path asked for, the name it is published or saved under. */
+  /** Paths it was asked for by, or is stored at: checked whole and by their file name. */
+  paths?: ReadonlyArray<string | undefined>;
+  /**
+   * Names it is published or saved under, now or later (an artifact's name is published when
+   * it is attached by id): checked as given and as evidence publishes them.
+   */
   names: ReadonlyArray<string | undefined>;
 }
 
@@ -30,20 +35,29 @@ export function isCodedenCredentialFile(file: string, home: string): boolean {
  * CodeDen's own tools skip the risk classifier, so these tools check here: a file `isSecretPath`
  * matches by any of its names (`.env`, SSH keys, `.npmrc`, `*.pem`, ...), or one of CodeDen's
  * own credential files in `home`, is refused with `403 secret_file` at every permission level.
- * Each name is also checked as evidence publishes it (`safeFileName`), so `-id_rsa` and
- * `notes.p!em` can't go out as `id_rsa` and `notes.pem`. Evidence then only adds `-2` before
- * the extension to tell files apart, which never turns a name into a secret's.
+ * Names are also checked as evidence publishes them (`safeFileName`, which turns anything but
+ * `[A-Za-z0-9._-]`, separators included, into `-`), so `-id_rsa`, `notes.p!em` and
+ * `service/account.json` can't go out as `id_rsa`, `notes.pem` and `service-account.json`;
+ * paths by their file name only, which is what they are published under. The `-2` evidence
+ * adds to repeated names can still make one look like a secret's (`process.env`,
+ * `process-2.env`), so `readEvidence` also checks the final names.
  */
 export function assertNotSecret(file: OutgoingFile, home: string | undefined): void {
-  const names = [file.realPath, ...file.names].filter((name): name is string => !!name);
-  for (const name of names) {
-    const published = safeFileName(basename(name));
-    const label = isSecretPath(name)
-      ? basename(name)
-      : isSecretPath(published)
-        ? `${basename(name)} (published as ${published})`
-        : undefined;
-    if (!label) continue;
+  // Labels for the error: a path by its file name only, so no full path is echoed.
+  const secrets = (list: ReadonlyArray<string | undefined> | undefined, isName: boolean) =>
+    (list ?? []).flatMap((given) => {
+      if (!given) return [];
+      const shown = isName ? given : basename(given);
+      if (isSecretPath(given)) return [shown];
+      const forms = [safeFileName(basename(given)), ...(isName ? [safeFileName(given)] : [])];
+      const published = forms.find((form) => isSecretPath(form));
+      return published ? [`${shown} (published as ${published})`] : [];
+    });
+  const [label] = [
+    ...secrets([file.realPath, ...(file.paths ?? [])], false),
+    ...secrets(file.names, true),
+  ];
+  if (label) {
     throw forbidden(
       `${label} looks like a secrets file (.env, keys, credentials). CodeDen never attaches or shares those, because they would leak secrets. Leave it out and describe what you checked instead.`,
       "secret_file",
