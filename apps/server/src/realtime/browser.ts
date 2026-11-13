@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   BrowserClientMessage,
+  type BrowserDialog,
   type BrowserEngine,
   type BrowserScreencastSettings,
   type BrowserServerMessage,
@@ -11,6 +12,7 @@ import {
 import type { WSContext, WSEvents } from "hono/ws";
 import { type BrowserService, isBrowserNotOpen } from "../services/browser/browser-service";
 import { errorMessage, ServiceError } from "../services/errors";
+import { runnerErrorCode } from "../services/runner-port";
 import { ViewportArbiter } from "./browser-viewport";
 
 interface AppliedViewport {
@@ -47,9 +49,9 @@ export interface BrowserBridgeDeps {
 
 /**
  * The `/ws/browser` channel (§12.2): one socket is one viewer of one session's browser.
- * Relays the runner's `browser.frame` and `browser.tabs` stream data for that session,
- * forwards human input, and registers the viewer with the runner's screencast, so the
- * screencast runs only while somebody watches.
+ * Relays the runner's `browser.frame`, `browser.tabs` and `browser.dialogs` stream data for that
+ * session, forwards human input and dialog answers, and registers the viewer with the runner's
+ * screencast, so the screencast runs only while somebody watches.
  */
 export class BrowserBridge {
   private readonly viewers = new Map<string, Set<Viewer>>();
@@ -60,6 +62,8 @@ export class BrowserBridge {
   private readonly applying = new Map<string, Promise<void>>();
   /** Per session: what backs its open browser. */
   private readonly engines = new Map<string, BrowserEngine>();
+  /** Per session: page dialogs waiting for an answer (shown to viewers that connect later). */
+  private readonly dialogs = new Map<string, BrowserDialog[]>();
 
   constructor(private readonly deps: BrowserBridgeDeps) {
     deps.browser.agentActivity?.onChange((sessionId, acting) => {
@@ -119,7 +123,7 @@ export class BrowserBridge {
     };
   }
 
-  /** Runner stream data: frames and tab updates go to the session's viewers. */
+  /** Runner stream data: frames, tab updates and page dialogs go to the session's viewers. */
   onStream(stream: RunnerStream): void {
     if (stream.kind === "browser.frame") {
       const { sessionId: _s, kind: _k, ...frame } = stream;
@@ -129,11 +133,23 @@ export class BrowserBridge {
       }
       return;
     }
+    if (stream.kind === "browser.dialogs") {
+      const { sessionId, kind: _k, ...update } = stream;
+      this.noteDialogs(sessionId, update.dialogs);
+      for (const v of this.viewers.get(sessionId) ?? []) send(v.ws, { type: "dialogs", ...update });
+      return;
+    }
     if (stream.kind === "browser.tabs") {
       const engineChanged =
         stream.engine !== undefined && this.engines.get(stream.sessionId) !== stream.engine;
       if (stream.engine) this.engines.set(stream.sessionId, stream.engine);
       if (stream.tabs.length === 0 || engineChanged) this.applied.delete(stream.sessionId);
+      // A closed browser, or one moved to the runner's Chromium, has no dialogs open.
+      if ((stream.tabs.length === 0 || engineChanged) && this.dialogs.delete(stream.sessionId)) {
+        for (const v of this.viewers.get(stream.sessionId) ?? []) {
+          send(v.ws, { type: "dialogs", dialogs: [] });
+        }
+      }
       for (const v of this.viewers.get(stream.sessionId) ?? []) {
         if (stream.tabs.length === 0) {
           if (v.open) this.detach(v);
@@ -164,8 +180,9 @@ export class BrowserBridge {
       v.open = true;
       return this.watchIfWanted(v, opened.tabs);
     }
-    const { open, tabs, engine } = await this.deps.browser.tabs(v.sessionId);
+    const { open, tabs, engine, dialogs } = await this.deps.browser.tabs(v.sessionId);
     this.noteEngine(v.sessionId, engine);
+    if (open) this.noteDialogs(v.sessionId, dialogs ?? []);
     v.open = v.open || open;
     if (!v.open) return this.sendState(v, []);
     return this.watchIfWanted(v, tabs);
@@ -204,12 +221,29 @@ export class BrowserBridge {
         else if (owner !== arbiter.ownerId) this.announceViewport(v.sessionId);
         return;
       }
+      case "dialog": {
+        const { type: _t, ...answer } = msg;
+        try {
+          await browser.command({
+            name: "browser.dialog",
+            sessionId: v.sessionId,
+            ...answer,
+            by: "viewer",
+          });
+        } catch (error) {
+          // Somebody else (another viewer, the agent, the timeout) answered it first.
+          if (runnerErrorCode(error) !== "no_dialog") throw error;
+        }
+        return;
+      }
     }
   }
 
   private async watchIfWanted(v: Viewer, tabs: BrowserTab[]): Promise<void> {
     if (v.wantsWatch && !v.watching) await this.setWatching(v, true);
     this.sendState(v, tabs);
+    const dialogs = this.dialogs.get(v.sessionId);
+    if (dialogs) send(v.ws, { type: "dialogs", dialogs });
     if (v.open) {
       // A freshly opened browser (or a new server) gets the owner's size; otherwise tell this
       // viewer what the page is at.
@@ -313,6 +347,11 @@ export class BrowserBridge {
 
   private noteEngine(sessionId: string, engine: BrowserEngine | undefined): void {
     if (engine) this.engines.set(sessionId, engine);
+  }
+
+  private noteDialogs(sessionId: string, dialogs: BrowserDialog[]): void {
+    if (dialogs.length > 0) this.dialogs.set(sessionId, dialogs);
+    else this.dialogs.delete(sessionId);
   }
 
   private fail(v: Viewer, error: unknown): void {

@@ -83,6 +83,7 @@ describe("CodeDen MCP endpoint", () => {
       "browser_type",
       "browser_press",
       "browser_mouse",
+      "browser_dialog",
       "browser_screenshot",
       "browser_logs",
       "browser_wait",

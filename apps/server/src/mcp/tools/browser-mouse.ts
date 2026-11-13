@@ -6,6 +6,7 @@ import {
 } from "@codeden/contracts";
 import { z } from "zod";
 import { defineTool } from "../define";
+import { withDialogNote } from "./browser-dialog";
 
 /**
  * `browser_mouse` (§12.2, computer use step 1): act at pixel coordinates in the session's
@@ -60,20 +61,39 @@ export const browserMouse = defineTool({
     })
     .superRefine(checkBrowserMouse),
   handler: async (input, { services, sessionId }) => {
-    await services.browser.agentCommand({ name: "browser.mouse", sessionId, ...input });
-    const held = input.modifiers?.length ? ` with ${input.modifiers.join("+")}` : "";
-    switch (input.action) {
-      case "click": {
-        const kind = ["Clicked", "Double-clicked", "Triple-clicked"][(input.clickCount ?? 1) - 1];
-        const button = input.button && input.button !== "left" ? ` (${input.button} button)` : "";
-        return `${kind} at ${at(input.x, input.y)}${button}${held}.`;
-      }
-      case "hover":
-        return `Hovering at ${at(input.x, input.y)}${held}.`;
-      case "drag":
-        return `Dragged from ${at(input.x, input.y)} to ${at(input.toX ?? 0, input.toY ?? 0)}${held}.`;
-      case "scroll":
-        return `Scrolled by ${at(input.deltaX ?? 0, input.deltaY ?? 0)} at ${at(input.x, input.y)}${held}.`;
-    }
+    const { dialog } = await services.browser.agentCommand({
+      name: "browser.mouse",
+      sessionId,
+      ...input,
+    });
+    return withDialogNote(describeAction(input), dialog);
   },
 });
+
+function describeAction(input: {
+  action: "click" | "hover" | "drag" | "scroll";
+  x: number;
+  y: number;
+  toX?: number;
+  toY?: number;
+  deltaX?: number;
+  deltaY?: number;
+  button?: string;
+  clickCount?: number;
+  modifiers?: string[];
+}): string {
+  const held = input.modifiers?.length ? ` with ${input.modifiers.join("+")}` : "";
+  switch (input.action) {
+    case "click": {
+      const kind = ["Clicked", "Double-clicked", "Triple-clicked"][(input.clickCount ?? 1) - 1];
+      const button = input.button && input.button !== "left" ? ` (${input.button} button)` : "";
+      return `${kind} at ${at(input.x, input.y)}${button}${held}.`;
+    }
+    case "hover":
+      return `Hovering at ${at(input.x, input.y)}${held}.`;
+    case "drag":
+      return `Dragged from ${at(input.x, input.y)} to ${at(input.toX ?? 0, input.toY ?? 0)}${held}.`;
+    case "scroll":
+      return `Scrolled by ${at(input.deltaX ?? 0, input.deltaY ?? 0)} at ${at(input.x, input.y)}${held}.`;
+  }
+}

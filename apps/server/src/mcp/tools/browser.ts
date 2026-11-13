@@ -1,6 +1,7 @@
 import { type BrowserTab, MAX_FOCUS_TYPE_CHARS } from "@codeden/contracts";
 import { z } from "zod";
 import { defineTool, ToolError } from "../define";
+import { dialogNote, withDialogNote } from "./browser-dialog";
 
 /**
  * Agent browser tools (§12.2): agents drive the same session browser the user watches in the
@@ -53,8 +54,11 @@ export const browserSnapshot = defineTool({
       sessionId,
       tabId: input.tabId,
     });
+    const head = `Tab ${snap.tabId}: ${snap.title} - ${snap.url}`;
+    // The page is paused under a dialog: there is nothing else to read until it is answered.
+    if (snap.dialog) return `${head}\n\n${dialogNote(snap.dialog)}`;
     const note = snap.truncated ? "\n(snapshot truncated)" : "";
-    return `Tab ${snap.tabId}: ${snap.title} - ${snap.url}\n\n${snap.snapshot}${note}`;
+    return `${head}\n\n${snap.snapshot}${note}`;
   },
 });
 
@@ -71,8 +75,12 @@ export const browserClick = defineTool({
     tabId,
   }),
   handler: async (input, { services, sessionId }) => {
-    await services.browser.agentCommand({ name: "browser.click", sessionId, ...input });
-    return `Clicked ${input.ref}.`;
+    const { dialog } = await services.browser.agentCommand({
+      name: "browser.click",
+      sessionId,
+      ...input,
+    });
+    return withDialogNote(`Clicked ${input.ref}.`, dialog);
   },
 });
 
@@ -93,9 +101,13 @@ export const browserType = defineTool({
       path: ["text"],
     }),
   handler: async (input, { services, sessionId }) => {
-    await services.browser.agentCommand({ name: "browser.type", sessionId, ...input });
+    const { dialog } = await services.browser.agentCommand({
+      name: "browser.type",
+      sessionId,
+      ...input,
+    });
     const where = input.ref ? `into ${input.ref}` : "at the focused element";
-    return `Typed ${where}${input.submit ? " and pressed Enter" : ""}.`;
+    return withDialogNote(`Typed ${where}${input.submit ? " and pressed Enter" : ""}.`, dialog);
   },
 });
 
@@ -106,8 +118,12 @@ export const browserPress = defineTool({
   scope: "session",
   input: z.object({ key: z.string().min(1).max(60), tabId }),
   handler: async (input, { services, sessionId }) => {
-    await services.browser.agentCommand({ name: "browser.press", sessionId, ...input });
-    return `Pressed ${input.key}.`;
+    const { dialog } = await services.browser.agentCommand({
+      name: "browser.press",
+      sessionId,
+      ...input,
+    });
+    return withDialogNote(`Pressed ${input.key}.`, dialog);
   },
 });
 
