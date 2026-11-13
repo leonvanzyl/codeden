@@ -262,8 +262,15 @@ export const RateLimitWindow = z.object({
   windowId: z.string(),
   label: z.string(),
   status: z.enum(["ok", "warning", "limited"]),
+  /**
+   * The share used, from the latest reading that had one; null when none has been read in the
+   * current window. Claude often reports only the status, so this can be older than the status.
+   */
   usedPercent: z.number().min(0).max(100).nullable(),
+  /** When `usedPercent` was read (null without one); can be earlier than `observedAt`. */
+  usedPercentAt: Timestamp.nullable(),
   resetsAt: Timestamp.nullable(),
+  /** When the latest reading (status, reset time) arrived. */
   observedAt: Timestamp,
   /** The window has reset since this reading, so the percentage is out of date. */
   stale: z.boolean(),

@@ -27,6 +27,7 @@ import { claudeNotesDirs } from "./notes-dirs";
 import { buildQueryOptions, claudeEffort, toSdkUserMessage } from "./options";
 import { ClaudePolicy, permissionModeFor } from "./permissions";
 import { carriesToolResult, planApprovalItem, planDecision, planText } from "./plan-review";
+import { readPlanUsage } from "./plan-usage";
 import { askQuestion } from "./questions";
 import type { ClaudeSdkModule } from "./sdk";
 import { approvalTitle, PLAN_TOOL, QUESTION_TOOL } from "./tools";
@@ -345,7 +346,20 @@ export class ClaudeSession implements ProviderSession {
     if (this.config.onModels) {
       q.supportedModels().then(this.config.onModels, () => {});
     }
+    this.reportPlanUsage(q);
     return prompts;
+  }
+
+  /**
+   * Report the subscription's usage windows (with percentages) for the Usage page: once when
+   * the query starts and after each turn, since `rate_limit_event`s rarely carry a figure.
+   */
+  private reportPlanUsage(q: Query): void {
+    void readPlanUsage(q).then((usage) => {
+      if (usage && !this.closed) {
+        this.events.push({ type: "usage.updated", threadId: this.mapper.rootThreadId, usage });
+      }
+    });
   }
 
   private async pump(q: Query): Promise<void> {
@@ -354,6 +368,7 @@ export class ClaudeSession implements ProviderSession {
       for await (const message of q) {
         this.mapper.handle(message);
         this.afterMessage(message);
+        if (str(message, "type") === "result") this.reportPlanUsage(q);
       }
     } catch (error) {
       failure = error;

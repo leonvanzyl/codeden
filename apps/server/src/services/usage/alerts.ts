@@ -70,6 +70,12 @@ export function windowLabel(id: string): string {
   if (known) return known;
   const m = /^(\d+)([hd])$/.exec(id);
   if (m) return `${m[1]}-${m[2] === "h" ? "hour" : "day"} window`;
+  // A per-model weekly window, e.g. `weekly-haiku` from Claude's plan usage.
+  const model = /^weekly-(.+)$/.exec(id)?.[1];
+  if (model) {
+    const name = model.replace(/-/g, " ");
+    return `Weekly (${name.charAt(0).toUpperCase()}${name.slice(1)})`;
+  }
   return id;
 }
 
@@ -80,6 +86,7 @@ export function toWindow(
     windowId: string;
     status: RateLimitWindow["status"];
     usedPercent: number | null;
+    usedPercentAt?: string | null;
     resetsAt: string | null;
     observedAt: string;
   },
@@ -90,6 +97,8 @@ export function toWindow(
     windowId: row.windowId,
     status: row.status,
     usedPercent: row.usedPercent,
+    // Rows written before the column existed read their percentage with the status.
+    usedPercentAt: row.usedPercent === null ? null : (row.usedPercentAt ?? row.observedAt),
     resetsAt: row.resetsAt,
     observedAt: row.observedAt,
     label: windowLabel(row.windowId),

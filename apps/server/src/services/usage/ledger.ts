@@ -1,5 +1,5 @@
 import type { AutonomyMode, Session, Usage, UsageSource } from "@codeden/contracts";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { automationRuns, projects, sessions } from "../../db/schema";
 import { rateLimitWindows, usageLedger } from "../../db/schema-usage";
 import type { Tx } from "../../events/projection-db";
@@ -89,7 +89,8 @@ export function attribution(tx: Tx, sessionId: string) {
 /**
  * Ledger projection for one `usage.updated` (§12.6), run inside the append transaction. A
  * report with a turn id upserts that turn's row with the turn's usage so far (providers
- * report per-turn figures); rate-limit windows are kept as their latest reading.
+ * report per-turn figures); rate-limit windows are kept per window id as their latest reading,
+ * with the last known percentage when the latest reading has none.
  */
 export function applyUsageReport(tx: Tx, report: UsageReport): void {
   const { usage } = report;
@@ -121,11 +122,14 @@ export function applyUsageReport(tx: Tx, report: UsageReport): void {
       .get()?.provider;
     if (!provider) return;
     for (const w of usage.rateLimits) {
+      const known =
+        w.usedPercent === undefined ? lastPercent(tx, provider, w.id, report.ts) : undefined;
       const row = {
         provider,
         windowId: w.id,
         status: w.status,
-        usedPercent: w.usedPercent ?? null,
+        usedPercent: w.usedPercent ?? known?.usedPercent ?? null,
+        usedPercentAt: w.usedPercent === undefined ? (known?.usedPercentAt ?? null) : report.ts,
         resetsAt: w.resetsAt ?? null,
         observedAt: report.ts,
         sessionId: report.sessionId,
@@ -139,4 +143,30 @@ export function applyUsageReport(tx: Tx, report: UsageReport): void {
         .run();
     }
   }
+}
+
+/**
+ * The stored percentage of a window, for a newer reading that has none (Claude often reports
+ * only the status). Kept only while that window has not reset: its reset time is known and
+ * still after `at`, so the figure still describes the current window.
+ */
+function lastPercent(
+  tx: Tx,
+  provider: string,
+  windowId: string,
+  at: string,
+): { usedPercent: number; usedPercentAt: string } | undefined {
+  const prev = tx
+    .select({
+      usedPercent: rateLimitWindows.usedPercent,
+      usedPercentAt: rateLimitWindows.usedPercentAt,
+      observedAt: rateLimitWindows.observedAt,
+      resetsAt: rateLimitWindows.resetsAt,
+    })
+    .from(rateLimitWindows)
+    .where(and(eq(rateLimitWindows.provider, provider), eq(rateLimitWindows.windowId, windowId)))
+    .get();
+  if (prev?.usedPercent == null || !prev.resetsAt) return undefined;
+  if (Date.parse(prev.resetsAt) <= Date.parse(at)) return undefined;
+  return { usedPercent: prev.usedPercent, usedPercentAt: prev.usedPercentAt ?? prev.observedAt };
 }

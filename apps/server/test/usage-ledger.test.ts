@@ -146,6 +146,39 @@ describe("usage ledger projection", () => {
       usedPercent: 91,
     });
   });
+
+  // #193: Claude's `rate_limit_event` usually carries a status and reset time but no percentage.
+  it("keeps a window's last known percentage when a newer reading has none", () => {
+    const limits = (rateLimits: NonNullable<Usage["rateLimits"]>) =>
+      emit("s1", { type: "usage.updated", threadId: "t", usage: { rateLimits } });
+    const resetsAt = "2026-11-10T06:00:00.000Z";
+    limits([{ id: "weekly", status: "ok", usedPercent: 37, resetsAt }]);
+    vi.setSystemTime(NOW + 60_000);
+    limits([{ id: "weekly", status: "ok", resetsAt }]);
+    limits([{ id: "5h", status: "ok", resetsAt: "2026-11-07T17:00:00.000Z" }]);
+    const windows = usage.rateLimitWindows();
+    expect(windows.map((w) => w.windowId)).toEqual(["5h", "weekly"]);
+    expect(windows.find((w) => w.windowId === "weekly")).toMatchObject({
+      status: "ok",
+      usedPercent: 37,
+      // The figure keeps the time it was read; the status is the newer reading's.
+      usedPercentAt: new Date(NOW).toISOString(),
+      observedAt: new Date(NOW + 60_000).toISOString(),
+      resetsAt,
+    });
+    expect(windows.find((w) => w.windowId === "5h")).toMatchObject({
+      usedPercent: null,
+      usedPercentAt: null,
+    });
+
+    // Once the window has reset, the old figure no longer describes it.
+    vi.setSystemTime(Date.parse(resetsAt) + 60_000);
+    limits([{ id: "weekly", status: "ok", resetsAt: "2026-11-17T06:00:00.000Z" }]);
+    expect(usage.rateLimitWindows().find((w) => w.windowId === "weekly")).toMatchObject({
+      usedPercent: null,
+      usedPercentAt: null,
+    });
+  });
 });
 
 describe("UsageService", () => {
