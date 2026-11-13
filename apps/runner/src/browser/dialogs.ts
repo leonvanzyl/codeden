@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import {
   type BrowserDialog,
   type BrowserDialogClosed,
@@ -72,6 +73,9 @@ export class DialogKeeper {
     // A tab shows one dialog at a time: one still held here was closed without word.
     this.forget(tabId);
     const info: BrowserDialog = {
+      // Random, so an answer meant for an earlier dialog (even of a browser since reopened)
+      // never matches this one.
+      dialogId: `d${randomBytes(4).toString("hex")}`,
       tabId,
       type,
       message: cut(dialog.message()),
@@ -100,21 +104,27 @@ export class DialogKeeper {
     if (!dialog) return;
     throw new CommandError(
       "dialog_open",
-      `A ${describeDialog(dialog)} dialog is open on tab ${tabId}, and the page waits until it is answered. Answer it with browser_dialog (accept: true for OK, false for Cancel) first.`,
+      `A ${describeDialog(dialog)} dialog is open on tab ${tabId}, and the page waits until it is answered. Answer it with browser_dialog (dialogId "${dialog.dialogId}"; accept: true for OK, false for Cancel) first.`,
     );
   }
 
   /**
-   * Answer the dialog on `tabId`: `accept` is OK, otherwise Cancel. An accepted prompt returns
-   * `promptText`, or its default text. Throws `no_dialog` when none is open there.
+   * Answer dialog `dialogId`: `accept` is OK, otherwise Cancel. An accepted prompt returns
+   * `promptText`, or its default text. Throws `no_dialog` when that dialog is no longer open:
+   * an answer meant for it must never reach the dialog the page opened next.
    */
   async answer(
-    tabId: string,
+    dialogId: string,
     answer: { accept: boolean; promptText?: string; by: "agent" | "viewer" },
   ): Promise<BrowserDialog> {
-    const held = this.held.get(tabId);
-    if (!held) throw new CommandError("no_dialog", `No dialog is open on tab ${tabId}`);
-    await this.close(tabId, answer.by, answer.accept, answer.promptText);
+    const held = [...this.held.values()].find((h) => h.info.dialogId === dialogId);
+    if (!held) {
+      throw new CommandError(
+        "no_dialog",
+        `Dialog ${dialogId} is no longer open: it was answered, timed out or closed. Take a new browser_snapshot to see the page now.`,
+      );
+    }
+    await this.close(held.info.tabId, answer.by, answer.accept, answer.promptText);
     return held.info;
   }
 

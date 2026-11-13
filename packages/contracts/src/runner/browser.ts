@@ -179,11 +179,19 @@ export const BrowserDialogType = z.enum(["alert", "confirm", "prompt", "beforeun
 export type BrowserDialogType = z.infer<typeof BrowserDialogType>;
 
 /**
+ * Runner-assigned id of one page dialog (`d` + random hex). An answer names it, so an answer
+ * meant for a dialog that already closed can never answer the next one on the same tab.
+ */
+export const BrowserDialogId = z.string().regex(/^[A-Za-z0-9_-]{1,64}$/);
+export type BrowserDialogId = z.infer<typeof BrowserDialogId>;
+
+/**
  * A page dialog waiting for an answer (§12.2). The page is paused until a viewer (the panel) or
  * an agent (`browser.dialog`) answers it, or `DIALOG_TIMEOUT_MS` passes and it is dismissed. A
  * tab shows at most one at a time.
  */
 export const BrowserDialog = z.object({
+  dialogId: BrowserDialogId,
   tabId: BrowserTabId,
   type: BrowserDialogType,
   /** What the page says or asks (cut to `MAX_DIALOG_TEXT`). */
@@ -457,14 +465,15 @@ export const BrowserCommands = [
     timeoutMs: z.int().min(1).max(120_000).optional(),
   }),
   /**
-   * Answer the page dialog open on a tab (default: the active tab's, else the only one open).
-   * `accept` is OK (Leave, for `beforeunload`), otherwise Cancel; `promptText` is what a prompt
-   * returns (default: its own default text). `by` tells viewers who answered (default `agent`).
-   * Fails with `no_dialog` when there is none.
+   * Answer the page dialog `dialogId`. `accept` is OK (Leave, for `beforeunload`), otherwise
+   * Cancel; `promptText` is what a prompt returns (default: its own default text). `by` tells
+   * viewers who answered (default `agent`). Fails with `no_dialog` when that dialog is no longer
+   * open (somebody answered it, or it closed): a stale answer never reaches a later dialog.
    */
   z.object({
     name: z.literal("browser.dialog"),
-    ...TabTarget,
+    sessionId: Id,
+    dialogId: BrowserDialogId,
     accept: z.boolean(),
     promptText: z.string().max(MAX_DIALOG_TEXT).optional(),
     by: z.enum(["agent", "viewer"]).optional(),

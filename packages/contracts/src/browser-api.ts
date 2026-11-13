@@ -4,6 +4,7 @@ import {
   BrowserCommandResults,
   BrowserDialog,
   BrowserDialogClosed,
+  BrowserDialogId,
   BrowserEngine,
   BrowserFrameMetadata,
   BrowserInput,
@@ -165,12 +166,12 @@ export const BrowserClientMessage = z.discriminatedUnion("type", [
    */
   BrowserViewportSize.extend({ type: z.literal("viewport"), claim: z.boolean().optional() }),
   /**
-   * Answer the page dialog open on `tabId` (see `dialogs`): `accept` is OK (Leave), otherwise
-   * Cancel; `promptText` is what a prompt returns.
+   * Answer the page dialog `dialogId` (see `dialogs`): `accept` is OK (Leave), otherwise Cancel;
+   * `promptText` is what a prompt returns. Ignored when that dialog is no longer open.
    */
   z.object({
     type: z.literal("dialog"),
-    tabId: BrowserTabId,
+    dialogId: BrowserDialogId,
     accept: z.boolean(),
     promptText: z.string().max(MAX_DIALOG_TEXT).optional(),
   }),
@@ -225,7 +226,8 @@ export const BrowserServerMessage = z.discriminatedUnion("type", [
   z.object({ type: z.literal("agent"), acting: z.boolean() }),
   /**
    * The page dialogs waiting for an answer (an `alert`, `confirm`, `prompt` or "Leave site?"),
-   * at most one per tab; sent on connect when there are any, and whenever one opens or closes.
+   * at most one per tab: the whole list, empty included, after every `state` of an open browser
+   * (so a viewer that reconnects drops dialogs closed meanwhile), and whenever one opens or closes.
    * The page is paused until a viewer or an agent answers, or `DIALOG_TIMEOUT_MS` passes.
    * `closed`: the dialog that just closed, and who closed it.
    */

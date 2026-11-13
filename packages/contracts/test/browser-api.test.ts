@@ -100,7 +100,13 @@ describe("browser panel contracts", () => {
   });
 
   it("round-trips page dialogs and a viewer's answer", () => {
-    const dialog = { tabId: "t1", type: "prompt" as const, message: "Name?", defaultValue: "a" };
+    const dialog = {
+      dialogId: "d1a2b3c4d",
+      tabId: "t1",
+      type: "prompt" as const,
+      message: "Name?",
+      defaultValue: "a",
+    };
     roundTrip(BrowserTabsResponse, { open: true, tabs: [tab], dialogs: [dialog] });
     roundTrip(BrowserServerMessage, { type: "dialogs", dialogs: [dialog] });
     roundTrip(BrowserServerMessage, {
@@ -108,14 +114,22 @@ describe("browser panel contracts", () => {
       dialogs: [],
       closed: { ...dialog, by: "viewer", accepted: true },
     });
-    roundTrip(BrowserClientMessage, { type: "dialog", tabId: "t1", accept: false });
+    roundTrip(BrowserClientMessage, { type: "dialog", dialogId: "d1a2b3c4d", accept: false });
     roundTrip(BrowserClientMessage, {
       type: "dialog",
-      tabId: "t1",
+      dialogId: "d1a2b3c4d",
       accept: true,
       promptText: "Renamed",
     });
+    // An answer always names the one dialog it is for.
     expect(BrowserClientMessage.safeParse({ type: "dialog", accept: true }).success).toBe(false);
+    expect(
+      BrowserClientMessage.safeParse({ type: "dialog", tabId: "t1", accept: true }).success,
+    ).toBe(false);
+    expect(
+      BrowserServerMessage.safeParse({ type: "dialogs", dialogs: [{ ...dialog, dialogId: "" }] })
+        .success,
+    ).toBe(false);
   });
 
   it("coerces numeric query parameters", () => {

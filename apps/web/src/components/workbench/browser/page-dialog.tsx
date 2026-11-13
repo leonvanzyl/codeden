@@ -14,12 +14,50 @@ function origin(url: string | undefined): string {
   }
 }
 
+/** The dialog the panel shows: the active tab's, else any tab's. */
+export function shownDialog(
+  dialogs: readonly BrowserDialog[],
+  activeTabId: string | undefined,
+): BrowserDialog | undefined {
+  return dialogs.find((d) => d.tabId === activeTabId) ?? dialogs[0];
+}
+
+/**
+ * The page dialog over the browser panel's page, if any (see `PageDialog`). The card is keyed by
+ * its dialog's id: dialogs opening or closing on other tabs never remount it (a prompt keeps what
+ * was typed), and a new dialog always gets a fresh card.
+ */
+export function PageDialogLayer({
+  dialogs,
+  tabs,
+  activeTabId,
+  onAnswer,
+}: {
+  dialogs: readonly BrowserDialog[];
+  tabs: readonly BrowserTab[];
+  activeTabId: string | undefined;
+  /** Send the answer for `dialogId`; false when it could not be sent (disconnected). */
+  onAnswer(dialogId: string, accept: boolean, promptText?: string): boolean;
+}) {
+  const dialog = shownDialog(dialogs, activeTabId);
+  if (!dialog) return null;
+  return (
+    <PageDialog
+      key={dialog.dialogId}
+      dialog={dialog}
+      tab={tabs.find((t) => t.tabId === dialog.tabId)}
+      active={dialog.tabId === activeTabId}
+      onAnswer={(accept, text) => onAnswer(dialog.dialogId, accept, text)}
+    />
+  );
+}
+
 /**
  * The page's own `alert`, `confirm`, `prompt` or "Leave this page?" (§12.2), over the page it
  * paused. OK, Cancel and the prompt's field work with mouse, touch and keyboard (Enter answers,
  * Escape cancels). It only takes focus when the browser panel already had it, so a dialog the
  * agent opens never catches keys meant for the chat. Answered once: the buttons wait for the
- * next dialog.
+ * next dialog (unless the answer could not be sent).
  */
 export function PageDialog({
   dialog,
@@ -32,7 +70,8 @@ export function PageDialog({
   tab: BrowserTab | undefined;
   /** It is on the tab the panel shows (otherwise the card names the tab). */
   active: boolean;
-  onAnswer(accept: boolean, promptText?: string): void;
+  /** False when the answer could not be sent (the card stays answerable). */
+  onAnswer(accept: boolean, promptText?: string): boolean;
 }) {
   const ids = useId();
   const box = useRef<HTMLDivElement>(null);
@@ -52,8 +91,7 @@ export function PageDialog({
 
   const answer = (accept: boolean) => {
     if (sent) return;
-    setSent(true);
-    onAnswer(accept, accept && dialog.type === "prompt" ? text : undefined);
+    if (onAnswer(accept, accept && dialog.type === "prompt" ? text : undefined)) setSent(true);
   };
   const onKeyDown = (e: KeyboardEvent) => {
     if (e.key !== "Escape") return;

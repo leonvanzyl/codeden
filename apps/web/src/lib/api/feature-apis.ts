@@ -102,10 +102,10 @@ export interface BrowserChannel {
    */
   viewport(size: BrowserViewportSize, claim?: boolean): void;
   /**
-   * Answer the page dialog open on `tabId`: OK (`accept`) or Cancel; `promptText` is what a
-   * prompt returns. Not queued while disconnected (it could answer a later dialog).
+   * Answer page dialog `dialogId`: OK (`accept`) or Cancel; `promptText` is what a prompt
+   * returns. Not queued while disconnected: false when it could not be sent.
    */
-  dialog(tabId: string, accept: boolean, promptText?: string): void;
+  dialog(dialogId: string, accept: boolean, promptText?: string): boolean;
   close(): void;
 }
 

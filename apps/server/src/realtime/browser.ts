@@ -231,8 +231,12 @@ export class BrowserBridge {
             by: "viewer",
           });
         } catch (error) {
-          // Somebody else (another viewer, the agent, the timeout) answered it first.
           if (runnerErrorCode(error) !== "no_dialog") throw error;
+          // That dialog closed first (another viewer, the agent, the timeout): the answer went
+          // nowhere, and this viewer gets the dialogs as they are now.
+          const { open, dialogs = [] } = await browser.tabs(v.sessionId);
+          if (open) this.noteDialogs(v.sessionId, dialogs);
+          send(v.ws, { type: "dialogs", dialogs: open ? dialogs : [] });
         }
         return;
       }
@@ -242,8 +246,9 @@ export class BrowserBridge {
   private async watchIfWanted(v: Viewer, tabs: BrowserTab[]): Promise<void> {
     if (v.wantsWatch && !v.watching) await this.setWatching(v, true);
     this.sendState(v, tabs);
-    const dialogs = this.dialogs.get(v.sessionId);
-    if (dialogs) send(v.ws, { type: "dialogs", dialogs });
+    // The whole list, empty too: a viewer that reconnects must drop a dialog that closed while
+    // it was away (answered by someone else, or timed out).
+    if (v.open) send(v.ws, { type: "dialogs", dialogs: this.dialogs.get(v.sessionId) ?? [] });
     if (v.open) {
       // A freshly opened browser (or a new server) gets the owner's size; otherwise tell this
       // viewer what the page is at.

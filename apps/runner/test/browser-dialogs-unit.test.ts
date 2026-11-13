@@ -101,11 +101,22 @@ describe("page dialogs (fake page)", () => {
       return s.kind === "browser.dialogs";
     });
 
+  /** The id of the dialog open now (the one the last update listed). */
+  const openId = () => session.dialogs.list()[0]?.dialogId ?? "none";
+  const answer = (dialogId: string, accept: boolean, extra: object = {}) =>
+    browser.execute({ name: "browser.dialog", sessionId, dialogId, accept, ...extra });
+
   it("holds a confirm open until the agent accepts it", async () => {
     const dialog = context.page.open("confirm", "Delete this item?");
-    const open = { tabId: "t1", type: "confirm", message: "Delete this item?" };
+    const open = {
+      dialogId: expect.stringMatching(/^d[0-9a-f]{8}$/),
+      tabId: "t1",
+      type: "confirm",
+      message: "Delete this item?",
+    };
     expect(dialog.dismiss).not.toHaveBeenCalled();
     expect(dialogStreams()).toEqual([{ kind: "browser.dialogs", sessionId, dialogs: [open] }]);
+    const id = openId();
 
     // The paused page is not acted on; a snapshot shows the dialog instead.
     const snap = await browser.handlers["browser.snapshot"]({
@@ -117,19 +128,37 @@ describe("page dialogs (fake page)", () => {
       browser.execute({ name: "browser.click", sessionId, ref: "e1" }),
     ).rejects.toMatchObject({ code: "dialog_open" });
 
-    const answered = await browser.execute({ name: "browser.dialog", sessionId, accept: true });
-    expect(answered).toEqual({ dialog: open });
+    const answered = await answer(id, true);
+    expect(answered).toEqual({ dialog: { ...open, dialogId: id } });
     expect(dialog.accept).toHaveBeenCalledTimes(1);
     expect(dialog.dismiss).not.toHaveBeenCalled();
     expect(dialogStreams().at(-1)).toEqual({
       kind: "browser.dialogs",
       sessionId,
       dialogs: [],
-      closed: { ...open, by: "agent", accepted: true },
+      closed: { ...open, dialogId: id, by: "agent", accepted: true },
     });
-    await expect(
-      browser.execute({ name: "browser.dialog", sessionId, accept: true }),
-    ).rejects.toMatchObject({ code: "no_dialog" });
+    await expect(answer(id, true)).rejects.toMatchObject({ code: "no_dialog" });
+  });
+
+  it("never lets a late answer for one dialog answer the next one on the same tab", async () => {
+    // The agent and the person both answer "Show details?"; the agent is first, and the page
+    // asks the next question at once.
+    const first = context.page.open("confirm", "Show details?");
+    const shown = openId();
+    await answer(shown, true);
+    const next = context.page.open("confirm", "Permanently delete all items?");
+    expect(openId()).not.toBe(shown);
+
+    // The person's answer, meant for "Show details?", arrives now: refused, the next one waits.
+    await expect(answer(shown, true, { by: "viewer" })).rejects.toMatchObject({
+      code: "no_dialog",
+    });
+    expect(first.accept).toHaveBeenCalledTimes(1);
+    expect(next.accept).not.toHaveBeenCalled();
+    expect(next.dismiss).not.toHaveBeenCalled();
+    expect(session.dialogs.list()).toMatchObject([{ message: "Permanently delete all items?" }]);
+    expect(() => session.dialogs.assertNone("t1")).toThrow(/dialogId "d[0-9a-f]{8}"/);
   });
 
   it("returns an agent's click as soon as it opens a dialog", async () => {
@@ -140,7 +169,13 @@ describe("page dialogs (fake page)", () => {
       ref: "e1",
     });
     expect(clicked).toEqual({
-      dialog: { tabId: "t1", type: "prompt", message: "New name?", defaultValue: "draft" },
+      dialog: {
+        dialogId: openId(),
+        tabId: "t1",
+        type: "prompt",
+        message: "New name?",
+        defaultValue: "draft",
+      },
     });
     expect(session.dialogs.list()).toHaveLength(1);
   });
@@ -156,17 +191,17 @@ describe("page dialogs (fake page)", () => {
     });
     expect(context.page.cdp.sent.slice(before)).toEqual([]);
 
-    await browser.execute({ name: "browser.dialog", sessionId, accept: false, by: "viewer" });
+    await answer(openId(), false, { by: "viewer" });
     expect(dialog.dismiss).toHaveBeenCalledTimes(1);
     expect(dialogStreams().at(-1)?.closed).toMatchObject({ by: "viewer", accepted: false });
   });
 
   it("answers a prompt with the given text, or its own default", async () => {
     const first = context.page.open("prompt", "New name?", "draft");
-    await browser.execute({ name: "browser.dialog", sessionId, accept: true, promptText: "Shed" });
+    await answer(openId(), true, { promptText: "Shed" });
     expect(first.accept).toHaveBeenCalledWith("Shed");
     const second = context.page.open("prompt", "New name?", "draft");
-    await browser.execute({ name: "browser.dialog", sessionId, accept: true });
+    await answer(openId(), true);
     expect(second.accept).toHaveBeenCalledWith("draft");
   });
 
@@ -196,7 +231,9 @@ describe("page dialogs (fake page)", () => {
     // The page navigates itself (a link): the person decides.
     const held = context.page.open("beforeunload", "");
     expect(held.accept).not.toHaveBeenCalled();
-    expect(session.dialogs.list()).toEqual([{ tabId: "t1", type: "beforeunload", message: "" }]);
+    expect(session.dialogs.list()).toEqual([
+      { dialogId: openId(), tabId: "t1", type: "beforeunload", message: "" },
+    ]);
   });
 
   it("forgets a dialog the browser closed (answered in the desktop app's own dialog box)", async () => {

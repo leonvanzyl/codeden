@@ -77,9 +77,14 @@ export function openBrowserSocket(
   };
   connect();
 
-  const send = (msg: BrowserClientMessage, queue: boolean) => {
-    if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
-    else if (queue) pending.push(msg);
+  /** Send now (true), or queue it (when `queue`) or drop it while disconnected (false). */
+  const send = (msg: BrowserClientMessage, queue: boolean): boolean => {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify(msg));
+      return true;
+    }
+    if (queue) pending.push(msg);
+    return false;
   };
 
   return {
@@ -101,9 +106,9 @@ export function openBrowserSocket(
       // Not queued: the open handler sends the latest one.
       send(viewport, false);
     },
-    dialog: (tabId, accept, promptText) =>
+    dialog: (dialogId, accept, promptText) =>
       send(
-        { type: "dialog", tabId, accept, ...(promptText !== undefined && { promptText }) },
+        { type: "dialog", dialogId, accept, ...(promptText !== undefined && { promptText }) },
         false,
       ),
     close() {

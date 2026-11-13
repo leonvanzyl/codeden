@@ -178,7 +178,8 @@ function dialogSuite(engine: "runner" | "native") {
       sessionId,
       ref,
     });
-    const dialog = { tabId: "t1", type: "confirm", message: "Delete this item?" };
+    const dialogId = clicked.dialog?.dialogId ?? "";
+    const dialog = { dialogId, tabId: "t1", type: "confirm", message: "Delete this item?" };
     expect(clicked).toEqual({ dialog });
     expect(lastDialogs()).toEqual({ kind: "browser.dialogs", sessionId, dialogs: [dialog] });
     // The page is paused: a snapshot shows the dialog, and acting on the page is refused.
@@ -191,7 +192,12 @@ function dialogSuite(engine: "runner" | "native") {
       code: "dialog_open",
     });
 
-    const answered = await browser.execute({ name: "browser.dialog", sessionId, accept: true });
+    const answered = await browser.execute({
+      name: "browser.dialog",
+      sessionId,
+      dialogId,
+      accept: true,
+    });
     expect(answered).toEqual({ dialog });
     expect(lastDialogs()).toMatchObject({ dialogs: [], closed: { by: "agent", accepted: true } });
     expect(await page().textContent("#out")).toBe("deleted");
@@ -209,7 +215,14 @@ function dialogSuite(engine: "runner" | "native") {
       });
     }
     expect(lastDialogs()).toMatchObject({ dialogs: [{ type: "confirm" }] });
-    await browser.execute({ name: "browser.dialog", sessionId, accept: false, by: "viewer" });
+    const shown = manager.get(sessionId).dialogs.list()[0]?.dialogId ?? "";
+    await browser.execute({
+      name: "browser.dialog",
+      sessionId,
+      dialogId: shown,
+      accept: false,
+      by: "viewer",
+    });
     expect(lastDialogs()).toMatchObject({ closed: { by: "viewer", accepted: false } });
     expect(await page().textContent("#out")).toBe("kept");
 
@@ -220,9 +233,14 @@ function dialogSuite(engine: "runner" | "native") {
       ref,
     });
     expect(clicked.dialog).toMatchObject({ type: "prompt", defaultValue: "draft" });
+    // The cancelled confirm's id no longer answers anything, not even this prompt.
+    await expect(
+      browser.execute({ name: "browser.dialog", sessionId, dialogId: shown, accept: true }),
+    ).rejects.toMatchObject({ code: "no_dialog" });
     await browser.execute({
       name: "browser.dialog",
       sessionId,
+      dialogId: clicked.dialog?.dialogId ?? "",
       accept: true,
       promptText: "Renamed",
     });

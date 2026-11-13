@@ -162,25 +162,12 @@ export async function press(
   });
 }
 
-/**
- * `browser.dialog`: answer the dialog open on `tabId`, else on the active tab, else the only
- * one open on any tab.
- */
+/** `browser.dialog`: answer dialog `dialogId`, and only that one (`no_dialog` once it closed). */
 export function answerDialog(
   session: BrowserSession,
-  answer: { tabId?: string; accept: boolean; promptText?: string; by?: "agent" | "viewer" },
+  answer: { dialogId: string; accept: boolean; promptText?: string; by?: "agent" | "viewer" },
 ): Promise<BrowserDialog> {
-  const { dialogs } = session;
-  const open = dialogs.list();
-  const active = session.listTabs().find((t) => t.active)?.tabId;
-  const tabId = answer.tabId
-    ? session.tabId(answer.tabId)
-    : active && dialogs.get(active)
-      ? active
-      : open.length === 1 && open[0]
-        ? open[0].tabId
-        : session.tabId();
-  return dialogs.answer(tabId, {
+  return session.dialogs.answer(answer.dialogId, {
     accept: answer.accept,
     promptText: answer.promptText,
     by: answer.by ?? "agent",

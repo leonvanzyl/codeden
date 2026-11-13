@@ -1,4 +1,9 @@
-import { type BrowserDialog, DIALOG_TIMEOUT_MS, MAX_DIALOG_TEXT } from "@codeden/contracts";
+import {
+  type BrowserDialog,
+  BrowserDialogId,
+  DIALOG_TIMEOUT_MS,
+  MAX_DIALOG_TEXT,
+} from "@codeden/contracts";
 import { z } from "zod";
 import { defineTool } from "../define";
 
@@ -26,7 +31,7 @@ export function dialogNote(dialog: BrowserDialog): string {
     dialog.type === "prompt"
       ? `; promptText is what the prompt returns (default "${dialog.defaultValue ?? ""}")`
       : "";
-  return `A ${describe(dialog)} is open on tab ${dialog.tabId}. The page waits until it is answered: call browser_dialog with ${choices}${prompt}. Unanswered, it is dismissed after ${minutes} minutes.`;
+  return `A ${describe(dialog)} is open on tab ${dialog.tabId} (dialogId "${dialog.dialogId}"). The page waits until it is answered: call browser_dialog with that dialogId and ${choices}${prompt}. Unanswered, it is dismissed after ${minutes} minutes.`;
 }
 
 /** `text`, plus the note on a dialog the action opened. */
@@ -36,22 +41,19 @@ export function withDialogNote(text: string, dialog: BrowserDialog | undefined):
 
 export const browserDialog = defineTool({
   name: "browser_dialog",
-  description: `Answer the alert, confirm or prompt dialog (or "Leave this page?") open in your browser. The page is paused until it is answered: a click, key or mouse action that opens one says so in its result, and browser_snapshot shows it. accept: true is OK (or Leave), false is Cancel; promptText is what a prompt returns (default: its own default text). The user may answer it in the browser panel first; unanswered dialogs are dismissed after ${minutes} minutes.`,
+  description: `Answer an alert, confirm or prompt dialog (or "Leave this page?") open in your browser. The page is paused until it is answered: a click, key or mouse action that opens one says so in its result, and browser_snapshot shows it, each with the dialog's dialogId. accept: true is OK (or Leave), false is Cancel; promptText is what a prompt returns (default: its own default text). The user may answer it in the browser panel first: then the call fails, and only that dialog is ever answered, never one the page opened after it. Unanswered dialogs are dismissed after ${minutes} minutes.`,
   roles: ["agent"],
   scope: "session",
   input: z.object({
+    dialogId: BrowserDialogId.describe(
+      "The dialogId from the result or snapshot that showed the dialog, e.g. d3fa9c21b",
+    ),
     accept: z.boolean().describe("true: OK (Leave); false: Cancel"),
     promptText: z
       .string()
       .max(MAX_DIALOG_TEXT)
       .optional()
       .describe("prompt only: the text it returns"),
-    tabId: z
-      .string()
-      .min(1)
-      .max(100)
-      .optional()
-      .describe("Tab id (t1, t2, ...); default: the tab with the open dialog"),
   }),
   handler: async (input, { services, sessionId }) => {
     const { dialog } = await services.browser.agentCommand({

@@ -211,21 +211,24 @@ describe("browser protocol", () => {
   });
 
   it("round-trips page dialogs: answers, action results, snapshots and stream data", () => {
-    const dialog = { tabId: "t1", type: "confirm", message: "Delete this item?" };
-    const prompt = { tabId: "t2", type: "prompt", message: "New name?", defaultValue: "draft" };
-    roundTrip(RunnerCommand, { name: "browser.dialog", sessionId: "s1", accept: true });
-    roundTrip(RunnerCommand, {
-      name: "browser.dialog",
-      sessionId: "s1",
+    const dialog = { dialogId: "d0f", tabId: "t1", type: "confirm", message: "Delete this item?" };
+    const prompt = {
+      dialogId: "d1e",
       tabId: "t2",
-      accept: true,
-      promptText: "Renamed",
-      by: "viewer",
-    });
+      type: "prompt",
+      message: "New name?",
+      defaultValue: "draft",
+    };
+    const answer = { name: "browser.dialog", sessionId: "s1", dialogId: "d0f" };
+    roundTrip(RunnerCommand, { ...answer, accept: true });
+    roundTrip(RunnerCommand, { ...answer, accept: true, promptText: "Renamed", by: "viewer" });
+    expect(() => RunnerCommand.parse({ ...answer, accept: true, by: "timeout" })).toThrow();
+    expect(() => RunnerCommand.parse(answer)).toThrow();
+    // An answer always names its dialog: never just a tab.
     expect(() =>
-      RunnerCommand.parse({ name: "browser.dialog", sessionId: "s1", accept: true, by: "timeout" }),
+      RunnerCommand.parse({ name: "browser.dialog", sessionId: "s1", tabId: "t1", accept: true }),
     ).toThrow();
-    expect(() => RunnerCommand.parse({ name: "browser.dialog", sessionId: "s1" })).toThrow();
+    expect(() => RunnerCommand.parse({ ...answer, dialogId: "d 1", accept: true })).toThrow();
     roundTrip(RunnerCommandResults["browser.dialog"], { dialog: prompt });
     for (const name of [
       "browser.click",

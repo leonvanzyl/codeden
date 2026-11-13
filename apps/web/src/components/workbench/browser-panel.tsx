@@ -1,6 +1,7 @@
 import type { BrowserInput } from "@codeden/contracts";
 import { Globe, Loader2, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
+import { toast } from "sonner";
 import { EmptyState } from "@/components/common/bits";
 import { Button } from "@/components/ui/button";
 import { useClient } from "@/lib/api";
@@ -9,7 +10,7 @@ import { cn } from "@/lib/utils";
 import { BrowserCanvas } from "./browser/browser-canvas";
 import { BrowserToolbar, DevServerMenu } from "./browser/browser-toolbar";
 import { NativeBrowserView } from "./browser/native-browser-view";
-import { PageDialog } from "./browser/page-dialog";
+import { PageDialogLayer } from "./browser/page-dialog";
 import { usePanelViewport, type ViewportMode } from "./browser/use-panel-viewport";
 import { type SessionBrowser, useSessionBrowser } from "./browser/use-session-browser";
 
@@ -35,9 +36,15 @@ export function BrowserPanel({ sessionId }: { sessionId: string }) {
   useEffect(() => {
     if (needsFrames) channel?.watch();
   }, [needsFrames, channel]);
-  // A page dialog pauses its page: show the active tab's first, else any tab's.
   const activeId = browser.activeTab?.tabId;
-  const dialog = browser.dialogs.open.find((d) => d.tabId === activeId) ?? browser.dialogs.open[0];
+  const onDialogAnswer = useCallback(
+    (dialogId: string, accept: boolean, text?: string) => {
+      if (channel?.dialog(dialogId, accept, text)) return true;
+      toast.error("Not connected to the browser", { description: "Answer again once it's back." });
+      return false;
+    },
+    [channel],
+  );
 
   if (browser.open === false) return <ClosedState sessionId={sessionId} browser={browser} />;
   if (browser.open === null) {
@@ -76,9 +83,9 @@ export function BrowserPanel({ sessionId }: { sessionId: string }) {
           <NativeBrowserView
             sessionId={sessionId}
             title={browser.activeTab?.title || "Session browser"}
-            // The view paints over everything: it steps aside (a still of the page stays) so the
-            // dialog shows.
-            covered={dialog !== undefined}
+            // The view paints over everything: it steps aside (a still of the page stays) so a
+            // page dialog shows.
+            covered={browser.dialogs.length > 0}
           />
         ) : (
           <BrowserCanvas
@@ -91,16 +98,12 @@ export function BrowserPanel({ sessionId }: { sessionId: string }) {
             title={browser.activeTab?.title || "Session browser"}
           />
         )}
-        {dialog && (
-          <PageDialog
-            // A fresh card for every update, so an answered one never answers the next.
-            key={`${browser.dialogs.version}:${dialog.tabId}`}
-            dialog={dialog}
-            tab={browser.tabs.find((t) => t.tabId === dialog.tabId)}
-            active={dialog.tabId === activeId}
-            onAnswer={(accept, text) => channel?.dialog(dialog.tabId, accept, text)}
-          />
-        )}
+        <PageDialogLayer
+          dialogs={browser.dialogs}
+          tabs={browser.tabs}
+          activeTabId={activeId}
+          onAnswer={onDialogAnswer}
+        />
       </div>
     </div>
   );
