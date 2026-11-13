@@ -10,7 +10,7 @@ import { budgetSpend, type FactoryContext, visionOf } from "./context";
 import { localDay, queueOrder } from "./policy";
 import { pullRequests } from "./pr-status";
 import { scoutStatus } from "./scout";
-import { factoryStats } from "./stats";
+import { factoryStats, viewRecentItems } from "./stats";
 import { ACTIVE_STAGES, DONE_STAGES, WAITING_STAGES } from "./store";
 
 /** A work item for the panel and the pipeline diagram. */
@@ -40,6 +40,14 @@ export function workItem(i: FactoryItem): FactoryWorkItem {
     stepSince: i.stepSince,
     mergedAt: i.mergedAt,
     finishedAt: i.finishedAt,
+    checks:
+      i.checks.length === 0
+        ? null
+        : {
+            passed: i.checks.filter((c) => c.state === "pass" || c.state === "skipped").length,
+            failed: i.checks.filter((c) => c.state === "fail").length,
+            total: i.checks.length,
+          },
     updatedAt: i.updatedAt,
   };
 }
@@ -92,6 +100,11 @@ export async function buildStatus(ctx: FactoryContext, projectId: string): Promi
     mergeChecks: [...active, ...done].flatMap((i) => mergeChecks(i) ?? []).slice(0, 20),
     pullRequests: pullRequests(ctx, project, all),
     recent: done.map(workItem),
+    // Not capped like `recent`: an older escalation or open failure still reaches the view.
+    viewRecent: viewRecentItems(
+      ctx.store.items(projectId, ["escalated", "failed", "merged"]),
+      ctx.now(),
+    ).map(workItem),
     ignored: ignored.map(workItem),
     githubLogin,
     scout: project.autonomyMode === "dark_factory" ? scoutStatus(ctx, project, loop, spend) : null,

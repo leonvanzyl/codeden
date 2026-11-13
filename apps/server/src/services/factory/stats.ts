@@ -1,7 +1,8 @@
 import type { FactoryItem, FactoryStats } from "@codeden/contracts";
 import { localDay } from "./policy";
 
-const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
+const WEEK_MS = 7 * DAY_MS;
 
 /** The middle value (the mean of the two middle ones for an even count); null when empty. */
 export function median(values: number[]): number | null {
@@ -35,4 +36,24 @@ export function factoryStats(items: FactoryItem[], now: Date): FactoryStats {
     medianMergeMs7d: median(durations),
     merged7d: durations.length,
   };
+}
+
+/**
+ * The finished items the Factory view keeps showing (`FactoryStatus.viewRecent`), whatever their
+ * place in the capped recent list: every escalated item, failed items that failed in the last
+ * 24 hours or still own an open pull request, and items merged today (by the local day).
+ */
+export function viewRecentItems(items: FactoryItem[], now: Date): FactoryItem[] {
+  const today = localDay(now);
+  return items.filter((i) => {
+    if (i.stage === "escalated") return true;
+    if (i.stage === "failed") {
+      const open = i.pr?.state === "open" || i.pr?.state === "draft";
+      const at = Date.parse(i.finishedAt ?? i.updatedAt);
+      return open || now.getTime() - at < DAY_MS;
+    }
+    if (i.stage === "merged")
+      return i.mergedAt !== null && localDay(new Date(i.mergedAt)) === today;
+    return false;
+  });
 }

@@ -521,6 +521,18 @@ export const FactoryWorkItem = z.object({
   stepSince: Timestamp.nullable().default(null),
   mergedAt: Timestamp.nullable().default(null),
   finishedAt: Timestamp.nullable().default(null),
+  /**
+   * Its merge checks so far: passed (passed or skipped), failed and all recorded; null before
+   * any ran.
+   */
+  checks: z
+    .object({
+      passed: z.int().nonnegative(),
+      failed: z.int().nonnegative(),
+      total: z.int().nonnegative(),
+    })
+    .nullable()
+    .default(null),
   updatedAt: Timestamp,
 });
 export type FactoryWorkItem = z.infer<typeof FactoryWorkItem>;
@@ -585,8 +597,14 @@ export const FactoryStatus = z.object({
    * the rest (being checked, rebased, rebuilt, waiting for you) and today's merges.
    */
   pullRequests: z.array(FactoryPrEntry).default([]),
-  /** Merged, reverted, failed, rejected and escalated items, newest first. */
+  /** Merged, reverted, failed, rejected and escalated items, newest first (the latest 30). */
   recent: z.array(FactoryWorkItem),
+  /**
+   * Finished items the Factory view keeps showing, however many newer results `recent` holds:
+   * every escalated item, failed items that failed in the last 24 hours or still own an open
+   * pull request, and items merged today.
+   */
+  viewRecent: z.array(FactoryWorkItem).default([]),
   /** Issues by untrusted authors, newest first; nothing runs on them until let in. */
   ignored: z.array(FactoryWorkItem).default([]),
   /** The account CodeDen uses on GitHub (always trusted); null when unknown. */

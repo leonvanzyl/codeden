@@ -1,7 +1,7 @@
 import type { FactoryItem } from "@codeden/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { localDay } from "../src/services/factory/policy";
-import { factoryStats, median } from "../src/services/factory/stats";
+import { factoryStats, median, viewRecentItems } from "../src/services/factory/stats";
 import { createFactoryEnv, type FactoryEnv } from "./support/factory-env";
 
 const NOW = new Date(2026, 10, 13, 15, 0, 0);
@@ -166,5 +166,81 @@ describe("time in step (§10.1)", () => {
     expect(verifying.updatedAt).toBe("2026-11-13T10:30:00.000Z");
     expect(verifying.stepSince).toBe("2026-11-13T11:00:00.000Z");
     expect(store.item(created.id)?.stepSince).toBe("2026-11-13T11:00:00.000Z");
+  });
+});
+
+describe("finished work the Factory view keeps (§10.1)", () => {
+  let env: FactoryEnv;
+  afterEach(() => {
+    env?.close();
+    vi.useRealTimers();
+  });
+
+  it("keeps escalations, recent or open failures and today's merges", () => {
+    const openPr = { number: 9, url: "https://github.com/acme/app/pull/9", state: "open" as const };
+    const kept = viewRecentItems(
+      [
+        item("esc", { stage: "escalated", finishedAt: at(24 * 30) }),
+        item("fail-new", { stage: "failed", finishedAt: at(3) }),
+        item("fail-open", { stage: "failed", finishedAt: at(24 * 5), pr: openPr }),
+        item("fail-old", { stage: "failed", finishedAt: at(30) }),
+        item("merged-today", { stage: "merged", mergedAt: at(2) }),
+        item("merged-old", { stage: "merged", mergedAt: at(24 * 2) }),
+        item("rejected", { stage: "rejected", finishedAt: at(1) }),
+      ],
+      NOW,
+    ).map((i) => i.id);
+    expect(kept).toEqual(["esc", "fail-new", "fail-open", "merged-today"]);
+  });
+
+  it("lists them even after more than 30 newer results fill the recent list", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    let clock = Date.parse("2026-11-13T09:00:00.000Z");
+    const tick = () => {
+      clock += 60_000;
+      vi.setSystemTime(new Date(clock));
+    };
+    tick();
+    env = createFactoryEnv();
+    const store = env.factory.data;
+    const base = { projectId: env.project.id, summary: "", source: "issue" as const };
+    tick();
+    const escalated = store.createItem({
+      ...base,
+      workKey: "issue:1",
+      title: "Touches payments",
+      stage: "escalated",
+      finishedAt: new Date(clock).toISOString(),
+    });
+    tick();
+    const failed = store.createItem({
+      ...base,
+      workKey: "issue:2",
+      title: "Checks failed twice",
+      stage: "failed",
+      failureKind: "stuck",
+      pr: { number: 7, url: "https://github.com/acme/app/pull/7", state: "open" },
+      finishedAt: new Date(clock - 3 * 24 * 60 * 60 * 1000).toISOString(),
+    });
+    for (let n = 0; n < 31; n++) {
+      tick();
+      store.createItem({
+        ...base,
+        workKey: `issue:${100 + n}`,
+        title: `Out of scope ${n}`,
+        stage: "rejected",
+      });
+    }
+    const status = await env.factory.status(env.project.id);
+    const ids = (list: { id: string }[]) => list.map((w) => w.id);
+    expect(status.recent).toHaveLength(30);
+    expect(ids(status.recent)).not.toContain(escalated.id);
+    expect(ids(status.recent)).not.toContain(failed.id);
+    expect(ids(status.viewRecent)).toEqual(expect.arrayContaining([escalated.id, failed.id]));
+    expect(status.viewRecent).toHaveLength(2);
+    expect(status.viewRecent.find((w) => w.id === failed.id)).toMatchObject({
+      failureKind: "stuck",
+      checks: null,
+    });
   });
 });

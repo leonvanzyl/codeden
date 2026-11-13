@@ -342,13 +342,29 @@ describe("factory API contracts (§10.1)", () => {
       note: null,
       updatedAt: ts,
     };
-    // Work items from before it lack the step time, merge and finish times and failure kind.
-    expect(FactoryStatus.parse({ ...status, recent: [work] }).recent[0]).toMatchObject({
+    // Work items from before it lack the step time, merge and finish times, failure kind and
+    // check counts; a status without the view's uncapped list reads it as empty.
+    const before = FactoryStatus.parse({ ...status, recent: [work] });
+    expect(before.recent[0]).toMatchObject({
       stepSince: null,
       mergedAt: null,
       finishedAt: null,
       failureKind: null,
+      checks: null,
     });
+    expect(before.viewRecent).toEqual([]);
+    const withChecks = FactoryStatus.parse({
+      ...status,
+      viewRecent: [{ ...work, checks: { passed: 5, failed: 1, total: 8 } }],
+    });
+    expect(FactoryStatus.parse(JSON.parse(JSON.stringify(withChecks)))).toEqual(withChecks);
+    expect(withChecks.viewRecent[0]?.checks).toEqual({ passed: 5, failed: 1, total: 8 });
+    expect(
+      FactoryStatus.safeParse({
+        ...status,
+        viewRecent: [{ ...work, checks: { passed: -1, failed: 0, total: 1 } }],
+      }).success,
+    ).toBe(false);
     const viewed = FactoryStatus.parse({
       ...status,
       stats: {
