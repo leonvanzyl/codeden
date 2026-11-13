@@ -109,7 +109,7 @@ export function usageFromRateLimit(event: unknown): Usage | undefined {
     utilization === undefined
       ? undefined
       : Math.min(100, Math.max(0, utilization <= 1 ? utilization * 100 : utilization));
-  const resetsAt = unixToIso(num(info, "resetsAt"));
+  const resetsAt = toMinute(unixToIso(num(info, "resetsAt")));
   return {
     rateLimits: [
       stripUndefined({ id: WINDOW_IDS[type] ?? type, status, usedPercent, resetsAt }) as RateLimit,
@@ -136,7 +136,7 @@ export function usageFromPlanUsage(response: unknown): Usage | undefined {
     const usedPercent = num(entry, "utilization");
     if (usedPercent === undefined || windows.has(id)) return;
     const percent = Math.min(100, Math.max(0, usedPercent));
-    const resetsAt = isoTime(str(entry, "resets_at"));
+    const resetsAt = toMinute(str(entry, "resets_at"));
     windows.set(
       id,
       stripUndefined({
@@ -161,11 +161,16 @@ export function usageFromPlanUsage(response: unknown): Usage | undefined {
   return windows.size > 0 ? { rateLimits: [...windows.values()] } : undefined;
 }
 
-/** An ISO timestamp in the `Z` form the contracts take, from any parseable time string. */
-function isoTime(value: string | undefined): string | undefined {
+/**
+ * A reset time as an ISO timestamp in the `Z` form the contracts take, rounded to the minute.
+ * Claude's events report whole seconds and its plan usage fractions of a second
+ * (`17:59:59.943` for an `18:00` reset); rounding gives one window one reset time from either
+ * source.
+ */
+function toMinute(value: string | undefined): string | undefined {
   if (!value) return undefined;
   const ms = Date.parse(value);
-  return Number.isNaN(ms) ? undefined : new Date(ms).toISOString();
+  return Number.isNaN(ms) ? undefined : new Date(Math.round(ms / 60_000) * 60_000).toISOString();
 }
 
 function stripUndefined<T extends object>(value: T): T {

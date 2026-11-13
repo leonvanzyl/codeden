@@ -323,6 +323,32 @@ describe("UsageService", () => {
     expect(usage.spendSince("2026-11-07", "p1")).toEqual(before.spend);
   });
 
+  // #193 review: Claude's events give whole-second reset times, its plan usage fractions of one.
+  it("raises one limit alert per window when two sources date its reset differently", async () => {
+    const limits = (rateLimits: NonNullable<Usage["rateLimits"]>) =>
+      emit("s1", { type: "usage.updated", threadId: "t", usage: { rateLimits } });
+    // A `rate_limit_event` (rejected), then the plan usage read after the turn.
+    limits([{ id: "5h", status: "limited", resetsAt: "2026-11-07T18:00:00.000Z" }]);
+    const first = await usage.checkAlerts();
+    expect(first.map((i) => i.id)).toEqual([
+      "inbox:usage:limit:claude:5h:2026-11-07T18:00:00.000Z:limited",
+    ]);
+    limits([
+      { id: "5h", status: "limited", usedPercent: 100, resetsAt: "2026-11-07T17:59:59.943Z" },
+    ]);
+    expect(await usage.checkAlerts()).toEqual([]);
+    expect(usage.rateLimitWindows()[0]).toMatchObject({
+      usedPercent: 100,
+      resetsAt: "2026-11-07T18:00:00.000Z",
+    });
+    expect(database.db.select().from(inboxItems).all()).toHaveLength(1);
+
+    // A new window (hours later) is a new reset time, and may alert again.
+    vi.setSystemTime(Date.parse("2026-11-07T18:01:00.000Z"));
+    limits([{ id: "5h", status: "limited", resetsAt: "2026-11-07T23:00:00.000Z" }]);
+    expect(usage.rateLimitWindows()[0]?.resetsAt).toBe("2026-11-07T23:00:00.000Z");
+  });
+
   it("rejects duplicate budget ids", () => {
     const b = { id: "x", projectId: null, period: "daily" as const, limitUsd: 1 };
     expect(() => usage.saveSettings({ budgets: [b, b] })).toThrow(/unique/);

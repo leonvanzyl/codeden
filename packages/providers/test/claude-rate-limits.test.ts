@@ -1,6 +1,7 @@
 import type { Query } from "@anthropic-ai/claude-agent-sdk";
 import type { AgentEvent, SessionOptions } from "@codeden/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { PlanUsageReader, readPlanUsage } from "../src/claude/plan-usage";
 import { ClaudeSession } from "../src/claude/session";
 import { usageFromPlanUsage, usageFromRateLimit } from "../src/claude/usage";
 
@@ -136,7 +137,7 @@ describe("plan usage mapping", () => {
     ).toEqual({
       rateLimits: [
         { id: "5h", status: "ok", usedPercent: 12, resetsAt: "2026-11-13T18:00:00.000Z" },
-        { id: "weekly", status: "limited", usedPercent: 100, resetsAt: "2026-11-17T06:00:00.123Z" },
+        { id: "weekly", status: "limited", usedPercent: 100, resetsAt: "2026-11-17T06:00:00.000Z" },
         { id: "weekly-opus", status: "ok", usedPercent: 5, resetsAt: "2026-11-17T06:00:00.000Z" },
         // Plan usage is already 0–100: 0.4 means 0.4%, not 40%.
         { id: "weekly-haiku", status: "ok", usedPercent: 0.4 },
@@ -144,11 +145,67 @@ describe("plan usage mapping", () => {
     });
   });
 
+  it("gives a window the same reset time as Claude's rate_limit_event does", () => {
+    // Events report whole seconds; plan usage reports the same reset a few ms early or late.
+    const fromEvent = event({
+      status: "rejected",
+      rateLimitType: "five_hour",
+      resetsAt: 1794592800,
+    });
+    const fromPlan = usageFromPlanUsage({
+      ...PLAN_USAGE,
+      rate_limits: { five_hour: { utilization: 100, resets_at: "2026-11-13T17:59:59.943Z" } },
+    })?.rateLimits?.[0];
+    expect(fromEvent?.resetsAt).toBe("2026-11-13T18:00:00.000Z");
+    expect(fromPlan?.resetsAt).toBe(fromEvent?.resetsAt);
+  });
+
   it("reports nothing when plan limits do not apply", () => {
     expect(
       usageFromPlanUsage({ ...PLAN_USAGE, rate_limits_available: false, rate_limits: null }),
     ).toBeUndefined();
     expect(usageFromPlanUsage(undefined)).toBeUndefined();
+  });
+});
+
+describe("PlanUsageReader", () => {
+  const plan = (fiveHour: unknown) =>
+    ({
+      usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET: async () => ({
+        ...PLAN_USAGE,
+        rate_limits: { five_hour: fiveHour },
+      }),
+    }) as unknown as Query;
+  // 2026-11-13T18:00:00Z, the reset in `PLAN_USAGE`'s 5-hour window.
+  const warned = {
+    type: "rate_limit_event",
+    rate_limit_info: {
+      status: "allowed_warning",
+      rateLimitType: "five_hour",
+      resetsAt: 1794592800,
+    },
+  };
+
+  it("keeps the warning Claude reported for the same window", async () => {
+    const reader = new PlanUsageReader();
+    reader.noteEvent(warned);
+    const usage = await reader.read(plan(PLAN_USAGE.rate_limits.five_hour));
+    expect(usage?.rateLimits?.[0]).toMatchObject({ id: "5h", status: "warning", usedPercent: 12 });
+  });
+
+  it("reads 'ok' for a later window, and the limit at 100%", async () => {
+    const reader = new PlanUsageReader();
+    reader.noteEvent(warned);
+    const later = await reader.read(
+      plan({ utilization: 3, resets_at: "2026-11-13T23:00:00.000Z" }),
+    );
+    expect(later?.rateLimits?.[0]?.status).toBe("ok");
+    const full = await reader.read(plan({ utilization: 100, resets_at: "2026-11-13T18:00:00Z" }));
+    expect(full?.rateLimits?.[0]?.status).toBe("limited");
+  });
+
+  it("reads nothing from an SDK without the method", async () => {
+    expect(await readPlanUsage({} as Query)).toBeUndefined();
   });
 });
 

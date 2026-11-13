@@ -122,15 +122,16 @@ export function applyUsageReport(tx: Tx, report: UsageReport): void {
       .get()?.provider;
     if (!provider) return;
     for (const w of usage.rateLimits) {
-      const known =
-        w.usedPercent === undefined ? lastPercent(tx, provider, w.id, report.ts) : undefined;
+      const prev = storedWindow(tx, provider, w.id);
       const row = {
         provider,
         windowId: w.id,
         status: w.status,
-        usedPercent: w.usedPercent ?? known?.usedPercent ?? null,
-        usedPercentAt: w.usedPercent === undefined ? (known?.usedPercentAt ?? null) : report.ts,
-        resetsAt: w.resetsAt ?? null,
+        ...percentOf(w.usedPercent, prev, report.ts),
+        resetsAt:
+          prev?.resetsAt && sameReset(prev.resetsAt, w.resetsAt)
+            ? prev.resetsAt
+            : (w.resetsAt ?? null),
         observedAt: report.ts,
         sessionId: report.sessionId,
       };
@@ -145,18 +146,9 @@ export function applyUsageReport(tx: Tx, report: UsageReport): void {
   }
 }
 
-/**
- * The stored percentage of a window, for a newer reading that has none (Claude often reports
- * only the status). Kept only while that window has not reset: its reset time is known and
- * still after `at`, so the figure still describes the current window.
- */
-function lastPercent(
-  tx: Tx,
-  provider: string,
-  windowId: string,
-  at: string,
-): { usedPercent: number; usedPercentAt: string } | undefined {
-  const prev = tx
+/** The stored reading of a window, if any. */
+function storedWindow(tx: Tx, provider: string, windowId: string) {
+  return tx
     .select({
       usedPercent: rateLimitWindows.usedPercent,
       usedPercentAt: rateLimitWindows.usedPercentAt,
@@ -166,7 +158,33 @@ function lastPercent(
     .from(rateLimitWindows)
     .where(and(eq(rateLimitWindows.provider, provider), eq(rateLimitWindows.windowId, windowId)))
     .get();
-  if (prev?.usedPercent == null || !prev.resetsAt) return undefined;
-  if (Date.parse(prev.resetsAt) <= Date.parse(at)) return undefined;
+}
+
+/**
+ * A window's percentage and when it was read. A reading without one (Claude often reports only
+ * the status) keeps the stored figure while that window has not reset: its reset time is known
+ * and still after `at`, so the figure still describes the current window.
+ */
+function percentOf(
+  next: number | undefined,
+  prev: ReturnType<typeof storedWindow>,
+  at: string,
+): { usedPercent: number | null; usedPercentAt: string | null } {
+  if (next !== undefined) return { usedPercent: next, usedPercentAt: at };
+  const current = !!prev?.resetsAt && Date.parse(prev.resetsAt) > Date.parse(at);
+  if (!current || prev?.usedPercent == null) return { usedPercent: null, usedPercentAt: null };
   return { usedPercent: prev.usedPercent, usedPercentAt: prev.usedPercentAt ?? prev.observedAt };
+}
+
+/** Two reset times this close describe the same window; a new window resets hours later. */
+const SAME_RESET_MS = 2 * 60_000;
+
+/**
+ * True when a new reset time is the stored one, give or take the sources' rounding (Claude's
+ * events report whole seconds, its plan usage fractions of one). The stored string is then
+ * kept, so one window keeps one reset time, and with it one alert id.
+ */
+function sameReset(stored: string, next: string | undefined): boolean {
+  if (!next) return false;
+  return Math.abs(Date.parse(stored) - Date.parse(next)) <= SAME_RESET_MS;
 }
