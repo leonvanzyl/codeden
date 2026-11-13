@@ -98,7 +98,7 @@ describe("loop guard (§8.2): only agent-to-agent loops are paced", () => {
     guard.turnStarted(pm, "automation");
     const rejected = guard.beginTurn(pm, "user");
     expect(guard.humanLed(fromPm)).toBe(false);
-    rejected.failed();
+    rejected.failed(false);
     expect(guard.humanLed(fromPm)).toBe(false);
     // Nothing saved says it's the user's (an origin never saved counts as not the user's).
     expect(saved.get("pm1")).not.toBe(true);
@@ -112,9 +112,14 @@ describe("loop guard (§8.2): only agent-to-agent loops are paced", () => {
     const wake = guard.beginTurn(pm, "codeden");
     expect(guard.humanLed(fromPm)).toBe(false);
     expect(saved.get("pm1")).toBe(false);
-    wake.failed();
+    wake.failed(false);
     expect(guard.humanLed(fromPm)).toBe(true);
     expect(saved.get("pm1")).toBe(true);
+    // A send whose outcome is unknown (timeout, lost connection) may have started the
+    // automatic turn: the user's authority never comes back, in memory or as saved.
+    guard.beginTurn(pm, "codeden").failed(true);
+    expect(guard.humanLed(fromPm)).toBe(false);
+    expect(saved.get("pm1")).toBe(false);
     // Accepted, the automatic turn is automatic.
     guard.beginTurn(pm, "codeden").accepted();
     expect(guard.humanLed(fromPm)).toBe(false);

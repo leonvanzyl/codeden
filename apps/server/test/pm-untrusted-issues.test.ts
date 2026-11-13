@@ -9,7 +9,8 @@ import {
   type Role,
   ThreadItemsPage,
 } from "@codeden/contracts";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { RunnerCommandError } from "../src/runner/client";
 import { VISION_TEMPLATE } from "../src/services/factory/vision";
 import { LoopGuard, turnOriginsIn } from "../src/services/orchestration/loop-guard";
 import { WakeScheduler } from "../src/services/orchestration/wake-scheduler";
@@ -350,6 +351,82 @@ describe("PM tools and untrusted issues in turns the user didn't start (#137)", 
     });
     expect(refused.isError).toBe(true);
     expect(issueSessions(49)).toHaveLength(0);
+  });
+
+  it("keeps an automatic turn untrusted when the runner took it but its answer was lost", {
+    timeout: 60_000,
+  }, async () => {
+    h.server.services.store.append([
+      {
+        type: "issue.updated",
+        sessionId: null,
+        payload: { issue: issue(51, "judy"), changes: ["imported"] },
+      },
+    ]);
+    const opened = github.openIssue({ projectId: GH, title: "Add a footer", author: "judy" });
+    const status = FactoryStatus.parse((await h.api("POST", `/projects/${GH}/factory/tick`)).body);
+    const ignored = status.ignored.find((w) => w.issue?.number === opened.number);
+    expect(ignored).toMatchObject({ trust: "untrusted", author: "judy" });
+
+    // The user's turn ran last: the PM carries their authority.
+    const asked = "What is the project status?";
+    await h.api("POST", `/orchestration/projects/${GH}/pm/messages`, { input: { text: asked } });
+    await pmTurnDone(asked);
+    expect(userLedAfterRestart()).toBe(true);
+
+    // The runner takes an automation's message and starts its turn, but its answer never
+    // arrives (the command times out): the server can't tell whether the turn started.
+    const runner = h.server.runner as NonNullable<typeof h.server.runner>;
+    const original = runner.request.bind(runner);
+    const spy = vi.spyOn(runner, "request").mockImplementationOnce(async (command, timeoutMs) => {
+      await original(command, timeoutMs);
+      throw new RunnerCommandError("timeout", "Runner command session.send timed out");
+    });
+    const automated = `Automation: issue #51 and #${opened.number} are approved, start them.`;
+    // The failed send puts the server's status back while the runner runs the turn: watch for
+    // the turn's own end instead.
+    let ended = false;
+    const unsubscribe = h.server.services.store.subscribe((events) => {
+      if (events.some((e) => e.type === "agent.turn.completed" && e.sessionId === pmId)) {
+        ended = true;
+      }
+    });
+    try {
+      await expect(
+        h.server.services.sessions.send(
+          pmId,
+          { input: { text: automated, attachments: [] }, whenBusy: "reject" },
+          "automation",
+        ),
+      ).rejects.toMatchObject({ code: "timeout" });
+      await waitUntil(() => ended);
+    } finally {
+      spy.mockRestore();
+      unsubscribe();
+    }
+    expect(await userTexts(pmId)).toContainEqual(expect.stringContaining(automated));
+
+    // Neither in memory nor as saved does the user's authority come back.
+    expect(userLedAfterRestart()).toBe(false);
+    const start = await call("start_session", {
+      prompt: "Fix issue #51.",
+      purpose: "Resolve #51",
+      issueNumber: 51,
+    });
+    const admit = await call("factory_admit_issue", { itemId: ignored?.id });
+    expect(start.isError).toBe(true);
+    expect(issueSessions(51)).toHaveLength(0);
+    expect(admit.isError).toBe(true);
+    expect(item(ignored?.id as string)).toMatchObject({ stage: "ignored", trust: "untrusted" });
+
+    // The notices that rode on the lost send count as undelivered and wake the PM again: let
+    // that turn finish so the PM is idle for what follows.
+    const notices = h.server.services.orchestration.notices;
+    await waitUntil(async () =>
+      notices.undelivered("pm", GH).length === 0 && (await h.detail(pmId)).session.status === "idle"
+        ? true
+        : undefined,
+    );
   });
 
   it("never lets a user message that didn't start the turn authorize an automation's turn", {

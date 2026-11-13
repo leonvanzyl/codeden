@@ -117,7 +117,7 @@ describe("notice delivery (§8.2)", () => {
     expect(racing.input.text).not.toContain("Summary of n1");
 
     // The send failed: they wait for the next turn.
-    first.failed?.();
+    first.failed?.(new Error("refused"));
     expect(ids(notices.undelivered("pm", "p1"))).toEqual(["n1", "n2"]);
     const retry = d.decorate(pm, { text: "wake", attachments: [] });
     expect(retry.input.text).toContain("Summary of n1");

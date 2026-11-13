@@ -47,8 +47,11 @@ export function turnOriginsIn(repo: Pick<SessionRepo, "find" | "setStartMeta">):
 export interface TurnDelivery {
   /** The runner took the turn. */
   accepted: () => void;
-  /** It didn't: no turn started. */
-  failed: () => void;
+  /**
+   * It failed. `mayHaveStarted`: the outcome is unknown (a timeout or lost connection, after
+   * which the runner may be running the turn anyway); otherwise the runner refused it.
+   */
+  failed: (mayHaveStarted: boolean) => void;
 }
 
 export interface LoopGuardDeps {
@@ -106,8 +109,11 @@ export class LoopGuard {
    * - while it is in flight the session has none (saved too, before anything is sent);
    * - `accepted` records the turn's origin (saved, so it survives a server restart) and, for
    *   the user's own input, clears the session's counts;
-   * - `failed` puts back the origin of the turn the last accepted delivery started, so a
-   *   rejected message never lends its origin to the turn that is running.
+   * - `failed` after a definite refusal puts back the origin of the turn the last accepted
+   *   delivery started, so a rejected message never lends its origin to the turn that is
+   *   running. When the runner may have started the turn anyway (a timeout or lost
+   *   connection), the session keeps no authority: what runs may be this automatic turn, and
+   *   it stays so until a later delivery is accepted.
    *
    * The session service delivers one message per session at a time, so nothing else changes
    * the origin between the two.
@@ -127,7 +133,7 @@ export class LoopGuard {
         if (from !== "user") return;
         this.clear(session.role === "pm" ? pmKey(session.projectId) : "orchestrator");
       },
-      failed: () => this.record(session.id, previous),
+      failed: (mayHaveStarted) => this.record(session.id, mayHaveStarted ? false : previous),
     };
   }
 

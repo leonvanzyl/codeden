@@ -17,6 +17,7 @@ import { errorMessage } from "../errors";
 import type { TrustedAuthors } from "../github/review-trust";
 import type { InboxService } from "../inbox-service";
 import type { ProjectService } from "../projects/project-service";
+import { mayHaveStarted } from "../sessions/input-decorator";
 import type { SessionRepo } from "../sessions/repo";
 import type { SessionService } from "../sessions/session-service";
 import { type AskOutcome, askMarker, finalAssistantMessage, PmAsks } from "./asks";
@@ -166,13 +167,14 @@ export class OrchestrationService {
             decorated.delivered?.();
             turn.accepted();
           },
-          failed: () => {
-            decorated.failed?.();
-            turn.failed();
+          failed: (error) => {
+            decorated.failed?.(error);
+            turn.failed(mayHaveStarted(error));
           },
         };
       } catch (error) {
-        turn.failed();
+        // Nothing was sent.
+        turn.failed(false);
         throw error;
       }
     });
