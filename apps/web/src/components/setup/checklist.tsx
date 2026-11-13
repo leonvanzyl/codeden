@@ -36,6 +36,7 @@ const PENDING: { id: string; label: string }[] = [
   { id: "claude", label: "Claude Code" },
   { id: "codex", label: "Codex" },
   { id: "opencode", label: "OpenCode" },
+  { id: "cursor", label: "Cursor" },
   { id: "gh", label: "GitHub CLI" },
   { id: "git", label: "git identity" },
   { id: "browser", label: "Browser for agents" },

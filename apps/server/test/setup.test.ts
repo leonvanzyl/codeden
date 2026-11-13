@@ -260,6 +260,47 @@ describe("SetupService", () => {
     expect(missing.check?.fix?.command).toBe("npm install -g @opencode/cli");
   });
 
+  it("checks Cursor: a Cursor-versioned `agent`, its ACP server and its login", async () => {
+    const run = async (extra: Record<string, Partial<ExecResult>>) => {
+      const status = await service({ ...extra }).status();
+      return { status, check: status.checks.find((c) => c.id === "cursor") };
+    };
+    const version = { "agent --version": { stdout: "2026.10.22-abc1234" } };
+    const signedIn = await run({
+      ...version,
+      "agent acp --help": { stdout: "Start the ACP server" },
+      "agent status": { stdout: "✓ Logged in as dev@example.com" },
+    });
+    expect(signedIn.check).toMatchObject({
+      label: "Cursor",
+      state: "ok",
+      version: expect.stringMatching(/^2026\.10\.22/),
+      loggedIn: true,
+      account: "dev@example.com",
+    });
+    expect(signedIn.status.ready).toBe(true);
+
+    const signedOut = await run({
+      ...version,
+      "agent acp --help": { stdout: "Start the ACP server" },
+      "agent status": { stdout: "Not logged in", code: 1 },
+    });
+    expect(signedOut.check).toMatchObject({ state: "missing", loggedIn: false });
+    expect(signedOut.check?.fix).toEqual({ kind: "login", command: "/bin/agent login" });
+
+    const old = await run({
+      ...version,
+      "agent acp --help": { stderr: "error: unknown command 'acp'", code: 1 },
+    });
+    expect(old.check).toMatchObject({ state: "missing", installed: true });
+    expect(old.check?.fix).toEqual({ kind: "upgrade", command: "/bin/agent update" });
+
+    // Another tool called `agent` is not Cursor's.
+    const other = await run({ "agent --version": { stdout: "agent 1.2.3" } });
+    expect(other.check).toMatchObject({ state: "missing", installed: false });
+    expect(other.check?.fix?.command).toBe("curl https://cursor.com/install -fsS | bash");
+  });
+
   it("persists completion in settings and hands out login commands", () => {
     const setup = service({});
     setup.complete();

@@ -1,4 +1,5 @@
 import { CODEDEN_VERSION } from "@codeden/contracts";
+import { agentEnv } from "../util/agent-env";
 import { type ResolvedCommand, spawnResolved } from "../util/exec";
 import type { InitializeParams, InitializeResponse } from "./protocol";
 import { CodexRpc, type CodexRpcHandlers } from "./rpc";
@@ -23,7 +24,7 @@ export async function startAppServer(
 ): Promise<{ rpc: CodexRpc; info: InitializeResponse }> {
   const child = spawnResolved(exe, ["app-server"], {
     stdio: ["pipe", "pipe", "pipe"],
-    env: { ...process.env, ...opts.env },
+    env: agentEnv(opts.env),
     ...(opts.cwd ? { cwd: opts.cwd } : {}),
   });
   const rpc = new CodexRpc(child, handlers);

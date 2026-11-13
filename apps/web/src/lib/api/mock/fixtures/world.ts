@@ -432,6 +432,33 @@ export const providers: ProviderInfo[] = [
       },
     ],
   },
+  {
+    id: "cursor",
+    displayName: "Cursor",
+    capabilities: {
+      ...caps,
+      steer: false,
+      subagents: false,
+      rollback: false,
+      fork: false,
+      reasoningEffort: false,
+      skills: false,
+      liveAutonomy: true,
+    },
+    // Cursor lists the models of the user's plan; efforts are separate model ids.
+    models: [
+      {
+        id: "default",
+        label: "Default",
+        description: "The model selected in Cursor's CLI (Cursor's own default)",
+        efforts: [],
+        isDefault: true,
+      },
+      { id: "auto", label: "Auto", efforts: [] },
+      { id: "composer-2", label: "Composer 2", efforts: [] },
+      { id: "gpt-6.1-sol-high", label: "GPT-6.1 Sol High", efforts: [] },
+    ],
+  },
 ];
 
 export const runner: RunnerConnectionStatus = {

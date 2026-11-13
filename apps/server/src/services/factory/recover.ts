@@ -8,6 +8,7 @@ import { freeSlots } from "./policy";
 import { continuePrompt } from "./prompts-integration";
 import { prAgent } from "./rebase";
 import { isRecheckObligation } from "./recheck";
+import { CLEAN_REVIEW } from "./review-environment";
 import { isBusy } from "./sessions";
 import { ownsTurnRaceFailure } from "./turn-race";
 
@@ -78,7 +79,8 @@ function freshNudges(nudges: FactoryItem["nudges"], at: string): FactoryItem["nu
       k.startsWith("rebase_") ||
       k.startsWith("conflict_from_") ||
       isRecheckObligation(k) ||
-      k.startsWith("supersede_"),
+      k.startsWith("supersede_") ||
+      k === CLEAN_REVIEW,
   );
   return {
     ...Object.fromEntries(keep),
