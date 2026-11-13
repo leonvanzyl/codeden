@@ -32,6 +32,7 @@ const project = (id: string, name: string): Project => ({
   factoryLimits: FactoryLimits.parse({}),
   killSwitch: false,
   timezone: null,
+  agentCiEnv: true,
   pinned: false,
   sortOrder: 0,
   createdAt: ts(1000),
@@ -123,9 +124,9 @@ describe("status digest (§8.4)", () => {
   });
 
   it("renders a compact PM digest with work key, purpose, status, progress and age", () => {
-    const text = renderProjectDigest(status, NOW);
+    const text = renderProjectDigest(status, NOW, "UTC");
     expect(text).toContain(
-      '<codeden_status project="Shop" mode="assisted" at="2026-11-07T12:00:00.000Z">',
+      '<codeden_status project="Shop" mode="assisted" at="2026-11-07T12:00:00.000Z" tz="UTC" local="2026-11-07 12:00">',
     );
     expect(text).toContain(
       '- automation:security-audit · running 14m · "Security audit of dependencies" · progress: "Scanning lockfile (3/5)" (2m ago) · session s-audit- · by automation',

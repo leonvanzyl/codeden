@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { localDateTime } from "../../services/automations/cron";
 import type { WakeupOwner } from "../../services/orchestration/reminders";
 import { type AnyServerTool, defineTool, ToolError } from "../define";
 
@@ -40,7 +41,8 @@ export const scheduleWakeup = defineTool({
   handler: async ({ inMinutes, at, note }, ctx) => {
     const when = at ? new Date(at) : new Date(Date.now() + (inMinutes ?? 0) * 60_000);
     const reminder = ctx.services.orchestration.reminders.schedule(ownerOf(ctx), when, note);
-    return `Wake-up ${reminder.id} scheduled for ${reminder.notBefore}. You will be woken with your note then; nothing more to do now.`;
+    const tz = ctx.services.orchestration.timezone();
+    return `Wake-up ${reminder.id} scheduled for ${reminder.notBefore} (${localDateTime(when, tz)} ${tz}, the user's local time). You will be woken with your note then; nothing more to do now.`;
   },
 });
 
@@ -54,9 +56,20 @@ export const listWakeups = defineTool({
   handler: async (_input, ctx) => {
     const owner = ownerOf(ctx);
     const pending = ctx.services.orchestration.reminders.pending(owner.target, owner.projectId);
+    const timezone = ctx.services.orchestration.timezone();
     return {
+      timezone,
       wakeups: pending.flatMap((n) =>
-        n.type === "reminder" ? [{ id: n.id, at: n.notBefore, note: n.data.note }] : [],
+        n.type === "reminder"
+          ? [
+              {
+                id: n.id,
+                at: n.notBefore,
+                local: n.notBefore ? localDateTime(new Date(n.notBefore), timezone) : null,
+                note: n.data.note,
+              },
+            ]
+          : [],
       ),
     };
   },

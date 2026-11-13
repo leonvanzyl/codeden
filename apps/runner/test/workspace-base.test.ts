@@ -36,7 +36,7 @@ const prepare = (sessionId: string, repoPath: string, extra: Record<string, unkn
 });
 
 // Git-heavy (clones, fetches, worktrees): slow on loaded Windows runners.
-describe("the base of a new worktree", { timeout: 20_000 }, () => {
+describe("the base of a new worktree", () => {
   it("is the fetched origin/<default> when the local default branch is only behind", async () => {
     const { clone, ctx } = clonedBehind();
     const result = await prepareWorkspace(

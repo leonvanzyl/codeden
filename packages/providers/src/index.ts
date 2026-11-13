@@ -1,9 +1,11 @@
 /** @codeden/providers: provider adapters behind the normalized `ProviderAdapter` interface (§7.1). */
+export * from "./acp";
 export * from "./adapter";
 export { ApprovalBroker, type ItemCtx } from "./approvals";
 export * from "./async-queue";
 export * from "./claude";
 export * from "./codex";
+export * from "./cursor";
 export { FakeProvider, type FakeProviderOptions } from "./fake/adapter";
 export { FakeSession } from "./fake/session";
 export * from "./image";
@@ -20,6 +22,7 @@ export {
 } from "./policy/risk";
 export * from "./registry";
 export * from "./replay";
+export { agentEnv } from "./util/agent-env";
 export { brokenInstallMessage } from "./util/detect-exe";
 export {
   isElectronRuntime,

@@ -7,3 +7,7 @@ onlyBuiltDependencies:
 # Squirrel.Windows tooling pulled in by electron-builder; the app ships with NSIS instead.
 ignoredBuiltDependencies:
   - electron-winstaller
+# When node_modules has to be rebuilt (after a rebase, a lockfile change or an interrupted
+# install), reinstall it without asking "Proceed? (Y/n)": nothing answers that in an agent's
+# shell, so the install would wait forever. pnpm 10 reads this here, not from .npmrc.
+confirmModulesPurge: false

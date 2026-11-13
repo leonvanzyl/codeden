@@ -47,7 +47,7 @@ const SUMMARY_MAX = REVIEW_SUMMARY_MAX.toLocaleString("en-US");
  */
 export const factorySubmitReview = defineTool({
   name: "factory_submit_review",
-  description: `Submit your review verdict for the factory pull request you were asked to review: \`approve\`, \`request_changes\` (it goes back to the author for a revision) or \`reject\`, a specific summary (up to ${SUMMARY_MAX} characters are stored; a longer one is cut), one entry per acceptance criterion (met or not), whether it fits the vision, whether its tests are adequate (or none are needed), and any security concerns. Submit one verdict; if the call is rejected for invalid input, fix what the error names and call it again.`,
+  description: `Submit your review verdict for the factory pull request you were asked to review: \`approve\`, \`request_changes\` (it goes back to the author for a revision) or \`reject\`, a specific summary (up to ${SUMMARY_MAX} characters are stored; a longer one is cut), one entry per acceptance criterion (met or not), whether it fits the vision, whether its tests are adequate (or none are needed), and any security concerns. CI on the PR's head is the authority for the full test suite: request changes only for a cause in the pull request; if only your local environment kept you from verifying it, set \`blockers: "environment"\` and you get the CI result instead. Submit one verdict; if the call is rejected for invalid input, fix what the error names and call it again.`,
   roles: ["agent"],
   scope: "session",
   alwaysLoad: true,

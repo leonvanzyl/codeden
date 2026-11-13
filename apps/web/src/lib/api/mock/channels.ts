@@ -23,6 +23,10 @@ const loginScript: Record<string, string[]> = {
     "Opening browser to sign in…",
     `${c.green}✓ Connected Anthropic${c.reset}`,
   ],
+  "agent login": [
+    "Opening browser to sign in to Cursor…",
+    `${c.green}✓ Logged in as leon@example.com${c.reset}`,
+  ],
   "claude auth login": [
     "Opening browser to sign in…",
     `${c.green}✓ Logged in as leon@example.com${c.reset}`,

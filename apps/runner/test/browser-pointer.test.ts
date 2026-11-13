@@ -185,6 +185,8 @@ describe("agent pointer actions", () => {
     const tabs: Array<string | undefined> = [];
     const session = {
       page: () => page,
+      tabId: (tabId?: string) => tabId ?? "t1",
+      dialogs: { assertNone: () => undefined },
       currentViewport: async (tabId?: string) => {
         tabs.push(tabId);
         throw new CommandError("viewport_unavailable", "Could not measure the size of tab t2");

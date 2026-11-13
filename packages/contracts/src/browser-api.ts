@@ -2,11 +2,15 @@ import { z } from "zod";
 import { Id } from "./common";
 import {
   BrowserCommandResults,
+  BrowserDialog,
+  BrowserDialogClosed,
+  BrowserDialogId,
   BrowserEngine,
   BrowserFrameMetadata,
   BrowserInput,
   BrowserTab,
   BrowserTabId,
+  MAX_DIALOG_TEXT,
 } from "./runner/browser";
 
 /**
@@ -41,6 +45,8 @@ export const BrowserTabsResponse = z.object({
   tabs: z.array(BrowserTab),
   /** What backs the browser while it is open. */
   engine: BrowserEngine.optional(),
+  /** Page dialogs waiting for an answer (absent when there are none). */
+  dialogs: z.array(BrowserDialog).optional(),
 });
 export type BrowserTabsResponse = z.infer<typeof BrowserTabsResponse>;
 
@@ -159,6 +165,16 @@ export const BrowserClientMessage = z.discriminatedUnion("type", [
    * over. The runner clamps the size (see `browser.viewport`).
    */
   BrowserViewportSize.extend({ type: z.literal("viewport"), claim: z.boolean().optional() }),
+  /**
+   * Answer the page dialog `dialogId` (see `dialogs`): `accept` is OK (Leave), otherwise Cancel;
+   * `promptText` is what a prompt returns. Ignored when that dialog is no longer open.
+   */
+  z.object({
+    type: z.literal("dialog"),
+    dialogId: BrowserDialogId,
+    accept: z.boolean(),
+    promptText: z.string().max(MAX_DIALOG_TEXT).optional(),
+  }),
 ]);
 export type BrowserClientMessage = z.infer<typeof BrowserClientMessage>;
 
@@ -208,6 +224,18 @@ export const BrowserServerMessage = z.discriminatedUnion("type", [
    * a short while after the last one. Human input is never blocked either way.
    */
   z.object({ type: z.literal("agent"), acting: z.boolean() }),
+  /**
+   * The page dialogs waiting for an answer (an `alert`, `confirm`, `prompt` or "Leave site?"),
+   * at most one per tab: the whole list, empty included, after every `state` of an open browser
+   * (so a viewer that reconnects drops dialogs closed meanwhile), and whenever one opens or closes.
+   * The page is paused until a viewer or an agent answers, or `DIALOG_TIMEOUT_MS` passes.
+   * `closed`: the dialog that just closed, and who closed it.
+   */
+  z.object({
+    type: z.literal("dialogs"),
+    dialogs: z.array(BrowserDialog),
+    closed: BrowserDialogClosed.optional(),
+  }),
   z.object({ type: z.literal("error"), code: z.string(), message: z.string() }),
 ]);
 export type BrowserServerMessage = z.infer<typeof BrowserServerMessage>;

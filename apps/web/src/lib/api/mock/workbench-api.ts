@@ -152,6 +152,7 @@ export function workbenchApi(world: MockWorld): WorkbenchApi {
         claude: "claude auth login",
         codex: "codex login",
         opencode: "opencode auth login",
+        cursor: "agent login",
         gh: "gh auth login",
       }[tool];
       const [bin = tool, ...args] = command.split(" ");

@@ -38,6 +38,14 @@ const projectBase = {
   /** IANA timezone for cron automations; machine timezone when null. */
   timezone: z.string().nullable(),
   /**
+   * Agent sessions in this project run with `CI=true` (§4.2), so no command waits on a prompt
+   * nothing can answer. Tools that read `CI` then behave as in CI (frozen lockfiles, Playwright
+   * not reusing a running dev server, builds failing on warnings), so a project can turn it off:
+   * the runner then adds no `CI` to its agents' environment. Defaults to true so events written
+   * before the setting existed still parse.
+   */
+  agentCiEnv: z.boolean().default(true),
+  /**
    * Pinned projects are listed above the rest (§13). Defaults to false so events written
    * before pinning existed still parse.
    */

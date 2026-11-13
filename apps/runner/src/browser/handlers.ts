@@ -62,7 +62,7 @@ export function createBrowserCommandHandlers(deps: BrowserCommandDeps): BrowserC
     }),
     "browser.tabs.list": async (c) => {
       const session = manager.get(c.sessionId);
-      return { tabs: session.listTabs(), engine: session.engine };
+      return { tabs: session.listTabs(), engine: session.engine, dialogs: session.dialogs.list() };
     },
     "browser.tabs.open": async (c) => ({ tab: await manager.get(c.sessionId).openTab(c.url) }),
     "browser.tabs.close": async (c) => {
@@ -102,24 +102,17 @@ export function createBrowserCommandHandlers(deps: BrowserCommandDeps): BrowserC
       tab: await manager.openDevServer(c.sessionId, c.port, c.path),
     }),
     "browser.snapshot": (c) => agent.snapshot(manager.get(c.sessionId), c.tabId),
-    "browser.click": async (c) => {
+    "browser.click": (c) => {
       const opts = { tabId: c.tabId, button: c.button, doubleClick: c.doubleClick };
-      await agent.click(manager.get(c.sessionId), c.ref, opts);
-      return {};
+      return agent.click(manager.get(c.sessionId), c.ref, opts);
     },
-    "browser.type": async (c) => {
+    "browser.type": (c) => {
       const opts = { tabId: c.tabId, submit: c.submit };
-      await agent.type(manager.get(c.sessionId), c.ref, c.text, opts);
-      return {};
+      return agent.type(manager.get(c.sessionId), c.ref, c.text, opts);
     },
-    "browser.press": async (c) => {
-      await agent.press(manager.get(c.sessionId), c.key, c.tabId);
-      return {};
-    },
-    "browser.mouse": async ({ name: _name, sessionId, ...command }) => {
-      await pointer.mouse(manager.get(sessionId), command);
-      return {};
-    },
+    "browser.press": (c) => agent.press(manager.get(c.sessionId), c.key, c.tabId),
+    "browser.mouse": ({ name: _name, sessionId, ...command }) =>
+      pointer.mouse(manager.get(sessionId), command),
     "browser.screenshot": (c) =>
       agent.screenshot(manager.get(c.sessionId), c.path, {
         tabId: c.tabId,
@@ -138,6 +131,9 @@ export function createBrowserCommandHandlers(deps: BrowserCommandDeps): BrowserC
     "browser.evaluate": (c) =>
       agent.evaluate(manager.get(c.sessionId), c.expression, manager.evaluateGuard, c.tabId),
     "browser.wait": async (c) => ({ matched: await agent.wait(manager.get(c.sessionId), c) }),
+    "browser.dialog": async ({ name: _name, sessionId, ...answer }) => ({
+      dialog: await agent.answerDialog(manager.get(sessionId), answer),
+    }),
   };
 
   return {

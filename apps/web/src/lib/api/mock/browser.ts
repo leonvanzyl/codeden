@@ -118,6 +118,8 @@ export function mockBrowserApi(): BrowserApi {
         open: () => {},
         // The mock storefront has a fixed size; the panel fits it inside.
         viewport: () => {},
+        // The mock storefront never opens a dialog.
+        dialog: () => true,
         close() {
           clearInterval(interval);
           b.listeners.delete(relay);

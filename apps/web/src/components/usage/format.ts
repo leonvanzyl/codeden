@@ -130,4 +130,5 @@ export const PROVIDER_NAMES: Record<string, string> = {
   claude: "Claude",
   codex: "Codex",
   opencode: "OpenCode",
+  cursor: "Cursor",
 };

@@ -27,7 +27,7 @@ export const TOKEN_KINDS = [
 ] as const;
 
 /** Providers keep the same color everywhere. */
-const FIXED_SLOTS: Record<string, number> = { codex: 0, claude: 1, opencode: 2 };
+const FIXED_SLOTS: Record<string, number> = { codex: 0, claude: 1, opencode: 2, cursor: 3 };
 
 /**
  * A color slot per key. Providers have fixed slots; other values take the remaining slots in

@@ -82,7 +82,7 @@ export function codexEnvVarNames(extra: Record<string, unknown> | undefined): st
 
 /**
  * The environment a stdio server starts with in a connection test (`McpStdioEnv`). `base` is
- * the runner's environment (minus CodeDen's secrets); the server's own `env` always wins.
+ * the runner's environment (minus CodeDen's own variables); the server's own `env` always wins.
  * Variable names are matched ignoring case on Windows, as the OS does.
  */
 export function stdioServerEnv(opts: {

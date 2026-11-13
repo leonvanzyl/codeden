@@ -14,6 +14,7 @@ import { lateReviewPrompt } from "./prompts";
 import { trackedHead } from "./rebase";
 import { ownershipAfterRetry } from "./rebuild";
 import { approveRecheck, recheckOf, recheckSentFor, withoutRecheck } from "./recheck";
+import { environmentBlocked, environmentOnly, withoutStrikes } from "./review-environment";
 
 /**
  * Decisions on work items (§10.1): letting an untrusted issue in, correcting a type, retrying
@@ -142,7 +143,9 @@ export function retry(ctx: FactoryContext, projectId: string, itemId: string): F
 /**
  * `factory_submit_review`: the independent reviewer's structured verdict. A verdict that comes
  * late is kept too: while a revise round runs, its findings are `forward`ed to the author (the
- * caller sends them); on a failed item it is recorded for whoever picks the work up.
+ * caller sends them); on a failed item it is recorded for whoever picks the work up. A request
+ * for changes that only the reviewer's own environment stands behind is never recorded or
+ * forwarded (`review-environment.ts`).
  */
 export function submitReview(
   ctx: FactoryContext,
@@ -153,6 +156,10 @@ export function submitReview(
     ? ctx.store.items(session.projectId).find((i) => i.reviewerSessionId === session.id)
     : undefined;
   if (!item) throw badRequest("You are not reviewing a factory pull request", "not_a_reviewer");
+  // Only the reviewer's own environment stands behind it: no cause in the PR (#206).
+  if (environmentOnly(verdict) && (item.stage === "verifying" || item.stage === "building")) {
+    return environmentBlocked(ctx, item);
+  }
   if (item.stage === "building" && item.builderSessionId && verdict.verdict !== "approve") {
     return {
       recorded: true,
@@ -180,7 +187,7 @@ export function submitReview(
   const recheck = Boolean(item.review && recheckOf(item));
   const at = ctx.now().toISOString();
   ctx.store.updateItem(item.id, (i) => {
-    const { rereview_sent: _s, reviewer: _r, ...rest } = i.nudges;
+    const { rereview_sent: _s, reviewer: _r, ...rest } = withoutStrikes(i.nudges);
     const keep = recheck && verdict.verdict === "approve" && i.review;
     return {
       ...i,

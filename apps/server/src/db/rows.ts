@@ -45,6 +45,7 @@ export function projectToRow(p: Project): ProjectRow {
     factoryLimits: p.factoryLimits,
     killSwitch: p.killSwitch,
     timezone: p.timezone,
+    agentCiEnv: p.agentCiEnv,
     pinned: p.pinned,
     sortOrder: p.sortOrder,
     github: p.kind === "github" ? p.github : null,

@@ -13,7 +13,12 @@ export const getOverview = defineTool({
   scope: "global",
   alwaysLoad: true,
   input: z.object({}),
-  handler: async (_input, { services }) => renderOverviewDigest(services.orchestration.overview()),
+  handler: async (_input, { services }) =>
+    renderOverviewDigest(
+      services.orchestration.overview(),
+      Date.now(),
+      services.orchestration.timezone(),
+    ),
 });
 
 /** `list_inbox` (§11.1): what is waiting on the user. */

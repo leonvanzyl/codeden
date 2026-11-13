@@ -8,11 +8,13 @@ From `npx codeden` to your first agent session in a couple of minutes, without t
 |---|---|---|
 | Node.js 24 or newer | `node --version` | CodeDen refuses to start on older versions |
 | git | `git --version` | Set `user.name` and `user.email`: `git config --global user.name "Your Name"` |
-| Claude Code, Codex CLI and/or OpenCode 2.2+ | `claude --version`, `codex --version`, `opencode --version` | At least one, **signed in** (`claude auth login`, `codex login`, `opencode auth login`; OpenCode's own free models work without an account) |
+| Claude Code, Codex CLI, OpenCode 2.2+ and/or the Cursor CLI | `claude --version`, `codex --version`, `opencode --version`, `agent --version` | At least one, **signed in** (`claude auth login`, `codex login`, `opencode auth login`, `agent login`; OpenCode's own free models work without an account) |
 | GitHub CLI *(optional)* | `gh auth status` | Needed for issues, PRs, evidence, triage and the factory |
 | Edge or Chrome *(optional)* | | For the browser panel and the agents' browser tools |
 
-CodeDen uses your installed CLIs and their logins, including claude.ai and ChatGPT subscriptions. It never asks for a provider password or stores a provider token.
+CodeDen uses your installed CLIs and their logins, including claude.ai, ChatGPT and Cursor subscriptions. It never asks for a provider password or stores a provider token.
+
+**Cursor:** CodeDen drives your own Cursor CLI with your own login, as it does for the other CLIs, and runs the models your Cursor plan includes. Check your plan's terms for automated or unattended use, such as the software factory, before you point it at Cursor.
 
 ## 2. Start CodeDen
 
@@ -38,14 +40,15 @@ The first screen checks, in parallel:
 - **Claude Code:** installed version, login and login expiry.
 - **Codex:** installed version and login. A Codex login also makes Codex the default image engine.
 - **OpenCode:** installed version (2.2 or newer) and the providers it's connected to. With none, only OpenCode's free models are available, and the row suggests `opencode auth login`.
+- **Cursor:** the Cursor CLI's version, that it has the ACP server CodeDen drives (`agent acp`; older builds need `agent update`), and its login (`agent login`).
 - **GitHub CLI:** installed and signed in.
 - **git:** installed, with your identity set.
 - **Browser:** an installed Edge or Chrome.
 - **Node.js:** version 24 or newer.
 
-Anything that passes is never asked about. Anything missing gets one fix: the install command, or a **Sign in** button that runs the tool's own login (`claude auth login`, `codex login`, `opencode auth login`, `gh auth login`) in a terminal right on the page, so the provider's normal browser login handles it. **Sign in** runs the exact copy CodeDen found, by its full path.
+Anything that passes is never asked about. Anything missing gets one fix: the install command, or a **Sign in** button that runs the tool's own login (`claude auth login`, `codex login`, `opencode auth login`, `agent login`, `gh auth login`) in a terminal right on the page, so the provider's normal browser login handles it. **Sign in** runs the exact copy CodeDen found, by its full path.
 
-CodeDen looks for Claude Code, Codex, OpenCode and the GitHub CLI on your PATH, then in their installers' own folders, such as `~/.local/bin`, where the native Claude Code installer puts `claude` even when that folder isn't on your PATH. A copy that doesn't run (for example an npm shim left behind after its package was removed) is skipped and shown as **installed but broken**, with its path; see [Troubleshooting](troubleshooting.md#claude-code-codex-or-opencode-is-installed-but-broken). **Re-check** also picks up PATH changes you made after starting CodeDen.
+CodeDen looks for Claude Code, Codex, OpenCode, the Cursor CLI and the GitHub CLI on your PATH, then in their installers' own folders, such as `~/.local/bin`, where the native Claude Code installer puts `claude` even when that folder isn't on your PATH. A copy that doesn't run (for example an npm shim left behind after its package was removed) is skipped and shown as **installed but broken**, with its path; see [Troubleshooting](troubleshooting.md#claude-code-codex-or-opencode-is-installed-but-broken). **Re-check** also picks up PATH changes you made after starting CodeDen.
 
 ![The first-run setup checklist](images/setup.png)
 

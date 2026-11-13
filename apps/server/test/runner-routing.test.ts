@@ -10,7 +10,7 @@ import { EventStore } from "../src/events/store";
 import { TerminalBridge } from "../src/realtime/terminals";
 import { RunnerHub } from "../src/runner/hub";
 import { BrowserService } from "../src/services/browser/browser-service";
-import type { RunnerPort, RunnerRouter } from "../src/services/runner-port";
+import { type RunnerPort, type RunnerRouter, runnerUnavailable } from "../src/services/runner-port";
 import type { SessionRepo } from "../src/services/sessions/repo";
 import { sampleSession } from "./helpers";
 
@@ -159,7 +159,7 @@ describe("RunnerHub routing", () => {
     }
     const port = runners.forSession("on-1");
     expect(port).not.toBe(runners.home());
-    expect(port.describe?.()).toBe("Runner rn-1 (docker)");
+    expect(port.describe?.()).toBe("Runner rn-1 (docker, runner r-1)");
     expect(runners.forRunnerId("r-1")).toBe(port);
     expect(runners.list().map((r) => r.id)).toEqual([HOME_RUNNER_ID, "rn-1"]);
   });
@@ -167,12 +167,15 @@ describe("RunnerHub routing", () => {
   it("fails commands for a session whose runner is not connected, naming that runner", async () => {
     const runners = hub();
     createSession("on-1", "r-1");
-    await expect(
-      runners.forSession("on-1").request({ name: "runner.status" }),
-    ).rejects.toMatchObject({
+    const live = runners.forSession("on-1");
+    // The live client's errors name the runner's journal id, as the record's do.
+    await expect(live.request({ name: "runner.status" })).rejects.toMatchObject({
       code: "runner_unavailable",
-      message: "Runner rn-1 (docker) is not connected",
+      message: "Runner rn-1 (docker, runner r-1) is not connected",
     });
+    expect(runnerUnavailable(live).message).toBe(
+      "Runner rn-1 (docker, runner r-1) is not connected",
+    );
     await runners.remove("rn-1", { deleted: true });
     const gone = runners.forSession("on-1");
     expect(gone).not.toBe(runners.home());

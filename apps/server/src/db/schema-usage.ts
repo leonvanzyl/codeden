@@ -45,7 +45,10 @@ export const rateLimitWindows = sqliteTable(
     provider: text("provider").notNull(),
     windowId: text("window_id").notNull(),
     status: text("status").$type<"ok" | "warning" | "limited">().notNull(),
+    /** Latest percentage read in the current window (a later status-only reading keeps it). */
     usedPercent: real("used_percent"),
+    /** When `usedPercent` was read. */
+    usedPercentAt: text("used_percent_at"),
     resetsAt: text("resets_at"),
     observedAt: text("observed_at").notNull(),
     /** Session whose provider reported it. */

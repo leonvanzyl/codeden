@@ -19,8 +19,14 @@ const delay = <T>(value: T, ms = 120): Promise<T> =>
 
 const now = () => new Date().toISOString();
 
+const minutesAgo = (m: number) => new Date(Date.now() - m * 60_000).toISOString();
+
+const FINISHED = ["merged", "reverted", "rejected", "failed", "escalated"];
+const OWNING = ["backlog", "building", "verifying", "escalated", "failed"];
+
 function work(w: FixtureWorkItem): FactoryWorkItem {
   const done = ["merged", "reverted", "rejected"].includes(w.stage);
+  const since = minutesAgo(w.stepMinutesAgo ?? 4);
   return {
     id: w.id,
     title: w.title,
@@ -39,13 +45,26 @@ function work(w: FixtureWorkItem): FactoryWorkItem {
     source: w.workKey.startsWith("issue:") ? "issue" : "discovery",
     attempts: w.attempts ?? 0,
     reason:
-      w.stage === "rejected"
+      w.reason ??
+      (w.stage === "rejected"
         ? "Out of scope for the vision"
         : w.stage === "ignored"
           ? `Opened by @${w.author ?? "someone"}, who is not a trusted author`
-          : null,
-    note: w.step === "merge" ? "Ready to merge: every check passed (auto-merge is off)" : null,
-    updatedAt: now(),
+          : null),
+    note:
+      w.note ??
+      (w.stage === "verifying" && w.step === "merge"
+        ? "Ready to merge: every check passed (auto-merge is off)"
+        : null),
+    failureKind: w.failureKind ?? null,
+    // Owned while open, in the stages the factory keeps its PRs.
+    ownedPr:
+      OWNING.includes(w.stage) && (w.pr?.state === "open" || w.pr?.state === "draft") ? w.pr : null,
+    checks: w.checks ?? null,
+    stepSince: since,
+    mergedAt: w.stage === "merged" || w.stage === "watching" ? since : null,
+    finishedAt: FINISHED.includes(w.stage) ? since : null,
+    updatedAt: since,
   };
 }
 
@@ -69,9 +88,26 @@ export function mockFactoryApi(world: MockWorld): FactoryApi {
       globalKillSwitch: world.snapshot.settings.factory.killSwitch,
       tuning: FactoryTuning.parse({}),
       activeSessions: Math.min(f.inProgress.length, f.limits.maxConcurrentSessions),
+      // The work-in-progress limit follows the agent limit (no `maxOpenPrs` set).
+      wip: {
+        openPrs: f.inProgress.filter((w) => w.pr).length,
+        limit: f.limits.maxConcurrentSessions,
+        holding: f.inProgress.filter((w) => w.pr).length >= f.limits.maxConcurrentSessions,
+      },
       backlog: f.backlog.map(work),
-      inProgress: f.inProgress.map(work),
+      inProgress: f.inProgress.map(work).map((w) => {
+        // Check counts from the fixture's merge checks of the same pull request.
+        const c = f.mergeChecks.find((m) => m.prNumber === w.pr?.number)?.checks;
+        if (!c) return w;
+        const passed = c.filter((x) => x.state === "pass" || x.state === "skipped").length;
+        const failed = c.filter((x) => x.state === "fail").length;
+        return { ...w, checks: { passed, failed, total: c.length } };
+      }),
       recent: f.recent.map(work),
+      // What a server keeps for the view beyond the capped recent list.
+      viewRecent: f.recent
+        .map(work)
+        .filter((w) => ["escalated", "failed", "merged"].includes(w.stage)),
       ignored: f.ignored.map(work),
       githubLogin: "hearth-co",
       scout:
@@ -91,8 +127,9 @@ export function mockFactoryApi(world: MockWorld): FactoryApi {
               runNowBlockedBy: "A scout round is already running.",
             }
           : null,
+      stats: { mergedToday: f.mergesToday, ...f.stats },
       mergeChecks: f.mergeChecks.map((c, i) => ({
-        itemId: f.inProgress[i]?.id ?? `fw-c${i}`,
+        itemId: f.inProgress.find((w) => w.pr?.number === c.prNumber)?.id ?? `fw-c${i}`,
         prNumber: c.prNumber,
         title: c.title,
         checks: c.checks.map((x) => ({ ...x, detail: x.detail ?? null, at: now() })),
@@ -131,7 +168,7 @@ export function mockFactoryApi(world: MockWorld): FactoryApi {
       review: null,
       checks: s.mergeChecks.find((c) => c.itemId === itemId)?.checks ?? [],
       attempts: w.attempts,
-      failureKind: null,
+      failureKind: w.failureKind,
       rebuiltFrom: null,
       mergeSha: null,
       revertOf: null,
@@ -140,9 +177,10 @@ export function mockFactoryApi(world: MockWorld): FactoryApi {
       largeChange: null,
       sessionsArchivedAt: null,
       earlierSessionIds: [],
+      stepSince: w.stepSince,
       createdAt: w.updatedAt,
-      mergedAt: w.stage === "merged" ? w.updatedAt : null,
-      finishedAt: null,
+      mergedAt: w.mergedAt,
+      finishedAt: w.finishedAt,
     };
   };
   const loop = (projectId: string) =>

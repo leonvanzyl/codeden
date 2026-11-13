@@ -27,17 +27,25 @@ Issue ─► Identify type ┼─ Feature:  Analyze ───► Implement ─�
 
 1. **Issue.** A new issue on GitHub (opened after you switched the mode on, or labelled `codeden-factory`) becomes a work item. Only issues by [trusted authors](#who-the-factory-works-for) are taken on.
 2. **Identify type.** One call to the [utility model](usage-and-costs.md) classifies it as a **bug**, a **feature** or a **docs** change. A GitHub label settles it without a model call (`bug`, `enhancement`/`feature`, `documentation`/`docs`); with no model available, keywords decide. The factory labels the issue (`factory:bug`, `factory:feature`, `factory:docs`) and comments which pipeline it goes down.
-3. **A free agent takes it.** The server is the orchestrator of the swarm: it hands queued items to agents as slots free up, within **Agents at once** (`maxConcurrentSessions`). A fix for a failing check on the default branch goes first, then the issues you and trusted authors filed, oldest first, then the issues the [scout](#the-dark-factory) filed, by the priority it gave them. Each item gets its own agent session in its own worktree.
+3. **A free agent takes it.** The server is the orchestrator of the swarm: it hands queued items to agents as slots free up, within **Agents at once** (`maxConcurrentSessions`), once the open work waiting for an agent has one ([finish before starting](#finish-before-starting)). A fix for a failing check on the default branch goes first, then the issues you and trusted authors filed, oldest first, then the issues the [scout](#the-dark-factory) filed, by the priority it gave them. Each item gets its own agent session in its own worktree.
 4. **The pipeline runs.**
    - **Bug: Reproduce.** The agent writes a failing test (or a probe) that shows the bug and reports it with `factory_report_reproduction`. A bug that doesn't reproduce stops here, with a comment on the issue asking for what's missing.
    - **Bug: Create fix.** The same agent makes the failing test pass and keeps it as a regression test.
    - **Feature: Analyze.** The agent checks whether the request already works, fits the vision and the architecture, and writes a spec with acceptance criteria (`factory_submit_analysis`). The spec is posted on the issue. A request that is already possible, unclear or out of scope stops here with a comment.
    - **Feature: Implement.** The same agent builds it to the spec, with tests and docs.
    - **Docs: Implement docs change.** No reproduction, no analysis, and no agent review as long as the change touches only documentation.
-5. **Review.** An **independent reviewer session**, on a different provider from the author when one is available, checks the pull request against the issue, the spec and the vision. `request_changes`, or any failed merge check, sends the work back to the author: the **revise loop** (up to `maxFixAttempts` rounds, default 2).
+5. **Review.** An **independent reviewer session**, on a different provider from the author when one is available, checks the pull request against the issue, the spec and the vision. `request_changes`, or any failed merge check, sends the work back to the author: the **revise loop** (up to `maxFixAttempts` rounds, default 2). CI on the pull request's head is the authority for the full test suite. A reviewer whose own checkout can't run the tests (a broken install, timeouts under load) marks its verdict `blockers: "environment"`. That verdict never goes to the author: the reviewer gets the CI result and reviews again on the merits. If its environment stops it a second time, the item fails as an infrastructure failure, which the factory recovers by itself without using a revise round, and the next reviewer works in a clean worktree on the PR's head.
 6. **Merge.** With every check green the pull request is **ready for you**: an inbox item, a comment on the PR, and the item waits at Merge until you merge it on GitHub. With **auto-merge** on, CodeDen squash-merges trusted work itself and watches CI on the default branch afterwards (a regression opens an automatic revert PR and pauses the loop).
 
 Every pull request carries its **test results** (a `## Test results` section in the description, or the raw output attached with `attach_evidence`) and, when UI files changed, **screenshots**. Both are merge checks.
+
+### Finish before starting
+
+Every factory PR still open when another one merges may need a rebase and a fresh look, so the factory finishes open work before it starts more:
+
+- **Who gets a free agent.** When an agent is free it goes, in this order, to: a reviewer for a PR whose CI passed; a rebase or conflict resolution, or a builder's revise round; a reviewer for a PR whose CI is still running; a builder carrying on after a failure outside its code, then a new build from the queue; and last the scout and its area reviewers. What waited longer goes first; the queue keeps its own order. Work in progress is never interrupted, only the next free agent is decided this way. Revise rounds and rebase requests wake an agent too, so they wait for a free one instead of going past **Agents at once**.
+- **PRs open at most** (`maxOpenPrs`, by default the same as **Agents at once**). With this many factory PRs open (being checked, reviewed, revised, rebased, queued or waiting for you to merge them), no new build starts from the queue and the scout files nothing; free agents go to reviews, fixes and rebases until a PR merges or closes. A fix for a failing check on the default branch still starts, because every open PR waits on it. PRs of failed or escalated work, which wait for you, don't count (work that failed for a reason outside its code goes back by itself, so its PR does). The factory panel and the Factory view say **Finishing open work (2 of 2 PRs open)** while it holds work back, and queued items say why they wait.
+- **Work that touches the same files waits its turn.** Before a queued item starts, the paths named in its issue (title, body, acceptance criteria) are compared with the files the factory's open PRs change. An item that clearly overlaps one ("Deferred: likely overlaps open PR #12 (src/counter.ts)") goes behind items that don't, and still starts when nothing else is waiting.
 
 ### The pipeline on the dashboard
 
@@ -48,6 +56,40 @@ The project page shows the factory panel with the pipelines drawn as a live diag
 Under the diagram: spend against the daily budget, agents working out of the limit, pull requests ready for you (or merges today with auto-merge), the failure streak, merge checks per PR, recent results, and the issues ignored because of their author.
 
 The loop runs its regular check every 30 seconds: it moves work in progress, picks up new issues, starts free agents and, in a dark factory, starts the scout if it's due. **Check now** on the panel runs that check immediately. In a dark factory, **Run scout now** starts a [scout round](#the-dark-factory) right away.
+
+### The Factory view
+
+While the factory runs you mostly just want to glance at it. The **Factory view** is a calm, full-screen page for that, made to stay open on a second screen. It shows only the factory: no sidebar, no sessions list, no side panels. The factory panel stays where it is, for settings, limits and details.
+
+Open it with **Factory view** on the project page or the factory panel, or **Factory view · <project>** in the command palette (Ctrl K). It has its own address, `/projects/<projectId>/factory/view`, so you can bookmark it. **Full screen** in its header fills the screen (in the desktop app, F11 does the same), and **Exit** goes back to the project page. It's only offered for projects in software factory or dark factory mode.
+
+- **The header** shows the project, its mode and the loop state (with the reason when it's paused, or "stopped" when a kill switch is on). Two counters answer "is anything waiting on me?": how many items **need you** and how many **failed**. The kill switch, **Check now** and **Run scout now** work here as on the panel.
+- **The figures**, in one row: spend today against the daily budget, merges today (against the daily cap when auto-merge is on), agents working against the limit, the factory's open pull requests, failures and reverts today, and the median time from issue to merge over the last 7 days (from when the factory took the issue in). Where the panel shows the same figure, it's the same number.
+- **The pipeline**, left to right: **Intake** (new issues before their type is known, and in a dark factory the scout's round and its area reviewers), **Identify type** (sorted into bug, feature or docs, waiting for a free agent), **Building** (reproduce or analyze, then implement), **Reviewing** (the independent review, the merge checks and CI), **Merge queue** (in the order they merge, each pull request with its state and place, such as "Updating · #1" or "Queued #2", plus the ones rebasing, rebuilding, waiting for you or stuck) and **Merged** (today's merges).
+  - **Cards.** Each item is a card with its issue number and title, its type, what it's doing now (its agent's latest progress line), and how long it's been in its step. It also shows its pull request's state and, while it's reviewed or queued, how many merge checks passed (for example 5/8).
+  - **Markers.** Every card has one of four markers: running, waiting (nobody needs to act, as for a merge that's done), needs a person, or failed.
+  - **Live.** Cards move as the factory works, with no reload.
+- **Needs you** is a lane above the pipeline for escalated work, and for failures from the last day or older ones whose pull request is still open. However much newer history there is, an old escalation or failure stays there until it's settled; this includes a rebuild that failed while the factory still owns its original pull request. On wide screens the lane takes at most about a third of the height and scrolls, so the pipeline stays in view. A stuck pull request stays in the merge queue, outlined in amber like anything else waiting on a person (a pull request for you to merge, an agent's question). Failed cards are outlined in red.
+- **Click a card** to see its details in a side sheet without leaving the view: the steps of its pipeline with the current one marked (also "waiting for a free agent" and "watching CI on the default branch"), the issue and the pull request, the merge checks, the review, and links to the builder's and reviewer's sessions.
+- **The PM chat** shows the last three turns with the project's PM and its usual message box. Replies stream in as in any session, and **Open full chat** opens the PM's page. On screens 1280 pixels wide and up it sits beside the pipeline, and **Hide** folds it into a slim bar. Narrower, it opens from that bar as a side sheet.
+
+On tablets and phones the stages stack as sections you can fold, the figures wrap, and the PM chat opens from a button as a sheet from the bottom. Each stage is a labelled region and each card a button named after its number, title and state. A screen reader hears cards move politely ("#142 moved to Reviewing"), and with reduced motion on, cards don't animate.
+
+#### Pixel mode
+
+**Pixel mode** in the header swaps the figures and the pipeline for a small pixel-art factory floor, seen from above, that works along with the factory. It's just for fun and off by default. The board stays the full view, and your browser remembers which one you picked.
+
+- New and sorted issues are a pile of tickets at the **IN** door. When a build starts, a worker carries a ticket to a bench.
+- Each build has a worker at a workbench, hammering while its agent works, with a "?" when the agent asks you something. Each review has a worker with a clipboard inspecting a crate.
+- The merge queue is a row of crates on the conveyor to the **SHIP** door, in merge order, flagged when one waits on you. A merge sends a crate out with a sparkle. Today's merges stack on the dock.
+- Failed and escalated work sits on broken machines along the bottom: a red lamp and smoke for a failure, an amber lamp for an escalation, and a flag above each.
+- In a dark factory, the scout walks the floor with a magnifying glass during a round, and its area reviewers write on notepads in the corner.
+- On the wall, a gauge shows spend against the daily budget, and a counter board shows today's merges.
+- With the kill switch on or the loop stopped, the lights dim and everyone sits down.
+
+Hover a worker, ticket, crate or machine to see its issue number and title (a builder also shows its latest progress line). Click it to open the same side sheet as on the board. Workers, crates and machines can also be reached with Tab. Under the scene, a line says what it shows ("4 building, 1 in review, 3 merged today, 2 need you") and updates for screen readers.
+
+The scene is one small canvas drawn about 12 times a second. It stops drawing while the tab is hidden, and with reduced motion on it shows a still frame that changes only when the factory does. Pixel mode isn't offered on phones (narrower than 640 pixels), where the scene would be too small to tap; they always show the board.
 
 ### Finished work cleans up after itself
 
@@ -85,9 +127,10 @@ When fewer than **Review when fewer than** (`minBacklog`, default 2) items wait 
 The rules that keep it cheap are enforced by the server, not left to the agents:
 
 - **One scout and at most one area reviewer per review area, ever.** They are long-lived: the next round sends them a message instead of starting new sessions, so they keep what they learned and don't re-read the codebase.
-- **At most `discoveryPerRound` review areas per round**, however many the scout asks for, and only as many as there are free agent slots: builders and reviewers come first. The scout ends its turn once it has planned, so its own slot goes to an area reviewer. When an area gets no reviewer, `factory_plan_round` tells the scout why (not an allowed area, asked for twice, over the round's limit, or no free slot under **Agents at once**).
+- **At most `discoveryPerRound` review areas per round**, however many the scout asks for, and only as many as there are free agent slots: reviews, fixes, rebases and builds waiting for an agent come first. The scout ends its turn once it has planned, so its own slot goes to an area reviewer. When an area gets no reviewer, `factory_plan_round` tells the scout why (not an allowed area, asked for twice, over the round's limit, or no free slot under **Agents at once**).
 - **A scheduled round only starts when the queue runs low** and the interval has passed; at most `maxIssuesPerRound` issues come out of it; a round that runs over three hours is closed.
-- **Run scout now** skips the interval and the threshold, nothing else. It's disabled, with the reason in its tooltip, while a round is running, when no agent slot is free, while the loop is paused or over today's budget, or while a kill switch is on. The next scheduled round counts its interval from the end of the manual one.
+- **No round and no filing at the work-in-progress limit** ([PRs open at most](#finish-before-starting)). A round already running keeps its area reviewers' findings and files them once a PR has merged; a round without area reviewers reviews then. The time a round waits doesn't count against its three hours.
+- **Run scout now** skips the interval and the threshold, nothing else. It's disabled, with the reason in its tooltip, while a round is running, when no agent slot is free (or other work waits for the free ones), at the work-in-progress limit, while the loop is paused or over today's budget, or while a kill switch is on. The next scheduled round counts its interval from the end of the manual one.
 - The scout and its area reviewers hold agent slots and count against the daily budget like every other factory session.
 
 ### Nobody waits on you in a dark factory
@@ -241,16 +284,17 @@ Settings are **enforced by the server**, never left to agent judgement. Open the
 | Merge automatically (`autoMerge`) | off | Off: every PR waits for you. On: trusted work merges once every check passes. Work let in from an untrusted author always waits |
 | Trusted authors (`trustedAuthors`) | none | GitHub logins whose issues are taken on, besides the account CodeDen uses |
 | Daily budget (USD and/or tokens) | required | The loop pauses until the next day when today's spend reaches it |
-| Agents at once (`maxConcurrentSessions`) | 2 | The swarm: builders, reviewers, the scout and its area reviewers share it |
+| Agents at once (`maxConcurrentSessions`) | 2 | The swarm: builders, reviewers, the scout and its area reviewers share it; reviews, fixes and rebases get a free agent first |
 | Auto-merges per day (`maxMergesPerDay`) | 5 | With auto-merge on, also caps the builds in flight |
 | Pause after failures (`pauseAfterConsecutiveFailures`) | 3 | Failed merge checks or reverts in a row pause the loop |
 | Protected paths | none | Added to the vision's protected areas |
 | Allow deploy and release changes (`allowDeploys`) | off | While off, deploy files (`.github/workflows/*deploy*`, `*release*`, `*publish*`, `Dockerfile`, `fly.toml`, `vercel.json`, `netlify.toml`) are protected |
 
-**Tuning.** The **Merge checks** and (in a dark factory) **The scout** sections of the settings cover every knob below except `areas`, `builderProvider` and `idleGraceMin`, which are set through the API's `tuning` field. Saving changes only the knobs you send; the rest keep their saved values.
+**Tuning.** **PRs open at most**, the **Merge checks** and (in a dark factory) **The scout** sections of the settings cover every knob below except `areas`, `builderProvider` and `idleGraceMin`, which are set through the API's `tuning` field. Saving changes only the knobs you send; the rest keep their saved values.
 
 | Setting | In the settings | Default |
 |---|---|---|
+| `maxOpenPrs` | PRs open at most (the [work-in-progress limit](#finish-before-starting); empty: the same as Agents at once) | `null` (Agents at once) |
 | `maxChangedLines` / `maxChangedFiles` | Merge checks: Largest change (lines) / Most files changed | `5000` / no limit (`null` turns either off) |
 | `maxFixAttempts` | Merge checks: Revise rounds (after a review asking for changes or a failed check; then the item fails) | `2` |
 | `watchTimeoutMin` | Merge checks: Watch main CI (minutes) (after an automatic merge; a failure while watched reverts it) | `120` |
@@ -293,7 +337,7 @@ Everything in the UI is also available over the local API (with the install toke
 
 | Route | |
 |---|---|
-| `GET /api/projects/:id/factory` | Panel status (items with their pipeline step, ignored issues, the scout) |
+| `GET /api/projects/:id/factory` | Panel status (items with their pipeline step and how long they've been in it, ignored issues, the scout, and for the Factory view: its figures in `stats`, in `viewRecent` the escalations, open or recent failures and today's merges that the capped `recent` list can leave out, and each item's `ownedPr`) |
 | `PUT /api/projects/:id/autonomy` | `{ mode, limits?, tuning? }` (`mode`: `software_factory` or `dark_factory`; the old `autopilot` still reads as `software_factory`) |
 | `GET` / `PUT /api/projects/:id/vision` | Read or write the vision |
 | `POST /api/projects/:id/factory/admit` | `{ itemId, type? }`: let an ignored issue in |

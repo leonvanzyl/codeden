@@ -107,6 +107,8 @@ export class ProjectService {
     if (patch.defaultBranch !== undefined) next.defaultBranch = patch.defaultBranch;
     // Pinning keeps `sortOrder`, so a project lands in its group by its manual position.
     if (patch.pinned !== undefined) next.pinned = patch.pinned;
+    // Applies to agent sessions opened from now on; running ones keep the environment they have.
+    if (patch.agentCiEnv !== undefined) next.agentCiEnv = patch.agentCiEnv;
     this.deps.store.append([
       { type: "project.updated", sessionId: null, payload: { project: next } },
     ]);
@@ -245,6 +247,7 @@ export class ProjectService {
       factoryLimits: FactoryLimits.parse({}),
       killSwitch: false,
       timezone: null,
+      agentCiEnv: true,
       pinned: false,
       sortOrder: this.nextSortOrder(),
       createdAt: now,

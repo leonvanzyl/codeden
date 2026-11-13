@@ -1,6 +1,6 @@
 # Orchestration
 
-CodeDen runs three kinds of agent: one **orchestrator**, one **project manager (PM)** per project, and any number of **agent sessions**. They're all ordinary agent sessions on Claude Code, Codex or OpenCode; what differs is their role, system prompt, working directory and tools.
+CodeDen runs three kinds of agent: one **orchestrator**, one **project manager (PM)** per project, and any number of **agent sessions**. They're all ordinary agent sessions on Claude Code, Codex, OpenCode or Cursor; what differs is their role, system prompt, working directory and tools.
 
 | Role | How many | Works in | Can edit code? | Purpose |
 |---|---|---|---|---|
@@ -8,7 +8,7 @@ CodeDen runs three kinds of agent: one **orchestrator**, one **project manager (
 | Project manager | 1 per project | The project root, read-only | No | Triages issues, plans work, starts and steers agent sessions, reviews results, escalates to you |
 | Agent | Many | Its own worktree and branch | Yes | Does the work: code, tests, PRs, evidence |
 
-The orchestrator and PMs run **read-only**: Claude gets no edit tools and a policy that denies writing commands, Codex gets a read-only sandbox, and CodeDen's policy refuses OpenCode's edits and writing commands. They act only through CodeDen's tools. Choose the provider, model and effort for each role in **Settings → Providers** (Claude Code is the default for the orchestrator and PMs when it's available).
+The orchestrator and PMs run **read-only**: Claude gets no edit tools and a policy that denies writing commands, Codex gets a read-only sandbox, and CodeDen's policy refuses OpenCode's and Cursor's edits and writing commands (Cursor also runs in its read-only `ask` mode). They act only through CodeDen's tools. Choose the provider, model and effort for each role in **Settings → Providers** (Claude Code is the default for the orchestrator and PMs when it's available).
 
 ![A PM reporting on its project](images/pm-chat.png)
 
@@ -36,6 +36,8 @@ Every time the orchestrator or a PM wakes (you message it, a notice arrives, ano
 
 - **PM digest:** running and queued sessions (work key, purpose, status, last progress, age), the next scheduled automation runs, open inbox items, and recent finishes and failures.
 - **Orchestrator digest:** the same, rolled up per project.
+
+The digest's opening tag carries the time in UTC plus your timezone and local time, for example `<codeden_status … at="2026-11-13T19:54:36.000Z" tz="Africa/Johannesburg" local="2026-11-13 21:54">`. That way the orchestrator and PMs tell you clock times in your own time. The timezone is the one usage reports count days in (the usage settings' timezone, else your computer's). `schedule_wakeup` and `list_wakeups` show a wake-up's local time next to UTC, too.
 
 Undelivered notices follow as an "Updates since your last turn" list. Each block is wrapped in its own tags, `<codeden_status>…</codeden_status>` and then `<codeden_updates>…</codeden_updates>`, and everything after them is what you (or the waking role) actually wrote. The tags matter because a notice can quote a multi-paragraph message. If free text in a block contains one of these tag names, it is defused, so only CodeDen's own tags open and close a block.
 

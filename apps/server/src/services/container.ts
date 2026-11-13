@@ -329,6 +329,7 @@ export function createServices(opts: ServicesOptions): AppServices {
     github: opts.orchestration?.github ?? new GithubServicePort(github),
     trustedAuthors,
     automation: opts.orchestration?.automation ?? automations,
+    timezone: () => usage.timezone(),
     options: opts.orchestration,
     log: opts.log,
   });

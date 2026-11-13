@@ -79,6 +79,8 @@ export async function advanceVerifying(
     prDecidedOutside(ctx, item, pr.ref);
     return loop;
   }
+  // What it changes, for overlap-aware scheduling of the queue (`overlap.ts`).
+  ctx.prFiles.set(project.id, pr.ref.number, pr.files);
   // CI that never started is started again (by its agent, or an integrator that takes the PR
   // over when the author's session is gone); its clock waits until that happened.
   const kicking = await kickCi(ctx, project, item, pr);

@@ -11,12 +11,13 @@ import { factoryKeys, useFactoryStatus } from "@/lib/factory";
 import { ago, compact, usd } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { AutonomyDialog, ExperimentalBadge } from "./autonomy-dialog";
-import { FactoryRunButtons } from "./factory-actions";
+import { FactoryRunButtons, OpenFactoryViewButton } from "./factory-actions";
 import { ChecksColumn, IgnoredColumn, RecentColumn } from "./factory-columns";
 import { KillSwitchButton } from "./kill-switch";
 import { LOOP_LABEL, MODE_LABEL } from "./meta";
 import { PipelineDiagram } from "./pipeline-diagram";
 import { PullRequestsCard } from "./pull-requests-card";
+import { WipChip } from "./wip-chip";
 
 function Meter(props: {
   label: string;
@@ -128,6 +129,7 @@ export function FactoryPanel({ project }: { project: Project }) {
           </div>
         </div>
         <div className="ml-auto flex flex-wrap items-center gap-1">
+          <OpenFactoryViewButton projectId={projectId} variant="outline" />
           {f.loopState === "paused" && (
             <Button size="sm" onClick={() => resume.mutate()} disabled={resume.isPending}>
               <Play /> Resume
@@ -174,7 +176,8 @@ export function FactoryPanel({ project }: { project: Project }) {
             <span className="text-3xs text-muted-foreground/80">
               Click an issue to open the agent working on it
             </span>
-            <span className="ml-auto">
+            <span className="ml-auto flex min-w-0 items-center gap-1.5">
+              <WipChip f={f} />
               <LoopState state={f.loopState} stopped={stopped} />
             </span>
           </div>
@@ -196,6 +199,13 @@ export function FactoryPanel({ project }: { project: Project }) {
             value={f.activeSessions}
             max={f.limits.maxConcurrentSessions}
             display={`${f.activeSessions} / ${f.limits.maxConcurrentSessions}`}
+            warn={false}
+          />
+          <Meter
+            label="PRs in progress"
+            value={f.wip.openPrs}
+            max={f.wip.limit}
+            display={`${f.wip.openPrs} / ${f.wip.limit}`}
             warn={false}
           />
           {f.limits.autoMerge ? (

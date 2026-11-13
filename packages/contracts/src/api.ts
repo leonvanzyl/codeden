@@ -94,6 +94,8 @@ export const UpdateProjectRequest = z.object({
   defaultBranch: z.string().nullable().optional(),
   /** Pin or unpin the project in the project list (§13). */
   pinned: z.boolean().optional(),
+  /** Run this project's agent sessions with `CI=true`, or not (`Project.agentCiEnv`, §4.2). */
+  agentCiEnv: z.boolean().optional(),
 });
 export type UpdateProjectRequest = z.infer<typeof UpdateProjectRequest>;
 
@@ -336,14 +338,26 @@ export type InboxCounts = z.infer<typeof InboxCounts>;
 // ---------------------------------------------------------------- first-run setup
 
 /**
- * A first-run check (§14): the agent CLIs (`claude`, `codex`, `opencode`), then `gh`, `git`,
- * the browser and Node.js.
+ * A first-run check (§14): the agent CLIs (`claude`, `codex`, `opencode`, `cursor`: the Cursor
+ * CLI, `agent`), then `gh`, `git`, the browser and Node.js.
  */
-export const SetupToolId = z.enum(["claude", "codex", "opencode", "gh", "git", "browser", "node"]);
+export const SetupToolId = z.enum([
+  "claude",
+  "codex",
+  "opencode",
+  "cursor",
+  "gh",
+  "git",
+  "browser",
+  "node",
+]);
 export type SetupToolId = z.infer<typeof SetupToolId>;
 
-/** Setup checks whose sign-in command the UI can run in its embedded terminal. */
-export const LoginToolId = z.enum(["claude", "codex", "opencode", "gh"]);
+/**
+ * Setup checks whose sign-in command the UI can run in its embedded terminal (`cursor` runs
+ * `agent login`).
+ */
+export const LoginToolId = z.enum(["claude", "codex", "opencode", "cursor", "gh"]);
 export type LoginToolId = z.infer<typeof LoginToolId>;
 
 /** A command the UI runs in its embedded terminal to fix a check (§14 step 3). */

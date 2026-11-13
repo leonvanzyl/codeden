@@ -76,11 +76,15 @@ describe("usage contracts", () => {
       label: "5-hour",
       status: "warning",
       usedPercent: 91,
+      usedPercentAt: "2026-11-07T09:30:00.000Z",
       resetsAt: "2026-11-07T12:00:00.000Z",
       observedAt: "2026-11-07T10:00:00.000Z",
       stale: false,
     };
     expect(RateLimitWindow.parse(window)).toEqual(window);
+    // A status-only reading: no percentage, so no time for one.
+    const statusOnly = { ...window, status: "ok", usedPercent: null, usedPercentAt: null };
+    expect(RateLimitWindow.parse(statusOnly)).toEqual(statusOnly);
     const subagent = {
       itemId: "toolu_1",
       costUsd: 0.0421,

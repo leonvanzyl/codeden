@@ -74,7 +74,7 @@ describe("cloud voice proxy (TTS, voices, STT)", () => {
   beforeAll(async () => {
     stub = await startStub(seen);
     h = await startHarness({ voice: { elevenLabsBaseUrl: stub.url, openAiBaseUrl: stub.url } });
-  }, 60_000);
+  });
 
   afterAll(async () => {
     await h?.close();

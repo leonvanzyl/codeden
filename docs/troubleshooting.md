@@ -82,6 +82,7 @@ Where CodeDen looks, in order:
    - Claude Code: `~/.local/bin/claude` (`%USERPROFILE%\.local\bin\claude.exe` on Windows), then `~/.claude/local/claude`.
    - Codex: `~/.local/bin/codex`, then `~/.codex/packages/standalone/current` (or under `CODEX_HOME`).
    - OpenCode: `~/.opencode/bin/opencode` (`%USERPROFILE%\.opencode\bin\opencode.exe` on Windows), where its install script puts it; `/opt/homebrew/bin/opencode` and `/usr/local/bin/opencode` on macOS.
+   - Cursor CLI: `cursor-agent`, or an `agent` whose version is Cursor's (`2026.10.22-…`): `~/.local/bin/agent`, and `%LOCALAPPDATA%\cursor-agent\agent.cmd` on Windows.
    - GitHub CLI: `C:\Program Files\GitHub CLI\gh.exe` on Windows; `/opt/homebrew/bin/gh` and `/usr/local/bin/gh` on macOS.
 
 The first copy that answers `--version` is used for detection, for sessions and for **Sign in**, so a working native install wins over a broken shim earlier on PATH. When the native installer says its folder *"is not in your PATH"*, CodeDen still finds it; add the folder to your PATH if you also want `claude` to work in your own terminals.
@@ -94,6 +95,7 @@ Use **Sign in** on the setup checklist, or run the CLI's own login in a terminal
 claude auth login
 codex login
 opencode auth login
+agent login
 gh auth login
 ```
 
@@ -102,6 +104,12 @@ A Claude login close to expiry shows as a warning; signing in again clears it.
 **Sign in** runs the copy CodeDen found by its full path (in PowerShell, for example `& 'C:\Users\you\.local\bin\claude.exe' auth login`), so it works even when that copy isn't on your PATH. If the row says **"Could not read the Claude login state"**, CodeDen ran `claude auth status` but couldn't understand the answer. Open **Details** to see the exit code and output.
 
 OpenCode with no connected provider is a warning rather than an error: its own free models work without an account. `opencode auth login` connects a provider (Anthropic, OpenAI, and many more); API keys in your environment and providers in `opencode.json` count too. CodeDen checks with `opencode auth list --standalone`, which runs a private OpenCode server for a few seconds and never starts or touches OpenCode's background service.
+
+### The Cursor CLI asks for `agent update`
+
+CodeDen drives the Cursor CLI through its ACP server (`agent acp`), which older builds don't have. Run `agent update` (or reinstall with `curl https://cursor.com/install -fsS | bash`, or `irm 'https://cursor.com/install?win32=true' | iex` on Windows), then press **Re-check**. Another program named `agent` on your PATH isn't Cursor's: CodeDen only uses an `agent` whose `--version` is a Cursor build, and prefers `cursor-agent` when both are installed.
+
+Cursor's own permission settings (`~/.cursor/cli-config.json`, a project's `.cursor/cli.json`) apply before CodeDen's: what they allow runs without asking, so CodeDen can only judge what Cursor asks about. Keep their allowlists short if you rely on CodeDen's levels.
 
 ### OpenCode is installed but shows as unsupported
 
@@ -142,6 +150,16 @@ opencode upgrade
 ### "The runner exited during start-up" or "did not start within 300 s"
 
 While CodeDen waits for its runner, the sidebar says **Starting the runner…**. A slow start (security software scanning files, a busy or cold disk) is waited for; CodeDen only gives up on a runner that hasn't started after five minutes. If the runner process exits during start-up, the error (hover the status in the sidebar, or see the server log) ends with the last lines of `~/.codeden/logs/runner.log`. A native module that failed to load (`node-pty`) usually means a broken or partial install: run `npm cache clean --force`, then `npx codeden@latest`. Security software that blocks new processes can also cause it.
+
+### Tests, installs or builds behave differently in agent sessions
+
+Agent sessions run with `CI=true`, because an agent's shell can't answer prompts (such as pnpm's "The modules directory will be removed and reinstalled from scratch. Proceed?"). Your project's tools then behave as they do in CI:
+
+- **Playwright:** with `reuseExistingServer: !process.env.CI`, the agent's test run starts its own dev server and fails if yours is already running; `forbidOnly: !!process.env.CI` fails on a `test.only`; `retries: process.env.CI ? 2 : 0` retries failing tests without saying so.
+- **Installs:** `pnpm install` keeps the lockfile frozen, and Yarn Berry turns on `enableImmutableInstalls`, so `yarn install` fails after an agent edits `package.json` instead of updating `yarn.lock`.
+- **Builds and tests:** Create React App and similar builds fail on warnings, test runners don't write new snapshots, and other tools switch to CI reporters or skip interactive setup.
+
+To turn it off for one project, use **Settings → General → Agent environment** (or ask the orchestrator). Agent sessions opened after that get no `CI` from CodeDen; a session that's already running keeps its environment until it restarts. With it off, pnpm may ask again before reinstalling `node_modules`, so add `confirmModulesPurge: false` to the project's `pnpm-workspace.yaml`. To turn it off everywhere, set `CI=false` in the environment you start CodeDen from. Your own terminals never get `CI` from CodeDen.
 
 ### Agents keep running after I close the terminal
 

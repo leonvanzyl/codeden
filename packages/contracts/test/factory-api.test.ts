@@ -9,6 +9,7 @@ import {
   FactoryLoop,
   FactoryStatus,
   FactoryTuning,
+  FactoryTuningPatch,
   isFactoryMode,
   Notice,
   REVIEW_SUMMARY_MAX,
@@ -73,6 +74,7 @@ const item: FactoryItem = {
   largeChange: null,
   sessionsArchivedAt: null,
   earlierSessionIds: [],
+  stepSince: ts,
   createdAt: ts,
   updatedAt: ts,
   mergedAt: null,
@@ -173,11 +175,13 @@ describe("factory API contracts (§10.1)", () => {
       investigation: _i,
       failureKind: _fk,
       rebuiltFrom: _rf,
+      stepSince: _ss,
       ...old
     } = item;
     expect(FactoryItem.parse(old)).toMatchObject({
       failureKind: null,
       rebuiltFrom: null,
+      stepSince: null,
       largeChange: null,
       sessionsArchivedAt: null,
       earlierSessionIds: [],
@@ -223,6 +227,13 @@ describe("factory API contracts (§10.1)", () => {
     );
     expect(FactoryTuning.safeParse({ reviewerFallback: "never" }).success).toBe(false);
     expect(FactoryTuning.safeParse({ reviewerModel: "" }).success).toBe(false);
+    // The WIP limit follows the agent limit until someone sets it; null sets it back.
+    expect(loop.tuning.maxOpenPrs).toBeNull();
+    const wip = FactoryTuning.parse({ maxOpenPrs: 4 });
+    expect(FactoryTuning.parse(JSON.parse(JSON.stringify(wip))).maxOpenPrs).toBe(4);
+    expect(FactoryTuning.safeParse({ maxOpenPrs: 0 }).success).toBe(false);
+    expect(FactoryTuningPatch.parse({ maxOpenPrs: null })).toEqual({ maxOpenPrs: null });
+    expect(FactoryTuningPatch.parse({ maxFixAttempts: 1 })).not.toHaveProperty("maxOpenPrs");
     expect(
       FactoryAllowLargeChangeRequest.parse({ itemId: "i1", reason: "Initial scaffold" }),
     ).toEqual({ itemId: "i1", reason: "Initial scaffold" });
@@ -248,6 +259,16 @@ describe("factory API contracts (§10.1)", () => {
     expect(verdict.security.concerns).toEqual([]);
     expect(ReviewVerdict.safeParse({ verdict: "maybe", summary: "x" }).success).toBe(false);
     expect(ReviewVerdict.parse(JSON.parse(JSON.stringify(verdict)))).toEqual(verdict);
+    expect(verdict.blockers).toBeUndefined();
+    // A request for changes blocked only by the reviewer's environment (#206).
+    const environment = ReviewVerdict.parse({
+      ...verdict,
+      verdict: "request_changes",
+      blockers: "environment",
+    });
+    expect(ReviewVerdict.parse(JSON.parse(JSON.stringify(environment)))).toEqual(environment);
+    expect(ReviewVerdictSubmission.parse(environment).blockers).toBe("environment");
+    expect(ReviewVerdict.safeParse({ ...verdict, blockers: "flaky" }).success).toBe(false);
     const decision = FactoryDecisionRequest.parse({
       question: "Polish index.html or migrate first?",
       decision: "Migrate first",
@@ -316,6 +337,84 @@ describe("factory API contracts (§10.1)", () => {
       lastTickAt: null,
     });
     expect(status.tuning.requireCi).toBe(true);
+    // A status from before the Factory view's stats still parses, with empty figures.
+    expect(status.stats).toEqual({
+      mergedToday: 0,
+      failedToday: 0,
+      revertedToday: 0,
+      medianMergeMs7d: null,
+      merged7d: 0,
+    });
+    // A status from before the WIP limit reads as not holding anything back.
+    expect(status.wip).toEqual({ openPrs: 0, limit: 2, holding: false });
+    const holding = FactoryStatus.parse({
+      ...status,
+      wip: { openPrs: 3, limit: 3, holding: true },
+    });
+    expect(FactoryStatus.parse(JSON.parse(JSON.stringify(holding)))).toEqual(holding);
+    expect(FactoryStatus.safeParse({ ...status, wip: { openPrs: 1, limit: 0 } }).success).toBe(
+      false,
+    );
+    const work = {
+      id: "i1",
+      title: "Add a counter",
+      workKey: "issue:3",
+      issue: item.issue,
+      pr: item.pr,
+      score: null,
+      sessionId: "s1",
+      stage: "failed",
+      step: "stopped",
+      source: "issue",
+      reason: "Checks failed",
+      note: null,
+      updatedAt: ts,
+    };
+    // Work items from before it lack the step time, merge and finish times, failure kind and
+    // check counts; a status without the view's uncapped list reads it as empty.
+    const before = FactoryStatus.parse({ ...status, recent: [work] });
+    expect(before.recent[0]).toMatchObject({
+      stepSince: null,
+      mergedAt: null,
+      finishedAt: null,
+      failureKind: null,
+      checks: null,
+      ownedPr: null,
+    });
+    expect(before.viewRecent).toEqual([]);
+    const owning = FactoryStatus.parse({
+      ...status,
+      viewRecent: [{ ...work, pr: null, ownedPr: item.pr }],
+    });
+    expect(FactoryStatus.parse(JSON.parse(JSON.stringify(owning)))).toEqual(owning);
+    expect(owning.viewRecent[0]?.ownedPr?.number).toBe(4);
+    const withChecks = FactoryStatus.parse({
+      ...status,
+      viewRecent: [{ ...work, checks: { passed: 5, failed: 1, total: 8 } }],
+    });
+    expect(FactoryStatus.parse(JSON.parse(JSON.stringify(withChecks)))).toEqual(withChecks);
+    expect(withChecks.viewRecent[0]?.checks).toEqual({ passed: 5, failed: 1, total: 8 });
+    expect(
+      FactoryStatus.safeParse({
+        ...status,
+        viewRecent: [{ ...work, checks: { passed: -1, failed: 0, total: 1 } }],
+      }).success,
+    ).toBe(false);
+    const viewed = FactoryStatus.parse({
+      ...status,
+      stats: {
+        mergedToday: 2,
+        failedToday: 1,
+        revertedToday: 1,
+        medianMergeMs7d: 5_400_000,
+        merged7d: 9,
+      },
+      recent: [{ ...work, stepSince: ts, finishedAt: ts, failureKind: "stuck" }],
+    });
+    expect(FactoryStatus.parse(JSON.parse(JSON.stringify(viewed)))).toEqual(viewed);
+    expect(
+      FactoryStatus.safeParse({ ...status, stats: { ...viewed.stats, failedToday: -1 } }).success,
+    ).toBe(false);
     // A status from before the merge queue still parses; its entries round-trip.
     expect(status.pullRequests).toEqual([]);
     const pullRequests = [

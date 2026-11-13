@@ -57,7 +57,7 @@ export interface SessionServiceDeps extends RunnerDeps {
 }
 
 /** Preferred providers when the choice is `auto` (first ready one wins). */
-const AUTO_ORDER = ["claude", "codex", "opencode"];
+const AUTO_ORDER = ["claude", "codex", "opencode", "cursor"];
 
 const BUSY = new Set(["running", "waiting"]);
 const NOT_STARTED = new Set(["created", "queued", "starting"]);
@@ -388,9 +388,12 @@ export class SessionService {
 
   /**
    * Re-open a session whose turn was cut off by a runner restart and tell the agent to carry
-   * on (§4.2). Resumes through the provider's resume token.
+   * on (§4.2). Resumes through the provider's resume token. A message already on its way
+   * re-opens it (a PM or the factory wrote to it first), so nothing is sent: a second resume
+   * would open the conversation twice.
    */
   async continueAfterRestart(id: string, text: string): Promise<void> {
+    if (this.delivering.has(id)) return;
     const session = this.deps.repo.get(id);
     await this.sendNow(session, { text, attachments: [], from: "codeden" }, "codeden");
   }

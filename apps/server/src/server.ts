@@ -58,6 +58,11 @@ export interface StartServerOptions {
   runner?: RunnerLaunchConfig | false;
   /** How long to wait for a runner this server spawns (tests shorten the slow-start note). */
   runnerStartTimeouts?: RunnerStartTimeouts;
+  /**
+   * No command to the runner gives up sooner than this (tests on a busy machine raise it above
+   * the product's 5-30 s deadlines). Default: each command's own deadline.
+   */
+  runnerRequestTimeoutFloorMs?: number;
   /** Load the scripted Fake provider in the runner (development and tests). */
   enableFakeProvider?: boolean;
   /**
@@ -187,6 +192,7 @@ export async function startServer(opts: StartServerOptions): Promise<RunningServ
       else browserBridge.onStream(stream);
     },
     onReady: (runnerId) => void services.recovery.onRunnerReady(runnerId),
+    requestTimeoutFloorMs: opts.runnerRequestTimeoutFloorMs,
     log,
   });
   const runnerStatus = () => runners.status();

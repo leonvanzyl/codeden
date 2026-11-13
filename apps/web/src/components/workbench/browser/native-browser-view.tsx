@@ -22,12 +22,23 @@ const PLACEHOLDER_LINGER_MS = 120;
  * A native view paints over the whole page, so the view hides whenever a menu, dialog, the
  * palette, a tooltip or a toast overlaps it, and while the panel is hidden. While hidden for an
  * overlay it shows a still of the page in its place: the menu sits on a picture of the page
- * instead of over an empty panel.
+ * instead of over an empty panel. `covered` hides it the same way for something the panel itself
+ * lays over the page (the page's own dialog).
  */
-export function NativeBrowserView({ sessionId, title }: { sessionId: string; title: string }) {
+export function NativeBrowserView({
+  sessionId,
+  title,
+  covered: coveredByPanel = false,
+}: {
+  sessionId: string;
+  title: string;
+  covered?: boolean;
+}) {
   const ref = useRef<HTMLDivElement>(null);
   const [placeholder, setPlaceholder] = useState<string | null>(null);
   const setShown = useUiStore((s) => s.setNativeBrowserShown);
+  const coveredRef = useRef(coveredByPanel);
+  coveredRef.current = coveredByPanel;
 
   useEffect(() => {
     const el = ref.current;
@@ -65,7 +76,9 @@ export function NativeBrowserView({ sessionId, title }: { sessionId: string; tit
         rect.height >= 2 &&
         document.visibilityState === "visible" &&
         (el.checkVisibility?.() ?? el.offsetParent !== null);
-      const overlap = visible && isOccluded(rect, overlayRects(overlayElements(document, el)));
+      const overlap =
+        visible &&
+        (coveredRef.current || isOccluded(rect, overlayRects(overlayElements(document, el))));
       if (overlap !== covered) {
         covered = overlap;
         clearTimeout(linger);

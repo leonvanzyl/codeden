@@ -41,9 +41,18 @@ export interface SetupServiceDeps {
   onChecked?: (status: SetupStatus) => void;
 }
 
-const ORDER: SetupToolId[] = ["claude", "codex", "opencode", "gh", "git", "browser", "node"];
+const ORDER: SetupToolId[] = [
+  "claude",
+  "codex",
+  "opencode",
+  "cursor",
+  "gh",
+  "git",
+  "browser",
+  "node",
+];
 /** Agent providers: setup is ready when at least one is installed and signed in. */
-export const PROVIDER_CHECKS: readonly SetupToolId[] = ["claude", "codex", "opencode"];
+export const PROVIDER_CHECKS: readonly SetupToolId[] = ["claude", "codex", "opencode", "cursor"];
 
 /**
  * First-run setup and re-checks on launch (§14). Runs every detection in parallel with a
@@ -112,7 +121,8 @@ export class SetupService {
     const userHome = this.deps.userHome;
     const env: CheckEnv = {
       exec: this.deps.exec,
-      locate: this.deps.locate ?? ((name) => findExecutable(name, { home: userHome })),
+      locate:
+        this.deps.locate ?? ((name, opts) => findExecutable(name, { home: userHome, ...opts })),
       shell: this.shell(),
       platform: this.deps.platform ?? process.platform,
       nodeVersion: this.deps.nodeVersion ?? process.version,

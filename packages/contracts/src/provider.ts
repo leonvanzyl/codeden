@@ -196,6 +196,11 @@ export const SessionOptions = z.object({
   mcpServers: z.array(McpServerConfig).default([]),
   /** Extra env vars for the agent process (CodeDen secrets are never included). */
   env: z.record(z.string(), z.string()).optional(),
+  /**
+   * False: the runner leaves `CI` out of the agent's environment instead of adding `CI=true`
+   * (the session's project turned it off, `Project.agentCiEnv`, §4.2). Absent means true.
+   */
+  ciEnv: z.boolean().optional(),
   /** Extra directories the agent may read/write. */
   additionalDirectories: z.array(z.string()).default([]),
   /**

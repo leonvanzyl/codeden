@@ -38,6 +38,20 @@ export function safeFileName(name: string): string {
   return `${stem || "file"}${ext}`;
 }
 
+/** The names files are published under: `safeFileName`, then `-2`, `-3`, ... for repeats. */
+export function evidenceFileNames(names: string[]): string[] {
+  const used = new Set<string>();
+  return names.map((name) => {
+    let fileName = safeFileName(name);
+    for (let i = 2; used.has(fileName); i++) {
+      const ext = extname(fileName);
+      fileName = `${fileName.slice(0, fileName.length - ext.length)}-${i}${ext}`;
+    }
+    used.add(fileName);
+    return fileName;
+  });
+}
+
 /**
  * A blob URL pinned to the commit with `?raw=true`. GitHub serves it to anyone who can read the
  * repository (redirecting to a signed raw URL), so images render inline in issue and PR comments
@@ -62,14 +76,9 @@ export async function commitEvidence(
   message: string,
 ): Promise<{ commitSha: string; files: PublishedEvidence[] }> {
   const { owner, repo: name } = repo;
-  const used = new Set<string>();
-  const entries = files.map((file) => {
-    let fileName = safeFileName(file.name);
-    for (let i = 2; used.has(fileName); i++) {
-      const ext = extname(fileName);
-      fileName = `${fileName.slice(0, fileName.length - ext.length)}-${i}${ext}`;
-    }
-    used.add(fileName);
+  const fileNames = evidenceFileNames(files.map((file) => file.name));
+  const entries = files.map((file, i) => {
+    const fileName = fileNames[i] ?? safeFileName(file.name);
     return { ...file, path: `${folder}/${fileName}`, fileName };
   });
 

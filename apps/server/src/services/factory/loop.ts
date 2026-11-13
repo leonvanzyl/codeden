@@ -10,17 +10,20 @@ import { earliestUntil, untilText } from "./availability";
 import { archiveFinished } from "./cleanup";
 import { budgetSpend, type FactoryContext, visionOf } from "./context";
 import { classifyPending, intakeFailedChecks, intakeIssues } from "./intake";
+import { openPrFiles, scheduleOrder } from "./overlap";
 import { advanceOwned } from "./owned";
-import { budgetExceeded, freeSlots, localDay, mayBuild, queueOrder } from "./policy";
+import { budgetExceeded, localDay, mayBuild, queueOrder } from "./policy";
 import { advanceBuilding, advanceWatching } from "./progress";
 import { advanceQueue } from "./queue";
 import { closeReplacedPrs } from "./rebuild";
 import { recoverInfraFailures } from "./recover";
 import { advanceScout } from "./scout";
+import { claimSlot } from "./slots";
 import { OWNED_STAGES } from "./store";
 import { mayAutoMerge } from "./trust";
 import { recoverTurnRaceFailures } from "./turn-race";
 import { advanceVerifying } from "./verify";
+import { finishesOpenWork, wipOf, wipText } from "./wip";
 
 export { FACTORY_LABEL } from "./intake";
 
@@ -37,7 +40,9 @@ export interface TickHooks {
  *
  * Order: work in flight moves first (watch, build, verify), finished work's sessions are
  * archived, then intake (new issues, failed checks on main), Identify type, the free agents
- * take the queue, and last the dark factory's scout gets whatever agents are still free.
+ * take the queue, and last the dark factory's scout gets whatever agents are still free. Who
+ * gets a free agent is decided by `slots.ts` (reviews, then fixes and rebases, then builds,
+ * then the scout), whatever the order the steps run in.
  */
 export async function runTick(
   ctx: FactoryContext,
@@ -70,8 +75,12 @@ export async function runTick(
 
   // Who is installed and signed in: detected again in the background every few minutes.
   ctx.sessions.refreshAvailability();
-  // Items that failed for a reason outside their code go back by themselves.
-  loop = await recoverInfraFailures(ctx, project, loop);
+  // Work that waited for an agent on the last tick gets the free slots first (`slots.ts`).
+  ctx.slots.beginTick(projectId);
+  // Items that failed for a reason outside their code go back by themselves (builders that
+  // must carry on wait until after the reviews, fixes and rebases, below).
+  const failedAtStart = new Set(ctx.store.items(projectId, ["failed"]).map((i) => i.id));
+  loop = await recoverInfraFailures(ctx, project, loop, { resume: false });
   // Items already in flight move on even while paused (merges stay blocked, reverts excepted).
   // Watch merges first, then builds, then verification, so a PR found while building is
   // verified in the same step and a fresh merge is watched from the next one. Then the merge
@@ -105,8 +114,9 @@ export async function runTick(
   loop = await intakeIssues(ctx, project, loop);
   loop = await intakeFailedChecks(ctx, project, loop);
   await classifyPending(ctx, project);
-  // Items whose builder was marked failed by a message racing its turn go back to building,
-  // ahead of new work for the free agents.
+  // Builders of work that failed for a reason outside its code, or whose builder was marked
+  // failed by a message racing its turn, carry on: ahead of new work for the free agents.
+  loop = await recoverInfraFailures(ctx, project, loop, { resume: true, only: failedAtStart });
   await recoverTurnRaceFailures(ctx, project, loop);
   await assignAgents(ctx, project, loop);
   if (project.autonomyMode === "dark_factory") loop = await advanceScout(ctx, project, loop);
@@ -143,15 +153,50 @@ function deriveState(ctx: FactoryContext, projectId: string, loop: FactoryLoop):
   return "idle";
 }
 
+/** Notes the scheduler writes on queued items (replaced or cleared as things change). */
+const HOLD_NOTE = /^(Waiting: finishing open work|Deferred: likely overlaps)/;
+
+/** Say why a queued item waits (`note`), or clear such a note once it no longer holds (null). */
+function scheduleNote(ctx: FactoryContext, itemId: string, note: string | null): void {
+  ctx.store.updateItem(
+    itemId,
+    (i) => {
+      if (note) return { ...i, note };
+      return i.note && HOLD_NOTE.test(i.note) ? { ...i, note: null } : i;
+    },
+    { touch: false },
+  );
+}
+
+/** While auto-merge is on: merges today plus work in flight stay under the daily merge cap. */
+function underMergeCap(
+  ctx: FactoryContext,
+  project: Project,
+  loop: FactoryLoop,
+  item: FactoryItem,
+) {
+  if (!mayAutoMerge(item, project.factoryLimits)) return true;
+  const inFlight = ctx.store
+    .items(project.id, ["building", "verifying"])
+    .filter((i) => mayAutoMerge(i, project.factoryLimits)).length;
+  return mayBuild(loop.mergesToday, inFlight, project.factoryLimits);
+}
+
 /**
- * The orchestrator of the swarm: give queued items to free agents, within the agent limit and,
- * while auto-merge is on, the daily merge cap. An item whose issue was closed meanwhile stops.
+ * The orchestrator of the swarm: give queued items to free agents, within the agent limit (new
+ * builds come after reviews, fixes and rebases, `slots.ts`), the work-in-progress limit
+ * (`wip.ts`) and, while auto-merge is on, the daily merge cap. Items that clearly overlap an open
+ * PR wait behind those that don't (`overlap.ts`). An item whose issue was closed meanwhile stops.
  */
 async function assignAgents(ctx: FactoryContext, project: Project, loop: FactoryLoop) {
-  const queue = ctx.store.items(project.id, ["backlog"]).sort(queueOrder);
+  const wip = wipOf(ctx, project, loop);
+  const queue = scheduleOrder(
+    ctx.store.items(project.id, ["backlog"]).sort(queueOrder),
+    openPrFiles(ctx, project),
+  );
   const vision = visionOf(project).text;
-  for (const item of queue) {
-    if (freeSlots(ctx.sessions.activeCount(project.id), project.factoryLimits) === 0) break;
+  let full = false;
+  for (const { item, overlap } of queue) {
     if (item.issue && ctx.github.issue(project.id, item.issue.number)?.state === "closed") {
       ctx.store.updateItem(item.id, (i) => ({
         ...i,
@@ -161,13 +206,20 @@ async function assignAgents(ctx: FactoryContext, project: Project, loop: Factory
       }));
       continue;
     }
-    if (mayAutoMerge(item, project.factoryLimits)) {
-      const inFlight = ctx.store
-        .items(project.id, ["building", "verifying"])
-        .filter((i) => mayAutoMerge(i, project.factoryLimits)).length;
-      if (!mayBuild(loop.mergesToday, inFlight, project.factoryLimits)) continue;
+    if (wip.holding && !finishesOpenWork(ctx, item)) {
+      scheduleNote(ctx, item.id, `Waiting: ${wipText(wip).replace(/^F/, "f")}`);
+      continue;
     }
-    await startBuilder(ctx, project, item, vision, loop);
+    if (!full && underMergeCap(ctx, project, loop, item)) {
+      if (claimSlot(ctx, project, "build", `build:${item.id}`, { ordered: true })) {
+        await startBuilder(ctx, project, item, vision, loop);
+        continue;
+      }
+      full = true;
+    }
+    const deferred =
+      overlap && `Deferred: likely overlaps open PR #${overlap.pr} (${overlap.path})`;
+    scheduleNote(ctx, item.id, deferred || null);
   }
 }
 
