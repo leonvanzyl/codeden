@@ -42,6 +42,7 @@ import { writeDigest } from "./digest";
 import type { FactoryGithub } from "./github-port";
 import { allowLargeChange } from "./large-change";
 import { runTick } from "./loop";
+import { PrFiles } from "./overlap";
 import { reportReproduction, submitAnalysis } from "./pipeline";
 import { localDay } from "./policy";
 import { runScoutNow } from "./scout";
@@ -52,6 +53,7 @@ import {
   LENS_WORK_KEY_PREFIX,
   SCOUT_WORK_KEY,
 } from "./sessions";
+import { SlotBoard } from "./slots";
 import { buildStatus } from "./status";
 import { FactoryStore } from "./store";
 import { answerProviderQuestion, recordDecision, unattendedSession } from "./unattended";
@@ -136,6 +138,8 @@ export class FactoryService {
       exec: deps.exec,
       complete: deps.complete ?? (async () => null),
       archiveSessions: (ids) => this.archiver.push(ids),
+      slots: new SlotBoard(),
+      prFiles: new PrFiles(),
       now: deps.options?.now ?? (() => new Date()),
       ciGraceMs: deps.options?.ciGraceMs ?? 10 * 60_000,
       log: deps.log,

@@ -72,6 +72,13 @@ describe("Run scout now (§10.1)", () => {
     expect(blocked({}, {}, { activeSessions: 2 })).toBe(
       "No free agent: all 2 are working (Agents at once).",
     );
+    // The free agent goes to work waiting for one; at the WIP limit no round starts.
+    expect(blocked({}, {}, { waitingForAgent: 1 })).toBe(
+      "No free agent: reviews, fixes and builds waiting for one come first.",
+    );
+    expect(blocked({}, {}, { wip: { openPrs: 2, limit: 2, holding: true } })).toBe(
+      "Finishing open work (2 of 2 PRs open): the scout finds new work once open pull requests merge.",
+    );
     // A paused loop is named before the agent limit.
     expect(blocked({}, { state: "paused", pausedReason: null }, { activeSessions: 2 })).toBe(
       "The loop is paused.",

@@ -3,7 +3,6 @@ import { errorMessage } from "../errors";
 import type { FactoryContext } from "./context";
 import type { FactoryPr } from "./github-port";
 import { prDecidedOutside } from "./merge";
-import { freeSlots } from "./policy";
 import {
   advanceConflicting,
   baseBranchOf,
@@ -69,6 +68,7 @@ export async function advanceOwned(
     note(ctx, item, `Could not read the PR: ${errorMessage(error)}`);
     return loop;
   }
+  ctx.prFiles.set(project.id, pr.ref.number, pr.files);
   const at = ctx.now().toISOString();
   const current = ctx.store.updateItem(item.id, (i) => ({
     ...i,
@@ -85,23 +85,13 @@ export async function advanceOwned(
     }
     return loop;
   }
-  const branch = baseBranchOf(project);
   // Rebasing work a person will merge spends an agent turn: not while paused, and only on a
-  // free agent slot (a rebuild only queues the work, so it needs none).
-  if (rebaseAsks(current) < MAX_REBASE_ASKS) {
-    if (loop.state === "paused") {
-      note(ctx, current, `Merge conflicts with ${branch}: waiting while the loop is paused`);
-      return loop;
-    }
-    const agent = prAgent(ctx, current);
-    const waitingOnTurn = agent && isBusy(agent);
-    if (
-      !waitingOnTurn &&
-      freeSlots(ctx.sessions.activeCount(project.id), project.factoryLimits) === 0
-    ) {
-      note(ctx, current, `Merge conflicts with ${branch}: waiting for a free agent to rebase it`);
-      return loop;
-    }
+  // free agent slot, which `advanceConflicting` claims (a rebuild only queues the work, so it
+  // needs none).
+  if (rebaseAsks(current) < MAX_REBASE_ASKS && loop.state === "paused") {
+    const branch = baseBranchOf(project);
+    note(ctx, current, `Merge conflicts with ${branch}: waiting while the loop is paused`);
+    return loop;
   }
   return advanceConflicting(ctx, project, loop, current, pr);
 }

@@ -27,17 +27,25 @@ Issue ─► Identify type ┼─ Feature:  Analyze ───► Implement ─�
 
 1. **Issue.** A new issue on GitHub (opened after you switched the mode on, or labelled `codeden-factory`) becomes a work item. Only issues by [trusted authors](#who-the-factory-works-for) are taken on.
 2. **Identify type.** One call to the [utility model](usage-and-costs.md) classifies it as a **bug**, a **feature** or a **docs** change. A GitHub label settles it without a model call (`bug`, `enhancement`/`feature`, `documentation`/`docs`); with no model available, keywords decide. The factory labels the issue (`factory:bug`, `factory:feature`, `factory:docs`) and comments which pipeline it goes down.
-3. **A free agent takes it.** The server is the orchestrator of the swarm: it hands queued items to agents as slots free up, within **Agents at once** (`maxConcurrentSessions`). A fix for a failing check on the default branch goes first, then the issues you and trusted authors filed, oldest first, then the issues the [scout](#the-dark-factory) filed, by the priority it gave them. Each item gets its own agent session in its own worktree.
+3. **A free agent takes it.** The server is the orchestrator of the swarm: it hands queued items to agents as slots free up, within **Agents at once** (`maxConcurrentSessions`), once the open work waiting for an agent has one ([finish before starting](#finish-before-starting)). A fix for a failing check on the default branch goes first, then the issues you and trusted authors filed, oldest first, then the issues the [scout](#the-dark-factory) filed, by the priority it gave them. Each item gets its own agent session in its own worktree.
 4. **The pipeline runs.**
    - **Bug: Reproduce.** The agent writes a failing test (or a probe) that shows the bug and reports it with `factory_report_reproduction`. A bug that doesn't reproduce stops here, with a comment on the issue asking for what's missing.
    - **Bug: Create fix.** The same agent makes the failing test pass and keeps it as a regression test.
    - **Feature: Analyze.** The agent checks whether the request already works, fits the vision and the architecture, and writes a spec with acceptance criteria (`factory_submit_analysis`). The spec is posted on the issue. A request that is already possible, unclear or out of scope stops here with a comment.
    - **Feature: Implement.** The same agent builds it to the spec, with tests and docs.
    - **Docs: Implement docs change.** No reproduction, no analysis, and no agent review as long as the change touches only documentation.
-5. **Review.** An **independent reviewer session**, on a different provider from the author when one is available, checks the pull request against the issue, the spec and the vision. `request_changes`, or any failed merge check, sends the work back to the author: the **revise loop** (up to `maxFixAttempts` rounds, default 2).
+5. **Review.** An **independent reviewer session**, on a different provider from the author when one is available, checks the pull request against the issue, the spec and the vision. `request_changes`, or any failed merge check, sends the work back to the author: the **revise loop** (up to `maxFixAttempts` rounds, default 2). CI on the pull request's head is the authority for the full test suite. A reviewer whose own checkout can't run the tests (a broken install, timeouts under load) marks its verdict `blockers: "environment"`. That verdict never goes to the author: the reviewer gets the CI result and reviews again on the merits. If its environment stops it a second time, the item fails as an infrastructure failure, which the factory recovers by itself without using a revise round, and the next reviewer works in a clean worktree on the PR's head.
 6. **Merge.** With every check green the pull request is **ready for you**: an inbox item, a comment on the PR, and the item waits at Merge until you merge it on GitHub. With **auto-merge** on, CodeDen squash-merges trusted work itself and watches CI on the default branch afterwards (a regression opens an automatic revert PR and pauses the loop).
 
 Every pull request carries its **test results** (a `## Test results` section in the description, or the raw output attached with `attach_evidence`) and, when UI files changed, **screenshots**. Both are merge checks.
+
+### Finish before starting
+
+Every factory PR still open when another one merges may need a rebase and a fresh look, so the factory finishes open work before it starts more:
+
+- **Who gets a free agent.** When an agent is free it goes, in this order, to: a reviewer for a PR whose CI passed; a rebase or conflict resolution, or a builder's revise round; a reviewer for a PR whose CI is still running; a builder carrying on after a failure outside its code, then a new build from the queue; and last the scout and its area reviewers. What waited longer goes first; the queue keeps its own order. Work in progress is never interrupted, only the next free agent is decided this way. Revise rounds and rebase requests wake an agent too, so they wait for a free one instead of going past **Agents at once**.
+- **PRs open at most** (`maxOpenPrs`, by default the same as **Agents at once**). With this many factory PRs open (being checked, reviewed, revised, rebased, queued or waiting for you to merge them), no new build starts from the queue and the scout files nothing; free agents go to reviews, fixes and rebases until a PR merges or closes. A fix for a failing check on the default branch still starts, because every open PR waits on it. PRs of failed or escalated work, which wait for you, don't count (work that failed for a reason outside its code goes back by itself, so its PR does). The factory panel and the Factory view say **Finishing open work (2 of 2 PRs open)** while it holds work back, and queued items say why they wait.
+- **Work that touches the same files waits its turn.** Before a queued item starts, the paths named in its issue (title, body, acceptance criteria) are compared with the files the factory's open PRs change. An item that clearly overlaps one ("Deferred: likely overlaps open PR #12 (src/counter.ts)") goes behind items that don't, and still starts when nothing else is waiting.
 
 ### The pipeline on the dashboard
 
@@ -103,9 +111,10 @@ When fewer than **Review when fewer than** (`minBacklog`, default 2) items wait 
 The rules that keep it cheap are enforced by the server, not left to the agents:
 
 - **One scout and at most one area reviewer per review area, ever.** They are long-lived: the next round sends them a message instead of starting new sessions, so they keep what they learned and don't re-read the codebase.
-- **At most `discoveryPerRound` review areas per round**, however many the scout asks for, and only as many as there are free agent slots: builders and reviewers come first. The scout ends its turn once it has planned, so its own slot goes to an area reviewer. When an area gets no reviewer, `factory_plan_round` tells the scout why (not an allowed area, asked for twice, over the round's limit, or no free slot under **Agents at once**).
+- **At most `discoveryPerRound` review areas per round**, however many the scout asks for, and only as many as there are free agent slots: reviews, fixes, rebases and builds waiting for an agent come first. The scout ends its turn once it has planned, so its own slot goes to an area reviewer. When an area gets no reviewer, `factory_plan_round` tells the scout why (not an allowed area, asked for twice, over the round's limit, or no free slot under **Agents at once**).
 - **A scheduled round only starts when the queue runs low** and the interval has passed; at most `maxIssuesPerRound` issues come out of it; a round that runs over three hours is closed.
-- **Run scout now** skips the interval and the threshold, nothing else. It's disabled, with the reason in its tooltip, while a round is running, when no agent slot is free, while the loop is paused or over today's budget, or while a kill switch is on. The next scheduled round counts its interval from the end of the manual one.
+- **No round and no filing at the work-in-progress limit** ([PRs open at most](#finish-before-starting)). A round already running keeps its area reviewers' findings and files them once a PR has merged; a round without area reviewers reviews then. The time a round waits doesn't count against its three hours.
+- **Run scout now** skips the interval and the threshold, nothing else. It's disabled, with the reason in its tooltip, while a round is running, when no agent slot is free (or other work waits for the free ones), at the work-in-progress limit, while the loop is paused or over today's budget, or while a kill switch is on. The next scheduled round counts its interval from the end of the manual one.
 - The scout and its area reviewers hold agent slots and count against the daily budget like every other factory session.
 
 ### Nobody waits on you in a dark factory
@@ -259,16 +268,17 @@ Settings are **enforced by the server**, never left to agent judgement. Open the
 | Merge automatically (`autoMerge`) | off | Off: every PR waits for you. On: trusted work merges once every check passes. Work let in from an untrusted author always waits |
 | Trusted authors (`trustedAuthors`) | none | GitHub logins whose issues are taken on, besides the account CodeDen uses |
 | Daily budget (USD and/or tokens) | required | The loop pauses until the next day when today's spend reaches it |
-| Agents at once (`maxConcurrentSessions`) | 2 | The swarm: builders, reviewers, the scout and its area reviewers share it |
+| Agents at once (`maxConcurrentSessions`) | 2 | The swarm: builders, reviewers, the scout and its area reviewers share it; reviews, fixes and rebases get a free agent first |
 | Auto-merges per day (`maxMergesPerDay`) | 5 | With auto-merge on, also caps the builds in flight |
 | Pause after failures (`pauseAfterConsecutiveFailures`) | 3 | Failed merge checks or reverts in a row pause the loop |
 | Protected paths | none | Added to the vision's protected areas |
 | Allow deploy and release changes (`allowDeploys`) | off | While off, deploy files (`.github/workflows/*deploy*`, `*release*`, `*publish*`, `Dockerfile`, `fly.toml`, `vercel.json`, `netlify.toml`) are protected |
 
-**Tuning.** The **Merge checks** and (in a dark factory) **The scout** sections of the settings cover every knob below except `areas`, `builderProvider` and `idleGraceMin`, which are set through the API's `tuning` field. Saving changes only the knobs you send; the rest keep their saved values.
+**Tuning.** **PRs open at most**, the **Merge checks** and (in a dark factory) **The scout** sections of the settings cover every knob below except `areas`, `builderProvider` and `idleGraceMin`, which are set through the API's `tuning` field. Saving changes only the knobs you send; the rest keep their saved values.
 
 | Setting | In the settings | Default |
 |---|---|---|
+| `maxOpenPrs` | PRs open at most (the [work-in-progress limit](#finish-before-starting); empty: the same as Agents at once) | `null` (Agents at once) |
 | `maxChangedLines` / `maxChangedFiles` | Merge checks: Largest change (lines) / Most files changed | `5000` / no limit (`null` turns either off) |
 | `maxFixAttempts` | Merge checks: Revise rounds (after a review asking for changes or a failed check; then the item fails) | `2` |
 | `watchTimeoutMin` | Merge checks: Watch main CI (minutes) (after an automatic merge; a failure while watched reverts it) | `120` |

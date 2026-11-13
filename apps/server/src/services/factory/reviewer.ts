@@ -5,7 +5,6 @@ import { failReview } from "./failures";
 import type { FactoryPr } from "./github-port";
 import { stoppedSinceNudge } from "./idle";
 import { failItem } from "./outcomes";
-import { freeSlots } from "./policy";
 import { REVIEWER_NUDGE, reReviewPrompt } from "./prompts";
 import { recheckPrompt } from "./prompts-integration";
 import {
@@ -17,7 +16,10 @@ import {
 } from "./provider-failure";
 import { baseBranchOf } from "./rebase";
 import { recheckOf, recheckSent, recheckSentFor, withoutRecheckRequest } from "./recheck";
+import { CLEAN_REVIEW, environmentStrikes, replaceBlockedReviewer } from "./review-environment";
 import { pickReviewer, type ReviewerChoice, type ReviewerWait } from "./reviewer-choice";
+import { isBusy } from "./sessions";
+import { claimSlot, reviewTier } from "./slots";
 import { mayAutoMerge } from "./trust";
 
 /**
@@ -35,7 +37,8 @@ const MAX_REVIEWER_RESTARTS = 3;
 /**
  * Where a new reviewer works: in the PR agent's worktree while it is there (offline, on the
  * PR branch), otherwise in a fresh worktree on the PR's head, fetched by CodeDen (a revert PR
- * opened through the API, an author whose session is gone, a worktree cleanup removed).
+ * opened through the API, an author whose session is gone, a worktree cleanup removed, or an
+ * earlier reviewer whose environment there couldn't verify the change).
  */
 function reviewHead(
   ctx: FactoryContext,
@@ -44,7 +47,8 @@ function reviewHead(
   pr: FactoryPr,
 ): { headBranch: string; baseBranch: string } | null {
   const builder = item.builderSessionId ? ctx.repo.find(item.builderSessionId)?.session : undefined;
-  if (builder?.worktreePath && !builder.worktreeRemovedAt) return null;
+  const shared = builder?.worktreePath && !builder.worktreeRemovedAt;
+  if (shared && !item.nudges[CLEAN_REVIEW]) return null;
   return { headBranch: pr.headBranch, baseBranch: baseBranchOf(project) };
 }
 
@@ -100,8 +104,20 @@ async function startReviewer(
   return { sessionId: res.sessionId, provider: choice.provider, note: choice.note };
 }
 
-const noFreeAgent = (ctx: FactoryContext, project: Project) =>
-  freeSlots(ctx.sessions.activeCount(project.id), project.factoryLimits) === 0;
+/**
+ * A slot for the item's review, ahead of fixes, rebases and builds once its CI passed
+ * (`slots.ts`). `wake` is the reviewer session a message wakes, when it is between turns; a
+ * message to one mid-turn waits behind that turn and needs no slot.
+ */
+function reviewSlot(
+  ctx: FactoryContext,
+  project: Project,
+  item: FactoryItem,
+  wake?: Session,
+): boolean {
+  if (wake && isBusy(wake)) return true;
+  return claimSlot(ctx, project, reviewTier(item.checks), `review:${item.id}`, { wake: wake?.id });
+}
 
 /**
  * Start the independent reviewer (another provider when possible), ask it to look again, or
@@ -120,13 +136,21 @@ export async function ensureReviewer(
   if (item.review) return item;
   if (item.reviewerSessionId) {
     if (!item.nudges.rereview_pending) return item;
+    const reviewer = ctx.repo.find(item.reviewerSessionId)?.session;
+    if (!reviewSlot(ctx, project, item, reviewer)) {
+      return ctx.store.updateItem(
+        item.id,
+        (i) => ({ ...i, note: "Waiting for a free agent for the re-review" }),
+        { touch: false },
+      );
+    }
     await ctx.sessions.message(item.reviewerSessionId, reReviewPrompt(item));
     return ctx.store.updateItem(item.id, (i) => {
       const { rereview_pending: _p, ...rest } = i.nudges;
       return { ...i, nudges: { ...rest, rereview_sent: ctx.now().toISOString() } };
     });
   }
-  if (noFreeAgent(ctx, project)) {
+  if (!reviewSlot(ctx, project, item)) {
     return ctx.store.updateItem(item.id, (i) => ({
       ...i,
       note: "Waiting for a free agent for the review",
@@ -173,6 +197,16 @@ async function requestRecheck(
     ? ctx.repo.find(item.reviewerSessionId)?.session
     : undefined;
   if (reviewer && reviewer.status !== "failed" && !reviewer.archivedAt) {
+    if (!reviewSlot(ctx, project, item, reviewer)) {
+      return ctx.store.updateItem(
+        item.id,
+        (i) => ({
+          ...i,
+          note: "Rebased after the review: waiting for a free agent to re-check the resolution",
+        }),
+        { touch: false },
+      );
+    }
     await ctx.sessions.message(reviewer.id, recheckPrompt(item, oldHead, newHead, base));
     return ctx.store.updateItem(item.id, (i) => {
       const { reviewer: _nudged, ...nudges } = i.nudges;
@@ -183,7 +217,7 @@ async function requestRecheck(
       };
     });
   }
-  if (noFreeAgent(ctx, project)) {
+  if (!reviewSlot(ctx, project, item)) {
     return ctx.store.updateItem(item.id, (i) => ({
       ...i,
       note: "Rebased after the review: waiting for a free agent to re-check the resolution",
@@ -255,6 +289,15 @@ export async function reviewerStalled(
     return loop;
   }
   if (stoppedSinceNudge(s, nudged, ctx.now(), loop.tuning)) {
+    // Its environment had already kept it from verifying the change: no revise round for that.
+    if (environmentStrikes(item) > 0) {
+      return replaceBlockedReviewer(
+        ctx,
+        loop,
+        item,
+        "ended without a verdict after its local environment couldn't verify the change",
+      );
+    }
     return failReview(ctx, project, loop, item, "The reviewer ended without a verdict");
   }
   return loop;

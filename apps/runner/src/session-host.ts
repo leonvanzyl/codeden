@@ -12,6 +12,7 @@ import {
 import { CommandError } from "./errors";
 import { createCheckpoint, nextCheckpointIndex } from "./git/checkpoints";
 import { isWorkTree } from "./git/exec";
+import { agentSessionOptions } from "./session-env";
 
 export { CommandError };
 
@@ -86,7 +87,7 @@ export class SessionHost {
     this.emit({ kind: "session.process", sessionId: cmd.sessionId, state: "starting" });
     let session: ProviderSession;
     try {
-      session = await adapter.openSession(cmd.options);
+      session = await adapter.openSession(agentSessionOptions(cmd.options));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.emit({
