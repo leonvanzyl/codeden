@@ -123,21 +123,16 @@ export class SessionLauncher {
         workspaceFallback: fallback,
       }));
     }
-    const result = await runner.request(
+    const result = await this.open(
+      runner,
       {
-        name: "session.start",
-        sessionId,
-        providerId: session.provider,
-        options: this.sessionOptions({
-          ...session,
-          cwd: ws.cwd,
-          worktreePath: ws.worktreePath,
-          branch: ws.branch,
-          baseBranch: ws.baseBranch,
-        }),
-        input: withSetupNote(opts.input, ws.setupNote),
+        ...session,
+        cwd: ws.cwd,
+        worktreePath: ws.worktreePath,
+        branch: ws.branch,
+        baseBranch: ws.baseBranch,
       },
-      START_TIMEOUT_MS,
+      withSetupNote(opts.input, ws.setupNote),
     );
     repo.update(sessionId, (s) => ({
       ...s,
@@ -162,16 +157,7 @@ export class SessionLauncher {
     const runner = runnerForSession(this.deps, session.id);
     await this.requireRunner(runner);
     const { session: current, setupNote } = await this.restoreWorktree(session);
-    const result = await runner.request(
-      {
-        name: "session.start",
-        sessionId: current.id,
-        providerId: current.provider,
-        options: this.sessionOptions(current),
-        input: withSetupNote(input, setupNote),
-      },
-      START_TIMEOUT_MS,
-    );
+    const result = await this.open(runner, current, withSetupNote(input, setupNote));
     this.deps.repo.update(session.id, (s) => ({
       ...s,
       resumeToken: result.resumeToken ?? s.resumeToken,
@@ -225,25 +211,48 @@ export class SessionLauncher {
   }
 
   /**
-   * Provider options for a start or resume: model, effort, autonomy, plan mode, cwd, the
-   * CodeDen system prompt, and CodeDen's MCP server through the runner's local proxy with a
-   * freshly minted session token (minting revokes the previous one). A session still planning
-   * reopens in plan mode; one whose plan was approved reopens at its permission level.
+   * Open the provider session on the runner (`session.start`) with a freshly minted MCP token.
+   * Only once the runner has started it are the session's other tokens revoked: their
+   * processes are gone. An open that fails revokes nothing, since the process opened before it
+   * may still be running with its token (a second resume racing the first after a restart).
    */
-  sessionOptions(session: Session): SessionOptions {
+  private async open(runner: RunnerPort, session: Session, input: UserInput | undefined) {
+    const token = runner.mcpProxyUrl()
+      ? this.deps.tokens.mint({
+          role: session.role,
+          sessionId: session.id,
+          projectId: session.projectId,
+        })
+      : null;
+    const result = await runner.request(
+      {
+        name: "session.start",
+        sessionId: session.id,
+        providerId: session.provider,
+        options: this.sessionOptions(session, token),
+        input,
+      },
+      START_TIMEOUT_MS,
+    );
+    if (token) this.deps.tokens.revokeSession(session.id, token);
+    return result;
+  }
+
+  /**
+   * Provider options for a start or resume: model, effort, autonomy, plan mode, cwd, the
+   * CodeDen system prompt, and, given the session's MCP token, CodeDen's MCP server through the
+   * runner's local proxy. A session still planning reopens in plan mode; one whose plan was
+   * approved reopens at its permission level.
+   */
+  sessionOptions(session: Session, mcpToken: string | null = null): SessionOptions {
     const proxyUrl = runnerForSession(this.deps, session.id).mcpProxyUrl();
     const mcpServers: McpServerConfig[] = [];
-    if (proxyUrl) {
-      const token = this.deps.tokens.mint({
-        role: session.role,
-        sessionId: session.id,
-        projectId: session.projectId,
-      });
+    if (proxyUrl && mcpToken) {
       mcpServers.push({
         transport: "http",
         name: MCP_SERVER_NAME,
         url: proxyUrl,
-        headers: { Authorization: `Bearer ${token}` },
+        headers: { Authorization: `Bearer ${mcpToken}` },
         toolTimeoutSec: 600,
         trusted: true,
       });
