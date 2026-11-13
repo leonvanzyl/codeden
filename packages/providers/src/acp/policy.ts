@@ -85,6 +85,8 @@ export class AcpPolicy {
   }
 
   decide(call: AcpToolState): AcpPolicyDecision {
+    // Only calls of kind `other` can be MCP calls (`mcpOf`): a command or an edit is judged
+    // as one, whatever the agent titled it.
     const mcp = mcpOf(call, this.mcpServers);
     if (mcp && this.trustedServers.includes(mcp.server)) return ALLOW;
     if (!this.isReadOnly && !this.planning && this.sessionAllow.has(this.key(call))) return ALLOW;
@@ -102,9 +104,16 @@ export class AcpPolicy {
     }
     if (kind === "think") return ALLOW;
     if (kind === "switch_mode") {
-      return this.isReadOnly
-        ? { kind: "deny", message: "This session cannot change its mode." }
-        : this.unknown("other", "The agent asks to change its mode");
+      if (this.isReadOnly) return { kind: "deny", message: "This session cannot change its mode." };
+      // Leaving plan mode is the plan approval: the user decides it at every level.
+      if (this.planning) {
+        return {
+          kind: "ask",
+          action: "plan",
+          reason: "The agent asks to leave plan mode and start",
+        };
+      }
+      return this.unknown("other", "The agent asks to change its mode");
     }
     return this.unknown(
       mcp ? "tool" : "other",

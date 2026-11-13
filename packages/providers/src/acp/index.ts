@@ -5,11 +5,16 @@
 export { answerPermission, approvalItem } from "./approvals";
 export { acpMcpServers, findOption, modeIds, modelsOf, optionId, optionValues } from "./config";
 export { classifyAcpError, failedPrompt, stopOutcome } from "./errors";
-export type { AcpExtensionHost, AcpExtensions } from "./extensions";
+export type {
+  AcpAgentSpec,
+  AcpExtensionHost,
+  AcpExtensions,
+  AcpSessionConfig,
+} from "./extensions";
 export { mergeToolCall, promptBlocks, toolCallItem } from "./items";
 export { AcpEventMapper, planTodos, todoStatus } from "./mapper";
 export { AcpPolicy } from "./policy";
 export { clientCapabilities, startAgent } from "./process";
 export * from "./protocol";
 export { AcpRpc, AcpRpcError, METHOD_NOT_FOUND } from "./rpc";
-export { type AcpAgentSpec, AcpSession, type AcpSessionConfig } from "./session";
+export { AcpSession } from "./session";

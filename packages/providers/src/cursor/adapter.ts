@@ -5,15 +5,16 @@ import type {
   SessionOptions,
 } from "@codeden/contracts";
 import { modelsOf } from "../acp/config";
+import type { AcpAgentSpec } from "../acp/extensions";
 import type { AcpInitializeResult, AcpSessionSetup } from "../acp/protocol";
-import { type AcpAgentSpec, AcpSession } from "../acp/session";
+import { AcpSession } from "../acp/session";
 import type { ProviderAdapter, ProviderSession, RefreshModelsOptions } from "../adapter";
 import { executableFingerprint, ModelFreshness } from "../freshness";
 import { ModelCatalog } from "../models";
 import type { ResolvedCommand } from "../util/exec";
-import { detectCursor } from "./detect";
+import type { LocateOptions } from "../util/locate";
+import { detectCursor, findCursor } from "./detect";
 import { cursorExtensions } from "./extensions";
-import { locateCursor } from "./locate";
 import { cursorModelInfos, fallbackCursorModels } from "./models";
 import { type CursorProbe, probeCursor } from "./probe";
 
@@ -58,6 +59,8 @@ const BASE_CAPABILITIES: ProviderCapabilities = {
 
 export interface CursorAdapterOptions {
   executable?: ResolvedCommand;
+  /** Where to look for the CLI (tests); default PATH, then its installer's folders. */
+  locate?: LocateOptions;
   /** Max time for a probe (detection, model discovery). */
   probeTimeoutMs?: number;
   startTimeoutMs?: number;
@@ -79,14 +82,28 @@ export class CursorAdapter implements ProviderAdapter {
 
   constructor(private readonly options: CursorAdapterOptions = {}) {}
 
-  /** The copy detection validated, else a quick look-up (the runner outlives reinstalls). */
-  private executable(): ResolvedCommand | undefined {
-    return this.options.executable ?? locateCursor() ?? this.found;
+  /**
+   * The CLI to run: the copy detection validated, else one looked up now whose `--version` is
+   * Cursor's (`findCursor`; results are cached per file). Another program called `agent` is
+   * never run with anything but `--version`. Undefined when no Cursor CLI is installed.
+   */
+  private async executable(): Promise<ResolvedCommand | undefined> {
+    if (this.options.executable) return this.options.executable;
+    if (this.found) return this.found;
+    const lookup = await findCursor({
+      ...(this.options.locate ? { locate: this.options.locate } : {}),
+      ...(this.options.probeTimeoutMs ? { timeoutMs: this.options.probeTimeoutMs } : {}),
+    });
+    this.found ??= lookup.command;
+    return this.found;
   }
 
   async detect(): Promise<ProviderStatus> {
+    // A reinstall or an uninstall since the last detection: look again.
+    this.found = undefined;
     const status = await detectCursor({
       ...(this.options.executable ? { executable: this.options.executable } : {}),
+      ...(this.options.locate ? { locate: this.options.locate } : {}),
       ...(this.options.probeTimeoutMs ? { timeoutMs: this.options.probeTimeoutMs } : {}),
       probe: (exe, signedIn) => {
         this.found = exe;
@@ -122,7 +139,7 @@ export class CursorAdapter implements ProviderAdapter {
 
   /** Ask the CLI for its models without a session or a model call. Never throws. */
   async refreshModels(opts: RefreshModelsOptions = {}): Promise<void> {
-    const exe = this.executable();
+    const exe = await this.executable();
     if (!exe) return;
     if (
       opts.maxAgeMs !== undefined &&
@@ -135,8 +152,12 @@ export class CursorAdapter implements ProviderAdapter {
   }
 
   async openSession(opts: SessionOptions): Promise<ProviderSession> {
-    const executable = this.executable();
-    if (!executable) throw new Error("The Cursor CLI is not installed (no `agent` on PATH)");
+    const executable = await this.executable();
+    if (!executable) {
+      throw new Error(
+        "The Cursor CLI is not installed (no `cursor-agent`, or `agent` from Cursor)",
+      );
+    }
     const session = new AcpSession(opts, {
       executable,
       spec: CURSOR_AGENT,

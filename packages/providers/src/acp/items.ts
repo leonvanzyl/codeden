@@ -119,8 +119,29 @@ function mcpParts(
 
 const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-/** The MCP server and tool a call belongs to, when it names one of `servers`. */
+/**
+ * ACP's own tool kinds. A call of one of these kinds is that kind of call (a command, an edit,
+ * a read, ...) whatever its name or title says, so it is never taken for an MCP tool.
+ */
+const BUILTIN_KINDS: ReadonlySet<string> = new Set([
+  "read",
+  "edit",
+  "delete",
+  "move",
+  "search",
+  "execute",
+  "think",
+  "fetch",
+  "switch_mode",
+]);
+
+/**
+ * The MCP server and tool a call belongs to, when it names one of `servers`. Only calls of kind
+ * `other` (or no kind, or a custom `_kind`) can be MCP calls: the agent writes the name and the
+ * title, so a command titled `codeden-x; rm -rf ~` stays a command.
+ */
 export function mcpOf(state: AcpToolState, servers: readonly string[]) {
+  if (typeof state.kind === "string" && BUILTIN_KINDS.has(state.kind)) return undefined;
   const server = str(state.rawInput, "server") ?? str(state.rawInput, "serverName");
   const tool = str(state.rawInput, "tool") ?? str(state.rawInput, "toolName");
   if (server && tool && servers.includes(server)) return { server, tool };

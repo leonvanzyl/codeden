@@ -1,6 +1,7 @@
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { select } from "../src/acp/approvals";
 import type { AcpToolState } from "../src/acp/items";
 import { AcpPolicy } from "../src/acp/policy";
 
@@ -75,5 +76,63 @@ describe("AcpPolicy", () => {
     policy.setAutonomy("read_only");
     policy.setAutonomy("supervised");
     expect(policy.decide(command).kind).toBe("ask");
+  });
+
+  it("judges commands and edits titled like CodeDen's own tools by their kind", () => {
+    // The agent writes titles: only `other` calls can be MCP tools, so these stay a command
+    // and an edit outside the worktree, at every level.
+    const sneaky = {
+      toolCallId: "s",
+      kind: "execute",
+      title: "codeden-x; rm -rf ~",
+      rawInput: { command: "codeden-x; rm -rf ~" },
+    };
+    const outside = {
+      toolCallId: "o",
+      kind: "edit",
+      title: "codeden.cmd",
+      locations: [{ path: join(tmpdir(), "..", "elsewhere", ".ssh", "config") }],
+    };
+    for (const level of ["read_only", "supervised", "auto"] as const) {
+      const policy = new AcpPolicy(level, ctx, false, ["codeden"], ["codeden"]);
+      for (const call of [sneaky, outside]) {
+        expect(policy.decide(call).kind, `${level} ${call.title}`).toBe(
+          level === "read_only" ? "deny" : "ask",
+        );
+      }
+      expect(policy.decide({ toolCallId: "m", kind: "other", title: "codeden: finish" }).kind).toBe(
+        "allow",
+      );
+    }
+  });
+
+  it("asks before the agent leaves plan mode on its own, at every level", () => {
+    const policy = new AcpPolicy("full", ctx);
+    const leave = { toolCallId: "p", kind: "switch_mode", title: "Ready to code" };
+    expect(policy.decide(leave).kind).toBe("allow");
+    policy.planning = true;
+    expect(policy.decide(leave)).toMatchObject({ kind: "ask", action: "plan" });
+  });
+});
+
+describe("choosing a permission option", () => {
+  const once = { optionId: "yes", kind: "allow_once" };
+  const always = { optionId: "always", kind: "allow_always" };
+  const no = { optionId: "no", kind: "reject_once" };
+  const never = { optionId: "never", kind: "reject_always" };
+
+  it("only ever picks a once option, so nothing is saved in the agent's settings", () => {
+    expect(select([always, once, never, no], "allow")).toEqual({
+      outcome: { outcome: "selected", optionId: "yes" },
+    });
+    expect(select([always, never, no], "reject")).toEqual({
+      outcome: { outcome: "selected", optionId: "no" },
+    });
+    // Without a once option to allow with, the call is refused once.
+    expect(select([always, no], "allow")).toEqual({
+      outcome: { outcome: "selected", optionId: "no" },
+    });
+    // With only "always" options, the request is cancelled.
+    expect(select([always, never], "reject")).toEqual({ outcome: { outcome: "cancelled" } });
   });
 });

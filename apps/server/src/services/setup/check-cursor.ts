@@ -1,19 +1,32 @@
-import { isCursorVersion, parseCursorStatus, shellCommandLine } from "@codeden/providers";
+import {
+  cursorBroken,
+  cursorOnly,
+  isCursorVersion,
+  parseCursorStatus,
+  shellCommandLine,
+} from "@codeden/providers";
 import { base, type CheckEnv, type CheckResult, installFix } from "./check-base";
 import { type Locate, loginFix, lookupTool, runDetail, type ToolLookup } from "./tool-lookup";
 
 const NO_ACP =
   /unknown command|not a (valid )?command|invalid command|no such command|unrecognized/i;
 
-/** `cursor-agent`, else an `agent` whose `--version` is Cursor's dated build. */
+/**
+ * `cursor-agent`, else the first `agent` whose `--version` is Cursor's dated build. Other
+ * programs called `agent` are passed over (only `--version` runs on them), not reported broken.
+ */
 async function findCursorTool(locate: Locate, platform: NodeJS.Platform): Promise<ToolLookup> {
   const notInstalled = {
     message: "The Cursor CLI is not installed",
     fix: installFix("cursor", platform),
   };
-  const named = await lookupTool(locate, "cursor-agent", base("cursor"), notInstalled);
+  const cursorLocate: Locate = async (name) => {
+    const lookup = await locate(name, { validate: cursorOnly() });
+    return { ...lookup, broken: cursorBroken(lookup.broken) };
+  };
+  const named = await lookupTool(cursorLocate, "cursor-agent", base("cursor"), notInstalled);
   if (named.found) return named;
-  const agent = await lookupTool(locate, "agent", base("cursor"), notInstalled);
+  const agent = await lookupTool(cursorLocate, "agent", base("cursor"), notInstalled);
   if (agent.found) {
     return isCursorVersion(agent.version)
       ? agent

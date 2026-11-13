@@ -9,12 +9,11 @@ import type {
 import { type ProviderSession, ProviderSessionError, type SessionConfigChange } from "../adapter";
 import { ApprovalBroker } from "../approvals";
 import { AsyncQueue } from "../async-queue";
-import type { ResolvedCommand } from "../util/exec";
 import { explicitModel } from "../util/model";
 import { answerPermission } from "./approvals";
-import { acpMcpServers, modelsOf } from "./config";
-import { failedPrompt, stopNotice, stopOutcome } from "./errors";
-import type { AcpExtensionHost, AcpExtensions } from "./extensions";
+import { acpMcpServers, agentCan, modelsOf, skippedNotice } from "./config";
+import { exitedOutcome, failedPrompt, stopNotice, stopOutcome } from "./errors";
+import { type AcpExtensionHost, type AcpSessionConfig, extensionHost } from "./extensions";
 import { promptBlocks, withInstructions } from "./items";
 import { AcpEventMapper } from "./mapper";
 import { type AcpPolicy, policyFor, trustedServers } from "./policy";
@@ -30,27 +29,6 @@ import type {
 } from "./protocol";
 import { type AcpRpc, AcpRpcError, METHOD_NOT_FOUND } from "./rpc";
 import { currentMode, openOrLoad, setMode, setModel } from "./setup";
-
-/** How one ACP agent is driven: its command, auth method, modes and vendor extensions. */
-export interface AcpAgentSpec {
-  /** "Cursor": shown in errors and notices. */
-  label: string;
-  /** Arguments that start its ACP server, e.g. `["acp"]`. */
-  args: readonly string[];
-  authMethod?: string;
-  /** Its mode ids: full tools, planning, and read-only (when it has them). */
-  modes: { agent: string; plan?: string; readOnly?: string };
-  extensions?: AcpExtensions;
-}
-
-export interface AcpSessionConfig {
-  executable: ResolvedCommand;
-  spec: AcpAgentSpec;
-  /** The agent reported its session setup (models, modes): for the adapter's model list. */
-  onSetup?: (setup: AcpSessionSetup, info: AcpInitializeResult) => void;
-  startTimeoutMs?: number;
-  interruptTimeoutMs?: number;
-}
 
 /**
  * A session on an ACP agent (§7.2): one agent process per CodeDen session, since every session
@@ -152,7 +130,10 @@ export class AcpSession implements ProviderSession {
     try {
       rpc = await this.ensureAgent();
       await this.applyModelChange(rpc);
-      prompt = promptBlocks(withInstructions(input, this.instructions), this.capable("images"));
+      prompt = promptBlocks(
+        withInstructions(input, this.instructions),
+        agentCan(this.info, "images"),
+      );
       this.instructions = undefined;
     } catch (error) {
       this.turnPending = false;
@@ -214,13 +195,6 @@ export class AcpSession implements ProviderSession {
     }
   }
 
-  private capable(what: "images" | "load" | "http"): boolean {
-    const caps = this.info.agentCapabilities;
-    if (what === "images") return caps?.promptCapabilities?.image === true;
-    if (what === "load") return caps?.loadSession === true;
-    return caps?.mcpCapabilities?.http === true;
-  }
-
   private ensureAgent(): Promise<AcpRpc> {
     if (this.rpc && !this.rpc.isClosed) return Promise.resolve(this.rpc);
     this.starting ??= this.boot().finally(() => {
@@ -271,16 +245,19 @@ export class AcpSession implements ProviderSession {
   /** `session/load` the resume token when the agent can; else (or when that fails) a new one. */
   private async openSession(rpc: AcpRpc): Promise<void> {
     const { label } = this.config.spec;
-    const { servers, skipped } = acpMcpServers(this.opts.mcpServers, this.capable("http"));
-    if (skipped.length) {
-      this.notice = `${label} can't connect to HTTP MCP servers, so ${skipped.join(", ")} ${skipped.length === 1 ? "is" : "are"} not available in this session.`;
-    }
+    const { servers, skipped } = acpMcpServers(this.opts.mcpServers, agentCan(this.info, "http"));
+    this.notice = skippedNotice(label, skipped) ?? this.notice;
+    // `session/load` replays the history first, mode and config updates included: none of it
+    // is news, and a replayed mode change must not end plan mode.
+    this.mapper.replaying = true;
     const opened = await openOrLoad(rpc, {
       cwd: this.opts.cwd,
       mcpServers: servers,
       ...(this.acpSession ? { resumeId: this.acpSession } : {}),
-      canLoad: this.capable("load"),
+      canLoad: agentCan(this.info, "load"),
       label,
+    }).finally(() => {
+      this.mapper.replaying = false;
     });
     this.notice = opened.notice ?? this.notice;
     this.acpSession = opened.sessionId;
@@ -290,7 +267,8 @@ export class AcpSession implements ProviderSession {
     this.config.onSetup?.(opened.setup, this.info);
     await this.applyMode();
     if (this.model) {
-      await setModel(rpc, opened.sessionId, this.setup, this.model).catch(() => undefined);
+      const setup = this.setup;
+      this.setup = await setModel(rpc, opened.sessionId, setup, this.model).catch(() => setup);
     }
     const model = this.model ?? modelsOf(opened.setup)?.current;
     this.events.push({
@@ -311,7 +289,10 @@ export class AcpSession implements ProviderSession {
           : modes.agent;
     const rpc = this.rpc;
     if (!rpc || !this.acpSession || want === this.mode) return;
-    if (await setMode(rpc, this.acpSession, this.setup, want)) this.mode = want;
+    const next = await setMode(rpc, this.acpSession, this.setup, want);
+    if (!next) return;
+    this.setup = next;
+    this.mode = want;
   }
 
   private async applyModelChange(rpc: AcpRpc): Promise<void> {
@@ -320,7 +301,7 @@ export class AcpSession implements ProviderSession {
     this.nextModel = undefined;
     const model = explicitModel(next);
     if (!model || model === this.model) return;
-    await setModel(rpc, this.acpSession, this.setup, model);
+    this.setup = await setModel(rpc, this.acpSession, this.setup, model);
     this.model = model;
     this.events.push({ type: "session.updated", model });
   }
@@ -343,23 +324,22 @@ export class AcpSession implements ProviderSession {
   }
 
   private host(): AcpExtensionHost {
-    const self = this;
-    return {
+    return extensionHost({
       cwd: this.opts.cwd,
       broker: this.broker,
       mapper: this.mapper,
-      ctx: () => this.mapper.ctx(),
-      get planning() {
-        return self.planning;
-      },
-      exitPlanMode: async () => {
-        if (!this.planning) return;
-        this.planning = false;
-        this.policy.planning = false;
-        this.events.push({ type: "session.updated", planMode: false });
-        await this.applyMode().catch(() => undefined);
-      },
-    };
+      planning: () => this.planning,
+      exitPlanMode: () => this.exitPlanMode(),
+    });
+  }
+
+  /** The user approved the plan: leave plan mode for the session's level, and say so. */
+  private async exitPlanMode(): Promise<void> {
+    if (!this.planning) return;
+    this.planning = false;
+    this.policy.planning = false;
+    this.events.push({ type: "session.updated", planMode: false });
+    await this.applyMode().catch(() => undefined);
   }
 
   private onNotification(message: AcpIncoming): void {
@@ -403,14 +383,7 @@ export class AcpSession implements ProviderSession {
     if (this.closed || rpc !== this.rpc) return;
     this.rpc = undefined;
     this.broker.cancelAll();
-    this.mapper.endTurn({
-      type: "failed",
-      code: "provider_exited",
-      // The next message starts the agent again and resumes the session.
-      kind: "transient",
-      message: `${this.config.spec.label} exited (code ${code ?? "unknown"})`,
-      ...(stderr ? { detail: stderr.slice(-2000) } : {}),
-    });
+    this.mapper.endTurn(exitedOutcome(this.config.spec.label, code, stderr));
     this.turnPending = false;
   }
 }

@@ -130,6 +130,8 @@ createInterface({ input: process.stdin }).on("line", (line) => {
       session = msg.params.sessionId;
       update({ sessionUpdate: "user_message_chunk", content: { type: "text", text: "old question" } });
       update({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: "old answer" } });
+      // The replay includes the mode the old session ended in.
+      update({ sessionUpdate: "current_mode_update", currentModeId: "agent" });
       return send({ id: msg.id, result: { modes, configOptions: [modelOption()] } });
     case "session/set_mode":
       send({ id: msg.id, result: {} });

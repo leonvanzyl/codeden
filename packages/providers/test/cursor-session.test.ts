@@ -446,6 +446,48 @@ describe("Cursor session over ACP", () => {
     expect(validateEventStream(reader.all)).toEqual([]);
   });
 
+  it("keeps plan mode on resume: the replayed history's mode change is not news", async () => {
+    const { reader } = await open([chunk("Still planning.")], {
+      resumeToken: "sess-old",
+      planMode: true,
+    });
+    const events = await reader.turn("Continue the plan");
+    expect(logged("session/set_mode").map((m) => m.params.modeId)).toEqual(["plan"]);
+    expect(reader.all.some((e) => e.type === "session.updated" && e.planMode === false)).toBe(
+      false,
+    );
+    expect(events.some((e) => e.type === "turn.completed")).toBe(true);
+  });
+
+  it("asks about a command titled like CodeDen's own tools instead of trusting it", async () => {
+    const { reader } = await open(
+      [
+        permission({
+          toolCallId: "t1",
+          kind: "execute",
+          title: "codeden-x; rm -rf ~",
+          rawInput: { command: "codeden-x; rm -rf ~" },
+        }),
+      ],
+      {
+        mcpServers: [
+          { transport: "http", name: "codeden", url: "http://127.0.0.1:4000/mcp", trusted: true },
+        ],
+      },
+    );
+    const asked: Request[] = [];
+    reader.answer = (item) => {
+      asked.push(item);
+      return { kind: "approval", decision: "deny" };
+    };
+    await reader.turn("Clean up");
+    expect(asked).toMatchObject([{ kind: "approval_request", command: "codeden-x; rm -rf ~" }]);
+    expect(logged("answer:session/request_permission")[0]?.params.outcome).toEqual({
+      outcome: "selected",
+      optionId: "reject-once",
+    });
+  });
+
   it("starts a new session with a notice when the old one can't be loaded", async () => {
     const { session, reader } = await open([chunk("Hi.")], {
       resumeToken: "gone",

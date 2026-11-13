@@ -1,5 +1,7 @@
 import type { ApprovalBroker } from "../approvals";
+import type { ResolvedCommand } from "../util/exec";
 import type { AcpEventMapper, ThreadCtx } from "./mapper";
+import type { AcpInitializeResult, AcpSessionSetup } from "./protocol";
 
 /** What a vendor extension can reach in its session. */
 export interface AcpExtensionHost {
@@ -17,6 +19,26 @@ export interface AcpExtensionHost {
   exitPlanMode(): Promise<void>;
 }
 
+/** A host from the session's parts; `planning` is read live. */
+export function extensionHost(parts: {
+  cwd: string;
+  broker: ApprovalBroker;
+  mapper: AcpEventMapper;
+  planning: () => boolean;
+  exitPlanMode: () => Promise<void>;
+}): AcpExtensionHost {
+  return {
+    cwd: parts.cwd,
+    broker: parts.broker,
+    mapper: parts.mapper,
+    ctx: () => parts.mapper.ctx(),
+    get planning() {
+      return parts.planning();
+    },
+    exitPlanMode: parts.exitPlanMode,
+  };
+}
+
 /**
  * An agent's vendor methods beyond ACP itself (`<vendor>/<method>`), plugged into the generic
  * session. Anything not handled is refused with JSON-RPC "method not found" (requests) or
@@ -29,4 +51,25 @@ export interface AcpExtensions {
   notification?(method: string, params: unknown, host: AcpExtensionHost): void;
   /** Extra `clientCapabilities` fields to advertise in `initialize` (vendor `_meta` flags). */
   clientCapabilities?: Record<string, unknown>;
+}
+
+/** How one ACP agent is driven: its command, auth method, modes and vendor extensions. */
+export interface AcpAgentSpec {
+  /** "Cursor": shown in errors and notices. */
+  label: string;
+  /** Arguments that start its ACP server, e.g. `["acp"]`. */
+  args: readonly string[];
+  authMethod?: string;
+  /** Its mode ids: full tools, planning, and read-only (when it has them). */
+  modes: { agent: string; plan?: string; readOnly?: string };
+  extensions?: AcpExtensions;
+}
+
+export interface AcpSessionConfig {
+  executable: ResolvedCommand;
+  spec: AcpAgentSpec;
+  /** The agent reported its session setup (models, modes): for the adapter's model list. */
+  onSetup?: (setup: AcpSessionSetup, info: AcpInitializeResult) => void;
+  startTimeoutMs?: number;
+  interruptTimeoutMs?: number;
 }

@@ -3,7 +3,7 @@ import type { ProviderIssue, ProviderStatus } from "@codeden/contracts";
 import { brokenInstallMessage, type DetectExeOptions, lookupForDetect } from "../util/detect-exe";
 import { type ResolvedCommand, runCommand } from "../util/exec";
 import type { ExecutableLookup } from "../util/locate";
-import { CURSOR_COMMANDS, isCursorVersion } from "./locate";
+import { CURSOR_COMMANDS, cursorBroken, cursorOnly, isCursorVersion } from "./locate";
 import type { CursorProbe } from "./probe";
 
 /** Cursor's installer, per platform. */
@@ -97,16 +97,21 @@ export async function detectCursor(opts: CursorDetectOptions = {}): Promise<Prov
   };
 }
 
-/** `cursor-agent`, else an `agent` whose version is Cursor's. Broken copies are collected. */
+/**
+ * `cursor-agent`, else the first `agent` whose `--version` is Cursor's: other programs called
+ * `agent` are passed over (only `--version` runs on them) and not reported as broken.
+ */
 export async function findCursor(opts: DetectExeOptions): Promise<ExecutableLookup> {
   if (opts.lookup || opts.executable) return lookupForDetect(CURSOR_COMMANDS[0], opts);
   const broken: ExecutableLookup["broken"] = [];
   for (const name of CURSOR_COMMANDS) {
-    const found = await lookupForDetect(name, opts);
-    broken.push(...found.broken);
-    if (found.command && (name === "cursor-agent" || isCursorVersion(found.version))) {
-      return { ...found, broken };
-    }
+    const found = await lookupForDetect(name, {
+      ...opts,
+      locate: { ...opts.locate, validate: cursorOnly(opts.timeoutMs) },
+    });
+    broken.push(...cursorBroken(found.broken));
+    // A copy whose earlier check is cached as working is still held to Cursor's version.
+    if (found.command && isCursorVersion(found.version)) return { ...found, broken };
   }
   return { version: null, broken };
 }

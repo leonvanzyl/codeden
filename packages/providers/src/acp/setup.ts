@@ -1,5 +1,5 @@
 import { findOption, modeIds, optionId } from "./config";
-import type { AcpMcpServer, AcpSessionSetup } from "./protocol";
+import type { AcpConfigOption, AcpMcpServer, AcpSessionSetup } from "./protocol";
 import { type AcpRpc, AcpRpcError } from "./rpc";
 
 /** An opened ACP session: its id, what the agent reported, and whether it was resumed. */
@@ -56,38 +56,56 @@ export function currentMode(setup: AcpSessionSetup): string | undefined {
 
 /**
  * Switch a session's mode through its `mode` config option, else `session/set_mode`. A mode the
- * agent doesn't list is skipped. Returns whether the mode was set.
+ * agent doesn't list is skipped (undefined). Returns the setup with the agent's updated options.
  */
 export async function setMode(
   rpc: AcpRpc,
   sessionId: string,
   setup: AcpSessionSetup,
   mode: string,
-): Promise<boolean> {
+): Promise<AcpSessionSetup | undefined> {
   const available = modeIds(setup);
-  if (available.length && !available.includes(mode)) return false;
-  const option = findOption(setup.configOptions, "mode");
-  const id = option ? optionId(option) : undefined;
-  if (id) {
-    await rpc.request("session/set_config_option", { sessionId, configId: id, value: mode });
-  } else {
-    await rpc.request("session/set_mode", { sessionId, modeId: mode });
-  }
-  return true;
+  if (available.length && !available.includes(mode)) return undefined;
+  const set = await setOption(rpc, sessionId, setup, "mode", mode);
+  if (set) return set;
+  await rpc.request("session/set_mode", { sessionId, modeId: mode });
+  return { ...setup, modes: { ...setup.modes, currentModeId: mode } };
 }
 
-/** Switch a session's model through its `model` config option, else `session/set_model`. */
+/**
+ * Switch a session's model through its `model` config option, else `session/set_model`.
+ * Returns the setup with the agent's updated options.
+ */
 export async function setModel(
   rpc: AcpRpc,
   sessionId: string,
   setup: AcpSessionSetup,
   model: string,
-): Promise<void> {
-  const option = findOption(setup.configOptions, "model");
+): Promise<AcpSessionSetup> {
+  const set = await setOption(rpc, sessionId, setup, "model", model);
+  if (set) return set;
+  await rpc.request("session/set_model", { sessionId, modelId: model });
+  return setup;
+}
+
+/**
+ * `session/set_config_option` on the option of `category`, when the session has one: the agent
+ * answers with all its options, since one change can change others. Undefined without one.
+ */
+async function setOption(
+  rpc: AcpRpc,
+  sessionId: string,
+  setup: AcpSessionSetup,
+  category: string,
+  value: string,
+): Promise<AcpSessionSetup | undefined> {
+  const option = findOption(setup.configOptions, category);
   const id = option ? optionId(option) : undefined;
-  if (id) {
-    await rpc.request("session/set_config_option", { sessionId, configId: id, value: model });
-  } else {
-    await rpc.request("session/set_model", { sessionId, modelId: model });
-  }
+  if (!id) return undefined;
+  const result = await rpc.request<{ configOptions?: unknown } | null>(
+    "session/set_config_option",
+    { sessionId, configId: id, value },
+  );
+  const options = result?.configOptions;
+  return Array.isArray(options) ? { ...setup, configOptions: options as AcpConfigOption[] } : setup;
 }

@@ -121,7 +121,8 @@ export class SetupService {
     const userHome = this.deps.userHome;
     const env: CheckEnv = {
       exec: this.deps.exec,
-      locate: this.deps.locate ?? ((name) => findExecutable(name, { home: userHome })),
+      locate:
+        this.deps.locate ?? ((name, opts) => findExecutable(name, { home: userHome, ...opts })),
       shell: this.shell(),
       platform: this.deps.platform ?? process.platform,
       nodeVersion: this.deps.nodeVersion ?? process.version,

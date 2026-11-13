@@ -10,7 +10,13 @@ export {
 } from "./adapter";
 export { cursorInstallCommand, detectCursor, findCursor, parseCursorStatus } from "./detect";
 export { cursorExtensions, cursorTodos, planMarkdown, questionAnswer } from "./extensions";
-export { CURSOR_COMMANDS, isCursorVersion, locateCursor } from "./locate";
+export {
+  CURSOR_COMMANDS,
+  cursorBroken,
+  cursorOnly,
+  isCursorVersion,
+  NOT_CURSOR,
+} from "./locate";
 export {
   cursorModelInfos,
   fallbackCursorModels,

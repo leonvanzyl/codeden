@@ -1,5 +1,26 @@
 import type { McpServerConfig } from "@codeden/contracts";
-import type { AcpConfigOption, AcpConfigValue, AcpMcpServer, AcpSessionSetup } from "./protocol";
+import type {
+  AcpConfigOption,
+  AcpConfigValue,
+  AcpInitializeResult,
+  AcpMcpServer,
+  AcpSessionSetup,
+} from "./protocol";
+
+/** What the agent said it supports in `initialize`: images, `session/load`, HTTP MCP servers. */
+export function agentCan(info: AcpInitializeResult, what: "images" | "load" | "http"): boolean {
+  const caps = info.agentCapabilities;
+  if (what === "images") return caps?.promptCapabilities?.image === true;
+  if (what === "load") return caps?.loadSession === true;
+  return caps?.mcpCapabilities?.http === true;
+}
+
+/** Why some MCP servers are missing from a session, if any are. */
+export function skippedNotice(label: string, skipped: readonly string[]): string | undefined {
+  if (!skipped.length) return undefined;
+  const verb = skipped.length === 1 ? "is" : "are";
+  return `${label} can't connect to HTTP MCP servers, so ${skipped.join(", ")} ${verb} not available in this session.`;
+}
 
 /**
  * CodeDen's MCP servers in ACP's shape. HTTP servers (CodeDen's own proxy among them) go only

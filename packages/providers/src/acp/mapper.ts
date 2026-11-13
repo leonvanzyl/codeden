@@ -50,6 +50,8 @@ export interface AcpMapperOptions {
  */
 export class AcpEventMapper {
   readonly rootThreadId: string;
+  /** While `session/load` replays the history: every update is dropped. */
+  replaying = false;
   private turnId: string | undefined;
   private text: { id: string; kind: "assistant_message" | "reasoning"; text: string } | undefined;
   private seq = 0;
@@ -98,6 +100,7 @@ export class AcpEventMapper {
   }
 
   handle(update: AcpSessionUpdate): void {
+    if (this.replaying) return;
     const kind = update.sessionUpdate;
     if (kind === "current_mode_update") {
       const mode = (update as { currentModeId?: unknown }).currentModeId;

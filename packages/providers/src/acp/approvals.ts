@@ -67,23 +67,25 @@ export async function answerPermission(
   return CANCELLED;
 }
 
-/** The "once" option of a kind: allow or reject. Never an "always" option. */
-function select(options: readonly AcpPermissionOption[], want: "allow" | "reject") {
+/**
+ * The "once" option of a kind: allow or reject. Never an "always" option, which would save a
+ * rule in the agent's own settings: without a "once" option to allow with, the call is
+ * refused once, and without any "once" option the request is answered `cancelled`.
+ */
+export function select(
+  options: readonly AcpPermissionOption[],
+  want: "allow" | "reject",
+): AcpPermissionResult {
   const list = Array.isArray(options) ? options : [];
   const option =
-    list.find((o) => o.kind === `${want}_once`) ??
-    (want === "reject" ? list.find((o) => o.kind === "reject_always") : undefined);
-  if (!option) {
-    // No "once" option to allow with: refuse rather than save a rule for good.
-    const reject = list.find((o) => o.kind === "reject_once");
-    return reject
-      ? { outcome: { outcome: "selected" as const, optionId: reject.optionId } }
-      : CANCELLED;
-  }
-  return { outcome: { outcome: "selected" as const, optionId: option.optionId } };
+    list.find((o) => o.kind === `${want}_once`) ?? list.find((o) => o.kind === "reject_once");
+  return option ? { outcome: { outcome: "selected", optionId: option.optionId } } : CANCELLED;
 }
 
-/** A call to CodeDen's own MCP tools: allowed silently, never recorded as a decision. */
+/**
+ * A call to CodeDen's own MCP tools: allowed silently, never recorded as a decision. Only calls
+ * of kind `other` qualify (`mcpOf`), never a command or an edit titled like one.
+ */
 function isTrustedCall(call: AcpToolState, deps: AcpApprovalDeps): boolean {
   const mcp = mcpOf(call, deps.mcpServers);
   return mcp !== undefined && deps.trustedServers.includes(mcp.server);
