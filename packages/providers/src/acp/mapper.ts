@@ -1,4 +1,12 @@
-import type { AgentEvent, Item, ItemOf, ProviderCommand, Usage } from "@codeden/contracts";
+import { randomUUID } from "node:crypto";
+import type {
+  AgentEvent,
+  Item,
+  ItemOf,
+  ProviderCommand,
+  Usage,
+  UserInput,
+} from "@codeden/contracts";
 import type { AcpTurnOutcome } from "./errors";
 import {
   type AcpToolContext,
@@ -171,6 +179,11 @@ export class AcpEventMapper {
         : {}),
     };
     this.emitUsage();
+  }
+
+  /** The message CodeDen sent, as the turn's user message (ACP doesn't echo prompts). */
+  userMessage(input: UserInput): void {
+    this.emitItem({ id: `user-${randomUUID()}`, kind: "user_message", status: "completed", input });
   }
 
   /** A finished item in the current turn (after any message that was streaming). */

@@ -54,6 +54,14 @@ export function failedPrompt(error: unknown, label: string): AcpTurnOutcome {
   };
 }
 
+/** A notice for a turn the agent cut short at a limit, if it did. */
+export function stopNotice(stopReason: string | undefined, label: string): string | undefined {
+  if (stopReason === "max_tokens") return `${label} stopped: the response hit its token limit.`;
+  if (stopReason === "max_turn_requests")
+    return `${label} stopped: the turn hit its request limit.`;
+  return undefined;
+}
+
 /** A `session/prompt` stop reason as a turn outcome. */
 export function stopOutcome(stopReason: string | undefined, label: string): AcpTurnOutcome {
   switch (stopReason) {

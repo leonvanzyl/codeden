@@ -1,4 +1,4 @@
-import type { ApprovalAction, AutonomyLevel } from "@codeden/contracts";
+import type { ApprovalAction, AutonomyLevel, SessionOptions } from "@codeden/contracts";
 import { mostSevere, touchesCodeden } from "../policy/assessment";
 import { readOnlyCommandDenial } from "../policy/read-only";
 import {
@@ -19,6 +19,26 @@ export type AcpPolicyDecision =
   | { kind: "ask"; action: ApprovalAction; reason: string };
 
 const ALLOW: AcpPolicyDecision = { kind: "allow" };
+
+/** The policy for a session's options: its level, worktree, role and MCP servers. */
+export function policyFor(opts: SessionOptions): AcpPolicy {
+  return new AcpPolicy(
+    opts.autonomy,
+    {
+      cwd: opts.cwd,
+      extraRoots: opts.additionalDirectories,
+      ...(opts.codedenHome ? { codedenHome: opts.codedenHome } : {}),
+    },
+    opts.readOnly ?? false,
+    trustedServers(opts),
+    opts.mcpServers.map((s) => s.name),
+  );
+}
+
+/** CodeDen's own MCP servers, whose tools run without asking. */
+export function trustedServers(opts: Pick<SessionOptions, "mcpServers">): string[] {
+  return opts.mcpServers.filter((s) => s.transport === "http" && s.trusted).map((s) => s.name);
+}
 
 /** Kinds of tool call that change files. */
 export const WRITE_KINDS = new Set(["edit", "delete", "move"]);

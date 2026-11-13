@@ -5,6 +5,7 @@ import { cursorInstallCommand, detectCursor, parseCursorStatus } from "../src/cu
 import { isCursorVersion } from "../src/cursor/locate";
 import { modelsFromListing, parseModelList } from "../src/cursor/models";
 import { probeCursor } from "../src/cursor/probe";
+import type { ResolvedCommand } from "../src/util/exec";
 import { clearExecutableCache } from "../src/util/locate";
 
 const fakeAgent = {
@@ -78,7 +79,7 @@ describe("Cursor versions and model lists", () => {
 });
 
 describe("detectCursor", () => {
-  const probe = (exe: typeof fakeAgent, signedIn: boolean) =>
+  const probe = (exe: ResolvedCommand, signedIn: boolean) =>
     probeCursor(exe, { signedIn, timeoutMs: 10_000 });
 
   it("reports the version and the login of a working CLI", async () => {

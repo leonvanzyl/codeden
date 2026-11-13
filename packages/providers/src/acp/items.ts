@@ -226,6 +226,12 @@ export function toolCallItem(
   }
 }
 
+/** CodeDen's role prompt in front of a message (ACP sessions take no system prompt). */
+export function withInstructions(input: UserInput, text: string | undefined): UserInput {
+  if (!text) return input;
+  return { ...input, text: `<instructions>\n${text}\n</instructions>\n\n${input.text}` };
+}
+
 /**
  * CodeDen input as ACP prompt content. Images go inline (base64) when the agent takes them;
  * files and images it can't take go as links to the file.

@@ -12,12 +12,12 @@ import { AsyncQueue } from "../async-queue";
 import type { ResolvedCommand } from "../util/exec";
 import { explicitModel } from "../util/model";
 import { answerPermission } from "./approvals";
-import { acpMcpServers, findOption, modeIds, modelsOf, optionId } from "./config";
-import { failedPrompt, stopOutcome } from "./errors";
+import { acpMcpServers, modelsOf } from "./config";
+import { failedPrompt, stopNotice, stopOutcome } from "./errors";
 import type { AcpExtensionHost, AcpExtensions } from "./extensions";
-import { promptBlocks } from "./items";
+import { promptBlocks, withInstructions } from "./items";
 import { AcpEventMapper } from "./mapper";
-import { AcpPolicy } from "./policy";
+import { type AcpPolicy, policyFor, trustedServers } from "./policy";
 import { startAgent } from "./process";
 import type {
   AcpConfigOption,
@@ -29,6 +29,7 @@ import type {
   AcpSessionSetup,
 } from "./protocol";
 import { type AcpRpc, AcpRpcError, METHOD_NOT_FOUND } from "./rpc";
+import { currentMode, openOrLoad, setMode, setModel } from "./setup";
 
 /** How one ACP agent is driven: its command, auth method, modes and vendor extensions. */
 export interface AcpAgentSpec {
@@ -94,9 +95,7 @@ export class AcpSession implements ProviderSession {
       this.events.push(event);
     };
     this.mcpServers = opts.mcpServers.map((s) => s.name);
-    this.trusted = opts.mcpServers
-      .filter((s) => s.transport === "http" && s.trusted)
-      .map((s) => s.name);
+    this.trusted = trustedServers(opts);
     this.mapper = new AcpEventMapper({
       sessionId: opts.sessionId,
       emit,
@@ -105,17 +104,7 @@ export class AcpSession implements ProviderSession {
       onConfigOptions: (options) => this.onConfigOptions(options),
     });
     this.broker = new ApprovalBroker(emit);
-    this.policy = new AcpPolicy(
-      opts.autonomy,
-      {
-        cwd: opts.cwd,
-        extraRoots: opts.additionalDirectories,
-        ...(opts.codedenHome ? { codedenHome: opts.codedenHome } : {}),
-      },
-      opts.readOnly ?? false,
-      this.trusted,
-      this.mcpServers,
-    );
+    this.policy = policyFor(opts);
     this.planning = opts.planMode && !!config.spec.modes.plan;
     this.policy.planning = this.planning;
     this.model = explicitModel(opts.model);
@@ -163,19 +152,15 @@ export class AcpSession implements ProviderSession {
     try {
       rpc = await this.ensureAgent();
       await this.applyModelChange(rpc);
-      prompt = promptBlocks(this.withInstructions(input), this.capable("images"));
+      prompt = promptBlocks(withInstructions(input, this.instructions), this.capable("images"));
+      this.instructions = undefined;
     } catch (error) {
       this.turnPending = false;
       throw error;
     }
     this.interrupted = false;
     this.mapper.beginTurn(turnId);
-    this.events.push({
-      type: "item.completed",
-      threadId: this.mapper.rootThreadId,
-      turnId,
-      item: { id: `user-${randomUUID()}`, kind: "user_message", status: "completed", input },
-    });
+    this.mapper.userMessage(input);
     this.flushNotice();
     void this.runPrompt(rpc, turnId, prompt);
   }
@@ -216,13 +201,8 @@ export class AcpSession implements ProviderSession {
       if (this.mapper.currentTurnId !== turnId) return;
       this.mapper.promptUsage(result?.usage);
       const outcome = stopOutcome(result?.stopReason, this.config.spec.label);
-      if (result?.stopReason === "max_tokens" || result?.stopReason === "max_turn_requests") {
-        this.mapper.notice(
-          "warning",
-          `${this.config.spec.label} stopped: ${result.stopReason === "max_tokens" ? "the response hit its token limit" : "the turn hit its request limit"}.`,
-          result.stopReason,
-        );
-      }
+      const limit = stopNotice(result?.stopReason, this.config.spec.label);
+      if (limit) this.mapper.notice("warning", limit, String(result?.stopReason));
       this.mapper.endTurn(
         this.interrupted && outcome.type === "completed" ? { type: "interrupted" } : outcome,
       );
@@ -290,106 +270,59 @@ export class AcpSession implements ProviderSession {
 
   /** `session/load` the resume token when the agent can; else (or when that fails) a new one. */
   private async openSession(rpc: AcpRpc): Promise<void> {
+    const { label } = this.config.spec;
     const { servers, skipped } = acpMcpServers(this.opts.mcpServers, this.capable("http"));
     if (skipped.length) {
-      this.notice = `${this.config.spec.label} can't connect to HTTP MCP servers, so ${skipped.join(", ")} ${skipped.length === 1 ? "is" : "are"} not available in this session.`;
+      this.notice = `${label} can't connect to HTTP MCP servers, so ${skipped.join(", ")} ${skipped.length === 1 ? "is" : "are"} not available in this session.`;
     }
-    const base = { cwd: this.opts.cwd, mcpServers: servers };
-    let setup: AcpSessionSetup | undefined;
-    const resumeId = this.acpSession;
-    if (resumeId) {
-      try {
-        if (!this.capable("load")) throw new Error("the agent can't load sessions");
-        setup =
-          (await rpc.request<AcpSessionSetup>("session/load", { ...base, sessionId: resumeId })) ??
-          {};
-      } catch (error) {
-        setup = undefined;
-        this.notice = `Could not resume ${this.config.spec.label} session ${resumeId} (${error instanceof Error ? error.message : String(error)}); started a new one.`;
-      }
-    }
-    if (!setup) {
-      setup = (await rpc.request<AcpSessionSetup>("session/new", base)) ?? {};
-      if (typeof setup.sessionId !== "string" || !setup.sessionId) {
-        throw new AcpRpcError(-32000, `${this.config.spec.label} returned no session id`);
-      }
-      this.acpSession = setup.sessionId;
-      this.instructions = this.opts.systemPrompt?.trim() || undefined;
-    }
-    this.setup = setup;
-    this.mode =
-      setup.modes?.currentModeId ??
-      stringValue(findOption(setup.configOptions, "mode")?.currentValue);
-    this.config.onSetup?.(setup, this.info);
+    const opened = await openOrLoad(rpc, {
+      cwd: this.opts.cwd,
+      mcpServers: servers,
+      ...(this.acpSession ? { resumeId: this.acpSession } : {}),
+      canLoad: this.capable("load"),
+      label,
+    });
+    this.notice = opened.notice ?? this.notice;
+    this.acpSession = opened.sessionId;
+    if (!opened.resumed) this.instructions = this.opts.systemPrompt?.trim() || undefined;
+    this.setup = opened.setup;
+    this.mode = currentMode(opened.setup);
+    this.config.onSetup?.(opened.setup, this.info);
     await this.applyMode();
-    if (this.model) await this.setModel(rpc, this.model).catch(() => undefined);
-    const current = modelsOf(setup)?.current;
+    if (this.model) {
+      await setModel(rpc, opened.sessionId, this.setup, this.model).catch(() => undefined);
+    }
+    const model = this.model ?? modelsOf(opened.setup)?.current;
     this.events.push({
       type: "session.updated",
-      ...(this.acpSession ? { resumeToken: this.acpSession } : {}),
-      ...((this.model ?? current) ? { model: this.model ?? current } : {}),
+      resumeToken: opened.sessionId,
+      ...(model ? { model } : {}),
     });
   }
 
-  /** The mode the session should be in: planning, read-only, or full tools. */
-  private wantedMode(): string {
-    const { modes } = this.config.spec;
-    if (this.planning && modes.plan) return modes.plan;
-    if (this.policy.isReadOnly && modes.readOnly) return modes.readOnly;
-    return modes.agent;
-  }
-
+  /** Put the agent in the mode the session needs: planning, read-only, or full tools. */
   private async applyMode(): Promise<void> {
+    const { modes } = this.config.spec;
+    const want =
+      this.planning && modes.plan
+        ? modes.plan
+        : this.policy.isReadOnly && modes.readOnly
+          ? modes.readOnly
+          : modes.agent;
     const rpc = this.rpc;
-    const want = this.wantedMode();
     if (!rpc || !this.acpSession || want === this.mode) return;
-    const available = modeIds(this.setup);
-    if (available.length && !available.includes(want)) return;
-    const option = findOption(this.setup.configOptions, "mode");
-    const id = option ? optionId(option) : undefined;
-    if (id) {
-      await rpc.request("session/set_config_option", {
-        sessionId: this.acpSession,
-        configId: id,
-        value: want,
-      });
-    } else {
-      await rpc.request("session/set_mode", { sessionId: this.acpSession, modeId: want });
-    }
-    this.mode = want;
+    if (await setMode(rpc, this.acpSession, this.setup, want)) this.mode = want;
   }
 
   private async applyModelChange(rpc: AcpRpc): Promise<void> {
     const next = this.nextModel;
-    if (next === undefined) return;
+    if (next === undefined || !this.acpSession) return;
     this.nextModel = undefined;
     const model = explicitModel(next);
     if (!model || model === this.model) return;
-    await this.setModel(rpc, model);
+    await setModel(rpc, this.acpSession, this.setup, model);
     this.model = model;
     this.events.push({ type: "session.updated", model });
-  }
-
-  /** The agent's `model` config option when it has one, else `session/set_model`. */
-  private async setModel(rpc: AcpRpc, model: string): Promise<void> {
-    const option = findOption(this.setup.configOptions, "model");
-    const id = option ? optionId(option) : undefined;
-    if (id) {
-      await rpc.request("session/set_config_option", {
-        sessionId: this.acpSession,
-        configId: id,
-        value: model,
-      });
-    } else {
-      await rpc.request("session/set_model", { sessionId: this.acpSession, modelId: model });
-    }
-  }
-
-  private withInstructions(input: UserInput): UserInput {
-    const text = this.instructions;
-    if (!text) return input;
-    this.instructions = undefined;
-    return { ...input, text: `<instructions>\n${text}\n</instructions>\n\n${input.text}` };
   }
 
   private onAgentMode(mode: string): void {
@@ -404,7 +337,7 @@ export class AcpSession implements ProviderSession {
 
   private onConfigOptions(options: AcpConfigOption[]): void {
     this.setup = { ...this.setup, configOptions: options };
-    const mode = stringValue(findOption(options, "mode")?.currentValue);
+    const mode = currentMode({ configOptions: options });
     if (mode && mode !== this.mode) this.onAgentMode(mode);
     this.config.onSetup?.(this.setup, this.info);
   }
@@ -480,8 +413,4 @@ export class AcpSession implements ProviderSession {
     });
     this.turnPending = false;
   }
-}
-
-function stringValue(value: unknown): string | undefined {
-  return typeof value === "string" && value ? value : undefined;
 }
