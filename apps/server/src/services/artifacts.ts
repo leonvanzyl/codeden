@@ -8,7 +8,7 @@ import { rowToArtifact } from "../db/rows";
 import { artifacts } from "../db/schema";
 import type { EventStore } from "../events/store";
 import { badRequest, notFound } from "./errors";
-import { resolveInside } from "./files/path-guard";
+import { realPathOf, resolveInside } from "./files/path-guard";
 
 const EXTENSIONS: Record<string, string> = {
   "image/png": ".png",
@@ -104,6 +104,35 @@ export class ArtifactService {
   }
 
   /**
+   * The real path of an artifact's file (symlinks, junctions and Windows short names resolved),
+   * still inside the artifacts folder. Tools that publish or share an artifact check and read
+   * this file, never the alias `filePath` returns.
+   */
+  realFilePath(artifact: Artifact): string {
+    const real = realPathOf(this.filePath(artifact));
+    if (!real) throw notFound(`Artifact ${artifact.id} has no file`, "artifact_file_missing");
+    return real;
+  }
+
+  /**
+   * The artifact stored in `file`, comparing real paths, so a symlink or junction in or above
+   * the artifacts folder can't hide which artifact a file is (and so its original name). Reads
+   * the file system, unlike `artifactForPath`.
+   */
+  artifactForFile(file: string): Artifact | undefined {
+    const real = realPathOf(file);
+    if (!real) return undefined;
+    for (const candidate of new Set([file, real])) {
+      const id = artifactIdOf(candidate);
+      const artifact = id ? this.find(id) : undefined;
+      if (!artifact) continue;
+      const stored = realPathOf(resolve(this.dir, artifact.path));
+      if (stored && comparable(stored) === comparable(real)) return artifact;
+    }
+    return undefined;
+  }
+
+  /**
    * Store pasted (base64) images as artifacts and point the attachment at the artifact, so
    * large payloads never land in the event log and stored input (queued messages, pending
    * starts) never carries a filesystem path. `resolveAttachments` turns the reference into a
@@ -158,8 +187,7 @@ export class ArtifactService {
    * match with an artifact's file inside the artifacts folder counts; nothing is read from disk.
    */
   artifactForPath(path: string): Artifact | undefined {
-    const file = path.split(/[\\/]/).pop() ?? "";
-    const id = file.replace(/\.[^.]*$/, "");
+    const id = artifactIdOf(path);
     if (!id) return undefined;
     const artifact = this.find(id);
     if (!artifact) return undefined;
@@ -201,3 +229,6 @@ export function sharedArtifactNotice(
 
 const caseInsensitive = process.platform === "win32" || process.platform === "darwin";
 const comparable = (p: string) => (caseInsensitive ? p.toLowerCase() : p);
+
+/** The artifact id a stored file is named after (`<id>.<ext>`). */
+const artifactIdOf = (path: string) => (path.split(/[\\/]/).pop() ?? "").replace(/\.[^.]*$/, "");

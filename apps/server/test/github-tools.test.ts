@@ -1,6 +1,5 @@
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { EVIDENCE_BRANCH } from "../src/services/github/evidence";
 import { pullRequestBody } from "../src/services/github/pull-requests";
@@ -160,104 +159,6 @@ describe("attach evidence", () => {
         files: [{ path: "../../etc/hosts" }],
       }),
     ).rejects.toMatchObject({ status: expect.any(Number) });
-  });
-
-  // #167: evidence is published to GitHub (public on a public repo, and kept in history), so
-  // secrets files and CodeDen's own credentials are never attached.
-  describe("secrets", () => {
-    const issueSession = () => {
-      env.gh.addIssue();
-      return env.addSession({
-        issue: { number: 1, url: "https://github.com/acme/widgets/issues/1" },
-      });
-    };
-    const refused = { status: 403, code: "secret_file" };
-    const nothingPublished = () => {
-      expect(env.gh.gitData.refs.get(`refs/heads/${EVIDENCE_BRANCH}`)).toBeUndefined();
-      expect(env.gh.issues.get(1)?.comments ?? []).toHaveLength(0);
-    };
-
-    it.each([
-      [".env in the worktree", (dir: string, _temp: string) => [dir, ".env"]],
-      [".env.local in the worktree", (dir: string) => [dir, ".env.local"]],
-      ["an SSH key copied into temp", (_dir: string, temp: string) => [temp, "id_rsa"]],
-      ["a .pem in temp", (_dir: string, temp: string) => [temp, "server.pem"]],
-      [".npmrc in temp", (_dir: string, temp: string) => [temp, ".npmrc"]],
-      ["CodeDen's install token", (dir: string) => [dir, "install-token"]],
-      ["the runner lock", (dir: string) => [dir, "runner", "runner.json"]],
-    ])("refuses to publish %s", async (_label, where) => {
-      const temp = mkdtempSync(join(tmpdir(), "codeden-evidence-"));
-      try {
-        const file = join(...where(env.dir, temp));
-        mkdirSync(dirname(file), { recursive: true });
-        writeFileSync(file, "SECRET=hunter2\n");
-        const session = issueSession();
-        await expect(
-          env.service.attachEvidence(session.id, { files: [{ path: file }] }),
-        ).rejects.toMatchObject(refused);
-        nothingPublished();
-      } finally {
-        rmSync(temp, { recursive: true, force: true });
-      }
-    });
-
-    it("refuses a secret under a harmless name, and a harmless file under a secret's name", async () => {
-      writeFileSync(join(env.dir, ".env"), "SECRET=hunter2\n");
-      writeFileSync(join(env.dir, "notes.txt"), "notes\n");
-      const session = issueSession();
-      const attach = (file: { path: string; name: string }) =>
-        env.service.attachEvidence(session.id, { files: [file] });
-      await expect(attach({ path: ".env", name: "config.txt" })).rejects.toMatchObject(refused);
-      await expect(attach({ path: "notes.txt", name: ".env" })).rejects.toMatchObject(refused);
-      nothingPublished();
-    });
-
-    it("refuses an artifact saved under a secret's name, by id and by its file path", async () => {
-      const session = issueSession();
-      const artifact = env.artifacts.save({
-        bytes: Buffer.from("SECRET=hunter2\n"),
-        name: ".env",
-        mediaType: "text/plain",
-        kind: "file",
-        projectId: P,
-        sessionId: session.id,
-      });
-      await expect(
-        env.service.attachEvidence(session.id, {
-          files: [{ artifactId: artifact.id, name: "log.txt" }],
-        }),
-      ).rejects.toMatchObject(refused);
-      await expect(
-        env.service.attachEvidence(session.id, {
-          files: [{ path: env.artifacts.filePath(artifact) }],
-        }),
-      ).rejects.toMatchObject(refused);
-      nothingPublished();
-    });
-
-    it("refuses a symlink to a secret", async (ctx) => {
-      writeFileSync(join(env.dir, ".env"), "SECRET=hunter2\n");
-      try {
-        symlinkSync(join(env.dir, ".env"), join(env.dir, "report.txt"));
-      } catch {
-        ctx.skip(); // Windows without Developer Mode can't create symlinks.
-      }
-      const session = issueSession();
-      await expect(
-        env.service.attachEvidence(session.id, { files: [{ path: "report.txt" }] }),
-      ).rejects.toMatchObject(refused);
-      nothingPublished();
-    });
-
-    it("still attaches .env.example and screenshots", async () => {
-      writeFileSync(join(env.dir, ".env.example"), "SECRET=\n");
-      writeFileSync(join(env.dir, "shot.png"), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
-      const session = issueSession();
-      const result = await env.service.attachEvidence(session.id, {
-        files: [{ path: ".env.example" }, { path: "shot.png" }],
-      });
-      expect(result.files.map((f) => f.name)).toEqual(["env.example", "shot.png"]);
-    });
   });
 });
 

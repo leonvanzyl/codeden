@@ -1,9 +1,10 @@
-import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, isAbsolute, relative, resolve } from "node:path";
 import type { GitHubRepo, Session } from "@codeden/contracts";
 import { type ArtifactService, MAX_ATTACHMENT_BYTES } from "../artifacts";
 import { badRequest, forbidden, notFound } from "../errors";
+import { realPathOf } from "../files/path-guard";
 import { assertNotSecret } from "../secret-files";
 import { sessionWorkdir } from "../sessions/workdir";
 import type { GithubClient } from "./client";
@@ -59,10 +60,11 @@ export function readEvidence(
     throw badRequest(`Attach at most ${MAX_EVIDENCE_FILES} files at once`);
   }
   const cwd = sessionWorkdir(session);
-  const roots = [cwd, tmpdir(), artifacts.sessionDir(session.id)]
-    .filter(existsSync)
-    .map((p) => realpathSync(p));
+  const roots = [cwd, tmpdir(), artifacts.sessionDir(session.id)].flatMap(
+    (p) => realPathOf(p) ?? [],
+  );
   return sources.map((source) => {
+    // Every check and the read use the real file (links, junctions and short names resolved).
     let file: string;
     let name: string;
     if (source.artifactId) {
@@ -71,15 +73,19 @@ export function readEvidence(
         artifact.sessionId === session.id ||
         (artifact.projectId !== null && artifact.projectId === session.projectId);
       if (!sameOwner) throw forbidden(`Artifact ${source.artifactId} belongs to another project`);
-      file = artifacts.filePath(artifact);
+      file = artifacts.realFilePath(artifact);
       name = source.name ?? artifact.name;
-      assertNotSecret({ realPath: file, names: [artifact.name, name] }, home);
+      // Its file may be a link to another artifact's file; that one's original name counts too.
+      const target = artifacts.artifactForFile(file)?.name;
+      assertNotSecret(
+        { realPath: file, names: [artifacts.filePath(artifact), artifact.name, target, name] },
+        home,
+      );
     } else if (source.path) {
       const absolute = resolve(cwd, source.path);
-      if (!existsSync(absolute) || !statSync(absolute).isFile()) {
-        throw notFound(`File not found: ${source.path}`, "file_not_found");
-      }
-      file = realpathSync(absolute);
+      const real = existsSync(absolute) && statSync(absolute).isFile() && realPathOf(absolute);
+      if (!real) throw notFound(`File not found: ${source.path}`, "file_not_found");
+      file = real;
       if (!roots.some((root) => isInside(root, file))) {
         throw forbidden(
           "Only files inside your working directory, the temp folder or your own CodeDen artifacts can be attached (or pass an artifactId)",
@@ -87,7 +93,7 @@ export function readEvidence(
       }
       name = source.name ?? basename(file);
       // A stored artifact's file has a generated name; its original name counts too.
-      const stored = artifacts.artifactForPath(file)?.name;
+      const stored = artifacts.artifactForFile(file)?.name;
       assertNotSecret({ realPath: file, names: [source.path, stored, name] }, home);
     } else {
       throw badRequest("Each file needs a path or an artifactId");

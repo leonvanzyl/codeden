@@ -1,12 +1,12 @@
-import { existsSync, realpathSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { CODEDEN_CREDENTIAL_FILES } from "@codeden/contracts";
 import { isSecretPath } from "@codeden/providers";
 import { forbidden } from "./errors";
+import { realPathOf } from "./files/path-guard";
 
 /** A file on its way out of the machine, by every name it goes by. */
 export interface OutgoingFile {
-  /** Its real path (symlinks resolved), when it comes from disk. */
+  /** Its real path (`realPathOf`: links and short names resolved), when it comes from disk. */
   realPath?: string;
   /** Its other names: the path asked for, the name it is published or saved under. */
   names: ReadonlyArray<string | undefined>;
@@ -14,22 +14,13 @@ export interface OutgoingFile {
 
 const caseInsensitive = process.platform === "win32" || process.platform === "darwin";
 const comparable = (p: string) => (caseInsensitive ? resolve(p).toLowerCase() : resolve(p));
+/** Both sides resolve the same way: symlinks, junctions and short names (`LEON~1`). */
+const canonical = (p: string) => comparable(realPathOf(p) ?? p);
 
-function realOrSelf(path: string): string {
-  try {
-    return existsSync(path) ? realpathSync(path) : path;
-  } catch {
-    return path;
-  }
-}
-
-/** True when `realPath` is one of CodeDen's own credential files in `home` (§15). */
-export function isCodedenCredentialFile(realPath: string, home: string): boolean {
-  const target = comparable(realPath);
-  return CODEDEN_CREDENTIAL_FILES.some((file) => {
-    const path = join(home, file);
-    return comparable(path) === target || comparable(realOrSelf(path)) === target;
-  });
+/** True when `file` is one of CodeDen's own credential files in `home` (§15). */
+export function isCodedenCredentialFile(file: string, home: string): boolean {
+  const target = canonical(file);
+  return CODEDEN_CREDENTIAL_FILES.some((name) => canonical(join(home, name)) === target);
 }
 
 /**
