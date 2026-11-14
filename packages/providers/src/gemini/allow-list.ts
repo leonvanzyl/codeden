@@ -1,6 +1,14 @@
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { readdirSync } from "node:fs";
 import path from "node:path";
-import { CHECK_RULES, field, listRules, readSettingsFile, stringList } from "../acp/allow-lists";
+import {
+  CHECK_RULES,
+  field,
+  listRules,
+  readSettingsFile,
+  readSmallFile,
+  stringList,
+  UNREADABLE,
+} from "../acp/allow-lists";
 
 /** Gemini CLI's project settings, relative to the worktree. */
 export const GEMINI_PROJECT_SETTINGS = ".gemini/settings.json";
@@ -37,9 +45,11 @@ export const GEMINI_PROJECT_POLICIES = ".gemini/policies";
 
 /** A policy rule that runs a tool without asking. */
 const ALLOW_DECISION = /^\s*decision\s*=\s*["']allow["']/im;
-const MAX_POLICY_BYTES = 1024 * 1024;
 
-/** The project's policy files with an `allow` rule, relative to the worktree, by name. */
+/**
+ * The project's policy files with an `allow` rule, relative to the worktree, by name. Only small
+ * regular files are read (`readSmallFile`); others are skipped.
+ */
 export function geminiAllowPolicies(cwd: string): string[] {
   const dir = path.join(cwd, GEMINI_PROJECT_POLICIES);
   let names: string[];
@@ -52,14 +62,8 @@ export function geminiAllowPolicies(cwd: string): string[] {
   }
   return names
     .filter((name) => {
-      try {
-        const file = path.join(dir, name);
-        return (
-          statSync(file).size <= MAX_POLICY_BYTES && ALLOW_DECISION.test(readFileSync(file, "utf8"))
-        );
-      } catch {
-        return false;
-      }
+      const text = readSmallFile(path.join(dir, name));
+      return typeof text === "string" && ALLOW_DECISION.test(text);
     })
     .map((name) => `${GEMINI_PROJECT_POLICIES}/${name}`);
 }
@@ -68,6 +72,7 @@ export function geminiAllowPolicies(cwd: string): string[] {
 function settingsRules(cwd: string): string | undefined {
   const file = readSettingsFile(path.join(cwd, GEMINI_PROJECT_SETTINGS));
   if (!file.exists) return undefined;
+  if (file.text === null) return UNREADABLE;
   if (file.data === undefined) {
     return /allowed|autoAccept|allowMCPServers|"trust"/i.test(file.text)
       ? "CodeDen couldn't read them"

@@ -1,8 +1,17 @@
-import { mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { AGENT_ALLOW_LIST_NOTICE, type ItemOf } from "@codeden/contracts";
 import { describe, expect, it } from "vitest";
+import { readSmallFile } from "../src/acp/allow-lists";
 import { cursorAllowListNotice } from "../src/cursor/allow-list";
 import {
   GEMINI_ADMIN_POLICY,
@@ -42,6 +51,37 @@ describe("Cursor's allow-list", () => {
     expect(cursorAllowListNotice(worktree(denyOnly))).toBeUndefined();
     const broken = worktree({ ".cursor/cli.json": '{ "permissions": { "allow": ["Shell(*)"' });
     expect(cursorAllowListNotice(broken)).toContain("CodeDen couldn't read its rules");
+  });
+
+  it("never opens what isn't a small regular file, and says it couldn't read it", () => {
+    const dir = worktree({});
+    mkdirSync(join(dir, ".cursor", "cli.json"), { recursive: true });
+    expect(cursorAllowListNotice(dir)).toContain(
+      "`.cursor/cli.json` (CodeDen couldn't read it safely)",
+    );
+  });
+
+  // A committed symlink to a device reports size 0 but never ends.
+  it.skipIf(process.platform === "win32")("doesn't read a symlink to /dev/zero", () => {
+    const dir = worktree({ "real.json": '{ "permissions": { "allow": ["Shell(ls)"] } }' });
+    mkdirSync(join(dir, ".cursor"));
+    symlinkSync("/dev/zero", join(dir, ".cursor", "cli.json"));
+    expect(readSmallFile(join(dir, ".cursor", "cli.json"))).toBeNull();
+    expect(cursorAllowListNotice(dir)).toContain("CodeDen couldn't read it safely");
+    // A symlink to a regular file is read as the file.
+    rmSync(join(dir, ".cursor", "cli.json"));
+    symlinkSync(join(dir, "real.json"), join(dir, ".cursor", "cli.json"));
+    expect(cursorAllowListNotice(dir)).toContain("(Shell(ls))");
+  });
+});
+
+describe("readSmallFile", () => {
+  it("reads small regular files only", () => {
+    const dir = worktree({ "a.json": "12345", "folder.toml/x": "" });
+    expect(readSmallFile(join(dir, "missing.json"))).toBeUndefined();
+    expect(readSmallFile(join(dir, "a.json"))).toBe("12345");
+    expect(readSmallFile(join(dir, "a.json"), 4)).toBeNull();
+    expect(readSmallFile(join(dir, "folder.toml"))).toBeNull();
   });
 });
 
@@ -87,6 +127,13 @@ describe("Gemini CLI's allow settings", () => {
       "without asking: allow rules in `.gemini/policies/b-allow.toml`. CodeDen starts",
     );
     expect(geminiAllowListNotice(worktree({ ".gemini/policies/a.toml": deny }))).toBeUndefined();
+    // Only small regular files are read: a folder named like a policy is skipped.
+    expect(
+      geminiAllowListNotice(worktree({ ".gemini/policies/dir.toml/x": allow })),
+    ).toBeUndefined();
+    expect(geminiAllowListNotice(worktree({ ".gemini/settings.json/x": "" }))).toContain(
+      "`.gemini/settings.json`: CodeDen couldn't read it safely",
+    );
     const both = worktree({
       ".gemini/settings.json": '{ "mcp": { "allowed": ["linear"] } }',
       ".gemini/policies/allow.toml": allow,

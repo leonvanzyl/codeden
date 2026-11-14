@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { closeSync, constants, fstatSync, openSync, readSync, type Stats, statSync } from "node:fs";
 import { parseJsonc } from "../util/jsonc";
 
 /**
@@ -8,22 +8,56 @@ import { parseJsonc } from "../util/jsonc";
  * change.
  */
 
+/** The most a settings or policy file is read; real ones are a few kilobytes. */
+export const MAX_FILE_BYTES = 1024 * 1024;
+
 /**
- * A settings file in the worktree: missing, or its text and what it parses to (undefined when it
- * isn't JSON).
+ * The text of a small regular file: undefined when nothing is there, null when it can't be read
+ * safely. The worktree is the agent's (or a merged change's), so a name may be a symlink to a
+ * device (`/dev/zero`, which reports size 0), a FIFO (opening one waits for a writer) or a folder:
+ * only a regular file, followed through symlinks, of at most `max` bytes is opened, and at most
+ * that much of it is read. Never throws.
  */
-export type SettingsFile = { exists: false } | { exists: true; text: string; data: unknown };
+export function readSmallFile(file: string, max = MAX_FILE_BYTES): string | null | undefined {
+  let stats: Stats;
+  try {
+    stats = statSync(file);
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "ENOENT" ? undefined : null;
+  }
+  if (!stats.isFile() || stats.size > max) return null;
+  let fd: number | undefined;
+  try {
+    // Non-blocking where the OS has it: a FIFO swapped in after the check can't hang the open.
+    fd = openSync(file, constants.O_RDONLY | (constants.O_NONBLOCK ?? 0));
+    // Checked again on what was opened: the name may have changed since.
+    const opened = fstatSync(fd);
+    if (!opened.isFile() || opened.size > max) return null;
+    const buffer = Buffer.alloc(opened.size);
+    const read = readSync(fd, buffer, 0, buffer.length, 0);
+    return buffer.subarray(0, read).toString("utf8");
+  } catch {
+    return null;
+  } finally {
+    if (fd !== undefined) closeSync(fd);
+  }
+}
+
+/**
+ * A settings file in the worktree: missing, or its text (null when it can't be read safely,
+ * `readSmallFile`) and what it parses to (undefined when it isn't JSON).
+ */
+export type SettingsFile = { exists: false } | { exists: true; text: string | null; data: unknown };
 
 /** Read a JSON settings file (comments and trailing commas allowed). Never throws. */
 export function readSettingsFile(file: string): SettingsFile {
-  let text: string;
-  try {
-    text = readFileSync(file, "utf8");
-  } catch {
-    return { exists: false };
-  }
-  return { exists: true, text, data: parseJsonc(text) };
+  const text = readSmallFile(file);
+  if (text === undefined) return { exists: false };
+  return { exists: true, text, data: text === null ? undefined : parseJsonc(text) };
 }
+
+/** What a warning says about a settings file it can't read safely (a device, too large, ...). */
+export const UNREADABLE = "CodeDen couldn't read it safely";
 
 /** `value[key]` when `value` is an object. */
 export function field(value: unknown, key: string): unknown {
