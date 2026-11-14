@@ -27,6 +27,8 @@ describe("toUnifiedPatch", () => {
 
   it("is null when GitHub sent no patch (binary, too large, no content change)", () => {
     expect(toUnifiedPatch({ path: "logo.png", status: "added" }, undefined)).toBeNull();
-    expect(toUnifiedPatch({ path: "a.ts", status: "renamed", previousPath: "b.ts" }, "")).toBeNull();
+    expect(
+      toUnifiedPatch({ path: "a.ts", status: "renamed", previousPath: "b.ts" }, ""),
+    ).toBeNull();
   });
 });
