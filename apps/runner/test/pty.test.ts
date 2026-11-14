@@ -142,6 +142,6 @@ describe.skipIf(!loadPty())("terminals (node-pty)", () => {
         cols: 80,
         rows: 24,
       }),
-    ).rejects.toMatchObject({ code: "not_found" });
+    ).rejects.toMatchObject({ code: "cwd_missing" });
   }, 60_000);
 });

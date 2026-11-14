@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import type {
   AgentEvent,
   RunnerCommandOf,
@@ -11,7 +12,7 @@ import {
 } from "@codeden/providers";
 import { CommandError } from "./errors";
 import { createCheckpoint, nextCheckpointIndex } from "./git/checkpoints";
-import { isWorkTree } from "./git/exec";
+import { cwdMissing, isWorkTree } from "./git/exec";
 import { agentSessionOptions } from "./session-env";
 
 export { CommandError };
@@ -91,6 +92,9 @@ export class SessionHost {
           (available.length > 0 ? ` (available: ${available.join(", ")})` : ""),
       );
     }
+    // A folder that isn't there (a host path sent to a sandbox, a removed worktree) is named as
+    // such instead of failing later as a provider's `spawn ENOENT`.
+    if (!existsSync(cmd.options.cwd)) throw cwdMissing(cmd.options.cwd);
     this.opening.add(cmd.sessionId);
     let hosted: Hosted;
     try {

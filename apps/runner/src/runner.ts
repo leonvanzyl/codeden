@@ -35,6 +35,7 @@ import { HttpMcpUpstream, handleMcpRequest, type McpUpstream } from "./mcp/proxy
 import { ProcessSupervisor } from "./process/supervisor";
 import { TerminalHost } from "./pty/terminal-host";
 import { SessionHost } from "./session-host";
+import { WorkspaceFsHost } from "./workspace/fs";
 import { emptyTrash } from "./workspace/trash";
 
 export interface StartRunnerOptions {
@@ -171,6 +172,7 @@ export async function startRunner(opts: StartRunnerOptions): Promise<RunningRunn
   // Chromium launches lazily on the first `browser.*` command (§12.2).
   const browserManager = opts.browser ?? new BrowserManager({ stream, log });
   const browser = createBrowserCommandHandlers({ manager: browserManager });
+  const files = new WorkspaceFsHost(opts.home);
   const finish = () => void close().then(() => opts.onShutdown?.());
 
   const core: RunnerCore = {
@@ -183,6 +185,7 @@ export async function startRunner(opts: StartRunnerOptions): Promise<RunningRunn
     supervisor,
     registry,
     browser,
+    files,
     startedAt: new Date().toISOString(),
     emit,
     log,
@@ -288,6 +291,7 @@ export async function startRunner(opts: StartRunnerOptions): Promise<RunningRunn
       stopProviderUpdates();
       await host.closeAll();
       await terminals.closeAll();
+      files.closeAll();
       await browserManager.shutdown().catch((error: unknown) => log(`browser: ${String(error)}`));
       await supervisor.killAll(opts.sweepDescendants ?? false);
       for (const conn of connections) conn.close("runner stopping");
