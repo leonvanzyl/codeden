@@ -48,9 +48,9 @@ export class WorkspaceFsHost {
   ) {}
 
   /** Run one command; guard refusals become `CommandError`s with the same code. */
-  execute(command: FsCommand): RunnerCommandResult<FsCommand["name"]> {
+  execute<C extends FsCommand>(command: C): RunnerCommandResult<C["name"]> {
     try {
-      return this.run(command);
+      return this.run(command) as RunnerCommandResult<C["name"]>;
     } catch (error) {
       if (error instanceof WorkspaceFsError) throw new CommandError(error.code, error.message);
       if (error instanceof CommandError) throw error;
