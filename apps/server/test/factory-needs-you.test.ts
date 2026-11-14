@@ -10,7 +10,9 @@ import { factorySteps } from "./support/factory-steps";
  */
 
 let env: FactoryEnv;
-const { item, tick, enable, backlogItem, verifying, failed } = factorySteps(() => env);
+const { item, tick, enable, backlogItem, verifying, failed, keepConflicting } = factorySteps(
+  () => env,
+);
 
 beforeEach(() => {
   env = createFactoryEnv();
@@ -97,6 +99,32 @@ describe("closed issues settle their failed items (#265)", () => {
     expect(item(id).stage).toBe("failed");
     expect(waiting()).toEqual([id]);
     expect(env.gh.closed.map((c) => c.number)).not.toContain(pr.ref.number);
+  });
+
+  it("leaves a failed rebuild to ownership when a person merges its original PR", async () => {
+    await enable();
+    const issue = env.gh.openIssue({ projectId: env.project.id, title: "Counter", author: "x" });
+    const { id, pr } = await verifying("pending", "Counter", issue.number);
+    pr.linkedIssues = [issue.number];
+    // It keeps conflicting, is rebuilt, and the rebuild stops before its new PR exists.
+    pr.mergeable = "conflicting";
+    await tick();
+    await keepConflicting(id);
+    expect(item(id).rebuiltFrom?.number).toBe(pr.ref.number);
+    await env.setStatus(item(id).builderSessionId as string, "stopped");
+    await tick();
+    expect(item(id)).toMatchObject({ stage: "failed", failureKind: "stuck", pr: null });
+
+    // A person merges the original PR; its "Fixes #n" closes the issue in the same sync.
+    pr.ref = { ...pr.ref, state: "merged" };
+    env.gh.closeIssue(issue.number, "completed");
+    await tick();
+    expect(item(id)).toMatchObject({
+      stage: "merged",
+      note: "Merged on GitHub",
+      pr: { number: pr.ref.number },
+    });
+    expect(item(id).mergedAt).not.toBeNull();
   });
 });
 

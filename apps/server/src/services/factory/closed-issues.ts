@@ -1,15 +1,19 @@
 import type { FactoryItem, GithubIssue, Project } from "@codeden/contracts";
 import type { FactoryContext } from "./context";
 import { closeInboxFor } from "./merge";
-import { ownedPr } from "./pr-status";
+import { rebuildOriginal } from "./rebuild";
 
 /**
- * Closed issues settle their failed items (§10.1, "Needs you"). An item that failed without an
- * open pull request has nothing left for a person to decide once its issue is closed on GitHub
- * (a duplicate, resolved by another pull request, not planned): it finishes by itself, with the
+ * Closed issues settle their failed items (§10.1, "Needs you"). An item that failed without a
+ * pull request has nothing left for a person to decide once its issue is closed on GitHub (a
+ * duplicate, resolved by another pull request, not planned): it finishes by itself, with the
  * reason recorded. When a merged pull request closed the issue, the work is done (`merged`,
- * naming that PR); otherwise it is `rejected`. An item with an open PR waits for a person to
- * merge or close it, as before.
+ * naming that PR); otherwise it is `rejected`.
+ *
+ * An item with a pull request of its own, or a rebuild's original it still stands for, is left
+ * to ownership (`owned.ts`): a person merging or closing that PR finishes it (`prDecidedOutside`,
+ * with the merge recorded), and while it is open it waits for them. Its "Fixes #n" closes the
+ * issue in the same sync as the merge, so settling it here would pre-empt that.
  */
 
 const CLOSED_AS: Record<NonNullable<GithubIssue["stateReason"]>, string> = {
@@ -22,7 +26,7 @@ const CLOSED_AS: Record<NonNullable<GithubIssue["stateReason"]>, string> = {
 export function settleClosedIssues(ctx: FactoryContext, project: Project): number {
   let settled = 0;
   for (const item of ctx.store.items(project.id, ["failed"])) {
-    if (!item.issue || ownedPr(ctx, item)) continue;
+    if (!item.issue || item.pr || rebuildOriginal(item)) continue;
     const issue = ctx.github.issue(project.id, item.issue.number);
     if (issue?.state !== "closed") continue;
     settle(ctx, project, item, issue);

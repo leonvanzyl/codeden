@@ -285,11 +285,11 @@ Items that failed this way before this was added are recognised by their reason 
 
 ### Closed issues settle their work
 
-When an item's issue is closed on GitHub (as a duplicate, as not planned, or because another pull request resolved it) and the item failed without an open pull request of its own, there's nothing left for you to decide. On its next check the factory settles it, with the reason recorded on the item:
+When an item's issue is closed on GitHub (as a duplicate, as not planned, or because another pull request resolved it) and the item failed without a pull request of its own, there's nothing left for you to decide. On its next check the factory settles it, with the reason recorded on the item:
 - the issue was closed by a merged pull request that links it ("Fixes #n"): the work is done, marked **merged** with "Resolved by #n";
 - otherwise it's **rejected**, with how the issue was closed ("The issue was closed on GitHub as a duplicate", "as not planned", "as completed").
 
-This also covers a builder that finished without a pull request because there was nothing left to do. Inbox items about it are resolved too. An item whose own pull request is still open waits for you to merge or close that pull request, as before, and a queued item whose issue is closed is dropped before an agent starts on it.
+This also covers a builder that finished without a pull request because there was nothing left to do. Inbox items about it are resolved too. An item with a pull request of its own (or a rebuild's original pull request) is left to that pull request, as before: merging or closing it on GitHub finishes the item, with the merge recorded, and while it's open it waits for you. A queued item whose issue is closed is dropped before an agent starts on it.
 
 ### Only what is truly stuck reaches you
 
