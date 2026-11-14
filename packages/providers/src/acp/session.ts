@@ -55,6 +55,8 @@ export class AcpSession implements ProviderSession {
   private setup: AcpSessionSetup = {};
   private closed = false;
   private turnPending = false;
+  /** A `send()` still starting the agent (or switching its model): no turn or prompt yet. */
+  private startingSend: StartingSend | undefined;
   private interrupted = false;
   private model: string | undefined;
   private nextModel: string | null | undefined;
@@ -138,32 +140,46 @@ export class AcpSession implements ProviderSession {
       throw new ProviderSessionError("turn_running", "A turn is already running");
     }
     this.turnPending = true;
-    const turnId = `turn-${randomUUID()}`;
-    let prompt: ReturnType<typeof promptBlocks>;
+    const pending: StartingSend = { turnId: `turn-${randomUUID()}`, input, stopped: false };
+    this.startingSend = pending;
+    let prompt: ReturnType<typeof promptBlocks> | undefined;
     let rpc: AcpRpc;
     try {
       rpc = await this.ensureAgent();
-      await this.applyModelChange(rpc);
-      prompt = promptBlocks(
-        withInstructions(input, this.instructions),
-        agentCan(this.info, "images"),
-      );
-      this.instructions = undefined;
+      if (!pending.stopped) {
+        await this.applyModelChange(rpc);
+        prompt = promptBlocks(
+          withInstructions(input, this.instructions),
+          agentCan(this.info, "images"),
+        );
+      }
     } catch (error) {
+      // Stopped while starting: the turn already ended as interrupted, so the failure is moot.
+      if (pending.stopped) return;
+      if (this.startingSend === pending) this.startingSend = undefined;
       this.turnPending = false;
       throw error;
     }
+    if (pending.stopped || !prompt) return;
+    if (this.startingSend === pending) this.startingSend = undefined;
+    this.instructions = undefined;
     this.interrupted = false;
-    this.mapper.beginTurn(turnId);
+    this.mapper.beginTurn(pending.turnId);
     this.mapper.userMessage(input);
     this.flushNotice();
-    void this.runPrompt(rpc, turnId, prompt);
+    void this.runPrompt(rpc, pending.turnId, prompt);
   }
 
-  /** `session/cancel`; the prompt then ends as cancelled. Waiting requests are cancelled. */
+  /**
+   * `session/cancel`; the prompt then ends as cancelled. Waiting requests are cancelled. A turn
+   * still starting the agent ends at once, and its prompt is never sent.
+   */
   async interrupt(): Promise<void> {
     const turnId = this.mapper.currentTurnId;
-    if (!turnId) return;
+    if (!turnId) {
+      this.stopStartingSend();
+      return;
+    }
     this.interrupted = true;
     this.broker.cancelAll();
     if (this.acpSession) this.rpc?.notify("session/cancel", { sessionId: this.acpSession });
@@ -186,6 +202,22 @@ export class AcpSession implements ProviderSession {
   }
 
   // ---------------------------------------------------------------- internals
+
+  /**
+   * Stop pressed while `send()` still starts the agent: the turn ends now as interrupted (with
+   * the user's message, so the transcript shows what was stopped) and its prompt is never sent.
+   * The agent keeps starting, for the next message.
+   */
+  private stopStartingSend(): void {
+    const pending = this.startingSend;
+    if (!pending || this.closed) return;
+    this.startingSend = undefined;
+    pending.stopped = true;
+    this.mapper.beginTurn(pending.turnId);
+    this.mapper.userMessage(pending.input);
+    this.flushNotice();
+    this.mapper.endTurn({ type: "interrupted" });
+  }
 
   private async runPrompt(rpc: AcpRpc, turnId: string, prompt: unknown): Promise<void> {
     try {
@@ -429,6 +461,9 @@ export class AcpSession implements ProviderSession {
     this.turnPending = false;
   }
 }
+
+/** A message `send()` took while the agent was starting; `stopped` once Stop ended its turn. */
+type StartingSend = { turnId: string; input: UserInput; stopped: boolean };
 
 /** The ACP session id a request or notification names, if any. */
 function sessionIdOf(params: unknown): string | undefined {
