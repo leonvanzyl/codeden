@@ -27,6 +27,8 @@ export const githubIssues = sqliteTable(
     createdAt: text("created_at"),
     updatedAt: text("updated_at").notNull(),
     closedAt: text("closed_at"),
+    /** GitHub's `state_reason` on a closed issue (`completed`, `not_planned`, `duplicate`). */
+    stateReason: text("state_reason"),
     syncedAt: text("synced_at").notNull(),
   },
   (t) => [primaryKey({ columns: [t.projectId, t.number] })],

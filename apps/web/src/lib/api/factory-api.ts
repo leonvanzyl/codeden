@@ -1,6 +1,7 @@
 import {
   type FactoryAdmitRequest,
   FactoryDigest,
+  type FactoryDismissRequest,
   type FactoryItem,
   FactoryItemResponse,
   FactoryLoop,
@@ -55,6 +56,11 @@ export interface FactoryApi {
    * re-review is asked for without an open PR.
    */
   retry(projectId: string, itemId: string, opts?: FactoryRetryOptions): Promise<FactoryItem>;
+  /**
+   * Dismiss a failed item without an open PR: it is rejected with the reason. 409 `pr_open`
+   * while its PR is open, `not_failed` for other stages.
+   */
+  dismiss(projectId: string, itemId: string, req?: FactoryDismissRequest): Promise<FactoryItem>;
 }
 
 const enc = encodeURIComponent;
@@ -85,5 +91,7 @@ export function httpFactoryApi(http: Fetcher): FactoryApi {
     setType: (id, req) => post(`${p(id)}/factory/set-type`, req, item),
     retry: (id, itemId, opts) =>
       post(`${p(id)}/factory/items/${enc(itemId)}/retry`, opts ?? {}, item),
+    dismiss: (id, itemId, req = {}) =>
+      post(`${p(id)}/factory/items/${enc(itemId)}/dismiss`, req, item),
   };
 }

@@ -1,4 +1,9 @@
-import type { GithubIssue, GithubPr, NewEvent } from "@codeden/contracts";
+import {
+  type GithubIssue,
+  GithubIssueStateReason,
+  type GithubPr,
+  type NewEvent,
+} from "@codeden/contracts";
 
 /**
  * Turn "what we had" vs "what GitHub says now" into domain events (§9, §10 triggers). Pure, so
@@ -18,7 +23,16 @@ export interface RestIssue {
   created_at: string;
   updated_at: string;
   closed_at: string | null;
+  /** `completed`, `not_planned`, `duplicate`, `reopened` or null. */
+  state_reason?: string | null;
   pull_request?: unknown;
+}
+
+/** GitHub's `state_reason` on a closed issue; `reopened` (an open issue) and unknown ones are null. */
+function stateReason(raw: RestIssue): GithubIssue["stateReason"] {
+  if (raw.state !== "closed") return null;
+  const parsed = GithubIssueStateReason.safeParse(raw.state_reason);
+  return parsed.success ? parsed.data : null;
 }
 
 export function toGithubIssue(projectId: string, raw: RestIssue): GithubIssue {
@@ -37,6 +51,7 @@ export function toGithubIssue(projectId: string, raw: RestIssue): GithubIssue {
     createdAt: raw.created_at,
     updatedAt: raw.updated_at,
     closedAt: raw.closed_at,
+    stateReason: stateReason(raw),
     sessionIds: [],
   };
 }
@@ -78,6 +93,7 @@ export function diffIssue(
   if (prev.title !== next.title) changes.push("title");
   if ((prev.body ?? "") !== (next.body ?? "")) changes.push("body");
   if (prev.state !== next.state) changes.push("state");
+  else if ((prev.stateReason ?? null) !== (next.stateReason ?? null)) changes.push("state_reason");
   if (next.labels.length !== prev.labels.length + added.length) changes.push("labels");
   // More comments is `issue.commented`; fewer (a deletion) is just an update.
   if (next.comments < prev.comments) changes.push("comments");

@@ -362,3 +362,12 @@ export const FactorySetTypeRequest = z.object({
   reason: z.string().trim().max(500).optional(),
 });
 export type FactorySetTypeRequest = z.infer<typeof FactorySetTypeRequest>;
+
+/**
+ * Dismiss a failed item that holds no open pull request: it is marked `rejected` with the
+ * reason (by default, that you dismissed it and why it had stopped).
+ */
+export const FactoryDismissRequest = z.object({
+  reason: z.string().trim().min(1).max(500).optional(),
+});
+export type FactoryDismissRequest = z.infer<typeof FactoryDismissRequest>;

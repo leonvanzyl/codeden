@@ -23,6 +23,8 @@ export interface FakePr extends FactoryPr {
   testOutput: boolean;
   /** The default branch's head the PR's branch is based on (behind once main moves). */
   baseSha: string;
+  /** Issues it closes ("Fixes #n"). */
+  linkedIssues?: number[];
 }
 
 /**
@@ -105,6 +107,20 @@ export class FakeFactoryGithub implements FactoryGithub {
 
   prRef(_projectId: string, number: number): GitHubPrRef | null {
     return this.prs.get(number)?.ref ?? null;
+  }
+
+  mergedPrClosing(_projectId: string, issueNumber: number): GitHubPrRef | null {
+    const pr = [...this.prs.values()].find(
+      (p) => p.ref.state === "merged" && (p.linkedIssues ?? []).includes(issueNumber),
+    );
+    return pr?.ref ?? null;
+  }
+
+  /** Close an issue on GitHub, as the sync would project it. */
+  closeIssue(number: number, stateReason: GithubIssue["stateReason"] = "completed"): void {
+    const issue = this.issues.find((i) => i.number === number);
+    if (!issue) throw new Error(`no issue ${number}`);
+    Object.assign(issue, { state: "closed", closedAt: new Date().toISOString(), stateReason });
   }
 
   isGithubProject(projectId: string): boolean {

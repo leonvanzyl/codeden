@@ -398,6 +398,7 @@ describe("factory API contracts (§10.1)", () => {
       failureKind: null,
       checks: null,
       ownedPr: null,
+      recovering: false,
     });
     expect(before.viewRecent).toEqual([]);
     const owning = FactoryStatus.parse({

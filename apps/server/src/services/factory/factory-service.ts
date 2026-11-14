@@ -4,6 +4,7 @@ import {
   type FactoryAnalysisReport,
   type FactoryDecisionRequest,
   type FactoryDigest,
+  type FactoryDismissRequest,
   type FactoryFileIssueRequest,
   type FactoryFinding,
   type FactoryItem,
@@ -401,6 +402,18 @@ export class FactoryService {
     by: decisions.DecidedBy = "user",
   ): FactoryItem {
     const item = decisions.retry(this.ctx, projectId, itemId, mode, by);
+    this.soon(projectId);
+    return item;
+  }
+
+  /** Dismiss a failed item without an open PR: it is rejected with the reason. */
+  dismiss(
+    projectId: string,
+    itemId: string,
+    req: FactoryDismissRequest,
+    by: decisions.DecidedBy,
+  ): FactoryItem {
+    const item = decisions.dismiss(this.ctx, projectId, itemId, req, by);
     this.soon(projectId);
     return item;
   }

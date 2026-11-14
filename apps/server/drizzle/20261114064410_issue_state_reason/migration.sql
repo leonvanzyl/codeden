@@ -1,0 +1,1 @@
+ALTER TABLE `github_issues` ADD `state_reason` text;
