@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { ExternalLink, MessageCircleQuestion, RotateCcw, X } from "lucide-react";
 import { toast } from "sonner";
+import { useRetryItem } from "@/components/factory/use-retry-item";
 import { Button } from "@/components/ui/button";
 import { useClient } from "@/lib/api";
 import { factoryKeys } from "@/lib/factory";
@@ -29,14 +30,7 @@ export function NeedActions({
   const need = card.need;
   const name = cardNumber(card.item);
   const refresh = () => void queryClient.invalidateQueries({ queryKey: factoryKeys.all });
-  const retry = useMutation({
-    mutationFn: () => client.factory.retry(projectId, card.item.id),
-    onSuccess: () => {
-      toast.success(`${name} queued again`);
-      refresh();
-    },
-    onError: (e) => toast.error("Couldn't retry", { description: e.message }),
-  });
+  const retry = useRetryItem(projectId, card.item.id);
   const dismiss = useMutation({
     mutationFn: () => client.factory.dismiss(projectId, card.item.id),
     onSuccess: () => {

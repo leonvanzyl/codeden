@@ -75,7 +75,7 @@ Open it with **Factory view** on the project page or the factory panel, or **Fac
   - **Retry or dismiss: stopped without a pull request**: work that failed in the last day without a pull request, for example because its builder was stopped. **Retry** runs it again, and **Dismiss** marks it rejected with the reason ("Dismissed by you", and why it had stopped).
   - **Answer the agent's question**: its builder or reviewer asked you something or wants an approval. **Answer** opens the session.
 
-  The same definition counts the header's **need you**, the pixel scene's machines and the daily digest's **Waiting on you**, so they always agree. What the factory settles or recovers by itself never shows here: a failure outside the work's code (a session that died, CI that never started) stays in its stage until the factory puts it back, and work whose issue is closed on GitHub settles on its own (see [Closed issues settle their work](#closed-issues-settle-their-work)). However much newer history there is, an old escalation or a failure with an open pull request stays until it's settled. The side sheet of a card shows the same buttons. On wide screens the lane takes at most about a third of the height and scrolls, so the pipeline stays in view. Cards waiting on a person are outlined in amber, failed ones in red.
+  The same definition counts the header's **need you**, the pixel scene's repair bay and the daily digest's **Waiting on you**, so they always agree. What the factory settles or recovers by itself never shows here: a failure outside the work's code (a session that died, CI that never started) stays in its stage until the factory puts it back, and work whose issue is closed on GitHub settles on its own (see [Closed issues settle their work](#closed-issues-settle-their-work)). However much newer history there is, an old escalation or a failure with an open pull request stays until it's settled. The side sheet of a card shows the same buttons. On wide screens the lane takes at most about a third of the height and scrolls, so the pipeline stays in view. Cards waiting on a person are outlined in amber, failed ones in red.
 - **Click a card** to see its details in a side sheet without leaving the view: the steps of its pipeline with the current one marked (also "waiting for a free agent" and "watching CI on the default branch"), the issue and the pull request, the merge checks, the review, and links to the builder's and reviewer's sessions.
 - **The PM chat** shows the last three turns with the project's PM and its usual message box. Replies stream in as in any session, and **Open full chat** opens the PM's page. On screens 1280 pixels wide and up it sits beside the pipeline, and **Hide** folds it into a slim bar. Narrower, it opens from that bar as a side sheet.
 
@@ -83,19 +83,42 @@ On tablets and phones the stages stack as sections you can fold, the figures wra
 
 #### Pixel mode
 
-**Pixel mode** in the header swaps the figures and the pipeline for a small pixel-art factory floor, seen from above, that works along with the factory. It's just for fun and off by default. The board stays the full view, and your browser remembers which one you picked.
+**Pixel mode** in the header swaps the figures and the pipeline for a small pixel-art factory floor, seen from above, that works along with the factory. It's off by default. The board stays the full view, and your browser remembers which one you picked.
 
-- New and sorted issues are a pile of tickets at the **IN** door. When a build starts, a worker carries a ticket to a bench.
-- Each build has a worker at a workbench, hammering while its agent works. Each review has a worker with a clipboard inspecting a crate.
-- The merge queue is a row of crates on the conveyor to the **SHIP** door, in merge order. A merge sends a crate out with a sparkle. Today's merges stack on the dock.
-- Whatever needs you sits on broken machines along the bottom: a red lamp and smoke for a failure, an amber lamp otherwise, and a flag above each.
-- In a dark factory, the scout walks the floor with a magnifying glass during a round, and its area reviewers write on notepads in the corner.
-- On the wall, a gauge shows spend against the daily budget, and a counter board shows today's merges.
-- With the kill switch on or the loop stopped, the lights dim and everyone sits down.
+The floor runs left to right like the pipeline:
 
-Hover a worker, ticket, crate or machine to see its issue number and title (a builder also shows its latest progress line). Click it to open the same side sheet as on the board. Workers, crates and machines can also be reached with Tab. Under the scene, a line says what it shows ("4 building, 1 in review, 3 merged today, 2 need you") and updates for screen readers.
+| Zone | What's there |
+|---|---|
+| **IN** | New and sorted issues, as tickets on a pallet by the door (plain before they're sorted, tinted bug, feature or docs after). |
+| **PREP** | Desks for the builders that reproduce a bug or analyze a feature. |
+| **BUILD** | Workbenches for the builders implementing or revising, and for agents rebasing a pull request. |
+| **REVIEW** | Desks for the reviewers. |
+| **CI** and the conveyor | Pull requests that passed review wait as crates on the conveyor to the **SHIP** door, in merge order, each with its reviewer beside it. The CI lamp blinks amber while CI runs. |
+| **SHIP** | The counter of today's merges, and agents whose merged work still has CI on the default branch watched. Merged history stays off the floor. |
+| Control room | The PM at its console and, in a dark factory, the scout and its area reviewers. |
+| **FIX** (the repair bay) | Stopped work, in the bottom-left corner. |
 
-The scene is one small canvas drawn about 12 times a second. It stops drawing while the tab is hidden, and with reduced motion on it shows a still frame that changes only when the factory does. Pixel mode isn't offered on phones (narrower than 640 pixels), where the scene would be too small to tap; they always show the board.
+**Agents say what they're doing.** Every agent sits at the station for its step and keeps its seat while it works there, so nothing jumps around when the data refreshes. Above each one is its issue number and a small glyph for its step. Hover it, or reach it with Tab, to see a card with its role (builder, reviewer, rebaser or integrator, scout, area reviewer, PM), the item with its issue and pull request numbers, the step (reproducing, analyzing, implementing, revising, reviewing, rebasing, merging, watching CI), the provider and model, the session's latest progress line, the time in this step, and its status:
+
+- **Working**: its session runs and reported progress in this step. It types at its desk.
+- **Thinking**: its session is starting, or runs without a progress line yet in this step. A thought bubble.
+- **Waiting for approval**: its agent asked you something. A raised hand and a "!".
+- **Blocked**: it waits for CI, merge conflicts, a free agent, its turn to merge or a person, or its session failed. A red sweat drop.
+- **Done**: merged.
+
+Click an agent to open its item's side sheet; its card also has **Open session**. Clicking the PM opens its chat, and the scout and area reviewers open their sessions. When seats run out, agents queue in front of the station, and past the queue a "+N" counts the rest.
+
+**Thought bubbles show the work as it happens.** When a working agent starts a tool call, a small bubble above it says what it is: "Edit src/factory/queue.ts", "Run pnpm test", "Read DESIGN.md", "Search: withReviewer", with an icon for edits, commands, reads, searches, web pages and thinking. Without a recent tool call, it shows the start of the agent's latest reasoning or reply, cut to about 40 characters. Each agent has at most one bubble, which changes at most every two seconds and fades a few seconds after it appeared. Hovering an agent keeps its bubble, and its card lists its last three activities. Bubbles only use what a title says: a command shows its program and subcommand ("Run pnpm test"), never its arguments, and anything that looks like a secret (a token, a password, credentials in a URL, a long key) is masked as `***`. Only the agents on screen with a live session are followed, from the moment the view opens, so no transcripts are loaded.
+
+**Movement means something.** Agents only walk when the work moves on: a builder carries its pull request crate to the review desk and walks back; a reviewer stamps the crate and carries it to the conveyor; a merge sends the crate out of the shipping door with a small celebration; a failure leaves a puff of smoke and a slumped agent. Paths go around desks, nobody walks through anyone, and two agents never stand on the same tile. Each role has its own uniform and accessory (a builder's tool belt, a reviewer's glasses and clipboard, a scout's binoculars, an area reviewer's magnifier and badge, a rebaser's wrench, the PM's headset), and each agent's hair, hat and shade come from its session, so you can tell agents apart.
+
+**The repair bay** holds at most three crates, one for each kind of stopped work, each with a count: **Needs a retry**, **Stuck** and **Yours to merge**. Hover or focus a crate to see each item in it and why it stopped (for example "Stopped after 2 revise rounds; needs a re-review", "Rebuilt once and still conflicting", or "Yours to merge: protected area"), with **Retry** or **Open PR** right there. Retry does the same as on the item page. From the keyboard, Tab from a crate (or an agent) goes into its card before moving on, and a screen reader hears what each crate holds and why.
+
+**The PM chat is part of the floor.** It's a terminal docked beside the control room, with the PM's latest messages, the usual message box and scrolling. On screens 1280 pixels wide and up it sits beside the scene, and the **–** button folds it into a slim tab. Narrower, clicking the PM (or the **PM chat** button) opens it over the right side of the scene. The PM types at its console, with its headset light blinking, while it answers.
+
+Under the scene, a line says what it shows ("4 building, 1 in review, 3 merged today, 1 waiting for approval, 2 in the repair bay") and updates for screen readers. The wall also has a gauge for spend against the daily budget. With the kill switch on or the loop stopped, the lights dim and everyone sits down.
+
+The scene is one small canvas drawn about 12 times a second while someone walks, and half as often when only the idle animations play. It stops drawing while the tab is hidden, and with reduced motion on it shows a still frame, with the same labels and status marks, that changes only when the factory does. Pixel mode isn't offered on phones (narrower than 640 pixels), where the scene would be too small to tap; they always show the board.
 
 ### Finished work cleans up after itself
 

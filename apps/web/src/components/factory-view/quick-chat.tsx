@@ -66,15 +66,22 @@ function PmThread({ session, projectId }: { session: Session; projectId: string 
 export function QuickChat({
   projectId,
   onCollapse,
+  header = true,
 }: {
   projectId: string;
   /** Shown as a "Hide" button when the chat can collapse. */
   onCollapse?: () => void;
+  /** Its own header; pixel mode's terminal draws one of its own. */
+  header?: boolean;
 }) {
   const session = useRoleSession("pm", projectId);
   return (
     <div className="flex min-h-0 flex-1 flex-col" data-testid="factory-view-chat">
-      <header className="flex h-10 shrink-0 items-center gap-2 border-b border-border px-3">
+      <header
+        className={
+          header ? "flex h-10 shrink-0 items-center gap-2 border-b border-border px-3" : "hidden"
+        }
+      >
         <Bot className="size-4 text-primary" aria-hidden />
         <h2 className="text-[13px] font-medium">Project manager</h2>
         {session && (
