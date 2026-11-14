@@ -291,6 +291,9 @@ describe("session row menu", () => {
     canFork: false,
     forkBlocked: null,
     fork: vi.fn(),
+    canHandoff: false,
+    handoffBlocked: null,
+    handoff: vi.fn(),
     ...patch,
   });
 

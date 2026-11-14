@@ -34,6 +34,11 @@ export function forkOriginText(origin: ForkOrigin): {
         : origin.checkpoint === 0
           ? "Code: its files when it started"
           : `Code: its files after turn ${origin.checkpoint}`,
-    conversation: null,
+    // A handoff starts a new conversation, possibly on another provider (§9).
+    conversation:
+      origin.kind === "handoff" ? "Conversation: a new one, opened with a brief of its work" : null,
   };
 }
+
+/** Whether a session was handed off from another (a new conversation), not forked. */
+export const isHandoff = (origin: ForkOrigin) => origin.kind === "handoff";

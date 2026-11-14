@@ -46,6 +46,11 @@ export interface ModelPickerProps {
   onChange: (next: ModelChoice) => void;
   /** The provider is fixed (a started session): other providers show but can't be opened. */
   lockedProvider?: string;
+  /**
+   * With `lockedProvider`: the other providers' tiles offer to continue the session in a new
+   * one on that provider (§9), opening `onHandoff`; `blocked` says why that can't run now.
+   */
+  handoff?: { blocked: string | null; onHandoff: (providerId: string) => void };
   /** Offer effort levels beside the list (default true). */
   effort?: boolean;
   disabled?: boolean;
@@ -69,6 +74,7 @@ export function ModelPicker({
   value,
   onChange,
   lockedProvider,
+  handoff,
   effort: offerEffort = true,
   disabled,
   placeholder = "Choose a model",
@@ -100,7 +106,10 @@ export function ModelPicker({
   // The user's custom model ids join the listed ones (§13).
   const { custom } = useCustomModels();
   const providers = withCustomModels(listed, custom);
-  const tabs = providerTabs(providers, checks, lockedProvider, { favorites: true });
+  const tabs = providerTabs(providers, checks, lockedProvider, {
+    favorites: true,
+    ...(handoff ? { handoff: { blocked: handoff.blocked } } : {}),
+  });
   const openTabs = openProviderTabs(tabs);
   const tab: PickerTab | undefined = tabs.find((t) => t.id === tabId) ?? openTabs[0];
   const provider = providers.find((p) => p.id === shown?.provider);
@@ -279,6 +288,14 @@ export function ModelPicker({
                   selectedId={tab?.id ?? ""}
                   onSelect={(id) => showTab(id, false)}
                   onFocusSearch={() => inputRef.current?.focus()}
+                  onHandoff={
+                    handoff
+                      ? (id) => {
+                          openPicker(false);
+                          handoff.onHandoff(id);
+                        }
+                      : undefined
+                  }
                   refresh={refresh}
                 />
               )}

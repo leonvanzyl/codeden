@@ -1,7 +1,13 @@
-import type { ArchiveSessionResponse, ProviderInfo, Session } from "@codeden/contracts";
+import type {
+  ArchiveSessionResponse,
+  HandoffSessionRequest,
+  ProviderInfo,
+  Session,
+} from "@codeden/contracts";
 import { useMutation } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
+import { useUiStore } from "@/stores/ui";
 import { useClient } from "./api";
 import { copyWithFeedback } from "./copy";
 import { useSnapshotData } from "./queries";
@@ -30,6 +36,44 @@ export function forkBlocked(session: Session): string | null {
   if (!session.resumeToken) return "No conversation to fork yet";
   if (!session.branch) return "Only sessions on a git branch can be forked";
   return null;
+}
+
+/**
+ * Why an agent session can't be handed off right now, or null when it can (the server checks
+ * the same, §9). Unlike a fork it needs no provider capability and no resume token.
+ */
+export function handoffBlocked(session: Session): string | null {
+  if (session.status === "waiting") return "Answer what it's waiting on first";
+  if (canStop(session)) return "Wait for the running turn to finish";
+  if (NOT_STARTED.has(session.status)) return "The session hasn't started yet";
+  if (!session.branch) return "Only sessions on a git branch can be handed off";
+  if (!session.rootThreadId) return "Nothing to hand off yet";
+  return null;
+}
+
+/**
+ * Hand a session off (§9): a new session on the chosen provider with this one's code and a
+ * brief of its work, then open it. Writing the brief can take a moment (the utility model
+ * summarises the work), so a loading toast shows meanwhile.
+ */
+export function useHandoffSession(session: Session) {
+  const client = useClient();
+  const navigate = useNavigate();
+  const providers = useSnapshotData((s) => s.runner.providers, []);
+  return useMutation({
+    mutationFn: (req: HandoffSessionRequest) => client.handoffSession(session.id, req),
+    onMutate: () => ({ toastId: toast.loading("Writing the handoff brief…") }),
+    onSuccess: ({ sessionId }, req, context) => {
+      const name = providers.find((p) => p.id === req.provider)?.displayName ?? req.provider;
+      toast.success(`Continued in a new ${name} session`, {
+        id: context?.toastId,
+        description:
+          "It has this session's code and a brief of the work. This session is unchanged.",
+      });
+      void navigate({ to: "/sessions/$sessionId", params: { sessionId } });
+    },
+    onError: (error, _vars, context) => toast.error(message(error), { id: context?.toastId }),
+  });
 }
 
 /**
@@ -156,6 +200,7 @@ export function useSessionActions(session: Session) {
     onError,
   });
   const fork = useForkSession(session);
+  const setHandoff = useUiStore((s) => s.setHandoff);
 
   return {
     open: () => void navigate({ to: "/sessions/$sessionId", params: { sessionId: session.id } }),
@@ -187,6 +232,13 @@ export function useSessionActions(session: Session) {
     /** Why Fork is disabled right now (null when it can run). */
     forkBlocked: fork.blocked,
     fork: () => fork.fork(),
+    /** Agent sessions can be handed off to any provider: show the Hand off action. */
+    canHandoff: session.role === "agent",
+    /** Why Hand off is disabled right now (null when it can run). */
+    handoffBlocked: session.role === "agent" ? handoffBlocked(session) : null,
+    /** Open the handoff dialog, with `provider` chosen when given. */
+    handoff: (provider?: string) =>
+      setHandoff({ sessionId: session.id, provider: provider ?? null }),
   };
 }
 

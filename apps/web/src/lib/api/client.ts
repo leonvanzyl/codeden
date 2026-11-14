@@ -15,6 +15,8 @@ import type {
   GitPushRequest,
   GitPushResponse,
   GitStatusResponse,
+  HandoffSessionRequest,
+  HandoffSessionResponse,
   InboxItem,
   LoginCommandResponse,
   LoginToolId,
@@ -137,6 +139,11 @@ export interface CodeDenClient {
    * worktree started from its latest checkpoint (§9). The source is left as it is.
    */
   forkSession(sessionId: string, req?: ForkSessionRequest): Promise<ForkSessionResponse>;
+  /**
+   * A new session, on any provider, with this one's code as a fork has it and a brief of its
+   * work as its first message instead of the conversation (§9). The source is left as it is.
+   */
+  handoffSession(sessionId: string, req: HandoffSessionRequest): Promise<HandoffSessionResponse>;
   /** Hide a session and remove its worktree (§9); `force` drops uncommitted changes. */
   archiveSession(sessionId: string, opts?: { force?: boolean }): Promise<ArchiveSessionResponse>;
   unarchiveSession(sessionId: string): Promise<Session>;

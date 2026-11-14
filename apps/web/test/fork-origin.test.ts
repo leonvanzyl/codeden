@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { forkOriginText } from "@/lib/fork-origin";
+import { forkOriginText, isHandoff } from "@/lib/fork-origin";
 
 describe("forkOriginText", () => {
   it("names a fork from a turn by its turn number, even when its checkpoint's differs", () => {
@@ -30,5 +30,16 @@ describe("forkOriginText", () => {
     expect(forkOriginText({ sessionId: "s1", checkpoint: 0 }).code).toBe(
       "Code: its files when it started",
     );
+  });
+
+  it("says a handoff's conversation is a new one, opened with a brief", () => {
+    const origin = { sessionId: "s1", checkpoint: 2, kind: "handoff" as const };
+    expect(isHandoff(origin)).toBe(true);
+    expect(isHandoff({ sessionId: "s1", checkpoint: 2 })).toBe(false);
+    expect(forkOriginText(origin)).toEqual({
+      upTo: "so far",
+      code: "Code: its files after turn 2",
+      conversation: "Conversation: a new one, opened with a brief of its work",
+    });
   });
 });

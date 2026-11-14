@@ -45,19 +45,22 @@ function onRailKeyDown(
  * The provider rail on the left of the picker: Favourites, then one tile per provider. Tiles of
  * providers that are not set up are dimmed (and still open, to show how to fix them); tiles
  * that can't be used here, such as other providers in a running session, are disabled with the
- * reason on hover.
+ * reason on hover, unless they offer a handoff (§9): those open it on click.
  */
 export function ProviderRail({
   tabs,
   selectedId,
   onSelect,
   onFocusSearch,
+  onHandoff,
   refresh,
 }: {
   tabs: PickerTab[];
   selectedId: string;
   onSelect: (id: string) => void;
   onFocusSearch: () => void;
+  /** A locked provider's tile that offers a handoff was clicked. */
+  onHandoff?: (providerId: string) => void;
   /** "Refresh models" at the foot of the rail, for the shown tab's provider(s). */
   refresh?: { label: string; busy: boolean; onRefresh: () => void };
 }) {
@@ -72,7 +75,8 @@ export function ProviderRail({
     >
       {tabs.map((tab) => {
         const selected = tab.id === selectedId;
-        const locked = Boolean(tab.lockedReason);
+        const handoff = tab.kind === "provider" && tab.handoff === "ready" && onHandoff;
+        const locked = Boolean(tab.lockedReason) && !handoff;
         const label = tabLabel(tab);
         return (
           <Fragment key={tab.id}>
@@ -81,15 +85,21 @@ export function ProviderRail({
                 <button
                   type="button"
                   data-picker-tab={tab.id}
+                  data-picker-handoff={handoff ? true : undefined}
                   aria-label={label}
-                  aria-pressed={selected}
+                  aria-pressed={handoff ? undefined : selected}
+                  aria-haspopup={handoff ? "dialog" : undefined}
                   aria-disabled={locked || undefined}
                   tabIndex={selected ? 0 : -1}
-                  onClick={() => !locked && onSelect(tab.id)}
+                  onClick={() => {
+                    if (handoff) handoff(tab.id);
+                    else if (!locked) onSelect(tab.id);
+                  }}
                   className={cn(
                     "relative flex aspect-square w-full items-center justify-center rounded-md outline-none transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring/50",
                     selected && "bg-accent",
                     locked && "cursor-not-allowed opacity-40 hover:bg-transparent",
+                    handoff && "opacity-60 hover:opacity-100",
                   )}
                 >
                   {tab.kind === "favorites" ? (
@@ -100,7 +110,7 @@ export function ProviderRail({
                       className={cn("size-6 text-[11px]", !tab.availability.ready && "opacity-50")}
                     />
                   )}
-                  {tab.kind === "provider" && !tab.availability.ready && !locked && (
+                  {tab.kind === "provider" && !tab.availability.ready && !tab.lockedReason && (
                     <span
                       aria-hidden
                       className="absolute right-1 bottom-1 size-1.5 rounded-full bg-status-waiting ring-2 ring-popover"

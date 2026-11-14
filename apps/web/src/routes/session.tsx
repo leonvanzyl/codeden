@@ -1,19 +1,38 @@
 import type { ForkOrigin } from "@codeden/contracts";
 import { Link } from "@tanstack/react-router";
-import { GitFork, MessageSquareDashed } from "lucide-react";
+import { ArrowRightLeft, GitFork, MessageSquareDashed } from "lucide-react";
 import { useEffect } from "react";
 import { EmptyState } from "@/components/common/bits";
 import { ThreadView } from "@/components/thread/thread-view";
-import { forkOriginText } from "@/lib/fork-origin";
+import { forkOriginText, isHandoff } from "@/lib/fork-origin";
 import { useSession } from "@/lib/queries";
 import { useLayoutStore } from "@/stores/layout";
 
-/** A new fork's empty transcript: where it came from and that the agent remembers it. */
+/**
+ * A new fork's empty transcript: where it came from and that the agent remembers it. A handoff
+ * says its brief is on the way instead (§9).
+ */
 function ForkedEmpty({ origin }: { origin: ForkOrigin }) {
   const sourceId = origin.sessionId;
   const source = useSession(sourceId);
   // Forked from a turn ("Fork from here"): the conversation and code end with that turn.
   const { upTo } = forkOriginText(origin);
+  if (isHandoff(origin)) {
+    return (
+      <EmptyState icon={<ArrowRightLeft />} title="Handed-off session" className="flex-1">
+        Continues{" "}
+        <Link
+          to="/sessions/$sessionId"
+          params={{ sessionId: sourceId }}
+          className="font-medium text-foreground underline-offset-2 hover:underline"
+        >
+          {source ? (source.title ?? source.purpose) : "another session"}
+        </Link>{" "}
+        with its code so far, in its own worktree and branch. Once the worktree is ready, CodeDen
+        sends the agent a brief of the work as its first message. The original session is unchanged.
+      </EmptyState>
+    );
+  }
   return (
     <EmptyState icon={<GitFork />} title="Forked session" className="flex-1">
       Forked from{" "}
