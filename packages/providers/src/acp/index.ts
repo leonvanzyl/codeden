@@ -1,8 +1,8 @@
 /**
  * Generic Agent Client Protocol (ACP) client: drives any agent that serves ACP version 1 on
- * stdio. Vendor layers (Cursor) add discovery, models and their extension methods on top.
+ * stdio. Vendor layers (Cursor, Gemini CLI) add discovery, models and their extensions on top.
  */
-export { answerPermission, approvalItem } from "./approvals";
+export { answerPermission, approvalItem, select } from "./approvals";
 export { acpMcpServers, findOption, modeIds, modelsOf, optionId, optionValues } from "./config";
 export { classifyAcpError, failedPrompt, stopOutcome } from "./errors";
 export type {
@@ -11,7 +11,14 @@ export type {
   AcpExtensions,
   AcpSessionConfig,
 } from "./extensions";
-export { mergeToolCall, promptBlocks, toolCallItem } from "./items";
+export {
+  type AcpToolFacts,
+  type AcpToolState,
+  mcpOf,
+  mergeToolCall,
+  promptBlocks,
+  toolCallItem,
+} from "./items";
 export { AcpEventMapper, planTodos, todoStatus } from "./mapper";
 export { AcpPolicy } from "./policy";
 export { clientCapabilities, startAgent } from "./process";

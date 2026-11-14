@@ -153,6 +153,7 @@ export function workbenchApi(world: MockWorld): WorkbenchApi {
         codex: "codex login",
         opencode: "opencode auth login",
         cursor: "agent login",
+        gemini: "gemini",
         gh: "gh auth login",
       }[tool];
       const [bin = tool, ...args] = command.split(" ");

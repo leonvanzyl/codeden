@@ -83,6 +83,7 @@ Where CodeDen looks, in order:
    - Codex: `~/.local/bin/codex`, then `~/.codex/packages/standalone/current` (or under `CODEX_HOME`).
    - OpenCode: `~/.opencode/bin/opencode` (`%USERPROFILE%\.opencode\bin\opencode.exe` on Windows), where its install script puts it; `/opt/homebrew/bin/opencode` and `/usr/local/bin/opencode` on macOS.
    - Cursor CLI: `cursor-agent`, or an `agent` whose version is Cursor's (`2026.10.22-…`): `~/.local/bin/agent`, and `%LOCALAPPDATA%\cursor-agent\agent.cmd` on Windows.
+   - Gemini CLI: npm's global folder (on your PATH); `/opt/homebrew/bin/gemini` and `/usr/local/bin/gemini` on macOS.
    - GitHub CLI: `C:\Program Files\GitHub CLI\gh.exe` on Windows; `/opt/homebrew/bin/gh` and `/usr/local/bin/gh` on macOS.
 
 The first copy that answers `--version` is used for detection, for sessions and for **Sign in**, so a working native install wins over a broken shim earlier on PATH. When the native installer says its folder *"is not in your PATH"*, CodeDen still finds it; add the folder to your PATH if you also want `claude` to work in your own terminals.
@@ -96,6 +97,7 @@ claude auth login
 codex login
 opencode auth login
 agent login
+gemini
 gh auth login
 ```
 
@@ -110,6 +112,17 @@ OpenCode with no connected provider is a warning rather than an error: its own f
 CodeDen drives the Cursor CLI through its ACP server (`agent acp`), which older builds don't have. Run `agent update` (or reinstall with `curl https://cursor.com/install -fsS | bash`, or `irm 'https://cursor.com/install?win32=true' | iex` on Windows), then press **Re-check**. Another program named `agent` on your PATH isn't Cursor's: CodeDen only uses an `agent` whose `--version` is a Cursor build, and prefers `cursor-agent` when both are installed.
 
 Cursor's own permission settings (`~/.cursor/cli-config.json`, a project's `.cursor/cli.json`) apply before CodeDen's: what they allow runs without asking, so CodeDen can only judge what Cursor asks about. Keep their allowlists short if you rely on CodeDen's levels.
+
+### Gemini CLI asks for an update, or its login can't be confirmed
+
+CodeDen needs Gemini CLI **0.68.0** or newer: older versions don't say which MCP server a tool call belongs to, so CodeDen's own tools would be refused in read-only sessions. Run `npm install -g @google/gemini-cli@latest` (or `brew upgrade gemini-cli`), then press **Re-check**.
+
+Gemini CLI has no command that reports its login, so CodeDen reads the method you chose in Gemini CLI's settings (`~/.gemini/settings.json`, or under `GEMINI_CLI_HOME`), your Google account's email, and which login variables are set, never a credential:
+
+- **"Not signed in to Gemini CLI"**: no login method is chosen and `GEMINI_API_KEY` isn't set. **Sign in** runs `gemini`, which asks how you want to sign in (Google, a Gemini API key or Vertex AI); finish there, close it, then **Re-check**.
+- **"Could not confirm the Gemini CLI login"**: you chose a method CodeDen can't see from outside, such as a Google login kept in your system keychain, or `GEMINI_API_KEY` in a `.env` file Gemini CLI reads but CodeDen's environment doesn't have. Sessions still start; if one fails with "Gemini CLI is not signed in", run `gemini` once in a terminal and sign in.
+
+CodeDen never signs Gemini CLI in itself, so it never changes the login method you chose. Gemini CLI's own permission rules apply before CodeDen's: what its policy files, `tools.allowed` or an MCP server marked `trust` in its settings allow runs without asking, so CodeDen can only judge what Gemini CLI asks about.
 
 ### OpenCode is installed but shows as unsupported
 

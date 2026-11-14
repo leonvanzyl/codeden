@@ -8,10 +8,11 @@ Provider adapters behind one normalized interface (`ProviderAdapter` / `Provider
 | `codex` | `codex app-server` JSON-RPC over stdio | Types generated from Codex 0.160.1 into `src/codex/protocol/` |
 | `opencode` | A private `opencode serve --stdio` per session, v2 HTTP API + SSE events | Tested with OpenCode 2.2.7 (minimum 2.2.0); route types in `src/opencode/protocol.ts` |
 | `cursor` | The Cursor CLI's ACP server (`agent acp`), one per session, through the generic ACP client in `src/acp/` | Agent Client Protocol version 1, typed by hand in `src/acp/protocol.ts`; Cursor's extensions in `src/cursor/extensions.ts` |
+| `gemini` | Gemini CLI's ACP server (`gemini --acp`), one per session, through the same generic ACP client | Minimum 0.68.0 (tested against its 0.68 ACP server); its vendor fields and plan approval in `src/gemini/extensions.ts` |
 | `fake` | Scripted, deterministic | Demos and tests |
 | `replay` | Plays back recorded fixtures | Contract tests; never spawns a CLI |
 
-`getProvider(id)` / `listProviders()` return the built-in real adapters. Each adapter except Cursor also exposes `utilityModel()` for tool-less one-shots (§7.4). `ApprovalBroker` and the risky-action classifier (`src/policy/`) are provider-neutral.
+`getProvider(id)` / `listProviders()` return the built-in real adapters. Each adapter except Cursor and Gemini CLI also exposes `utilityModel()` for tool-less one-shots (§7.4). `ApprovalBroker` and the risky-action classifier (`src/policy/`) are provider-neutral.
 
 ## Scripts
 
@@ -37,7 +38,7 @@ The SDK is not redistributed in the published `codeden` package. `loadClaudeSdk(
 
 ## Autonomy mapping (§11.2)
 
-| Level | Claude | Codex | OpenCode / Cursor |
+| Level | Claude | Codex | OpenCode / Cursor / Gemini CLI |
 |---|---|---|---|
 | supervised | `default` + PreToolUse hook forces every edit/command to ask | `untrusted`, workspace-write sandbox | every edit and command goes to the user |
 | auto | `acceptEdits` + hook asks only when the classifier flags a call | `on-request`, workspace-write, network off | only calls the classifier flags go to the user |
@@ -85,9 +86,9 @@ OpenCode has no OS sandbox. Its sessions get permission rules that make every `e
 - **Utility model.** `POST /api/experimental/generate/text` (`{ prompt, model }`, no tools, no session) on a short-lived server; it takes no system prompt, so `system` goes in front of the prompt. A model chosen in Settings is sent as is. With none, `cheapUtilityModel()` (`src/opencode/models.ts`) reads `/api/model/default` and `/api/model` on the same server and picks the cheapest model from the default model's provider, by listed input + output price per million tokens (the base price, not a context tier), a free one included. Disabled, deprecated and unpriced models are skipped (the default too), and the default wins ties. Staying on the default's provider keeps side jobs on the account the user already chose (an Anthropic default gives Haiku, never another provider's free tier). With no default, no prices or a failed lookup, no model is sent and OpenCode uses its own default.
 - **Not wired up yet:** OpenCode's revert (rollback), fork, the `plan` agent (plan mode) and skills, so those capabilities are `false`.
 
-**ACP (`src/acp/`) and Cursor (`src/cursor/`)**
+**ACP (`src/acp/`), Cursor (`src/cursor/`) and Gemini CLI (`src/gemini/`)**
 
-- **Generic client.** `AcpSession` takes an `AcpAgentSpec` (command arguments, auth method, mode ids, vendor extensions); nothing in `src/acp/` knows about Cursor. Messages are JSON-RPC 2.0 with `jsonrpc: "2.0"`, one per line; the agent's logs on stderr are kept as a short tail for errors only.
+- **Generic client.** `AcpSession` takes an `AcpAgentSpec` (command arguments, auth method, mode ids, vendor extensions); nothing in `src/acp/` knows about Cursor or Gemini CLI. An agent's own conventions plug in through `AcpExtensions`: vendor methods (`request`, `notification`), `toolCall` (what its `_meta` says about a tool call: an MCP identity or a command's folder) and `permission` (its own answer to a permission request). Messages are JSON-RPC 2.0 with `jsonrpc: "2.0"`, one per line; the agent's logs on stderr are kept as a short tail for errors only.
 - **Resume replays history.** `session/load` streams the whole conversation as `session/update`s before it answers. The mapper drops updates outside a turn, so the replay never reaches the transcript.
 - **Permissions.** Options are picked by `kind`, never by id: `allow_once` or `reject_once`. `allow_always` would save a rule in the agent's own settings, so `allow_session` stays in `AcpPolicy`. A cancelled turn must answer `{ outcome: "cancelled" }`.
 - **Titles are the agent's.** Only `other` calls can be MCP calls (`mcpOf`): a command titled `codeden-x; rm -rf ~` is still a command, so CodeDen's trusted-server rule never covers it.
@@ -96,6 +97,10 @@ OpenCode has no OS sandbox. Its sessions get permission rules that make every `e
 - **Only a validated `agent` runs.** `findCursor` accepts `cursor-agent` or an `agent` with Cursor's dated `--version` (`cursorOnly`); the adapter never falls back to an unchecked look-up.
 - **Cursor.** `cursor_login` reuses the CLI's login. Models come from `cursor/list_available_models`, else `agent --list-models`, and are set through the `model` config option (Cursor's `session/set_model` answers `{}` without confirming anything, so it is only the fallback). `cursor/ask_question` and `cursor/create_plan` are blocking requests answered with `{ outcome: { outcome: ... } }`; `cursor/update_todos`, `cursor/task` and `cursor/generate_image` may arrive as either (Cursor's docs call the last two notifications; CLIs send them as requests and only log a failed answer). Cursor reads the subagents opt-in from `clientCapabilities._meta.subagents` and drops the top-level key, so `CURSOR_CLIENT_CAPABILITIES` sends both, and the probe sends them too so `capabilities().subagents` is right before a session starts. `cursor/task` is answered `completed`; it adds a card only for CLIs without child sessions. `cursor/generate_image` is answered `generated` only when `filePath` exists. The child-session wire format comes from captures of real CLI runs (2026.10.22, 2026.11.05), not from Cursor's docs, so it is parsed leniently.
 - **Tests** drive `test/fixtures/fake-acp/agent.mjs`, a scripted ACP agent that also answers the CLI's `--version`, `status` and `--list-models`.
+- **Gemini CLI never authenticates.** No `authMethod` in `GEMINI_AGENT`: Gemini CLI's `authenticate` writes the method into the user's settings and clears a cached login of another kind. `session/new` uses the method the user chose, else `GEMINI_API_KEY`, and fails with -32000 "Authentication required." without one. `session/load` needs a chosen method even with the key set, so such a resume starts a new session with a notice.
+- **Gemini CLI's login has no status command.** `readGeminiAuth` reads `security.auth.selectedType` (or the older `selectedAuthType`) from `~/.gemini/settings.json` (JSON with comments), `google_accounts.json`'s `active` email, whether `oauth_creds.json` exists, and which variables are set. Its OAuth tokens may be in the system keychain instead, so a Google login without either file is unknown, not signed out.
+- **Gemini CLI's shapes.** Sessions report `modes` (`default`, `autoEdit`, `yolo`, `plan`) and `models`, never config options, so mode and model go through `session/set_mode` and `session/set_model`. It sends no `current_mode_update`, even when its `exit_plan_mode` tool leaves plan mode, which is why that permission request (titled `Requesting plan approval for: <file>`) is the plan approval. MCP permission requests carry `_meta["gemini-cli"].mcp` (`server_name`, `tool_name`; 0.67+) and titles of the tool's name only; shell commands are titled with the raw command and say `[in <dir>]` in their content; no request carries `rawInput`. Its `ask_user` tool is dropped in ACP mode. The prompt result has standard `usage`. 0.67 replays a loaded session's history after answering `session/load`; 0.68 before.
+- **Gemini CLI tests** drive `test/fixtures/fake-gemini/gemini.mjs`, a scripted stand-in in its 0.68 shapes that also answers `--version`.
 
 ## Image generation (`src/image/`, §12.5)
 

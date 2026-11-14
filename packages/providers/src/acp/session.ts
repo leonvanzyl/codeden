@@ -81,6 +81,7 @@ export class AcpSession implements ProviderSession {
     this.trusted = trustedServers(opts);
     const tools = { cwd: opts.cwd, mcpServers: this.mcpServers };
     this.subagents = new AcpSubagents({ sessionId: opts.sessionId, emit, tools });
+    const ext = config.spec.extensions;
     this.mapper = new AcpEventMapper({
       sessionId: opts.sessionId,
       emit,
@@ -89,6 +90,7 @@ export class AcpSession implements ProviderSession {
       onConfigOptions: (options) => this.onConfigOptions(options),
       beforeEnd: (ok) => this.subagents.endAll(ok),
       onToolDone: (state) => this.subagents.toolDone(this.mapper, state),
+      ...(ext?.toolCall ? { describeTool: (call) => ext.toolCall?.(call) } : {}),
     });
     this.broker = new ApprovalBroker(emit);
     this.policy = policyFor(opts);
@@ -380,13 +382,18 @@ export class AcpSession implements ProviderSession {
   private async onRequest(message: AcpIncoming): Promise<unknown> {
     const mapper = this.mapperOf(sessionIdOf(message.params)) ?? this.mapper;
     if (message.method === "session/request_permission") {
-      return answerPermission(message.params as AcpPermissionRequest, {
+      const req = message.params as AcpPermissionRequest;
+      const ext = this.config.spec.extensions;
+      return answerPermission(req, {
         broker: this.broker,
         policy: this.policy,
         mapper,
         cwd: this.opts.cwd,
         mcpServers: this.mcpServers,
         trustedServers: this.trusted,
+        ...(ext?.permission
+          ? { own: (call) => ext.permission?.(req, call, this.host(sessionIdOf(req))) }
+          : {}),
       });
     }
     const handled = this.config.spec.extensions?.request?.(

@@ -8,6 +8,7 @@ export * from "./codex";
 export * from "./cursor";
 export { FakeProvider, type FakeProviderOptions } from "./fake/adapter";
 export { FakeSession } from "./fake/session";
+export * from "./gemini";
 export * from "./image";
 export { ModelCatalog } from "./models";
 export * from "./opencode";

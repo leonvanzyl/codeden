@@ -23,6 +23,12 @@ const loginScript: Record<string, string[]> = {
     "Opening browser to sign in…",
     `${c.green}✓ Connected Anthropic${c.reset}`,
   ],
+  gemini: [
+    `${c.dim}How would you like to authenticate for this project?${c.reset}`,
+    `${c.cyan}› Sign in with Google${c.reset}`,
+    "Opening browser to sign in…",
+    `${c.green}✓ Signed in as leon@example.com${c.reset}`,
+  ],
   "agent login": [
     "Opening browser to sign in to Cursor…",
     `${c.green}✓ Logged in as leon@example.com${c.reset}`,

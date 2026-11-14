@@ -1,5 +1,5 @@
 import type { SetupCheck, SetupCommand, SetupToolId } from "@codeden/contracts";
-import { cursorInstallCommand } from "@codeden/providers";
+import { cursorInstallCommand, GEMINI_INSTALL_COMMAND } from "@codeden/providers";
 import type { Exec } from "../exec";
 import type { BrowserProbe } from "./browsers";
 import type { Locate } from "./tool-lookup";
@@ -11,6 +11,7 @@ const LABELS: Record<SetupToolId, string> = {
   codex: "Codex",
   opencode: "OpenCode",
   cursor: "Cursor",
+  gemini: "Gemini CLI",
   gh: "GitHub CLI",
   git: "git",
   browser: "Browser",
@@ -36,6 +37,8 @@ export function installFix(id: SetupToolId, platform: NodeJS.Platform): SetupCom
         command: cursorInstallCommand(platform),
         url: "https://cursor.com/docs/cli/installation",
       };
+    case "gemini":
+      return { kind: "install", command: GEMINI_INSTALL_COMMAND, url: "https://geminicli.com" };
     case "gh":
       return {
         kind: "install",
@@ -101,4 +104,8 @@ export interface CheckEnv {
   nodeVersion: string;
   now: number;
   browserProbe?: Partial<BrowserProbe>;
+  /** The user's home folder, where CLIs keep their settings (default: `os.homedir()`). */
+  userHome?: string;
+  /** Read for which login variables are set, never their values (default: `process.env`). */
+  env?: NodeJS.ProcessEnv;
 }

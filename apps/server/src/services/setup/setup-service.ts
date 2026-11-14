@@ -25,8 +25,13 @@ export interface SetupServiceDeps {
   now?: () => number;
   /** Finds claude, codex and gh (default: PATH, then their known install locations). */
   locate?: Locate;
-  /** The user's home folder, for known install locations (default: `os.homedir()`). */
+  /**
+   * The user's home folder, for known install locations and the CLIs' own settings (default:
+   * `os.homedir()`).
+   */
   userHome?: string;
+  /** Read for which login variables are set, never their values (default: `process.env`). */
+  env?: NodeJS.ProcessEnv;
   /**
    * Picks up PATH changes made since CodeDen started, before an explicit re-check (default:
    * the Windows registry's user and machine `Path`; nothing elsewhere).
@@ -46,13 +51,20 @@ const ORDER: SetupToolId[] = [
   "codex",
   "opencode",
   "cursor",
+  "gemini",
   "gh",
   "git",
   "browser",
   "node",
 ];
 /** Agent providers: setup is ready when at least one is installed and signed in. */
-export const PROVIDER_CHECKS: readonly SetupToolId[] = ["claude", "codex", "opencode", "cursor"];
+export const PROVIDER_CHECKS: readonly SetupToolId[] = [
+  "claude",
+  "codex",
+  "opencode",
+  "cursor",
+  "gemini",
+];
 
 /**
  * First-run setup and re-checks on launch (§14). Runs every detection in parallel with a
@@ -128,6 +140,8 @@ export class SetupService {
       nodeVersion: this.deps.nodeVersion ?? process.version,
       now: this.now(),
       browserProbe: this.deps.browserProbe,
+      ...(userHome ? { userHome } : {}),
+      ...(this.deps.env ? { env: this.deps.env } : {}),
     };
     const checks = await Promise.all(ORDER.map((id) => this.timed(id, env)));
     const previous = this.cached;

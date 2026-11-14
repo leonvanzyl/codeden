@@ -15,6 +15,8 @@ export interface AcpApprovalDeps {
   cwd: string;
   mcpServers: readonly string[];
   trustedServers: readonly string[];
+  /** The agent's own answer to this request (`AcpExtensions.permission`), if it has one. */
+  own?: (call: AcpToolState) => Promise<AcpPermissionResult> | undefined;
 }
 
 const CANCELLED: AcpPermissionResult = { outcome: { outcome: "cancelled" } };
@@ -33,6 +35,8 @@ export async function answerPermission(
   const call = deps.mapper.tool(req.toolCall ?? { toolCallId: "" });
   const ctx = deps.mapper.ctx();
   if (!ctx) return CANCELLED;
+  const own = deps.own?.(call);
+  if (own) return own;
   const decision = deps.policy.decide(call);
   const item = approvalItem(call, decision, deps, deps.mapper.toolItemId(call.toolCallId));
   const trusted = decision.kind === "allow" && isTrustedCall(call, deps);

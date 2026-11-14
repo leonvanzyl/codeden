@@ -1,19 +1,19 @@
 import type { Snapshot } from "@codeden/contracts";
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { ArrowRight, BellRing, Check, Loader2, Mic, Volume2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { ArrowRight, Check, Loader2, Mic, Volume2 } from "lucide-react";
+import { useEffect, useId, useState } from "react";
 import { toast } from "sonner";
 import { useSettings } from "@/components/settings/settings-ui";
 import { ProjectSourcePicker } from "@/components/setup/add-project-dialog";
 import { SetupChecklist, useSetupStatus } from "@/components/setup/checklist";
 import { useClaudeSdkStatus, useInstallClaudeSdk } from "@/components/setup/claude-support";
 import { LocalWhisperCard } from "@/components/setup/local-whisper-card";
+import { NotificationsRow } from "@/components/setup/notifications-row";
 import { Logo } from "@/components/shell/logo";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { useClient } from "@/lib/api";
-import { platform } from "@/lib/platform";
 import { snapshotKey } from "@/lib/queries";
 import { cn } from "@/lib/utils";
 import { stt, tts } from "@/lib/voice/engines";
@@ -22,7 +22,7 @@ const STEPS = ["Check your tools", "Voice & notifications", "First project"];
 
 function Extras() {
   const { settings, update } = useSettings();
-  const [permission, setPermission] = useState(platform.notificationPermission());
+  const readAloudId = useId();
   const row = "flex items-center gap-3 px-4 py-3.5";
   const browserStt = stt.supported;
   return (
@@ -45,8 +45,10 @@ function Extras() {
       <div className={row}>
         <Volume2 className="size-4 text-muted-foreground" />
         <div className="flex-1">
-          <div className="text-[13.5px] font-medium">Read final messages aloud</div>
-          <div className="text-2xs text-muted-foreground">
+          <div id={`${readAloudId}-label`} className="text-[13.5px] font-medium">
+            Read final messages aloud
+          </div>
+          <div id={`${readAloudId}-hint`} className="text-2xs text-muted-foreground">
             When a turn completes and you're in another tab.
           </div>
         </div>
@@ -59,33 +61,13 @@ function Extras() {
           Test
         </Button>
         <Switch
+          aria-labelledby={`${readAloudId}-label`}
+          aria-describedby={`${readAloudId}-hint`}
           checked={settings.voice.readAloud.enabled}
           onCheckedChange={(enabled) => update({ voice: { readAloud: { enabled } } })}
         />
       </div>
-      <div className={row}>
-        <BellRing className="size-4 text-muted-foreground" />
-        <div className="flex-1">
-          <div className="text-[13.5px] font-medium">Browser notifications</div>
-          <div className="text-2xs text-muted-foreground">
-            Know when an agent needs you, even in another tab.
-          </div>
-        </div>
-        {permission === "granted" ? (
-          <span className="flex items-center gap-1 text-2xs text-status-done">
-            <Check className="size-3" /> Allowed
-          </span>
-        ) : (
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={permission === "unsupported" || permission === "denied"}
-            onClick={async () => setPermission(await platform.requestNotificationPermission())}
-          >
-            {permission === "denied" ? "Blocked" : "Allow"}
-          </Button>
-        )}
-      </div>
+      <NotificationsRow />
     </div>
   );
 }

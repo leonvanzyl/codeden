@@ -13,7 +13,9 @@ import { count as int } from "../util/text";
 import type { AcpTurnOutcome } from "./errors";
 import {
   type AcpToolContext,
+  type AcpToolFacts,
   type AcpToolState,
+  addFacts,
   blockText,
   mergeToolCall,
   toolCallItem,
@@ -54,6 +56,8 @@ export interface AcpMapperOptions {
   beforeEnd?: (ok: boolean) => void;
   /** A tool call finished (completed or failed). */
   onToolDone?: (state: AcpToolState) => void;
+  /** What the agent's vendor fields say about a tool call (`AcpExtensions.toolCall`). */
+  describeTool?: (call: AcpToolCall) => AcpToolFacts | undefined;
 }
 
 /** Updates that describe the whole session, ignored from a subagent's child session. */
@@ -118,6 +122,7 @@ export class AcpEventMapper {
     const known = this.tools.get(call.toolCallId);
     const state: AcpToolState = known ? { ...known } : { toolCallId: call.toolCallId };
     mergeToolCall(state, call);
+    addFacts(state, this.opts.describeTool?.(call));
     return state;
   }
 
@@ -373,6 +378,7 @@ export class AcpEventMapper {
     const known = this.tools.get(call.toolCallId);
     const state: AcpToolState = known ?? { toolCallId: call.toolCallId, startedAt: Date.now() };
     mergeToolCall(state, call);
+    addFacts(state, this.opts.describeTool?.(call));
     this.tools.set(call.toolCallId, state);
     if (!known) this.closeText();
     const done = state.status === "completed" || state.status === "failed";

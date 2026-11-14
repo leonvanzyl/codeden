@@ -37,6 +37,7 @@ const PENDING: { id: string; label: string }[] = [
   { id: "codex", label: "Codex" },
   { id: "opencode", label: "OpenCode" },
   { id: "cursor", label: "Cursor" },
+  { id: "gemini", label: "Gemini CLI" },
   { id: "gh", label: "GitHub CLI" },
   { id: "git", label: "git identity" },
   { id: "browser", label: "Browser for agents" },
@@ -155,9 +156,15 @@ export function SetupChecklist() {
       >
         {rows.map(({ id, label, check: c }) => {
           const state: RowState = !c || rechecking ? "checking" : c.state;
+          // A check that isn't ok shows its whole reason: that's what the user needs to read.
+          const needsAttention = state !== "ok" && state !== "checking";
           return (
             <Fragment key={id}>
-              <div className="flex items-center gap-3 px-4 py-3" data-check={id}>
+              {/* On phones the fix actions wrap onto their own line, under the reason. */}
+              <div
+                className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3 sm:flex-nowrap"
+                data-check={id}
+              >
                 <StateIcon state={state} />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2 text-[13.5px] font-medium">
@@ -169,7 +176,7 @@ export function SetupChecklist() {
                   <div
                     className={cn(
                       "text-2xs",
-                      c?.broken?.length && state !== "checking" ? "break-words" : "truncate",
+                      needsAttention ? "break-words" : "truncate",
                       state === "missing" || state === "error"
                         ? "text-status-failed/90"
                         : "text-muted-foreground",
@@ -178,14 +185,14 @@ export function SetupChecklist() {
                   >
                     {state === "checking" ? "Checking…" : c?.message}
                   </div>
-                  {c && state !== "checking" && state !== "ok" && <CheckDetails check={c} />}
+                  {c && needsAttention && <CheckDetails check={c} />}
                 </div>
-                {c?.fix && state !== "ok" && state !== "checking" && (
-                  <div className="flex items-center gap-1.5">
+                {c?.fix && needsAttention && (
+                  <div className="flex min-w-0 basis-full items-center gap-1.5 pl-9 sm:basis-auto sm:pl-0">
                     <Button
                       size="xs"
                       variant="ghost"
-                      className="max-w-56 font-mono text-muted-foreground"
+                      className="min-w-0 max-w-56 shrink font-mono text-muted-foreground"
                       title={c.fix.command}
                       onClick={() => void copyWithFeedback(c.fix?.command ?? "", "Command copied")}
                     >
