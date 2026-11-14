@@ -193,6 +193,8 @@ export const sampleProject: Project = {
   path: "C:/Projects/codeden",
   defaultBranch: "main",
   defaultProvider: null,
+  defaultModel: null,
+  defaultEffort: null,
   autonomy: null,
   autonomyMode: "assisted",
   visionPath: ".codeden/VISION.md",

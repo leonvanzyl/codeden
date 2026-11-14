@@ -26,6 +26,8 @@ const project = (id: string, name: string): Project => ({
   kind: "local",
   defaultBranch: "main",
   defaultProvider: null,
+  defaultModel: null,
+  defaultEffort: null,
   autonomy: null,
   autonomyMode: "assisted",
   visionPath: ".codeden/VISION.md",

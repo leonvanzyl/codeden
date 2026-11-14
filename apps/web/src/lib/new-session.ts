@@ -34,12 +34,27 @@ export const emptyChoice: DraftChoice = {
   planMode: false,
 };
 
+/** A default provider with the model and effort that go with it (model ids are per provider). */
+export interface DefaultAgent {
+  /** A provider id; `auto` (Settings) or null names none. */
+  provider: string | null;
+  model: string | null;
+  effort: ReasoningEffort | null;
+}
+
 /** Where the defaults come from: the runner's providers, the project and Settings. */
 export interface DraftDefaults {
   providers: ProviderInfo[];
-  project: { defaultProvider: string | null; autonomy: AutonomyLevel | null } | undefined;
-  /** Settings → Providers → Agent sessions (`auto` or a provider id). */
-  agentProvider: string | null;
+  project:
+    | {
+        defaultProvider: string | null;
+        defaultModel: string | null;
+        defaultEffort: ReasoningEffort | null;
+        autonomy: AutonomyLevel | null;
+      }
+    | undefined;
+  /** Settings → Providers → Agent sessions. */
+  agent: DefaultAgent | null;
   /** Settings → Autonomy default. */
   defaultAutonomy: AutonomyLevel;
 }
@@ -56,10 +71,14 @@ export interface ResolvedDraft {
 }
 
 /**
- * Fill in the defaults: the provider picked, else the project's default, else the agent default
- * from Settings, else the first ready provider (a provider the runner doesn't list is skipped);
- * the model picked for that provider (a custom model id included), else the provider's default
- * model, else its first; the autonomy picked, else the project's, else the Settings default.
+ * Fill in the defaults, so the pickers show what the first send will start:
+ * - provider: the one picked, else the project's default, else Settings → Agent sessions, else
+ *   the first ready provider (a provider the runner doesn't list is skipped);
+ * - model and effort: what was picked for that provider (a custom model id included), else the
+ *   first default naming that provider and a model or effort (the project's, then Settings'),
+ *   else the provider's default model and the model's own effort. A default for another provider
+ *   never applies: its model id means nothing there;
+ * - autonomy: the one picked, else the project's, else the Settings default.
  */
 export function resolveDraftChoice(choice: DraftChoice, defaults: DraftDefaults): ResolvedDraft {
   const { providers, project } = defaults;
@@ -68,17 +87,29 @@ export function resolveDraftChoice(choice: DraftChoice, defaults: DraftDefaults)
   const providerId =
     known(choice.provider) ??
     known(project?.defaultProvider) ??
-    known(defaults.agentProvider) ??
+    known(defaults.agent?.provider) ??
     providers[0]?.id ??
     null;
   const provider = providers.find((p) => p.id === providerId);
-  // A model picked for another provider (one that is gone now) doesn't carry over.
-  const picked = provider && choice.provider === provider.id ? choice.model : null;
+  // What was picked for another provider (one that is gone now) doesn't carry over.
+  const mine = provider !== undefined && (choice.provider ?? provider.id) === provider.id;
+  const projectAgent: DefaultAgent | null = project
+    ? {
+        provider: project.defaultProvider,
+        model: project.defaultModel,
+        effort: project.defaultEffort,
+      }
+    : null;
+  const preset = [projectAgent, defaults.agent].find(
+    (d) => d && d.provider === provider?.id && (d.model !== null || d.effort !== null),
+  );
   const fallback = provider?.models.find((m) => m.isDefault) ?? provider?.models[0];
   return {
     provider,
-    model: picked ?? fallback?.id ?? null,
-    effort: provider?.capabilities.reasoningEffort ? choice.effort : null,
+    model: (mine ? choice.model : null) ?? preset?.model ?? fallback?.id ?? null,
+    effort: provider?.capabilities.reasoningEffort
+      ? ((mine ? choice.effort : null) ?? preset?.effort ?? null)
+      : null,
     autonomy: choice.autonomy ?? project?.autonomy ?? defaults.defaultAutonomy,
     planMode: choice.planMode && (provider?.capabilities.planMode ?? false),
   };

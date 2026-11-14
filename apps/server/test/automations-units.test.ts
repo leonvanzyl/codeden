@@ -394,6 +394,8 @@ describe("issue intake ownership (§10.1)", () => {
     path: "/tmp/widgets",
     defaultBranch: "main",
     defaultProvider: "fake",
+    defaultModel: null,
+    defaultEffort: null,
     autonomy: null,
     autonomyMode,
     visionPath: ".codeden/VISION.md",
