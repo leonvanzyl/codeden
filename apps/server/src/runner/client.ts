@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import {
   CODEDEN_VERSION,
+  HOME_RUNNER_ID,
   RUNNER_PROTOCOL_VERSION,
   type RunnerCommand,
   type RunnerCommandName,
@@ -22,8 +23,10 @@ import type { Db } from "../db/client";
 import { runnerState } from "../db/schema";
 import { ingestRunnerEvent } from "../events/ingest";
 import type { EventStore } from "../events/store";
+import { journalIdRefusal } from "./identity";
 import { type RunnerLaunchConfig, type RunnerStartTimeouts, startRunnerProcess } from "./launcher";
 import { isProcessAlive, probeRunnerLock, readLiveRunnerLock } from "./lock";
+import { UntrustedRunnerGuard } from "./untrusted";
 
 export interface RunnerClientOptions {
   /**
@@ -36,6 +39,13 @@ export interface RunnerClientOptions {
    * r-1)". Read when an error happens, so it can carry the journal id learned on connecting.
    */
   describe?: () => string;
+  /**
+   * The runner's messages are untrusted input: every runner but the home runner (a sandbox
+   * runner shares its sandbox with an agent that has a shell). Its events and streams count only
+   * for sessions routed to it and ptys the server opened on it, and its journal id must be new
+   * on its first connection and the same on every later one (`identity.ts`, `untrusted.ts`).
+   */
+  untrusted?: boolean;
   home: string;
   lockFile: string;
   db: Db;
@@ -120,7 +130,12 @@ export class RunnerClient {
     lastError: null,
   };
 
-  constructor(private readonly opts: RunnerClientOptions) {}
+  /** What an untrusted runner may send beyond its sessions' events; none for the home runner. */
+  private readonly guard: UntrustedRunnerGuard | undefined;
+
+  constructor(private readonly opts: RunnerClientOptions) {
+    this.guard = opts.untrusted ? new UntrustedRunnerGuard(opts.db) : undefined;
+  }
 
   get status(): RunnerConnectionStatus {
     return this.current;
@@ -166,6 +181,7 @@ export class RunnerClient {
       }, deadlineMs);
       this.pending.set(id, { name: command.name, resolve, reject, timer });
     });
+    this.guard?.sending(command as RunnerCommand);
     this.send({ type: "command", id, command: command as RunnerCommand });
     const raw = await result;
     return RunnerCommandResults[command.name as N].parse(raw) as RunnerCommandResult<N>;
@@ -284,11 +300,25 @@ export class RunnerClient {
           serverVersion: CODEDEN_VERSION,
         });
       });
+      // Whether this connection's `welcome` was accepted: events count only after it.
+      let welcomed = false;
       ws.on("message", (data) => {
         try {
           const msg = RunnerToServerMessage.parse(JSON.parse(data.toString()));
-          // A handshake that completes after `stop()` is discarded, never recorded as connected.
-          if (msg.type === "welcome" && signal.aborted) return void ws.terminate();
+          if (msg.type === "welcome") {
+            // A handshake that completes after `stop()` is discarded, never recorded as connected.
+            if (signal.aborted) return void ws.terminate();
+            if (welcomed) return; // one handshake per connection
+            // Refused: the connect loop shows the reason as the last error and retries.
+            const refused = this.welcomeRefusal(msg);
+            if (refused) {
+              ws.terminate();
+              return settle(new Error(refused));
+            }
+            welcomed = true;
+          } else if ((msg.type === "event" || msg.type === "stream") && !welcomed) {
+            return;
+          }
           this.handle(msg, settle);
         } catch (error) {
           this.opts.log?.(`runner: bad message: ${(error as Error).message}`);
@@ -344,6 +374,8 @@ export class RunnerClient {
         this.onEvent(msg);
         return;
       case "stream":
+        // An untrusted runner's stream for a pty or session that isn't its own is dropped.
+        if (this.guard && !this.guard.allowsStream(msg.stream, this.runnerId)) return;
         this.opts.onStream?.(msg.stream);
         return;
       case "providers":
@@ -356,6 +388,15 @@ export class RunnerClient {
       case "pong":
         return;
     }
+  }
+
+  /** Why this runner's `welcome` is refused (its journal id isn't its own), or `null`. */
+  private welcomeRefusal(msg: RunnerWelcome): string | null {
+    const recordId = this.opts.recordId ?? HOME_RUNNER_ID;
+    const reason = journalIdRefusal(this.opts.db, recordId, msg.runnerId, !!this.opts.untrusted);
+    if (!reason) return null;
+    const name = this.opts.describe?.() ?? "Runner";
+    return `${name} was refused: ${reason}`;
   }
 
   private onWelcome(msg: RunnerWelcome): void {
@@ -435,7 +476,18 @@ export class RunnerClient {
     if (!runnerId) return;
     if (msg.seq > this.lastAckedSeq) {
       try {
-        ingestRunnerEvent(this.opts.db, this.opts.store, runnerId, msg, this.opts.recordId);
+        const guard = this.guard;
+        const { refused } = ingestRunnerEvent(this.opts.db, this.opts.store, runnerId, msg, {
+          recordId: this.opts.recordId,
+          untrusted: !!guard,
+          ownsPty: guard && ((ptyId) => guard.ownsPty(ptyId)),
+        });
+        // Acked like any other, so the runner stops redelivering it, but never stored.
+        if (refused) {
+          this.opts.log?.(`runner: dropped event ${msg.seq} (${msg.event.kind}): ${refused}`);
+        } else if (msg.event.kind === "pty.exited") {
+          guard?.ptyExited(msg.event.ptyId);
+        }
       } catch (error) {
         // Not acked: the runner keeps it journaled and redelivers it after a reconnect.
         this.opts.log?.(`runner: failed to store event ${msg.seq}: ${String(error)}`);

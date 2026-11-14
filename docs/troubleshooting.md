@@ -117,9 +117,9 @@ Cursor's own permission settings (`~/.cursor/cli-config.json`, a project's `.cur
 
 The project's `.gemini/settings.json` lets some tools run without asking (`tools.allowed`, `tools.autoAccept`, `mcp.allowed`, or an MCP server marked `trust`), or its `.gemini/policies` files have `allow` rules. CodeDen starts Gemini CLI with an admin policy that still asks before commands, and before edits and MCP tools outside plan mode, but anything else those settings allow runs without CodeDen seeing it. Remove the settings if you didn't add them on purpose. If Gemini CLI prints "Ignoring --admin-policy because system policies are already defined", your machine has Gemini CLI system policies, and those decide instead of CodeDen's.
 
-### My Gemini CLI deny rules don't apply in CodeDen
+### A Gemini CLI deny rule doesn't apply in CodeDen
 
-CodeDen's admin policy outranks every rule in your Gemini CLI settings and policy files for commands, edits and MCP tools, your `deny` rules, `tools.exclude` entries and excluded MCP servers included. Such a call is asked about instead, and CodeDen's permission level decides it: at Full a command your Gemini CLI rules would deny (`git push --force`, say) can run. Use Supervised, or Auto (where CodeDen's own classifier asks before risky commands), for sessions where you relied on those rules. See [Permissions](security.md#permissions).
+CodeDen repeats your Gemini CLI rules for commands, edits and MCP tools above its own admin policy, so what they deny stays denied (see [Permissions](security.md#permissions)). It reads them when a session starts, from `~/.gemini/policies` (in `$GEMINI_CLI_HOME` when set), the project's `.gemini/policies`, and the tool and MCP server lists of your and the project's `settings.json`. A rule elsewhere isn't repeated: in a Gemini CLI extension, in system settings, or in a folder named by `policyPaths`. Move it to `~/.gemini/policies`. A policy file Gemini CLI can't load (not TOML, or a rule with a field it doesn't accept) is skipped whole, as Gemini CLI skips it. Start a new session after changing your rules.
 
 ### Gemini CLI asks for an update, or its login can't be confirmed
 

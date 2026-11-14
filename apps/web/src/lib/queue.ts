@@ -3,7 +3,9 @@ import { type QueryClient, useQuery, useQueryClient } from "@tanstack/react-quer
 import { useEffect } from "react";
 import { toast } from "sonner";
 import { getDraft, useComposerStore } from "@/stores/composer";
+import { usePrRequestsStore } from "@/stores/pr-requests";
 import { useClient } from "./api";
+import { isOpenPrPrompt } from "./pull-request";
 import { onLiveEvent } from "./realtime";
 
 /** Query key of a session's queued messages (`GET /api/sessions/:id/queue`). */
@@ -41,7 +43,8 @@ export const senderLabel = (from: QueueSender) => SENDERS[from];
 
 /**
  * A session's queued messages, kept live from the `message.*` events. When an interrupt or
- * stop drops the user's queued messages, their text goes back into the composer draft.
+ * stop drops the user's queued messages, their text goes back into the composer draft. A
+ * request for a pull request that is deleted or dropped is no longer in progress.
  */
 export function useQueuedMessages(sessionId: string) {
   const client = useClient();
@@ -50,8 +53,14 @@ export function useQueuedMessages(sessionId: string) {
     const restore = droppedRestorer(queryClient, sessionId);
     return onLiveEvent((env) => {
       if (queueEventSession(env) !== sessionId) return;
-      if (env.type === "message.dequeued" && env.payload.reason === "dropped") {
-        restore(env.payload.messageId);
+      if (env.type === "message.dequeued" && env.payload.reason !== "sent") {
+        const { messageId, reason } = env.payload;
+        const cached = queryClient.getQueryData<QueuedMessage[]>(queueKey(sessionId));
+        const message = cached?.find((m) => m.id === messageId);
+        if (message && isOpenPrPrompt(message.input.text)) {
+          usePrRequestsStore.getState().forget(sessionId);
+        }
+        if (reason === "dropped") restore(messageId);
       }
       void queryClient.invalidateQueries({ queryKey: queueKey(sessionId) });
     });

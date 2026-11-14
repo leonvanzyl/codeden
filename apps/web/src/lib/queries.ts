@@ -1,5 +1,5 @@
 import type { Project, Session, Snapshot } from "@codeden/contracts";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
 import { useTranscriptsStore } from "@/stores/transcripts";
 import { useClient } from "./api";
@@ -36,6 +36,16 @@ export function useSetupStatus(opts: { staleTime?: number } = {}) {
     queryKey: setupKey,
     queryFn: () => client.getSetupStatus(),
     ...(opts.staleTime !== undefined ? { staleTime: opts.staleTime } : {}),
+  });
+}
+
+/** Run setup detection again now, past the server's cache, and share the answer. */
+export function useRecheckSetup() {
+  const client = useClient();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => client.getSetupStatus({ refresh: true }),
+    onSuccess: (next) => queryClient.setQueryData(setupKey, next),
   });
 }
 
