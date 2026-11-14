@@ -26,6 +26,14 @@ export const ARCHIVE_TIMEOUT_MS = 5_000;
 /** Codex's answer for a thread that has no rollout to archive (archived already, or deleted). */
 const NO_ROLLOUT = /\bno rollout found\b|\bthread not found\b/i;
 
+/**
+ * Codex's answer to a turn on a thread the app-server doesn't have loaded: archived (perhaps by
+ * an archive that answered after CodeDen stopped waiting) or otherwise unloaded.
+ */
+export function isThreadNotFound(error: unknown): boolean {
+  return error instanceof Error && /\bthread not found\b/i.test(error.message);
+}
+
 /** Threads listed per `thread/list` page, and the most pages read. */
 const LIST_PAGE = 200;
 const MAX_PAGES = 100;
@@ -46,7 +54,8 @@ export async function unarchiveThread(rpc: CodexRpc, threadId: string): Promise<
 
 /**
  * Archive `threadId` so the Codex apps stop listing it. True when Codex archived it. Never
- * throws, and gives up after `timeoutMs`: a thread left listed is only clutter.
+ * throws, and gives up after `timeoutMs`: a thread left listed is only clutter. False doesn't
+ * mean the thread is still loaded: an archive that answers late can still go through.
  */
 export async function archiveThread(
   rpc: CodexRpc,

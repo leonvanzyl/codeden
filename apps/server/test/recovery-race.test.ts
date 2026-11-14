@@ -233,6 +233,41 @@ describe("session recovery", () => {
     });
     t.delivering.add("on-its-way");
     await t.recovery.onRunnerReady();
-    expect(order).toEqual(["resume", "sweep"]);
+    await vi.waitFor(() => expect(order).toEqual(["resume", "sweep"]));
+  });
+
+  it("finishes recovery without waiting for the sweep, and recovers a reconnect during one", async () => {
+    // The sweep takes a while (a short-lived provider process per provider).
+    let finishSweep: () => void = () => undefined;
+    const sweep = vi.fn(
+      () =>
+        new Promise<{ hidden: string[]; failed: number }>((resolve) => {
+          finishSweep = () => resolve({ hidden: [], failed: 0 });
+        }),
+    );
+    const cut = { ...sampleSession, provider: "fake", resumeToken: "r" } as const;
+    const t = setup([{ ...cut, id: "first", status: "running" }], undefined, sweep);
+    // A resumed session is hosted by the runner again.
+    t.continueAfterRestart.mockImplementation(async (id) => {
+      t.hosted.add(id);
+    });
+
+    let recovered = false;
+    void t.recovery.onRunnerReady().then(() => {
+      recovered = true;
+    });
+    await vi.waitFor(() => expect(sweep).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(recovered).toBe(true));
+    expect(t.continueAfterRestart.mock.calls.map((c) => c[0])).toEqual(["first"]);
+
+    // The runner drops and reconnects while the sweep still runs, cutting off another turn.
+    t.sessions.set("second", { ...cut, id: "second", status: "running" });
+    await t.recovery.onRunnerReady();
+    expect(t.continueAfterRestart.mock.calls.map((c) => c[0])).toEqual(["first", "second"]);
+    // The reconnect's own sweep waits for the one in progress, then runs.
+    expect(sweep).toHaveBeenCalledTimes(1);
+    finishSweep();
+    await vi.waitFor(() => expect(sweep).toHaveBeenCalledTimes(2));
+    finishSweep();
   });
 });

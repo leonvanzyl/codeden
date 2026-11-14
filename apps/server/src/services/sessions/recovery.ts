@@ -36,12 +36,16 @@ const isCutOff = (status: string) => (CUT_OFF as readonly string[]).includes(sta
  */
 export class SessionRecovery {
   private readonly running = new Map<string, Promise<void>>();
+  /** The vendor-history sweep in progress (or queued) for each runner. */
+  private readonly sweeping = new Map<string, Promise<void>>();
 
   constructor(private readonly deps: RecoveryDeps) {}
 
   /**
    * Called when a current runner is connected and configured; `runnerId` is its journal id
-   * (omitted: the home runner). Never throws.
+   * (omitted: the home runner). Resolves once recovery is done; the sweep that follows runs on
+   * its own, so it never holds recovery up, and a runner that reconnects meanwhile is recovered
+   * again rather than waiting on it. Never throws.
    */
   onRunnerReady(runnerId?: string): Promise<void> {
     const key = runnerId ?? "";
@@ -100,16 +104,35 @@ export class SessionRecovery {
     }
 
     // Sessions resumed above are mid-turn again (and hosted): the sweep leaves them alone.
-    const swept = await this.deps.sweepVendorHistory?.(
-      runner,
-      (id) => sessions.launching.has(id) || sessions.isDelivering(id),
-    );
-    if (swept?.hidden.length || swept?.failed) {
-      this.deps.log?.(
-        `recovery: hid ${swept.hidden.length} conversations a restart left in a provider's app` +
-          (swept.failed ? ` (${swept.failed} failed)` : ""),
-      );
-    }
+    this.sweepAfterRecovery(runnerId ?? "", runner);
+  }
+
+  /**
+   * Hide what a crash left in providers' own apps, without anyone waiting on it. One sweep per
+   * runner at a time: a reconnect's sweep runs after the one in progress, with its own view of
+   * which sessions to leave alone.
+   */
+  private sweepAfterRecovery(key: string, runner: RunnerPort): void {
+    const sweepVendorHistory = this.deps.sweepVendorHistory;
+    if (!sweepVendorHistory) return;
+    const { sessions } = this.deps;
+    const before = this.sweeping.get(key) ?? Promise.resolve();
+    const sweep = before.then(async () => {
+      const swept = await sweepVendorHistory(
+        runner,
+        (id) => sessions.launching.has(id) || sessions.isDelivering(id),
+      ).catch(() => undefined);
+      if (swept?.hidden.length || swept?.failed) {
+        this.deps.log?.(
+          `recovery: hid ${swept.hidden.length} conversations a restart left in a provider's app` +
+            (swept.failed ? ` (${swept.failed} failed)` : ""),
+        );
+      }
+    });
+    this.sweeping.set(key, sweep);
+    void sweep.finally(() => {
+      if (this.sweeping.get(key) === sweep) this.sweeping.delete(key);
+    });
   }
 
   /** The sessions the runner hosts right now; undefined (and logged) when it can't say. */

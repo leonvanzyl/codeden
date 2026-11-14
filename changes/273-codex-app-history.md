@@ -1,7 +1,0 @@
----
-section: fixed
----
-
-- **CodeDen's Codex sessions no longer fill the Codex app's recents.** The Codex apps list every Codex conversation on your machine as yours, so factory reviewers, builders, PMs and other CodeDen sessions crowded out your own chats. A CodeDen conversation is now visible in the Codex app only while one of its turns is running; the rest of the time it is under the app's **Archived** conversations. CodeDen unarchives it just before the next turn, a resume or a fork, so nothing is lost, and archives a fork's copy as it is made. A turn that fails to start, an interrupted turn or a Codex process that crashes doesn't leave one listed either, and when CodeDen starts after being killed mid-turn, it archives what was left. Your own conversations are never touched.
-- **Hide the ones from before.** **Settings → Providers → Provider apps → Hide CodeDen's sessions from the Codex app** lists the conversations CodeDen started that the Codex app still shows, found by CodeDen's own record of them rather than by their titles. It archives them once you confirm. They are archived, not deleted, and CodeDen can still resume them.
-- **Claude Code sessions stay out of `/resume` when CodeDen runs from a Claude Code terminal.** CodeDen now always labels its Claude Code sessions as SDK sessions, which Claude Code's own `/resume` leaves out, instead of inheriting the terminal's label.
