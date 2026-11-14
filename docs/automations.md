@@ -50,6 +50,10 @@ Choose **Starts off** or **Starts on** in the header, then **Save**, or **Save a
 
 **From the PM.** Ask your PM ("run the linter every night and tell me what fails") and it can create the automation with `create_automation`, or change one with `update_automation`, using the same validation. PM-created automations start off and say **Created by the PM**, so you can check the prompt and permissions before switching them on.
 
+- **A change to what an automation does switches it off.** When the PM changes the trigger, the action (the prompt, agent or permissions included) or the guards of an automation that's on, it's switched off in the same change, and your inbox gets **Automation switched off: the project manager changed "…"**, listing each setting's old and new value. It runs again only once you switch it on.
+- **Renaming it, a new description or a new work key keeps it on.**
+- **Some automations are yours alone.** The PM can't change automations for all projects, or automations defined in a `.md` file (those are edited in the file).
+
 ## Sharing: export and import
 
 Automations travel as Markdown files with YAML frontmatter, the same format as automation files, so a shared file also works dropped into a repo's `.codeden/automations/` folder.
@@ -132,7 +136,7 @@ Guards are checked in this order every time a trigger fires:
 
 Every outcome is recorded as a run: `queued`, `running`, `completed`, `failed`, `skipped` or `cancelled`. Skipped runs carry a reason: `overlap`, `concurrency`, `quiet_hours`, `daily_cap`, `disabled`, `skipped_by_pm`, `conflict_skip` or `factory_intake`. Session runs follow their session, and link to it both ways. Skipped runs send an `automation.skipped` notice to the PM, which may take over or adjust the schedule.
 
-PMs manage automations with `list_automations`, `create_automation` and `update_automation` (created off; files stay read-only), `run_automation`, `list_scheduled_runs`, `skip_next_run`, `pause_automation` / `resume_automation` (no cron or event runs while paused) and `cancel_queued_run`.
+PMs manage automations with `list_automations`, `create_automation` and `update_automation` (created off; changing what one that's on does switches it off; automations for all projects and files are yours to change, see [From the PM](#create-an-automation)), `run_automation`, `list_scheduled_runs`, `skip_next_run`, `pause_automation` / `resume_automation` (no cron or event runs while paused) and `cancel_queued_run`.
 
 ## The file format
 
@@ -232,7 +236,7 @@ Tip: quote any value that starts with `{{`, as in the `workKey` above, so YAML d
 | `action` | `start_session` \| `message_pm` \| `triage` | `start_session` | |
 | `workKey` | string | `automation:<file name>` | `<kind>:<id>`; may use placeholders |
 | `title` | string | | Session title; may use placeholders |
-| `provider` | string | the agent role default | `claude`, `codex`, `opencode` |
+| `provider` | string | the agent role default | `claude`, `codex`, `opencode`, `cursor`, `gemini` |
 | `model` | string | the provider default | |
 | `effort` | `minimal` \| `low` \| `medium` \| `high` \| `xhigh` \| `max` | | Each model supports a subset |
 | `autonomy` | `read_only` \| `supervised` \| `auto` \| `full` | your default | The permissions; see [Security](security.md#permissions) |

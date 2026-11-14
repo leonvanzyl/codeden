@@ -5,6 +5,7 @@ import { join } from "node:path";
 import {
   CODEDEN_VERSION,
   RUNNER_PROTOCOL_VERSION,
+  type RunnerBackendId,
   type RunnerEvent,
   type RunnerLock,
   type RunnerStream,
@@ -39,6 +40,8 @@ import { emptyTrash } from "./workspace/trash";
 export interface StartRunnerOptions {
   /** CodeDen data directory; the runner uses `<home>/runner/` and `<home>/wt/`. */
   home: string;
+  /** Where this runner runs, reported to the server in `welcome`. Default `local`. */
+  backend?: RunnerBackendId;
   /** Load the scripted Fake provider (development and tests). */
   enableFakeProvider?: boolean;
   /** Extra adapters (tests). */
@@ -172,6 +175,7 @@ export async function startRunner(opts: StartRunnerOptions): Promise<RunningRunn
 
   const core: RunnerCore = {
     home: opts.home,
+    backend: opts.backend ?? "local",
     version,
     journal,
     host,
