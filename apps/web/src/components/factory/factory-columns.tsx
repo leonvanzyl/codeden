@@ -10,6 +10,7 @@ import { factoryKeys } from "@/lib/factory";
 import { ago } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { CHECK_HELP, CHECK_LABEL, STAGE_LABEL } from "./meta";
+import { openPrOf, RetryButton } from "./retry-button";
 
 function Column({ title, count, children }: { title: string; count: number; children: ReactNode }) {
   return (
@@ -196,19 +197,40 @@ export function RecentColumn({
     <Column title="Recent merges & reverts" count={recent.length}>
       {recent.map((w) => {
         const s = recentIcon[w.stage as keyof typeof recentIcon] ?? recentIcon.merged;
-        return (
-          <ItemLink key={w.id} projectId={projectId} item={w}>
+        const row = (
+          <>
             <s.icon className={cn("size-3.5 shrink-0", s.cls)} />
             <span
               className={cn("truncate", w.stage === "rejected" && "text-muted-foreground")}
-              title={w.reason ?? undefined}
+              title={[w.reason, w.note].filter(Boolean).join(" · ") || undefined}
             >
               {w.title}
             </span>
             <span className={cn("ml-auto shrink-0 text-3xs", s.cls)}>
               {STAGE_LABEL[w.stage].label.toLowerCase()} · {ago(w.updatedAt)}
             </span>
-          </ItemLink>
+          </>
+        );
+        if (w.stage !== "failed" && w.stage !== "rejected") {
+          return (
+            <ItemLink key={w.id} projectId={projectId} item={w}>
+              {row}
+            </ItemLink>
+          );
+        }
+        // Stopped work: Retry right here (its open PR back to review, or a fresh attempt).
+        return (
+          <div key={w.id} className={cn(rowCls, "pr-1")} data-testid="factory-stopped-item">
+            <Link
+              to="/projects/$projectId/factory/$itemId"
+              params={{ projectId, itemId: w.id }}
+              className="flex min-w-0 flex-1 items-center gap-2"
+              data-testid="factory-item-link"
+            >
+              {row}
+            </Link>
+            <RetryButton projectId={projectId} itemId={w.id} pr={openPrOf(w)} />
+          </div>
         );
       })}
     </Column>

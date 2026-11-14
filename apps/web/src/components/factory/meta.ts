@@ -127,7 +127,7 @@ export const PR_STATE_LABEL: Record<FactoryPrState, { label: string; tone: Tone;
   waiting_for_you: {
     label: "Waiting for you",
     tone: "waiting",
-    help: "A person merges this one (auto-merge is off, a protected area, an untrusted author, or checks that failed). The factory keeps it free of merge conflicts meanwhile.",
+    help: "A person merges this one (auto-merge is off, a protected area or an untrusted author), or its checks failed: then Retry sends it back to a fresh review, and new commits on it are re-reviewed by themselves. The factory keeps it free of merge conflicts meanwhile.",
   },
   stuck: {
     label: "Stuck",
@@ -238,7 +238,7 @@ export function stepHelp(step: PipelineStep, type: WorkType | null, autoMerge: b
     case "done":
       return "Merged.";
     case "stopped":
-      return "The work stopped: not reproduced, declined, failed or closed. You can run it again from its page.";
+      return "The work stopped: not reproduced, declined, failed or closed. Retry runs it again: with its pull request still open, that pull request goes back to a fresh review; otherwise the work starts over. A failed pull request that gets new commits is re-reviewed by itself.";
   }
 }
 
