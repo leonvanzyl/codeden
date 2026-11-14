@@ -128,7 +128,7 @@ function settleStopped(
     return loop;
   }
   const waiting = due === "now" ? "resume" : due === "after_ci" ? "ci" : null;
-  const label = stoppedNote(item, waiting);
+  const label = stoppedNote(item, pr.ref, waiting);
   const prefix = resolved ? "Merge conflicts resolved" : null;
   const text = [prefix, label].filter(Boolean).join(". ");
   if (text) note(ctx, item, text);

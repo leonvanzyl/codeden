@@ -3,7 +3,7 @@ import { Link } from "@tanstack/react-router";
 import { Check, CircleDot, ExternalLink, GitPullRequest } from "lucide-react";
 import type { ReactNode } from "react";
 import { SectionLabel } from "@/components/common/bits";
-import { CheckRow, ItemActions, SessionLink } from "@/components/factory/item-parts";
+import { CheckRow, SessionLink } from "@/components/factory/item-parts";
 import { PR_STATE_LABEL, STAGE_LABEL, stepLabel } from "@/components/factory/meta";
 import {
   Sheet,
@@ -102,10 +102,6 @@ function Body({ projectId, card }: { projectId: string; card: ViewCard }) {
         >
           {card.activity}
         </p>
-      )}
-      {/* Stopped work runs again from here: Retry (its open PR back to review) or Rebuild. */}
-      {(item.stage === "failed" || item.stage === "rejected") && (
-        <ItemActions item={item} projectId={projectId} />
       )}
       <section>
         <SectionLabel className="mb-1.5">Steps</SectionLabel>

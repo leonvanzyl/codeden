@@ -1,12 +1,12 @@
-import type {
-  Classification,
-  FactoryAdmitRequest,
-  FactoryItem,
-  FactoryRetryMode,
-  FactorySetTypeRequest,
-  GitHubPrRef,
-  ReviewVerdict,
-  Session,
+import {
+  type Classification,
+  type FactoryAdmitRequest,
+  type FactoryItem,
+  type FactoryRetryMode,
+  type FactorySetTypeRequest,
+  type ReviewVerdict,
+  type Session,
+  stoppedRetry,
 } from "@codeden/contracts";
 import { badRequest, conflict, notFound } from "../errors";
 import { sessionsToArchive } from "./cleanup";
@@ -106,13 +106,6 @@ export async function setType(
   return updated;
 }
 
-/** The item's own pull request while it is open (as last synced), else null. */
-function openPrOf(ctx: FactoryContext, item: FactoryItem): GitHubPrRef | null {
-  if (!item.pr) return null;
-  const ref = ctx.github.prRef(item.projectId, item.pr.number) ?? item.pr;
-  return ref.state === "open" || ref.state === "draft" ? ref : null;
-}
-
 /**
  * Run an item that stopped (not reproduced, declined, failed checks, closed) again. `rereview`
  * (the default while its PR is open): the open PR goes straight back to a fresh review of its
@@ -130,11 +123,14 @@ export function retry(
   by: DecidedBy = "user",
 ): FactoryItem {
   const item = projectItem(ctx, projectId, itemId);
-  if (item.stage !== "rejected" && item.stage !== "failed") {
+  // The shared rule (`stoppedRetry`), with the PR's state as last synced from GitHub.
+  const synced = item.pr ? (ctx.github.prRef(item.projectId, item.pr.number) ?? item.pr) : null;
+  const can = stoppedRetry({ ...item, pr: synced });
+  if (!can) {
     throw conflict(`Only stopped items can be retried (this one is ${item.stage})`, "not_stopped");
   }
-  const pr = openPrOf(ctx, item);
-  if ((mode ?? (pr ? "rereview" : "rebuild")) === "rereview") {
+  const pr = can.pr;
+  if ((mode ?? can.mode) === "rereview") {
     if (!pr) {
       throw conflict(
         `Item ${item.id} has no open pull request to re-review: retry it as a rebuild`,

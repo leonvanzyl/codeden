@@ -1,4 +1,4 @@
-import { type FactoryItem, type MergeCheck, WorkType } from "@codeden/contracts";
+import { type FactoryItem, type MergeCheck, stoppedRetry, WorkType } from "@codeden/contracts";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { AlertTriangle, UserCheck } from "lucide-react";
@@ -11,7 +11,7 @@ import { ago } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { CheckPill } from "./factory-columns";
 import { CHECK_HELP, TYPE_LABEL } from "./meta";
-import { openPrOf, RetryButton } from "./retry-button";
+import { RetryButton } from "./retry-button";
 
 /**
  * Parts of the factory item page and the Factory view's item sheet (§10.1): the first step's
@@ -115,15 +115,16 @@ export function ItemActions({ item, projectId }: { item: FactoryItem; projectId:
       </Button>
     );
   }
-  if (item.stage === "rejected" || item.stage === "failed") {
-    const pr = openPrOf(item);
+  const stopped = stoppedRetry(item);
+  if (stopped) {
+    const pr = stopped.pr;
     return (
       <div className="space-y-1.5">
+        {stopped.label && <p className="text-2xs text-muted-foreground">{stopped.label}</p>}
         <div className="flex gap-1.5">
           <RetryButton
             projectId={projectId}
-            itemId={item.id}
-            pr={pr}
+            item={item}
             size="sm"
             variant="outline"
             className="flex-1"
@@ -132,8 +133,7 @@ export function ItemActions({ item, projectId }: { item: FactoryItem; projectId:
           {pr && (
             <RetryButton
               projectId={projectId}
-              itemId={item.id}
-              pr={pr}
+              item={item}
               mode="rebuild"
               size="sm"
               variant="ghost"

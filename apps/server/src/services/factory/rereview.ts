@@ -1,4 +1,4 @@
-import type { FactoryItem, GitHubPrRef } from "@codeden/contracts";
+import { type FactoryItem, type GitHubPrRef, stoppedRetry } from "@codeden/contracts";
 import type { FactoryContext } from "./context";
 import type { FactoryPr } from "./github-port";
 import { closeInboxFor } from "./merge";
@@ -97,22 +97,20 @@ export function autoReReview(
 }
 
 /**
- * The note on a failed item whose PR is open: what it needs (Retry sends the PR back to review),
- * never "waiting for a person to merge", which only escalated work is. `waiting`: the loop will
- * re-review its new head by itself once CI passes, or once the paused factory resumes. Null when
- * another note says more (stuck work, a size decision the PM owes).
+ * The note on a failed item whose open PR is `pr`: the shared label (`stoppedRetry`), and when
+ * the loop will re-review its new head by itself (`waiting`: once CI passes, or once the paused
+ * factory resumes). Null when another note says more (stuck work, a size decision the PM owes).
  */
 export function stoppedNote(
   item: FactoryItem,
+  pr: GitHubPrRef,
   waiting: "ci" | "resume" | null = null,
 ): string | null {
-  if (item.stage !== "failed" || item.failureKind === "stuck") return null;
-  if (item.checks.some((c) => c.name === "size" && c.state === "fail")) return null;
-  const n = item.attempts;
-  const base = `Stopped after ${n} revise round${n === 1 ? "" : "s"}; needs a re-review (Retry)`;
-  if (waiting === "ci") return `${base}. Its new head is re-reviewed by itself once CI passes`;
-  if (waiting === "resume") return `${base}. Its new head is re-reviewed once the factory resumes`;
-  return base;
+  const label = stoppedRetry({ ...item, pr })?.label;
+  if (!label) return null;
+  if (waiting === "ci") return `${label}. Its new head is re-reviewed by itself once CI passes`;
+  if (waiting === "resume") return `${label}. Its new head is re-reviewed once the factory resumes`;
+  return label;
 }
 
 /** Nudges of the stopped attempt that would hold up a fresh review. */

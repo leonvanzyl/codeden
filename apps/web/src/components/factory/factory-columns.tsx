@@ -1,4 +1,9 @@
-import type { FactoryMergeChecks, FactoryWorkItem, MergeCheck } from "@codeden/contracts";
+import {
+  type FactoryMergeChecks,
+  type FactoryWorkItem,
+  type MergeCheck,
+  stoppedRetry,
+} from "@codeden/contracts";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { AlertTriangle, Check, Clock, GitMerge, Minus, Undo2, UserCheck, X } from "lucide-react";
@@ -10,7 +15,7 @@ import { factoryKeys } from "@/lib/factory";
 import { ago } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { CHECK_HELP, CHECK_LABEL, STAGE_LABEL } from "./meta";
-import { openPrOf, RetryButton } from "./retry-button";
+import { RetryButton } from "./retry-button";
 
 function Column({ title, count, children }: { title: string; count: number; children: ReactNode }) {
   return (
@@ -211,7 +216,7 @@ export function RecentColumn({
             </span>
           </>
         );
-        if (w.stage !== "failed" && w.stage !== "rejected") {
+        if (!stoppedRetry(w)) {
           return (
             <ItemLink key={w.id} projectId={projectId} item={w}>
               {row}
@@ -229,7 +234,7 @@ export function RecentColumn({
             >
               {row}
             </Link>
-            <RetryButton projectId={projectId} itemId={w.id} pr={openPrOf(w)} />
+            <RetryButton projectId={projectId} item={w} />
           </div>
         );
       })}

@@ -2,7 +2,6 @@ import type { FactoryStatus } from "@codeden/contracts";
 import { ChevronDown, ChevronRight, UserRound } from "lucide-react";
 import { type ReactNode, useEffect, useId, useRef, useState } from "react";
 import { InfoHint } from "@/components/common/info-hint";
-import { openPrOf, RetryButton } from "@/components/factory/retry-button";
 import { cn } from "@/lib/utils";
 import { useWide } from "./hooks";
 import { ScoutCard } from "./scout-card";
@@ -145,18 +144,13 @@ function Stage({
   );
 }
 
-/**
- * The lane of work waiting on a person: escalated, failed, and anything stuck. A failed card
- * carries Retry, so stopped work runs again from here (its open PR back to review).
- */
+/** The lane of work waiting on a person: escalated, failed, and anything stuck. */
 function NeedsYou({
-  projectId,
   cards,
   now,
   onOpen,
   wide,
 }: {
-  projectId: string;
   cards: ViewCard[];
   now: number;
   onOpen: (card: ViewCard) => void;
@@ -201,17 +195,8 @@ function NeedsYou({
         data-testid="factory-view-needs-you-list"
       >
         {cards.map((c) => (
-          <li key={c.item.id} className="flex flex-col gap-1">
+          <li key={c.item.id}>
             <ViewCardButton card={c} now={now} onOpen={onOpen} />
-            {c.item.stage === "failed" && (
-              <RetryButton
-                projectId={projectId}
-                itemId={c.item.id}
-                pr={openPrOf(c.item)}
-                variant="outline"
-                className="self-start"
-              />
-            )}
           </li>
         ))}
       </ul>
@@ -246,13 +231,7 @@ export function PipelineBoard({
       >
         {announcement}
       </div>
-      <NeedsYou
-        projectId={f.projectId}
-        cards={pipeline.needsYou}
-        now={now}
-        onOpen={onOpen}
-        wide={wide}
-      />
+      <NeedsYou cards={pipeline.needsYou} now={now} onOpen={onOpen} wide={wide} />
       <div
         // Six columns that never squeeze a card below a readable width: past that the pipeline
         // scrolls sideways instead.

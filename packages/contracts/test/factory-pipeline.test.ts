@@ -4,8 +4,6 @@ import {
   FactoryAnalysisReport,
   FactoryFileIssueRequest,
   FactoryLimits,
-  FactoryRetryOptions,
-  FactoryRetryRequest,
   type Investigation,
   Project,
   pipelineStep,
@@ -98,16 +96,5 @@ describe("factory pipelines (§10.1)", () => {
     });
     expect(ScoutRound.parse(JSON.parse(JSON.stringify(held)))).toEqual(held);
     expect(ScoutRound.safeParse({ ...round, heldMs: -1 }).success).toBe(false);
-  });
-
-  it("round-trips a retry request: the item, and an optional re-review or rebuild", () => {
-    const req = FactoryRetryRequest.parse({ itemId: "item-1", mode: "rereview" });
-    expect(FactoryRetryRequest.parse(JSON.parse(JSON.stringify(req)))).toEqual(req);
-    // Without a mode the server picks: a re-review while the item's PR is open.
-    expect(FactoryRetryRequest.parse({ itemId: "item-1" }).mode).toBeUndefined();
-    expect(FactoryRetryOptions.parse({})).toEqual({});
-    expect(FactoryRetryOptions.parse({ mode: "rebuild" }).mode).toBe("rebuild");
-    expect(FactoryRetryRequest.safeParse({ itemId: "item-1", mode: "merge" }).success).toBe(false);
-    expect(FactoryRetryRequest.safeParse({ mode: "rereview" }).success).toBe(false);
   });
 });
