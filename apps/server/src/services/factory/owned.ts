@@ -43,6 +43,14 @@ function note(ctx: FactoryContext, item: FactoryItem, text: string): void {
   ctx.store.updateItem(item.id, (i) => ({ ...i, note: text }));
 }
 
+/**
+ * Failed and escalated work waits for a person, so it is not work in flight: while the loop is
+ * paused or draining (`drain.ts`) it starts no agent turn (a rebase, a re-review).
+ */
+function holdsAgentTurns(loop: FactoryLoop): boolean {
+  return loop.state === "paused" || Boolean(loop.drain);
+}
+
 export async function advanceOwned(
   ctx: FactoryContext,
   project: Project,
@@ -94,12 +102,13 @@ export async function advanceOwned(
     if (resolved) note(ctx, current, "Merge conflicts resolved; waiting for a person to merge it");
     return loop;
   }
-  // Rebasing work a person will merge spends an agent turn: not while paused, and only on a
-  // free agent slot, which `advanceConflicting` claims (a rebuild only queues the work, so it
-  // needs none).
-  if (rebaseAsks(current) < MAX_REBASE_ASKS && loop.state === "paused") {
+  // Rebasing work a person will merge spends an agent turn: not while paused or draining (it
+  // isn't work in flight), and only on a free agent slot, which `advanceConflicting` claims (a
+  // rebuild only queues the work, so it needs none).
+  if (rebaseAsks(current) < MAX_REBASE_ASKS && holdsAgentTurns(loop)) {
     const branch = baseBranchOf(project);
-    note(ctx, current, `Merge conflicts with ${branch}: waiting while the loop is paused`);
+    const why = loop.drain ? "the factory finishes its work in flight" : "the loop is paused";
+    note(ctx, current, `Merge conflicts with ${branch}: waiting while ${why}`);
     return loop;
   }
   return advanceConflicting(ctx, project, loop, current, pr);
@@ -108,7 +117,8 @@ export async function advanceOwned(
 /**
  * A failed item's PR without conflicts. When its head moved past the last verdict, with CI
  * green, it goes back to a fresh review by itself, once per head (`rereview.ts`); not while the
- * loop is paused, since a review spends an agent turn. Otherwise its note says what it needs.
+ * loop is paused or draining, since a review spends an agent turn. Otherwise its note says what
+ * it needs.
  */
 function settleStopped(
   ctx: FactoryContext,
@@ -118,7 +128,7 @@ function settleStopped(
   resolved: boolean,
 ): FactoryLoop {
   const due = autoReReview(item, pr, loop.tuning.requireCi);
-  if (due === "now" && pr.headSha && loop.state !== "paused") {
+  if (due === "now" && pr.headSha && !holdsAgentTurns(loop)) {
     const n = autoReReviews(item) + 1;
     resumeReview(ctx, item, pr.ref, {
       note: `Back in review by itself: #${pr.ref.number} has commits its last review didn't cover (${n} of ${MAX_AUTO_REREVIEWS})`,

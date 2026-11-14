@@ -102,16 +102,19 @@ export async function awaitTurnRaceResume(
  * (`factory_report_reproduction`, `factory_submit_analysis`) are offered only to the builder of
  * an item in building, its provider lists them once, while it opens, and its reports need the
  * item there. If the turn doesn't start, the item goes back to exactly how it was (failed, and
- * recoverable on a later tick), unless a report moved it on meanwhile.
+ * recoverable on a later tick), unless a report moved it on meanwhile. While the factory drains,
+ * `only` the drain's items go back.
  */
 export async function recoverTurnRaceFailures(
   ctx: FactoryContext,
   project: Project,
   loop: FactoryLoop,
+  only?: ReadonlySet<string>,
 ): Promise<void> {
   const failed = ctx.store
     .items(project.id, ["failed"])
     .filter((i) => i.reason === BUILDER_FAILED_REASON && i.builderSessionId)
+    .filter((i) => !only || only.has(i.id))
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   for (const item of failed) {
     const s = ctx.repo.find(item.builderSessionId as string)?.session;

@@ -353,6 +353,8 @@ export function createServices(opts: ServicesOptions): AppServices {
     trustedAuthors,
     automation: opts.orchestration?.automation ?? automations,
     timezone: () => usage.timezone(),
+    // The factory is created below; the digest asks it at wake time.
+    factoryLoop: (projectId) => factory.loopSummary(projectId),
     options: opts.orchestration,
     log: opts.log,
   });

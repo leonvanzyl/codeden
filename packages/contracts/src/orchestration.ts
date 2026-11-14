@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { GitHubIssueRef, GitHubPrRef, Id, JsonValue, Timestamp } from "./common";
 import { InboxItemKind, InboxItemStatus } from "./entities/inbox";
-import { AutonomyMode } from "./factory";
+import { AutonomyMode, FactoryLoopState } from "./factory";
 import { ConflictDecision, ScheduledRun, StartedBy, WorkKey, WorkSummary } from "./work";
 
 /**
@@ -204,7 +204,10 @@ export const Notice = z.discriminatedUnion("type", [
     ...noticeBase,
     type: z.literal("factory.update"),
     data: z.object({
-      /** What happened in the factory loop (§10.1). */
+      /**
+       * What happened in the factory loop (§10.1). `stopped`: a drain ("Finish current work, then
+       * stop") ended and the loop stopped by itself.
+       */
       event: z.enum([
         "triage_needed",
         "digest",
@@ -214,6 +217,7 @@ export const Notice = z.discriminatedUnion("type", [
         "merged",
         "failed",
         "ready",
+        "stopped",
       ]),
       /** Instructions (for the PM) or a summary (for the orchestrator). */
       text: z.string(),
@@ -286,6 +290,18 @@ export const ProjectStatus = z.object({
   }),
   /** Finishes and failures of the last 24 hours, newest first. */
   recent: z.array(RecentOutcome),
+  /**
+   * The factory loop of a project in a factory mode, so the PM can report it; null otherwise.
+   * `drainInFlight` is set while the kill switch's "Finish current work, then stop" runs: the
+   * items still in flight before the loop stops by itself.
+   */
+  factory: z
+    .object({
+      loopState: FactoryLoopState,
+      drainInFlight: z.int().nonnegative().nullable(),
+    })
+    .nullable()
+    .default(null),
 });
 export type ProjectStatus = z.infer<typeof ProjectStatus>;
 

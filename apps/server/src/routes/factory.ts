@@ -15,7 +15,8 @@ import { jsonBody } from "./validate";
 /**
  * `/api/projects/:id/...`: autonomy mode, vision, the factory panel and its controls (§10.1).
  * Mounted under `/projects`. `factory/scout` is "Run scout now": 409 `scout_unavailable` with
- * the reason when no round can start.
+ * the reason when no round can start. `kill-switch` takes `mode` (`now`, the default, or
+ * `drain`: finish the work in flight, then stop); `factory/resume` also cancels a drain.
  */
 export function projectFactoryRoutes(s: AppServices) {
   const f = s.factory;
@@ -28,10 +29,11 @@ export function projectFactoryRoutes(s: AppServices) {
     .put("/:id/vision", jsonBody(PutVisionRequest), async (c) =>
       c.json(await f.putVision(c.req.param("id"), c.req.valid("json").contents)),
     )
-    .post("/:id/kill-switch", jsonBody(KillSwitchRequest), async (c) =>
-      c.json(await f.setKillSwitch(c.req.param("id"), c.req.valid("json").on)),
-    )
-    .post("/:id/factory/resume", (c) => c.json(f.resume(c.req.param("id"))))
+    .post("/:id/kill-switch", jsonBody(KillSwitchRequest), async (c) => {
+      const { on, mode, drainLimitMin } = c.req.valid("json");
+      return c.json(await f.setKillSwitch(c.req.param("id"), on, { mode, drainLimitMin }));
+    })
+    .post("/:id/factory/resume", async (c) => c.json(await f.resume(c.req.param("id"))))
     .post("/:id/factory/tick", async (c) => {
       await f.tick(c.req.param("id"));
       return c.json(await f.status(c.req.param("id")));
@@ -66,9 +68,10 @@ export function projectFactoryRoutes(s: AppServices) {
     );
 }
 
-/** `/api/factory`: the global kill switch. */
+/** `/api/factory`: the global kill switch (Stop now only: 400 `drain_per_project` for a drain). */
 export function factoryRoutes(s: AppServices) {
-  return new Hono().post("/kill-switch", jsonBody(KillSwitchRequest), async (c) =>
-    c.json(await s.factory.setGlobalKillSwitch(c.req.valid("json").on)),
-  );
+  return new Hono().post("/kill-switch", jsonBody(KillSwitchRequest), async (c) => {
+    const { on, mode } = c.req.valid("json");
+    return c.json(await s.factory.setGlobalKillSwitch(on, mode));
+  });
 }

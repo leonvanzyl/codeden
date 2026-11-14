@@ -54,6 +54,8 @@ export interface FactoryContext {
   slots: SlotBoard;
   /** Files changed by the factory's open PRs as last read, for overlap-aware scheduling. */
   prFiles: PrFiles;
+  /** Turn a project's kill switch on or off (a `project.updated` event); no-op when it is already. */
+  setKillSwitch: (projectId: string, on: boolean) => void;
   now: () => Date;
   /**
    * How long CI may take to start on a commit (a PR's new head, a merge on the default branch)
@@ -149,7 +151,8 @@ export function factoryNotice(
       | "regression"
       | "merged"
       | "failed"
-      | "ready";
+      | "ready"
+      | "stopped";
     title: string;
     text: string;
     itemIds?: string[];

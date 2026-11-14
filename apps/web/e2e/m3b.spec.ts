@@ -105,6 +105,11 @@ test("switch a GitHub project to the software factory with a vision and limits; 
   await test.step("the project kill switch asks first, then stops the loop", async () => {
     const panel = page.getByTestId("factory-panel");
     await panel.getByRole("button", { name: "Kill switch" }).click();
+    // Two ways to stop: finishing current work first (offered first), or Stop now.
+    await expect(page.getByRole("menuitem").first()).toContainText(
+      "Finish current work, then stop",
+    );
+    await page.getByRole("menuitem", { name: /Stop now/ }).click();
     await page.getByRole("alertdialog").getByRole("button", { name: "Stop everything" }).click();
     await expect(panel.getByTestId("factory-loop-state")).toHaveText("Loop stopped");
     await panel.getByRole("button", { name: "Release kill switch" }).click();

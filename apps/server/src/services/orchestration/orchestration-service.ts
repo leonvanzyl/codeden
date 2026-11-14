@@ -72,6 +72,8 @@ export interface OrchestrationDeps {
   automation?: AutomationPort;
   /** The user's IANA timezone (the usage settings', else the machine's). Default: the machine's. */
   timezone?: () => string;
+  /** The factory loop of a project, for the status digest (null outside the factory modes). */
+  factoryLoop?: (projectId: string) => ProjectStatus["factory"];
   options?: OrchestrationOptions;
   log?: (message: string) => void;
 }
@@ -209,6 +211,7 @@ export class OrchestrationService {
       scheduled: this.automation.listScheduledRuns(projectId, 5),
       inbox: this.deps.inbox.list({ projectId }),
       outcomes: this.notices.recent(projectId, ["session.finished", "session.failed"], dayAgo()),
+      factory: this.deps.factoryLoop?.(projectId) ?? null,
     });
   }
 

@@ -228,7 +228,7 @@ Check, in order: the master switch (**Settings → General → Automations**), t
 
 ### The factory isn't doing anything
 
-Open the factory panel. A **paused** loop shows its reason (budget reached, repeated failures, a revert); resume it once you've looked. A **stopped** loop means a kill switch is on, either the project's or **Settings → General → Global factory kill switch**. Only issues opened after you enabled the mode, or labelled `codeden-factory`, are picked up.
+Open the factory panel. A **paused** loop shows its reason (budget reached, repeated failures, a revert); resume it once you've looked. A **stopped** loop means a kill switch is on, either the project's or **Settings → General → Global factory kill switch**. **Draining: N items in flight** means someone chose **Finish current work, then stop**: nothing new starts until those items finish and the factory stops, or until you press **Resume**. Only issues opened after you enabled the mode, or labelled `codeden-factory`, are picked up.
 
 ## Windows notes
 

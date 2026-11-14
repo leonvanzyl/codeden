@@ -227,18 +227,34 @@ export function mockFactoryApi(world: MockWorld): FactoryApi {
       const path = project(projectId)?.visionPath ?? ".codeden/VISION.md";
       return { path, exists: true, contents, parsed: parseVision(contents) };
     },
-    async killSwitch(scope, on) {
+    async killSwitch(scope, on, opts = {}) {
       if (scope === "global") {
+        if (on && opts.mode === "drain") throw new Error("Draining is per project");
         const settings = { ...world.snapshot.settings, factory: { killSwitch: on } };
         world.emitDomain({ type: "settings.updated", sessionId: null, payload: { settings } });
         world.factory.clear();
-        return { on, stoppedSessions: [] };
+        return { on, stoppedSessions: [], draining: false, inFlight: 0 };
       }
       const s = status(scope.projectId);
+      // A drain: the work in flight finishes first (the mock keeps it draining until resumed).
+      const inFlight = s.inProgress.length;
+      if (on && opts.mode === "drain" && inFlight > 0) {
+        const at = now();
+        const deadline = opts.drainLimitMin
+          ? new Date(Date.parse(at) + opts.drainLimitMin * 60_000).toISOString()
+          : null;
+        world.factory.set(scope.projectId, {
+          ...s,
+          loopState: "draining",
+          drain: { since: at, inFlight, total: inFlight, deadline },
+        });
+        return { on: false, stoppedSessions: [], draining: true, inFlight };
+      }
       world.factory.set(scope.projectId, {
         ...s,
         killSwitch: on,
         loopState: on ? "stopped" : "building",
+        drain: null,
       });
       const p = project(scope.projectId);
       if (p)
@@ -247,9 +263,13 @@ export function mockFactoryApi(world: MockWorld): FactoryApi {
           sessionId: null,
           payload: { project: { ...p, killSwitch: on } },
         });
-      return { on, stoppedSessions: [] };
+      return { on, stoppedSessions: [], draining: false, inFlight: 0 };
     },
-    resume: (id) => delay(loop(id)),
+    async resume(id) {
+      const s = status(id);
+      if (s.drain) world.factory.set(id, { ...s, drain: null, loopState: "building" });
+      return delay(loop(id));
+    },
     tick: (id) => delay(status(id)),
     async runScout(projectId) {
       const s = status(projectId);

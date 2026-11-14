@@ -1,4 +1,5 @@
 import {
+  DRAIN_PER_PROJECT,
   type FactoryAdmitRequest,
   type FactoryAllowLargeChangeRequest,
   type FactoryAnalysisReport,
@@ -9,12 +10,14 @@ import {
   type FactoryFinding,
   type FactoryItem,
   type FactoryLoop,
+  type FactoryLoopState,
   type FactoryPlanRoundRequest,
   type FactoryReproductionReport,
   type FactoryRetryMode,
   type FactorySetTypeRequest,
   type FactoryStatus,
   isFactoryMode,
+  type KillSwitchMode,
   type KillSwitchResponse,
   type Project,
   type RawEventEnvelope,
@@ -27,7 +30,7 @@ import {
 import type { Db } from "../../db/client";
 import type { EventStore } from "../../events/store";
 import type { SettingsStore } from "../../settings-store";
-import { errorMessage, notFound } from "../errors";
+import { badRequest, errorMessage, notFound } from "../errors";
 import type { Exec } from "../exec";
 import type { InboxService } from "../inbox-service";
 import type { NoticeDraft } from "../orchestration/notices";
@@ -42,6 +45,7 @@ import type { FactoryContext } from "./context";
 import { assertCanEnter, haltProject } from "./controls";
 import * as decisions from "./decisions";
 import { writeDigest } from "./digest";
+import { advanceDrain, drainInboxId, drainStatus, startDrain } from "./drain";
 import type { FactoryGithub } from "./github-port";
 import { allowLargeChange } from "./large-change";
 import { runTick } from "./loop";
@@ -143,6 +147,7 @@ export class FactoryService {
       archiveSessions: (ids) => this.archiver.push(ids),
       slots: new SlotBoard(),
       prFiles: new PrFiles(),
+      setKillSwitch: (projectId, on) => this.writeKillSwitch(projectId, on),
       now: deps.options?.now ?? (() => new Date()),
       ciGraceMs: deps.options?.ciGraceMs ?? 10 * 60_000,
       log: deps.log,
@@ -291,7 +296,9 @@ export class FactoryService {
               state: "idle" as const,
             }
           : {}),
-        ...(!entering ? { state: "idle" as const, scout: { ...loop.scout, round: null } } : {}),
+        ...(!entering
+          ? { state: "idle" as const, drain: null, scout: { ...loop.scout, round: null } }
+          : {}),
       });
     });
     this.soon(projectId);
@@ -312,22 +319,41 @@ export class FactoryService {
     return loop;
   }
 
-  /** The project kill switch: on stops the loop and every factory session at once. */
-  async setKillSwitch(projectId: string, on: boolean): Promise<KillSwitchResponse> {
-    const project = this.deps.projects.get(projectId);
-    if (project.killSwitch !== on) {
-      const next = { ...project, killSwitch: on, updatedAt: new Date().toISOString() } as Project;
-      this.deps.store.append([
-        { type: "project.updated", sessionId: null, payload: { project: next } },
-      ]);
-    }
-    const stoppedSessions = on ? await this.halt(projectId) : [];
-    if (!on) this.resumeAfterKill(projectId);
-    return { on, stoppedSessions };
+  /**
+   * The project kill switch. On with `mode: "now"` (the default) stops the loop and every factory
+   * session at once, ending a drain. On with `mode: "drain"` ("Finish current work, then stop",
+   * `drain.ts`) takes on no new work and stops by itself once the work in flight has finished,
+   * or after `drainLimitMin`. Off releases the switch and cancels a drain (Resume).
+   */
+  async setKillSwitch(
+    projectId: string,
+    on: boolean,
+    opts: { mode?: KillSwitchMode; drainLimitMin?: number | null } = {},
+  ): Promise<KillSwitchResponse> {
+    if (on && opts.mode === "drain") return this.drain(projectId, opts.drainLimitMin);
+    this.writeKillSwitch(projectId, on);
+    if (on)
+      return { on, stoppedSessions: await this.halt(projectId), draining: false, inFlight: 0 };
+    const drained = this.deps.inbox.find(drainInboxId(projectId));
+    if (drained?.status === "open") this.deps.inbox.close(drained, "resolved", { note: "resumed" });
+    await this.serialize(projectId, "resume after kill", () => this.resumeAfterKill(projectId));
+    return { on, stoppedSessions: [], draining: false, inFlight: 0 };
   }
 
-  /** The global kill switch (`settings.factory.killSwitch`): stops every project's loop. */
-  async setGlobalKillSwitch(on: boolean): Promise<KillSwitchResponse> {
+  /**
+   * The global kill switch (`settings.factory.killSwitch`): stops every project's loop at once.
+   * A drain is per project, so `mode: "drain"` is refused (400 `drain_per_project`).
+   */
+  async setGlobalKillSwitch(
+    on: boolean,
+    mode: KillSwitchMode = "now",
+  ): Promise<KillSwitchResponse> {
+    if (on && mode === "drain") {
+      throw badRequest(
+        "Finishing current work before stopping is per project; the global switch stops every factory now",
+        DRAIN_PER_PROJECT,
+      );
+    }
     const settings = this.deps.settings.update({ factory: { killSwitch: on } });
     this.deps.store.append([{ type: "settings.updated", sessionId: null, payload: { settings } }]);
     const stoppedSessions: string[] = [];
@@ -335,22 +361,42 @@ export class FactoryService {
       if (on) stoppedSessions.push(...(await this.halt(p.id)));
       else if (!p.killSwitch && this.data.loop(p.id)) this.resumeAfterKill(p.id);
     }
-    return { on, stoppedSessions };
+    return { on, stoppedSessions, draining: false, inFlight: 0 };
   }
 
-  /** Resume a paused loop (resets the failure count). */
-  resume(projectId: string): FactoryLoop {
-    const loop = this.data.loopOrNew(projectId, this.ctx.now());
-    const next = this.data.saveLoop({
-      ...loop,
-      state: "idle",
-      pausedReason: null,
-      consecutiveFailures: 0,
+  /**
+   * Resume a paused loop (resets the failure count). It also cancels a drain: the loop returns
+   * to normal. Runs after the ticks already queued, so a tick in flight never brings either back.
+   */
+  resume(projectId: string): Promise<FactoryLoop> {
+    const next = this.serialize(projectId, "resume", () => {
+      const loop = this.data.loopOrNew(projectId, this.ctx.now());
+      return this.data.saveLoop({
+        ...loop,
+        state: "idle",
+        pausedReason: null,
+        consecutiveFailures: 0,
+        drain: null,
+      });
     });
     const paused = this.deps.inbox.find(`inbox:factory-paused:${projectId}`);
     if (paused?.status === "open") this.deps.inbox.close(paused, "resolved", { note: "resumed" });
     this.soon(projectId);
     return next;
+  }
+
+  /** The loop for the PM's status digest; null outside the factory modes. */
+  loopSummary(
+    projectId: string,
+  ): { loopState: FactoryLoopState; drainInFlight: number | null } | null {
+    const project = this.deps.projects.get(projectId);
+    if (!isFactoryMode(project.autonomyMode)) return null;
+    const loop = this.data.loopOrNew(projectId, this.ctx.now());
+    const killed = project.killSwitch || this.deps.settings.get().factory.killSwitch;
+    return {
+      loopState: killed ? "stopped" : loop.state,
+      drainInFlight: drainStatus(this.ctx, projectId, loop)?.inFlight ?? null,
+    };
   }
 
   item(projectId: string, itemId: string): FactoryItem {
@@ -526,9 +572,50 @@ export class FactoryService {
     return haltProject(this.ctx, projectId);
   }
 
+  /**
+   * Begin a drain, or change the time limit of the one running. With nothing in flight the loop
+   * stops at once. A kill switch that is on already has nothing left to drain.
+   */
+  private async drain(
+    projectId: string,
+    limitMin: number | null | undefined,
+  ): Promise<KillSwitchResponse> {
+    const project = this.deps.projects.get(projectId);
+    if (project.killSwitch || this.deps.settings.get().factory.killSwitch) {
+      return { on: project.killSwitch, stoppedSessions: [], draining: false, inFlight: 0 };
+    }
+    const res = await this.serialize(projectId, "drain", async () => {
+      const started = await startDrain(this.ctx, projectId, limitMin);
+      const loop = this.data.saveLoop(await advanceDrain(this.ctx, project, started.loop));
+      return { loop, stoppedSessions: started.stoppedSessions };
+    });
+    this.soon(projectId);
+    const draining = res.loop.drain !== null;
+    return {
+      on: !draining,
+      stoppedSessions: res.stoppedSessions,
+      draining,
+      inFlight: drainStatus(this.ctx, projectId, res.loop)?.inFlight ?? 0,
+    };
+  }
+
+  /** Write the project's kill switch (a `project.updated` event) when it changes. */
+  private writeKillSwitch(projectId: string, on: boolean): void {
+    const project = this.deps.projects.get(projectId);
+    if (project.killSwitch === on) return;
+    const next = { ...project, killSwitch: on, updatedAt: new Date().toISOString() } as Project;
+    this.deps.store.append([
+      { type: "project.updated", sessionId: null, payload: { project: next } },
+    ]);
+  }
+
+  /** The switch is off: a stopped loop runs again and a drain is cancelled (a pause stays). */
   private resumeAfterKill(projectId: string): void {
     const loop = this.data.loopOrNew(projectId, this.ctx.now());
-    if (loop.state === "stopped") this.data.saveLoop({ ...loop, state: "idle" });
+    if (loop.state === "stopped" || loop.state === "draining" || loop.drain) {
+      const state = loop.state === "paused" ? "paused" : "idle";
+      this.data.saveLoop({ ...loop, state, drain: null });
+    }
     this.soon(projectId);
   }
 

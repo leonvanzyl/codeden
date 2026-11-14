@@ -70,6 +70,7 @@ export const LOOP_LABEL: Record<FactoryLoopState, { label: string; tone: Tone }>
   verifying: { label: "Verifying", tone: "waiting" },
   paused: { label: "Paused", tone: "waiting" },
   stopped: { label: "Stopped", tone: "failed" },
+  draining: { label: "Draining", tone: "waiting" },
 };
 
 export const STAGE_LABEL: Record<FactoryItemStage, { label: string; tone: Tone }> = {

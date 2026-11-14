@@ -82,7 +82,11 @@ export const FactoryLimits = z.object({
 });
 export type FactoryLimits = z.infer<typeof FactoryLimits>;
 
-/** State of a project's factory loop. */
+/**
+ * State of a project's factory loop. `draining`: the kill switch's "Finish current work, then
+ * stop" is running (`FactoryLoop.drain`): no new work starts, the work in flight carries on to the
+ * end of its pipeline, then the loop stops by itself.
+ */
 export const FactoryLoopState = z.enum([
   "idle",
   "discovering",
@@ -90,5 +94,6 @@ export const FactoryLoopState = z.enum([
   "verifying",
   "paused",
   "stopped",
+  "draining",
 ]);
 export type FactoryLoopState = z.infer<typeof FactoryLoopState>;

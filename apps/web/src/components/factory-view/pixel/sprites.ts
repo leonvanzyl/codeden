@@ -248,8 +248,8 @@ export function sprite(name: SpriteName, variant: SpriteVariant = "base"): HTMLC
 }
 
 /**
- * A 5-pixel-high font for the counter board, the "+N" signs and the door signs. Glyphs are
- * 3 wide, except N (4), which can't read as an N in 3.
+ * A 5-pixel-high font for the counter board, the "+N" signs, the door signs and the "CLOSED"
+ * board of a draining factory. Glyphs are 3 wide, except N (4), which can't read as an N in 3.
  */
 const GLYPHS: Record<string, string> = {
   "0": "111101101101111",
@@ -268,6 +268,11 @@ const GLYPHS: Record<string, string> = {
   S: "111100111001111",
   H: "101101111101101",
   P: "111101111100100",
+  C: "111100100100111",
+  L: "100100100100111",
+  O: "111101101101111",
+  E: "111100111100111",
+  D: "110101101101110",
 };
 
 const glyphWidth = (ch: string) => (GLYPHS[ch]?.length ?? 15) / 5;
