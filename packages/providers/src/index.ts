@@ -13,6 +13,7 @@ export * from "./image";
 export { ModelCatalog } from "./models";
 export * from "./opencode";
 export { isInWorkspace, isSecretPath, type PathContext } from "./policy/paths";
+export { isProviderLoginFile } from "./policy/provider-logins";
 export {
   classifyCommand,
   classifyFetch,

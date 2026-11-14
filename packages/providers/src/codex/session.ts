@@ -308,6 +308,7 @@ export class CodexSession implements ProviderSession {
               extraRoots: this.opts.additionalDirectories,
               ...(this.opts.ownBranch ? { ownBranch: this.opts.ownBranch } : {}),
               ...(this.opts.codedenHome ? { codedenHome: this.opts.codedenHome } : {}),
+              ...(this.opts.env ? { env: { ...process.env, ...this.opts.env } } : {}),
             },
             autonomy: () => (this.opts.readOnly ? "read_only" : this.autonomy),
             ctx: (threadId, turnId) => this.mapper.requestCtx(threadId, turnId),

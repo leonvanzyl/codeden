@@ -28,6 +28,7 @@ export function policyFor(opts: SessionOptions): AcpPolicy {
       cwd: opts.cwd,
       extraRoots: opts.additionalDirectories,
       ...(opts.codedenHome ? { codedenHome: opts.codedenHome } : {}),
+      ...(opts.env ? { env: { ...process.env, ...opts.env } } : {}),
     },
     opts.readOnly ?? false,
     trustedServers(opts),

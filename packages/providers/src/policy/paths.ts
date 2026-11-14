@@ -1,6 +1,7 @@
 import { realpathSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { isLoginFileName } from "./login-names";
 
 /** Context for path checks: the worktree plus any extra directories the agent may use. */
 export interface PathContext {
@@ -29,6 +30,11 @@ export interface PathContext {
    * (`./codeden-home`), and `$CODEDEN_HOME` resolves to it.
    */
   codedenHome?: string;
+  /**
+   * The agent's environment, for where the agent CLIs keep their logins (`CODEX_HOME`,
+   * `CLAUDE_CONFIG_DIR`, `XDG_*`, ...; `./provider-logins`). Defaults to `process.env`.
+   */
+  env?: Readonly<Record<string, string | undefined>>;
 }
 
 /** True when the context's paths are Windows paths. */
@@ -39,7 +45,8 @@ export function pathApi(ctx: PathContext): path.PlatformPath {
   return isWin(ctx) ? path.win32 : path.posix;
 }
 
-function homeOf(ctx: PathContext): string {
+/** The home directory `~` expands to. */
+export function homeOf(ctx: PathContext): string {
   return ctx.home ?? process.env.HOME ?? process.env.USERPROFILE ?? "";
 }
 
@@ -226,7 +233,11 @@ const SECRET_BASENAMES = new Set([
 const SAFE_ENV_SUFFIXES = [".example", ".sample", ".template", ".dist", ".defaults"];
 const SECRET_EXTENSIONS = [".pem", ".key", ".p12", ".pfx", ".keystore", ".jks"];
 
-/** True for files that commonly hold credentials (`.env`, SSH keys, `.npmrc`, `*.pem`, ...). */
+/**
+ * True for files that commonly hold credentials (`.env`, SSH keys, `.npmrc`, `*.pem`, ...) and
+ * the agent CLIs' own login files by name (`./login-names`: `~/.codex/auth.json`,
+ * `.credentials.json`, ...).
+ */
 export function isSecretPath(target: string): boolean {
   const normalized = target
     .trim()
@@ -244,5 +255,6 @@ export function isSecretPath(target: string): boolean {
   }
   if (SECRET_BASENAMES.has(base)) return true;
   if (SECRET_EXTENSIONS.some((ext) => base.endsWith(ext))) return true;
+  if (isLoginFileName(normalized)) return true;
   return /(^|\/)\.(ssh|aws|gnupg|docker)\//i.test(normalized) && !base.endsWith(".pub");
 }

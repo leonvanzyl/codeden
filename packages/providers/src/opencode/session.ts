@@ -109,6 +109,7 @@ export class OpenCodeSession implements ProviderSession {
         cwd: opts.cwd,
         extraRoots: opts.additionalDirectories,
         ...(opts.codedenHome ? { codedenHome: opts.codedenHome } : {}),
+        ...(opts.env ? { env: { ...process.env, ...opts.env } } : {}),
       },
       opts.readOnly ?? false,
     );
