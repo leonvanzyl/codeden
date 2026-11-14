@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import type { AnswerReview } from "../approvals";
 import { shorten, toJson } from "../util/text";
 import {
   type ApprovalContext,
@@ -6,7 +7,15 @@ import {
   approvedByPolicy,
   decisionOf,
 } from "./approval-context";
-import { ACCEPT, CONFIRM_ID, formContent, formFields, formQuestions } from "./elicitation-form";
+import {
+  ACCEPT,
+  CONFIRM_ID,
+  DECLINE,
+  type FormField,
+  formContent,
+  formFields,
+  formQuestions,
+} from "./elicitation-form";
 import type { JsonValue } from "./protocol/serde_json/JsonValue";
 import type {
   McpServerElicitationRequestParams,
@@ -101,7 +110,12 @@ async function toolApproval(
   return decision === "deny" ? DECLINED : CANCELLED;
 }
 
-/** A server's form: a question card built from its schema, the answers sent as its content. */
+/**
+ * A server's form: a question card built from its schema, the answers sent as its content. An
+ * answer that doesn't fit its field is rejected with what the field takes and the card stays
+ * open: the server never gets a refusal the user didn't give. Only the confirmation's Decline
+ * declines, and the card records it as declined.
+ */
 async function fillForm(
   p: Extract<Params, { mode: "form" }>,
   where: Where,
@@ -109,20 +123,44 @@ async function fillForm(
 ): Promise<Response> {
   const fields = formFields(p.requestedSchema);
   const requestId = newRequestId();
-  const response = await ac.broker.request(ac.ctx(where.threadId, where.turnId), {
-    id: `question-${requestId}`,
-    kind: "user_question",
-    status: "in_progress",
-    requestId,
-    mcpServer: p.serverName,
-    questions: formQuestions(p.serverName, p.message, fields),
-  });
+  const confirmed = (answers: Record<string, string[]>) =>
+    answers[CONFIRM_ID]?.includes(ACCEPT) === true;
+  const review: AnswerReview =
+    fields.length === 0
+      ? {
+          problem: (r) =>
+            r.kind === "answer" && !isConfirmation(r.answers[CONFIRM_ID])
+              ? `Answer ${ACCEPT} or ${DECLINE}.`
+              : undefined,
+          declines: (r) => r.kind === "answer" && !confirmed(r.answers),
+        }
+      : { problem: (r) => (r.kind === "answer" ? problemsOf(fields, r.answers) : undefined) };
+  const response = await ac.broker.request(
+    ac.ctx(where.threadId, where.turnId),
+    {
+      id: `question-${requestId}`,
+      kind: "user_question",
+      status: "in_progress",
+      requestId,
+      mcpServer: p.serverName,
+      questions: formQuestions(p.serverName, p.message, fields),
+    },
+    undefined,
+    review,
+  );
   if (response.kind !== "answer") return CANCELLED;
-  if (fields.length === 0) {
-    return response.answers[CONFIRM_ID]?.includes(ACCEPT) ? accept({}) : DECLINED;
-  }
-  const content = formContent(fields, response.answers);
-  return content ? accept(content) : DECLINED;
+  if (fields.length === 0) return confirmed(response.answers) ? accept({}) : DECLINED;
+  const result = formContent(fields, response.answers);
+  // The review let only fitting answers through; withdraw rather than refuse if one slipped by.
+  return "content" in result ? accept(result.content) : CANCELLED;
+}
+
+const isConfirmation = (answer: string[] | undefined) =>
+  answer?.length === 1 && (answer[0] === ACCEPT || answer[0] === DECLINE);
+
+function problemsOf(fields: FormField[], answers: Record<string, string[]>): string | undefined {
+  const result = formContent(fields, answers);
+  return "problems" in result ? result.problems.join("\n") : undefined;
 }
 
 /**

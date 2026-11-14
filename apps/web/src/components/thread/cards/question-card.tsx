@@ -1,7 +1,14 @@
-import type { ItemOf, RuntimeResponse, UserQuestion } from "@codeden/contracts";
+import {
+  answerFormatName,
+  type ItemOf,
+  type ItemStatus,
+  parseNumberAnswer,
+  type RuntimeResponse,
+  type UserQuestion,
+} from "@codeden/contracts";
 import { useMutation } from "@tanstack/react-query";
-import { Check, MessageCircleQuestion } from "lucide-react";
-import { useLayoutEffect, useRef, useState } from "react";
+import { Check, MessageCircleQuestion, Minus, X } from "lucide-react";
+import { useId, useLayoutEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,7 +19,9 @@ type Answers = Record<string, string[]>;
 
 /**
  * Structured questions from the agent, answered inline with options and optional free text. An
- * MCP server's form (`mcpServer`) can also be dismissed, so the user never has to make up data.
+ * MCP server's form (`mcpServer`) can also be dismissed, so the user never has to make up data;
+ * its number fields (`format`) are checked as they are typed, so the server gets what it asked
+ * for. A form that was dismissed or declined says so instead of looking answered.
  */
 export function QuestionCard({
   item,
@@ -22,6 +31,7 @@ export function QuestionCard({
   sessionId: string;
 }) {
   const client = useClient();
+  const errorId = useId();
   const [answers, setAnswers] = useState<Answers>({});
   const [freeText, setFreeText] = useState<Record<string, string>>({});
   const pending = item.status === "in_progress";
@@ -34,12 +44,26 @@ export function QuestionCard({
     return (
       <div className="space-y-2 rounded-lg border border-border bg-card/50 px-3 py-2.5 text-[13px]">
         {item.questions.map((q) => (
-          <AnsweredQuestion key={q.id} question={q} answers={item.answers?.[q.id] ?? []} />
+          <AnsweredQuestion
+            key={q.id}
+            question={q}
+            answers={item.answers?.[q.id] ?? []}
+            status={item.status}
+          />
         ))}
         {item.decidedBy === "pm" && (
           <p className="text-2xs text-muted-foreground">Answered by the project manager</p>
         )}
-        {item.status === "cancelled" && <p className="text-2xs text-muted-foreground">Dismissed</p>}
+        {item.status === "cancelled" && (
+          <p className="text-2xs text-muted-foreground">
+            {item.mcpServer ? `Dismissed: nothing was sent to ${item.mcpServer}` : "Dismissed"}
+          </p>
+        )}
+        {item.status === "declined" && (
+          <p className="text-2xs text-muted-foreground">
+            {item.mcpServer ? `Declined: ${item.mcpServer} got no data` : "Declined"}
+          </p>
+        )}
       </div>
     );
   }
@@ -63,6 +87,13 @@ export function QuestionCard({
       }),
     );
   const complete = item.questions.every((q) => (final()[q.id]?.length ?? 0) > 0);
+  /** What's wrong with a typed answer to a number field, while it doesn't fit. */
+  const problem = (q: UserQuestion): string | undefined => {
+    const text = freeText[q.id]?.trim();
+    if (!q.format || !text || parseNumberAnswer(text, q.format) !== undefined) return undefined;
+    return `Enter ${answerFormatName(q.format)}, like ${q.format === "integer" ? "3 or 1,000" : "2.5 or 1,000"}`;
+  };
+  const invalid = item.questions.some((q) => problem(q) !== undefined);
 
   return (
     <div className="overflow-hidden rounded-xl border border-chart-2/30 bg-card animate-rise">
@@ -126,11 +157,20 @@ export function QuestionCard({
             </div>
             {q.allowFreeText && (
               <Input
-                placeholder="Or type your own answer…"
+                placeholder={
+                  q.format ? `Type ${answerFormatName(q.format)}…` : "Or type your own answer…"
+                }
                 value={freeText[q.id] ?? ""}
                 onChange={(e) => setFreeText((p) => ({ ...p, [q.id]: e.target.value }))}
+                aria-invalid={problem(q) !== undefined}
+                aria-describedby={problem(q) ? `${errorId}-${qi}` : undefined}
                 className="h-8 text-[13px]"
               />
+            )}
+            {problem(q) && (
+              <p id={`${errorId}-${qi}`} className="text-2xs text-destructive">
+                {problem(q)}
+              </p>
             )}
           </section>
         ))}
@@ -154,7 +194,7 @@ export function QuestionCard({
         )}
         <Button
           size="sm"
-          disabled={!complete || submit.isPending || submit.isSuccess}
+          disabled={!complete || invalid || submit.isPending || submit.isSuccess}
           onClick={() => submit.mutate({ kind: "answer", answers: final() })}
         >
           Send answer
@@ -168,9 +208,18 @@ export function QuestionCard({
  * One answered question. A short answer stays on the question's line after an arrow; when the
  * two don't fit side by side the answer wraps onto its own line, lined up with the question.
  * Picked options are listed first, then any typed answer on its own line with its line breaks
- * kept. Long text is clamped to a few lines with a toggle to show it all.
+ * kept. Long text is clamped to a few lines with a toggle to show it all. The check mark is for
+ * answers that were sent; a declined or dismissed question gets a muted mark instead.
  */
-function AnsweredQuestion({ question, answers }: { question: UserQuestion; answers: string[] }) {
+function AnsweredQuestion({
+  question,
+  answers,
+  status,
+}: {
+  question: UserQuestion;
+  answers: string[];
+  status: ItemStatus;
+}) {
   const questionRef = useRef<HTMLParagraphElement>(null);
   const answerRef = useRef<HTMLParagraphElement>(null);
   const [expanded, setExpanded] = useState(false);
@@ -191,9 +240,16 @@ function AnsweredQuestion({ question, answers }: { question: UserQuestion; answe
   const picked = answers.filter(isOption);
   const typed = answers.filter((a) => !isOption(a));
 
+  const Mark = status === "completed" ? Check : status === "declined" ? X : Minus;
+
   return (
     <div className="flex gap-2">
-      <Check className="mt-0.5 size-3.5 shrink-0 text-status-done" />
+      <Mark
+        className={cn(
+          "mt-0.5 size-3.5 shrink-0",
+          Mark === Check ? "text-status-done" : "text-muted-foreground",
+        )}
+      />
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
           <p

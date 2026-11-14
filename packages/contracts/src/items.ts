@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { ErrorInfo, Id, JsonValue } from "./common";
+import { AnswerFormat } from "./form-answers";
 import { UserInput } from "./input";
 
 /**
@@ -244,6 +245,12 @@ export const UserQuestion = z.object({
   options: z.array(z.object({ label: z.string(), description: z.string().optional() })).default([]),
   multiSelect: z.boolean().default(false),
   allowFreeText: z.boolean().default(true),
+  /**
+   * What a typed answer must be, for a form's number fields (an MCP elicitation): the card
+   * checks it before the answer can be sent (`parseNumberAnswer`), and the provider rejects an
+   * answer that still doesn't fit instead of sending the server a refusal. Absent: any text.
+   */
+  format: AnswerFormat.optional(),
 });
 export type UserQuestion = z.infer<typeof UserQuestion>;
 
@@ -267,8 +274,10 @@ export const UserQuestionItem = z.object({
   deferred: z.boolean().optional(),
   /**
    * The MCP server asking, when the questions are its form (an MCP elicitation) rather than the
-   * agent's own: the answers go to that server as data. Unattended sessions withdraw such a form
-   * instead of answering it (§10.1).
+   * agent's own: the answers go to that server as data. Like an approval it stays with the user:
+   * the PM's `answer_question` refuses it, and unattended sessions withdraw it instead of
+   * answering it (§10.1). Its status says what the server got: `completed` the answers,
+   * `declined` a refusal (the user picked Decline), `cancelled` nothing (dismissed).
    */
   mcpServer: z.string().min(1).optional(),
 });
