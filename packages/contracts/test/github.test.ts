@@ -68,6 +68,18 @@ describe("github contracts", () => {
     expect(GithubPr.parse(JSON.parse(JSON.stringify(pr)))).toEqual(pr);
   });
 
+  it("round-trips why an issue was closed, and reads issues stored without it (#265)", () => {
+    const closed: GithubIssue = {
+      ...issue,
+      state: "closed",
+      closedAt: ts,
+      stateReason: "duplicate",
+    };
+    expect(GithubIssue.parse(JSON.parse(JSON.stringify(closed)))).toEqual(closed);
+    expect(GithubIssue.parse(issue).stateReason).toBeUndefined();
+    expect(GithubIssue.safeParse({ ...closed, stateReason: "reopened" }).success).toBe(false);
+  });
+
   it("round-trips a review's author association, and reads reviews stored without it", () => {
     const review: GithubReview = {
       id: "r1",

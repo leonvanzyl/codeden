@@ -1,8 +1,11 @@
-import type {
-  FactoryPrEntry,
-  FactoryStatus,
-  FactoryWorkItem,
-  SessionStatus,
+import {
+  type FactoryNeedKind,
+  type FactoryPrEntry,
+  type FactoryStatus,
+  type FactoryWorkItem,
+  factoryNeed,
+  factoryNeedLabel,
+  type SessionStatus,
 } from "@codeden/contracts";
 import { stepLabel } from "@/components/factory/meta";
 
@@ -37,7 +40,7 @@ export const VIEW_STAGES = [
   {
     id: "merge",
     label: "Merge queue",
-    hint: "Every check passed. With auto-merge on they merge one at a time, in this order; otherwise they wait for you. Stuck pull requests wait here for a person too.",
+    hint: "Every check passed and auto-merge is on: they merge one at a time, in this order. Pull requests a person merges wait in Needs you.",
   },
   {
     id: "merged",
@@ -48,8 +51,17 @@ export const VIEW_STAGES = [
 
 export type ViewStageId = (typeof VIEW_STAGES)[number]["id"];
 
-/** Where a card is drawn: a pipeline stage, or the lane of work that waits on a person. */
+/**
+ * Where a card is drawn: a pipeline stage, or the lane of work that waits on a person (whatever
+ * `factoryNeed` says needs you, and nothing else).
+ */
 export type ViewPlace = ViewStageId | "needs_you";
+
+/** What a card in the "Needs you" lane needs from a person, in words. */
+export interface ViewNeed {
+  kind: FactoryNeedKind;
+  label: string;
+}
 
 export const NEEDS_YOU_LABEL = "Needs you";
 
@@ -89,12 +101,14 @@ export interface ViewCard {
   since: string;
   /** The session working on it now (the reviewer while reviewing). */
   sessionId: string | null;
+  /** What it needs from a person; set on the cards of the "Needs you" lane only. */
+  need: ViewNeed | null;
 }
 
 export interface ViewPipeline {
   stages: Record<ViewStageId, ViewCard[]>;
   needsYou: ViewCard[];
-  /** Cards that wait on a person, wherever they are drawn. */
+  /** Work that waits on a person: the "Needs you" lane, so the header counts what it lists. */
   needsPerson: number;
   /** Failed work (the item, or its agent's session), wherever it is drawn. */
   failed: number;
@@ -144,18 +158,45 @@ function isStuck(w: FactoryWorkItem, pr: FactoryPrEntry | null): boolean {
   return pr ? pr.state === "stuck" : w.stage === "failed" && w.failureKind === "stuck";
 }
 
+/** The open PR the factory holds for it: the PR list's entry, else its own `ownedPr` or open PR. */
+function openPrNumber(w: FactoryWorkItem, pr: FactoryPrEntry | null): number | null {
+  if (pr) return CLOSED_PR.has(pr.state) ? null : pr.pr.number;
+  return w.ownedPr?.number ?? w.pr?.number ?? null;
+}
+
 /**
- * The stage a work item is drawn on, or null when the view leaves it out. `kept`: the server
- * listed it in `viewRecent`, so it still matters (a failure it judged still open, an escalation).
+ * What a work item needs from a person, by the factory's one definition (`factoryNeed`): the
+ * lane shows these cards and the header counts them. Null when nothing waits on a person.
+ */
+export function needOf(
+  w: FactoryWorkItem,
+  pr: FactoryPrEntry | null,
+  session: SessionInfo | undefined,
+  now: number,
+): ViewNeed | null {
+  const kind = factoryNeed(w, {
+    now,
+    ownsOpenPr: ownsOpenPr(w, pr),
+    recovering: w.recovering,
+    prWaitsForYou: pr?.state === "waiting_for_you",
+    agentWaiting: session?.status === "waiting",
+  });
+  if (!kind) return null;
+  const prNumber = openPrNumber(w, pr);
+  return { kind, label: factoryNeedLabel(kind, { attempts: w.attempts, prNumber }) };
+}
+
+/**
+ * The stage a work item is drawn on, or null when the view leaves it out. Work that needs a
+ * person (`need`) is drawn in the "Needs you" lane, wherever it is in the pipeline.
  */
 export function placeOf(
   w: FactoryWorkItem,
   pr: FactoryPrEntry | null,
   now: number,
-  kept = false,
+  need: ViewNeed | null = null,
 ): ViewPlace | null {
-  // A stuck pull request stays in the merge queue, marked as waiting on a person.
-  if (isStuck(w, pr) && ownsOpenPr(w, pr)) return "merge";
+  if (need) return "needs_you";
   switch (w.stage) {
     case "candidate":
       return "intake";
@@ -169,14 +210,15 @@ export function placeOf(
       return "merged";
     case "merged":
       return sameLocalDay(w.mergedAt ?? w.updatedAt, now) ? "merged" : null;
-    case "escalated":
-      return "needs_you";
-    case "failed": {
-      const recent = now - Date.parse(w.finishedAt ?? w.updatedAt) < DAY_MS;
-      return kept || recent || ownsOpenPr(w, pr) ? "needs_you" : null;
-    }
+    case "failed":
+      // A failure outside its code goes back by itself, to review when its PR is open (and
+      // within the last day, as the server keeps them); others that need nothing are old news.
+      if (!w.recovering) return null;
+      if (ownsOpenPr(w, pr)) return "reviewing";
+      return now - Date.parse(w.finishedAt ?? w.updatedAt) < DAY_MS ? "building" : null;
     default:
-      // Ignored (counted on Intake), rejected and reverted (counted in the stats).
+      // Ignored (counted on Intake), rejected and reverted (counted in the stats); escalated
+      // work always needs you.
       return null;
   }
 }
@@ -232,15 +274,15 @@ export function viewPipeline(
   const needsYou: ViewCard[] = [];
   const seen = new Set<string>();
   // `viewRecent` holds the finished work the view needs beyond the capped `recent` list.
-  const kept = new Set(f.viewRecent.map((w) => w.id));
   for (const w of [...f.backlog, ...f.inProgress, ...f.viewRecent, ...f.recent]) {
     if (seen.has(w.id)) continue;
     seen.add(w.id);
     const pr = currentPr(w, f.pullRequests);
-    const place = placeOf(w, pr, now, kept.has(w.id));
-    if (!place) continue;
     const sessionId = w.activeSessionId ?? w.sessionId;
     const session = sessionId ? sessions.get(sessionId) : undefined;
+    const need = needOf(w, pr, session, now);
+    const place = placeOf(w, pr, now, need);
+    if (!place) continue;
     const card: ViewCard = {
       item: w,
       place,
@@ -249,6 +291,7 @@ export function viewPipeline(
       activity: activityOf(w, pr, session),
       since: w.stepSince ?? w.updatedAt,
       sessionId,
+      need,
     };
     (place === "needs_you" ? needsYou : stages[place]).push(card);
   }
@@ -279,7 +322,7 @@ export function viewPipeline(
   return {
     stages,
     needsYou,
-    needsPerson: all.filter((c) => c.state === "person").length,
+    needsPerson: needsYou.length,
     failed: all.filter((c) => c.state === "failed" || c.item.stage === "failed").length,
   };
 }

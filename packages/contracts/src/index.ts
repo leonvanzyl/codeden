@@ -22,6 +22,7 @@ export * from "./entities/session";
 export * from "./events";
 export * from "./factory";
 export * from "./factory-api";
+export * from "./factory-needs-you";
 export * from "./factory-pipeline";
 export * from "./factory-prs";
 export * from "./factory-retry";

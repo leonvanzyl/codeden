@@ -275,7 +275,7 @@ describe("digest decisions", () => {
       projectName: "test-todo",
       day: "2026-11-09",
       items: [],
-      escalated: [],
+      needsYou: [],
       inbox: [
         inbox(`${DECISION_INBOX_PREFIX}a`, "low", at),
         inbox(`${DECISION_INBOX_PREFIX}b`, "high", at),

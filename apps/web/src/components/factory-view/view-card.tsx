@@ -107,10 +107,12 @@ export function ViewCardButton({
   card,
   now,
   onOpen,
+  className,
 }: {
   card: ViewCard;
   now: number;
   onOpen: (card: ViewCard) => void;
+  className?: string;
 }) {
   const w = card.item;
   const number = cardNumber(w);
@@ -130,6 +132,7 @@ export function ViewCardButton({
         card.state === "person" && "border-status-waiting/50 bg-status-waiting/[0.05]",
         card.state === "failed" && "border-status-failed/50 bg-status-failed/[0.05]",
         card.state !== "person" && card.state !== "failed" && "border-border",
+        className,
       )}
     >
       <div className="flex min-w-0 items-center gap-1 overflow-hidden">

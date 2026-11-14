@@ -8,6 +8,7 @@ import {
 import { errorMessage } from "../errors";
 import { earliestUntil, untilText } from "./availability";
 import { archiveFinished } from "./cleanup";
+import { settleClosedIssues } from "./closed-issues";
 import { budgetSpend, type FactoryContext, visionOf } from "./context";
 import { classifyPending, intakeFailedChecks, intakeIssues } from "./intake";
 import { openPrFiles, scheduleOrder } from "./overlap";
@@ -77,6 +78,9 @@ export async function runTick(
   ctx.sessions.refreshAvailability();
   // Work that waited for an agent on the last tick gets the free slots first (`slots.ts`).
   ctx.slots.beginTick(projectId);
+  // Failed items whose issue was closed on GitHub have nothing left to decide: they settle
+  // first, so none of them is put back or waits on a person.
+  settleClosedIssues(ctx, project);
   // Items that failed for a reason outside their code go back by themselves (builders that
   // must carry on wait until after the reviews, fixes and rebases, below).
   const failedAtStart = new Set(ctx.store.items(projectId, ["failed"]).map((i) => i.id));

@@ -1,6 +1,7 @@
 import {
   type Classification,
   type FactoryAdmitRequest,
+  type FactoryDismissRequest,
   type FactoryItem,
   type FactoryRetryMode,
   type FactorySetTypeRequest,
@@ -12,6 +13,8 @@ import { badRequest, conflict, notFound } from "../errors";
 import { sessionsToArchive } from "./cleanup";
 import type { FactoryContext } from "./context";
 import { announceType } from "./intake";
+import { closeInboxFor } from "./merge";
+import { ownedPr } from "./pr-status";
 import { lateReviewPrompt } from "./prompts";
 import { trackedHead } from "./rebase";
 import { ownershipAfterRetry } from "./rebuild";
@@ -21,8 +24,8 @@ import { environmentBlocked, environmentOnly, withoutStrikes } from "./review-en
 
 /**
  * Decisions on work items (§10.1): letting an untrusted issue in, correcting a type, retrying
- * work that stopped, and the independent reviewer's verdict. Each records data the state
- * machine acts on.
+ * or dismissing work that stopped, and the independent reviewer's verdict. Each records data
+ * the state machine acts on.
  */
 
 /** Who made a decision: you (the UI) or the PM (at your request). */
@@ -167,6 +170,43 @@ export function retry(
     earlierSessionIds: [...new Set([...i.earlierSessionIds, ...earlier])],
     finishedAt: null,
   }));
+}
+
+/**
+ * Dismiss a failed item that holds no open pull request: nothing more is done with it. It is
+ * `rejected`, with your reason or, by default, that you dismissed it and why it had stopped.
+ * One with an open PR waits for that PR to be merged or closed instead.
+ */
+export function dismiss(
+  ctx: FactoryContext,
+  projectId: string,
+  itemId: string,
+  req: FactoryDismissRequest,
+  by: DecidedBy,
+): FactoryItem {
+  const item = projectItem(ctx, projectId, itemId);
+  if (item.stage !== "failed") {
+    throw conflict(`Only failed items can be dismissed (this one is ${item.stage})`, "not_failed");
+  }
+  const open = ownedPr(ctx, item);
+  if (open) {
+    throw conflict(
+      `Its pull request #${open.number} is still open: merge or close it, or retry the item`,
+      "pr_open",
+    );
+  }
+  const who = by === "user" ? "you" : "the PM";
+  const why = item.reason ? ` (it had stopped: ${item.reason})` : "";
+  const dismissed = ctx.store.updateItem(item.id, (i) => ({
+    ...i,
+    stage: "rejected",
+    reason: req.reason ? `Dismissed by ${who}: ${req.reason}` : `Dismissed by ${who}${why}`,
+    failureKind: null,
+    note: null,
+    finishedAt: i.finishedAt ?? ctx.now().toISOString(),
+  }));
+  closeInboxFor(ctx, item.id, "dismissed");
+  return dismissed;
 }
 
 /**

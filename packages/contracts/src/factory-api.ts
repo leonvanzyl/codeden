@@ -551,6 +551,11 @@ export const FactoryWorkItem = z.object({
    */
   ownedPr: GitHubPrRef.nullable().default(null),
   /**
+   * It failed for a reason outside its code and the loop still puts it back by itself, so it
+   * doesn't need a person (`factoryNeed`).
+   */
+  recovering: z.boolean().default(false),
+  /**
    * Its merge checks so far: passed (passed or skipped), failed and all recorded; null before
    * any ran.
    */

@@ -1,4 +1,10 @@
-import { type GithubChecksSummary, GithubIssue, GithubPr, githubPrId } from "@codeden/contracts";
+import {
+  type GithubChecksSummary,
+  GithubIssue,
+  GithubIssueStateReason,
+  GithubPr,
+  githubPrId,
+} from "@codeden/contracts";
 import type { githubIssues, githubPrs } from "../../db/schema";
 
 /** Mapping between GitHub contract entities and their projection rows. */
@@ -30,6 +36,7 @@ export function issueToRow(issue: GithubIssue, syncedAt: string): GithubIssueRow
     createdAt: issue.createdAt,
     updatedAt: issue.updatedAt,
     closedAt: issue.closedAt,
+    stateReason: issue.stateReason ?? null,
     syncedAt,
   };
 }
@@ -48,6 +55,7 @@ export function rowToIssue(row: GithubIssueRow, sessionIds: string[] = []): Gith
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     closedAt: row.closedAt,
+    stateReason: GithubIssueStateReason.safeParse(row.stateReason).data ?? null,
     sessionIds,
   });
 }
