@@ -27,7 +27,7 @@ The runner (`apps/runner`) hosts provider sessions, the event journal, git and c
 - **Found by lock file.** The server reads `<home>/runner/runner.json`, checks the pid is alive on this machine, probes `/health`, then dials `ws://127.0.0.1:<port>/runner` (`runner/lock.ts`, `client.ts` `ensureRunner`/`connect`).
 - **Loopback only.** The runner binds `127.0.0.1` on a random port and refuses any non-loopback `Host` (`runner.ts` lines 78, 198, 241). It has no `--port` flag.
 - **Protocol.** `hello` → `welcome` → `resume`, then commands with results and journaled events acked by `seq` (`connection.ts`). Nothing in it depends on the transport being a WebSocket; it is JSON messages.
-- **MCP.** The runner's proxy forwards each agent request over HTTP to the server's loopback `/mcp` (`mcp/proxy.ts`, `HttpMcpUpstream`). The `McpUpstream` interface was left as the seam for tunnelling over the runner connection.
+- **MCP.** The runner's proxy forwards each agent request over HTTP to the server's loopback `/mcp` (`mcp/proxy.ts`, `HttpMcpUpstream`). The `McpUpstream` interface was left as the seam for tunnelling over the runner connection (done in Phase 3b, §11).
 
 Things that assume the runner shares the server's disk:
 
@@ -292,6 +292,39 @@ Running agent processes as a different Unix user from the runner would close the
 
 The runner's proxy keeps its agent-facing address (`http://127.0.0.1:<runnerPort>/mcp` inside the sandbox). For remote runners its upstream is a **`LinkMcpUpstream`**: each MCP HTTP request becomes `mcp.request` frames on the link (method, headers, body), and the server answers with `mcp.response` frames, streaming SSE chunks. The server feeds them to its MCP handler in-process, with the same session-token check, so `/mcp` stays loopback-only. This is the change the `McpUpstream` interface was made for. In the experiment, the HTTP upstream failed inside the container ("CodeDen server unreachable … fetch failed").
 
+**Built in Phase 3b.**
+- **Contracts** (`packages/contracts/src/runner/mcp-link.ts`).
+  - Runner to server: `mcp.request` (method, the proxy's allow-listed headers, base64 body), `mcp.cancel` and `mcp.ack`.
+  - Server to runner: `mcp.response` with `part` `head` (status, allow-listed headers), `chunk` (base64) and `end` (with `error` when the body broke off).
+  - `runner.configure` gains `mcpLink: true`; `mcpUpstreamUrl` is then `null`, so the runner never learns the server's address. An older runner ignores `mcpLink` and turns its proxy off rather than breaking.
+  - The frames are protocol messages, never journaled or logged. The request's `authorization` header carries the agent's token across the link and nowhere else.
+- **Which runners.** The server decides from its own runner record, never from the runner's `welcome`: a runner whose backend isn't `local` gets the link, while the home runner and other local runners keep `HttpMcpUpstream` and the URL as before (`RunnerHub.add`).
+- **Runner** (`apps/runner/src/mcp/link-upstream.ts`).
+  - Requests go out on the attached server connection. A request whose connection closes, or that finds none, fails like an unreachable HTTP upstream: 502 "CodeDen server unreachable…" from the proxy, or a broken body stream once the head was sent.
+  - The body is a pull stream that reads nothing ahead. Each piece the agent reads is acked, so the server sends more.
+  - An agent that disconnects or stops reading sends `mcp.cancel`.
+  - Timeouts match the HTTP upstream's `fetch`: 300 s for the head, and 300 s with neither a frame from the server nor a read by the agent.
+- **Server** (`apps/server/src/runner/mcp-link.ts`, one `McpLinkServer` per connection, wired in `RunnerClient`).
+  - Each frame becomes a `Request` with only the allow-listed headers and goes to the very handler `/mcp` uses (`createMcpHandler`), so a bad, expired or revoked token gets the same status, body and `www-authenticate`.
+  - For an untrusted runner the handler's `accept` hook adds the routing check its events get (§8): the token's session must have `sessions.runnerId` equal to that runner's journal id. Otherwise the answer is the invalid-token one, and the log names the session, never the token.
+  - A cancel or the link closing aborts the request's signal, which closes the MCP server and the tool call's own signal.
+- **Limits** (`MCP_LINK_*`).
+
+  | Limit | Value | Over it |
+  |---|---|---|
+  | Request body | 8 MiB, so a request always fits one 16 MiB link line after base64 | The proxy answers 413 without sending anything; share large files by path |
+  | Response chunks | 256 KiB each | |
+  | Unacked body per response | 1 MiB | The server waits for acks |
+  | Requests in flight per runner | 32 | The server answers 429 |
+- **DELETE and GET.** `/mcp` is stateless and answers both with 405 after the token check; over the link they get the same answer.
+- **Tests.**
+  - `apps/server/test/mcp-link.test.ts` pairs both ends in memory with a scripted handler: ordered SSE, the window, cancellation, 413, 429, a dropped link and the head timeout.
+  - `apps/server/test/remote-mcp.test.ts` runs a sandbox-like runner (its own home, backend `docker`, reached only through the exec link) with a Fake session.
+    - Using the session's own token, an MCP client calls `report_progress`, then `ask_user`, whose stream stays open until the question is answered, then sends a DELETE.
+    - Nothing goes to the server's loopback `/mcp`.
+    - A made-up token and another session's live token get the same answer as a bad token on `/mcp`.
+    - None of the tokens is in the logs, the runner's files or the stored events.
+
 ## 12. Terminals and the browser
 
 - **Terminals** are already protocol commands (`pty.*`) with output on the `stream` channel, so they work over any link. node-pty compiled and spawned a shell in the experiment container (`pty-ok x86_64`).
@@ -447,7 +480,7 @@ Each phase is one pull request well under 5,000 changed lines, written as an iss
 
 **Split in two.**
 - **3a (built, #271):** clone workspaces, brokered git credentials, `fs.*`/`transfer.*`, `WorkspaceFs` and the modules moved to it, screenshot bytes and `cwd_missing` (§9.1, §9.2, §10).
-- **3b (next):** MCP over the link. `LinkMcpUpstream` with `mcp.request`/`mcp.response` frames, SSE and `DELETE`, and bad session tokens refused exactly as on `/mcp`.
+- **3b (built, #285):** MCP over the link. `LinkMcpUpstream` with `mcp.request`/`mcp.response` frames, SSE with backpressure and cancellation, and `DELETE`. Bad session tokens, and tokens of sessions not routed to the runner, are refused exactly as on `/mcp`. There are limits on body size and in-flight requests (§11).
 
 ### Phase 4: Docker backend
 
