@@ -87,6 +87,16 @@ const open = (req: object, autonomy: AutonomyLevel = "supervised") => {
   return { events, pending, settled: () => settled, started, answer };
 };
 
+/** The error `fn` throws (an answer the broker rejects), or undefined. */
+const rejection = (fn: () => unknown): { code?: string; message: string } | undefined => {
+  try {
+    fn();
+  } catch (error) {
+    return error as { code?: string; message: string };
+  }
+  return undefined;
+};
+
 describe("Codex MCP tool approvals", () => {
   it("asks the user about an MCP tool call instead of declining it", async () => {
     const { settled, started, answer } = open(toolApproval());
@@ -266,18 +276,66 @@ describe("Codex MCP server forms", () => {
     });
   });
 
-  it("returns cancel when the form is dismissed and decline when an answer doesn't fit", async () => {
-    expect(await open(form(schema)).answer({ kind: "cancel" })).toMatchObject({
-      action: "cancel",
-    });
-    const wrong = open(form(schema)).answer({
-      kind: "answer",
-      answers: { environment: ["Staging"], replicas: ["two"] },
-    });
-    expect(await wrong).toMatchObject({ action: "decline", content: null });
+  it("returns cancel when the form is dismissed, and records it as dismissed", async () => {
+    const dismissed = open(form(schema));
+    expect(await dismissed.answer({ kind: "cancel" })).toMatchObject({ action: "cancel" });
+    expect(dismissed.events.at(-1)).toMatchObject({ item: { status: "cancelled" } });
   });
 
-  it("confirms a form without fields with Accept or Decline", async () => {
+  it("never declines a form the user answered because one answer doesn't parse (#235)", async () => {
+    const amount = {
+      type: "object",
+      properties: {
+        environment: schema.properties.environment,
+        budget: { type: "number", title: "Budget" },
+      },
+      required: ["environment", "budget"],
+    };
+    const answers = (budget: string) => ({ environment: ["Production"], budget: [budget] });
+    // How people write numbers is understood: the server gets the number.
+    const thousand = open(form(amount));
+    expect(thousand.started()).toMatchObject({ questions: [{}, { format: "number" }] });
+    expect(await thousand.answer({ kind: "answer", answers: answers("1,000") })).toEqual({
+      action: "accept",
+      content: { environment: "prod", budget: 1000 },
+      _meta: null,
+    });
+    // Anything else is rejected with what the field takes, and the form stays open: the card
+    // isn't marked answered and the server gets nothing until the answer fits.
+    for (const typed of ["10 items", "five"]) {
+      const { events, answer, settled } = open(form(amount));
+      expect(rejection(() => answer({ kind: "answer", answers: answers(typed) }))).toMatchObject({
+        code: "invalid_answer",
+        message: `Budget: "${typed}" isn't a number. Type a number, like 2.5 or 1,000.`,
+      });
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(settled()).toBeUndefined();
+      expect(events.some((e) => e.type === "item.completed")).toBe(false);
+      expect(await answer({ kind: "answer", answers: answers("10") })).toMatchObject({
+        action: "accept",
+        content: { budget: 10 },
+      });
+    }
+  });
+
+  it("names every field an answer doesn't fit, including a required one left out", () => {
+    const { answer, settled } = open(form(schema));
+    const error = rejection(() =>
+      answer({ kind: "answer", answers: { environment: ["Moon"], replicas: ["two"] } }),
+    );
+    expect(error?.message).toBe(
+      [
+        'Environment: "Moon" isn\'t one of the options. Pick one of: Staging, Production.',
+        'Replicas: "two" isn\'t a whole number. Type a whole number, like 3 or 1,000.',
+      ].join("\n"),
+    );
+    expect(rejection(() => answer({ kind: "answer", answers: {} }))?.message).toBe(
+      "Environment: needs an answer.\nReplicas: needs an answer.",
+    );
+    expect(settled()).toBeUndefined();
+  });
+
+  it("confirms a form without fields with Accept or Decline, and records a Decline", async () => {
     const empty = { type: "object", properties: {} };
     const yes = open(form(empty));
     expect(yes.started()).toMatchObject({
@@ -287,8 +345,19 @@ describe("Codex MCP server forms", () => {
       action: "accept",
       content: {},
     });
-    const no = open(form(empty)).answer({ kind: "answer", answers: { confirm: ["Decline"] } });
-    expect(await no).toMatchObject({ action: "decline" });
+    expect(yes.events.at(-1)).toMatchObject({ item: { status: "completed" } });
+    const no = open(form(empty));
+    // Only Accept or Decline: anything else is no refusal.
+    expect(
+      rejection(() => no.answer({ kind: "answer", answers: { confirm: ["sure, go"] } })),
+    ).toMatchObject({ code: "invalid_answer" });
+    expect(await no.answer({ kind: "answer", answers: { confirm: ["Decline"] } })).toMatchObject({
+      action: "decline",
+    });
+    // The card says the server was turned down, not that the form was filled in.
+    expect(no.events.at(-1)).toMatchObject({
+      item: { status: "declined", answers: { confirm: ["Decline"] } },
+    });
   });
 
   it("declines an elicitation outside a turn, with nothing to show it in", async () => {

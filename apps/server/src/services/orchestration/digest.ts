@@ -254,13 +254,7 @@ function noticeDetail(n: Notice): string {
     case "session.finished":
       return ` · ${n.data.workKey} · session ${short(n.data.sessionId)}${n.data.summary ? ` · "${clipKeepingEnd(n.data.summary)}"` : ""}`;
     case "session.needs_input":
-      return ` · ${n.data.kind}: ${quote(n.data.question, 200)} (${
-        n.data.kind !== "question"
-          ? "waiting for the user's approval"
-          : n.data.startedBy.kind === "user"
-            ? `inbox item ${n.data.inboxItemId}: the user started this session and answers its questions`
-            : `inbox item ${n.data.inboxItemId}: answer it with answer_question when the brief, the notes or the vision settle it`
-      })`;
+      return ` · ${n.data.kind}: ${quote(n.data.question, 200)} (${needsInputNote(n.data)})`;
     case "session.failed":
       return ` · ${n.data.workKey} · ${quote(n.data.error, 200)}`;
     case "pr.opened":
@@ -292,6 +286,17 @@ function noticeDetail(n: Notice): string {
     case "factory.update":
       return ` · ${n.data.event}\n${quote(n.data.text, 4000)}`;
   }
+}
+
+/** Who a "needs input" notice waits on, and whether the PM can answer it. */
+function needsInputNote(data: Extract<Notice, { type: "session.needs_input" }>["data"]): string {
+  if (data.kind !== "question") return "waiting for the user's approval";
+  if (data.mcpServer) {
+    return `inbox item ${data.inboxItemId}: a form from the ${data.mcpServer} MCP server, waiting for the user (its answers go to that server as data, so like an approval it stays with the user)`;
+  }
+  return data.startedBy.kind === "user"
+    ? `inbox item ${data.inboxItemId}: the user started this session and answers its questions`
+    : `inbox item ${data.inboxItemId}: answer it with answer_question when the brief, the notes or the vision settle it`;
 }
 
 /** The day window for recent outcomes, from `now`. */

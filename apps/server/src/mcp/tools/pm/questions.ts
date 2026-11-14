@@ -6,14 +6,15 @@ import { questionItem } from "../shared/session-items";
 
 /**
  * `answer_question` (§8.2 step 5): the PM answers a question one of its project's agent
- * sessions asked, so the agent carries on without waiting for the user. Only questions from
- * work the PM, the orchestrator or an automation started; approvals and the questions of
+ * sessions asked, so the agent carries on without waiting for the user. Only the agent's own
+ * questions from work the PM, the orchestrator or an automation started. Approvals, MCP
+ * servers' forms (their answers go to an external tool as data, §11.2) and the questions of
  * sessions the user started stay with the user.
  */
 export const answerQuestion = defineTool({
   name: "answer_question",
   description:
-    "Answer a question one of this project's agent sessions asked (an open inbox item of kind 'question', named in a 'needs input' update), when its brief, your notes, the vision or a sensible default settles it. The agent gets the answer at once (or as its next message) and the inbox item closes as answered by you. Approvals, and questions from sessions the user started, stay with the user.",
+    "Answer a question one of this project's agent sessions asked (an open inbox item of kind 'question', named in a 'needs input' update), when its brief, your notes, the vision or a sensible default settles it. The agent gets the answer at once (or as its next message) and the inbox item closes as answered by you. Approvals, MCP servers' forms, and questions from sessions the user started, stay with the user.",
   roles: ["pm"],
   scope: "project",
   alwaysLoad: true,
@@ -43,8 +44,13 @@ export const answerQuestion = defineTool({
     if (!wakesPm(session)) {
       throw new ToolError("The user started that session and answers its questions themselves.");
     }
-    // Every question of the item gets the answer (an `ask_user` question has one, `q1`).
     const asked = questionItem(services.db, session.id, item.requestId);
+    if (asked?.mcpServer) {
+      throw new ToolError(
+        `This is a form from the ${asked.mcpServer} MCP server: its answers go to that server as data, so like an approval it stays with the user. Leave it open; the agent waits for the user.`,
+      );
+    }
+    // Every question of the item gets the answer (an `ask_user` question has one, `q1`).
     const ids = asked?.questions.map((q) => q.id) ?? ["q1"];
     const answers = Object.fromEntries(ids.map((id) => [id, [answer]]));
     await services.sessions.respond(

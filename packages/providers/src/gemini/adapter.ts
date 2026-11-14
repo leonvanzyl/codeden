@@ -13,6 +13,8 @@ import { type ProviderAdapter, type ProviderSession, ProviderSessionError } from
 import { ModelCatalog } from "../models";
 import type { ResolvedCommand } from "../util/exec";
 import { findExecutable, type LocateOptions } from "../util/locate";
+import { geminiSessionArgs, writeGeminiAdminPolicy } from "./admin-policy";
+import { geminiAllowListNotice } from "./allow-list";
 import { detectGemini, GEMINI_MIN_VERSION, isSupportedGeminiVersion } from "./detect";
 import { geminiExtensions } from "./extensions";
 import { fallbackGeminiModels, geminiModelInfos } from "./models";
@@ -26,13 +28,15 @@ export const GEMINI_PROVIDER_ID = "gemini";
  * use the login the user already chose. Agent sessions run in its `default` mode, which asks
  * before every edit, command and MCP tool; there is no read-only mode (its `plan` mode refuses
  * CodeDen's own tools), so read-only sessions stay in `default` and CodeDen's policy refuses
- * edits and commands.
+ * edits and commands. Each session also gets `--admin-policy` (`./admin-policy`), so allow-lists
+ * in Gemini CLI's settings and policy files don't skip CodeDen's approvals.
  */
 export const GEMINI_AGENT: AcpAgentSpec = {
   label: "Gemini CLI",
   args: GEMINI_ACP_ARGS,
   modes: { agent: "default", plan: "plan" },
   extensions: geminiExtensions,
+  allowListNotice: geminiAllowListNotice,
 };
 
 /**
@@ -145,9 +149,11 @@ export class GeminiAdapter implements ProviderAdapter {
         `Gemini CLI ${version} is older than ${GEMINI_MIN_VERSION}, the oldest CodeDen supports. Update it with \`npm install -g @google/gemini-cli@latest\`.`,
       );
     }
+    // Allow-lists in Gemini CLI's settings and policy files don't skip CodeDen's approvals.
+    const policy = writeGeminiAdminPolicy(opts.codedenHome);
     const session = new AcpSession(opts, {
       executable: command,
-      spec: GEMINI_AGENT,
+      spec: { ...GEMINI_AGENT, args: geminiSessionArgs(GEMINI_AGENT.args, policy) },
       onSetup: (setup, info) => this.onSetup(setup, info),
       ...(this.options.startTimeoutMs ? { startTimeoutMs: this.options.startTimeoutMs } : {}),
       ...(this.options.interruptTimeoutMs

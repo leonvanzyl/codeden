@@ -5,6 +5,8 @@ import { toast } from "sonner";
 import { AUTONOMY, supportsReadOnly } from "@/components/thread/autonomy";
 import { useClient } from "@/lib/api";
 import { snapshotKey, useSnapshotData } from "@/lib/queries";
+import { useHandoffBlocked } from "@/lib/session-actions";
+import { useUiStore } from "@/stores/ui";
 import { ModelPicker } from "./model-picker/model-picker";
 import { AutonomyPicker, PlanToggle } from "./pickers";
 
@@ -36,7 +38,8 @@ export function appliesFrom(
  * `PATCH /api/sessions/:id`. Model and effort apply from the next turn (a running turn keeps
  * its settings); autonomy and plan mode apply from the next tool call or the next turn, as the
  * provider allows. The provider is fixed for the life of a session, so the picker shows the
- * other providers locked. The pickers show the server's values, never a local-only choice.
+ * other providers locked; in an agent session they offer to hand the work off to a new session
+ * on that provider (§9). The pickers show the server's values, never a local-only choice.
  */
 export function SessionOptions({ session, running }: { session: Session; running: boolean }) {
   const client = useClient();
@@ -44,6 +47,8 @@ export function SessionOptions({ session, running }: { session: Session; running
   const providers = useSnapshotData((s) => s.runner.providers, []);
   const providerInfo = providers.find((p) => p.id === session.provider);
   const liveAutonomy = providerInfo?.capabilities.liveAutonomy ?? false;
+  const setHandoff = useUiStore((s) => s.setHandoff);
+  const handoffBlocked = useHandoffBlocked(session);
   const update = useMutation({
     mutationFn: (patch: UpdateSessionRequest) => client.updateSession(session.id, patch),
     onSuccess: (updated, patch) => {
@@ -68,6 +73,14 @@ export function SessionOptions({ session, running }: { session: Session; running
       <ModelPicker
         providers={providers}
         lockedProvider={session.provider}
+        handoff={
+          session.role === "agent"
+            ? {
+                blocked: handoffBlocked,
+                onHandoff: (provider) => setHandoff({ sessionId: session.id, provider }),
+              }
+            : undefined
+        }
         value={{ provider: session.provider, model: session.model, effort: session.effort }}
         shortcut
         onChange={(next) => {

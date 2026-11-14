@@ -8,6 +8,7 @@ import {
   GitCommitResponse,
   GitPushResponse,
   GitStatusResponse,
+  HandoffSessionResponse,
   InboxItem,
   LoginCommandResponse,
   Project,
@@ -114,6 +115,8 @@ export function createHttpClient(origin: string, opts: HttpClientOptions = {}): 
     },
     forkSession: (id, req) =>
       post(`/sessions/${enc(id)}/fork`, req ?? {}, (v) => ForkSessionResponse.parse(v)),
+    handoffSession: (id, req) =>
+      post(`/sessions/${enc(id)}/handoff`, req, (v) => HandoffSessionResponse.parse(v)),
     queue: httpQueueApi(http),
     searchTranscripts: ({ q, projectId, role, includeArchived, cursor, limit }) => {
       const params = new URLSearchParams({ q });

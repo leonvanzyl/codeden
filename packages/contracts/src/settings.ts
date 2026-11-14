@@ -129,6 +129,11 @@ export const Settings = z.object({
           readAloudSummary: z.boolean().default(true),
           sessionTitles: z.boolean().default(true),
           noticeSummaries: z.boolean().default(true),
+          /**
+           * The "where it got to" summary in a handoff's brief (§9). Off, or without an answer,
+           * the brief quotes the source's last reply instead.
+           */
+          handoffSummaries: z.boolean().default(true),
         })
         .prefault({}),
     })

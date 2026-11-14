@@ -9,9 +9,10 @@ import { errorMessage } from "../errors";
 import { CONFLICTS_DETAIL } from "./checks";
 import type { FactoryContext } from "./context";
 import type { FactoryPr } from "./github-port";
-import { autoMerge, prDecidedOutside } from "./merge";
+import { autoMerge, githubRefused, prDecidedOutside } from "./merge";
+import { markStuck } from "./outcomes";
 import { mayMerge } from "./policy";
-import { baseBranchOf, rebaseAsks, trackedHead, UPDATE } from "./rebase";
+import { baseBranchOf, REFUSED, rebaseAsks, trackedHead, UPDATE } from "./rebase";
 import { mayAutoMerge } from "./trust";
 
 /**
@@ -20,11 +21,16 @@ import { mayAutoMerge } from "./trust";
  * (reverts ahead of everything). Only the head of the queue acts, so CI never runs on every
  * queued PR at once. A head that is behind the default branch is brought up to date on GitHub
  * (`update-branch`, no agent), CI is awaited on the new head, and then it merges. Main moved,
- * so the next head is checked against the new main in turn.
+ * so the next head is checked against the new main in turn. A PR GitHub keeps refusing to
+ * merge or update leaves the queue for a person after `MAX_REFUSALS` refusals of the same
+ * head, so it never holds up the PRs behind it; GitHub being down or rate-limited never counts.
  */
 
 /** When the item's checks first all passed (its place in the queue). */
 export const MERGE_QUEUED = "merge_queued";
+
+/** Refusals in a row to merge or update one head before the PR leaves the queue. */
+export const MAX_REFUSALS = 3;
 
 /** Join the queue once every check passed; the item keeps its place while it waits. */
 export function joinQueue(ctx: FactoryContext, item: FactoryItem): FactoryItem {
@@ -145,7 +151,11 @@ async function mergeOrUpdate(
     note(ctx, head, `Could not compare it with ${baseBranchOf(project)}: ${errorMessage(error)}`);
     return loop;
   }
-  if (behind === 0) return autoMerge(ctx, project, loop, head, pr, head.checks);
+  if (behind === 0) {
+    const merged = await autoMerge(ctx, project, loop, head, pr, head.checks);
+    if (!("failed" in merged)) return merged;
+    return failed(ctx, loop, head, sha, "Merge failed", merged.failed, merged.refusal);
+  }
   const key = `${UPDATE}${sha}`;
   const asked = head.nudges[key];
   // GitHub makes the new head in the background; ask again if none came within the CI grace.
@@ -153,8 +163,8 @@ async function mergeOrUpdate(
   try {
     await ctx.github.updateBranch(project.id, pr.ref.number, sha);
   } catch (error) {
-    note(ctx, head, `Could not update it with ${baseBranchOf(project)}: ${errorMessage(error)}`);
-    return loop;
+    const doing = `Could not update it with ${baseBranchOf(project)}`;
+    return failed(ctx, loop, head, sha, doing, errorMessage(error), githubRefused(error));
   }
   const at = ctx.now().toISOString();
   ctx.store.updateItem(head.id, (i) => ({
@@ -163,4 +173,51 @@ async function mergeOrUpdate(
     nudges: { ...i.nudges, [key]: at },
   }));
   return loop;
+}
+
+/** How many times in a row GitHub refused to merge or update this head of the item's PR. */
+function refusals(item: FactoryItem, sha: string): number {
+  let n = 0;
+  while (item.nudges[`${REFUSED}${sha}_${n + 1}`]) n++;
+  return n;
+}
+
+/**
+ * The head couldn't be merged, or updated with the default branch. When GitHub didn't answer
+ * properly (a rate limit, a 5xx or network failure, GitHub not connected) it is only noted and
+ * tried again on the next tick, however long that takes. A refusal (`githubRefused`) is counted
+ * against that head (a new head starts afresh, `trackHead`): the `MAX_REFUSALS`th takes the PR
+ * out of the queue, the item is stuck with what GitHub said (an inbox item, or a recorded
+ * decision in a dark factory, and a notice to the PM), and the next PR in line goes ahead.
+ */
+function failed(
+  ctx: FactoryContext,
+  loop: FactoryLoop,
+  head: FactoryItem,
+  sha: string,
+  doing: string,
+  error: string,
+  refusal: boolean,
+): FactoryLoop {
+  const why = error.replace(/[.\s]+$/, "");
+  if (!refusal) {
+    note(ctx, head, `${doing}: ${why}; trying again on the next check`);
+    return loop;
+  }
+  const n = refusals(head, sha) + 1;
+  const at = ctx.now().toISOString();
+  const current = ctx.store.updateItem(head.id, (i) => ({
+    ...i,
+    note: `${doing}: ${why} (try ${n} of ${MAX_REFUSALS})`,
+    nudges: { ...i.nudges, [`${REFUSED}${sha}_${n}`]: at },
+  }));
+  if (n < MAX_REFUSALS) return loop;
+  ctx.log?.(`factory: ${head.id}: GitHub refused #${head.pr?.number} ${n} times; out of the queue`);
+  return markStuck(
+    ctx,
+    loop,
+    leaveQueue(ctx, current),
+    `${doing} ${n} times in a row; GitHub said: ${why}`,
+    `Look at pull request #${head.pr?.number ?? "?"} on GitHub (branch protection, required checks or reviews, merge settings), then merge it yourself or retry the item. The pull requests queued behind it merge meanwhile.`,
+  );
 }

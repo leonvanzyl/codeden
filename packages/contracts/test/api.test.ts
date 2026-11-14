@@ -4,6 +4,9 @@ import {
   defaultSettings,
   ForkSessionRequest,
   ForkSessionResponse,
+  HANDOFF_NOTE_MAX,
+  HandoffSessionRequest,
+  HandoffSessionResponse,
   ListSessionsQuery,
   LoginCommandResponse,
   LoginToolId,
@@ -214,6 +217,43 @@ describe("api schemas", () => {
     expect(ForkSessionRequest.safeParse({ turnId: "" }).success).toBe(false);
     roundTrip(ForkSessionResponse, { sessionId: "s2" });
     expect(ForkSessionResponse.safeParse({}).success).toBe(false);
+  });
+
+  it("round-trips handoff requests and responses", () => {
+    expect(roundTrip(HandoffSessionRequest, { provider: "codex" })).toEqual({ provider: "codex" });
+    const full = roundTrip(HandoffSessionRequest, {
+      provider: "claude",
+      model: " opus ",
+      effort: "high",
+      title: " Second opinion ",
+      note: "  Review the approach before changing anything. ",
+    });
+    expect(full).toEqual({
+      provider: "claude",
+      model: "opus",
+      effort: "high",
+      title: "Second opinion",
+      note: "Review the approach before changing anything.",
+    });
+    expect(
+      roundTrip(HandoffSessionRequest, { provider: "codex", model: null, effort: null }),
+    ).toEqual({ provider: "codex", model: null, effort: null });
+    expect(HandoffSessionRequest.safeParse({}).success).toBe(false);
+    expect(HandoffSessionRequest.safeParse({ provider: "" }).success).toBe(false);
+    expect(HandoffSessionRequest.safeParse({ provider: "codex", note: " " }).success).toBe(false);
+    expect(
+      HandoffSessionRequest.safeParse({ provider: "codex", note: "x".repeat(HANDOFF_NOTE_MAX + 1) })
+        .success,
+    ).toBe(false);
+    expect(HandoffSessionRequest.safeParse({ provider: "codex", effort: "huge" }).success).toBe(
+      false,
+    );
+    roundTrip(HandoffSessionResponse, { sessionId: "s3" });
+    expect(HandoffSessionResponse.safeParse({}).success).toBe(false);
+  });
+
+  it("defaults the handoff summary job on", () => {
+    expect(defaultSettings().utilityModel.jobs.handoffSummaries).toBe(true);
   });
 
   it("parses project sources", () => {

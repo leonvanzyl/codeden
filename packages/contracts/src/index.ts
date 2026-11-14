@@ -24,6 +24,7 @@ export * from "./factory";
 export * from "./factory-api";
 export * from "./factory-pipeline";
 export * from "./factory-prs";
+export * from "./form-answers";
 export * from "./github";
 export * from "./images-api";
 export * from "./input";

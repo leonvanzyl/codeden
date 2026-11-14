@@ -1,0 +1,205 @@
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { basename, dirname, join } from "node:path";
+import { AGENT_ALLOW_LIST_NOTICE, type ItemOf } from "@codeden/contracts";
+import { describe, expect, it } from "vitest";
+import { readSmallFile } from "../src/acp/allow-lists";
+import { cursorAllowListNotice } from "../src/cursor/allow-list";
+import {
+  GEMINI_ADMIN_POLICY,
+  geminiAdminPolicyPath,
+  geminiSessionArgs,
+  writeGeminiAdminPolicy,
+} from "../src/gemini/admin-policy";
+import { geminiAllowListNotice, geminiAllowRules } from "../src/gemini/allow-list";
+import { chunk, completedOf, fakeAcp } from "./support/fake-acp";
+
+/** Issue #232: allow-lists already in a worktree are named when a session starts. */
+
+const worktree = (files: Record<string, string>) => {
+  const dir = mkdtempSync(join(tmpdir(), "codeden-allow-list-"));
+  for (const [file, text] of Object.entries(files)) {
+    mkdirSync(join(dir, file, ".."), { recursive: true });
+    writeFileSync(join(dir, file), text);
+  }
+  return dir;
+};
+
+describe("Cursor's allow-list", () => {
+  it("names the rules of .cursor/cli.json", () => {
+    const dir = worktree({
+      ".cursor/cli.json": JSON.stringify({ permissions: { allow: ["Shell(*)", "Write(**)"] } }),
+    });
+    expect(cursorAllowListNotice(dir)).toMatch(
+      /^This worktree has Cursor's own allow-list, `\.cursor\/cli\.json` \(Shell\(\*\), Write\(\*\*\)\)\. Cursor runs what it allows without asking/,
+    );
+  });
+
+  it("says nothing without rules, and reports a file it can't read that mentions allow", () => {
+    expect(cursorAllowListNotice(worktree({}))).toBeUndefined();
+    const denyOnly = {
+      ".cursor/cli.json": '{ "permissions": { "allow": [], "deny": ["Shell(rm)"] } }',
+    };
+    expect(cursorAllowListNotice(worktree(denyOnly))).toBeUndefined();
+    const broken = worktree({ ".cursor/cli.json": '{ "permissions": { "allow": ["Shell(*)"' });
+    expect(cursorAllowListNotice(broken)).toContain("CodeDen couldn't read its rules");
+  });
+
+  it("never opens what isn't a small regular file, and says it couldn't read it", () => {
+    const dir = worktree({});
+    mkdirSync(join(dir, ".cursor", "cli.json"), { recursive: true });
+    expect(cursorAllowListNotice(dir)).toContain(
+      "`.cursor/cli.json` (CodeDen couldn't read it safely)",
+    );
+  });
+
+  // A committed symlink to a device reports size 0 but never ends.
+  it.skipIf(process.platform === "win32")("doesn't read a symlink to /dev/zero", () => {
+    const dir = worktree({ "real.json": '{ "permissions": { "allow": ["Shell(ls)"] } }' });
+    mkdirSync(join(dir, ".cursor"));
+    symlinkSync("/dev/zero", join(dir, ".cursor", "cli.json"));
+    expect(readSmallFile(join(dir, ".cursor", "cli.json"))).toBeNull();
+    expect(cursorAllowListNotice(dir)).toContain("CodeDen couldn't read it safely");
+    // A symlink to a regular file is read as the file.
+    rmSync(join(dir, ".cursor", "cli.json"));
+    symlinkSync(join(dir, "real.json"), join(dir, ".cursor", "cli.json"));
+    expect(cursorAllowListNotice(dir)).toContain("(Shell(ls))");
+  });
+});
+
+describe("readSmallFile", () => {
+  it("reads small regular files only", () => {
+    const dir = worktree({ "a.json": "12345", "folder.toml/x": "" });
+    expect(readSmallFile(join(dir, "missing.json"))).toBeUndefined();
+    expect(readSmallFile(join(dir, "a.json"))).toBe("12345");
+    expect(readSmallFile(join(dir, "a.json"), 4)).toBeNull();
+    expect(readSmallFile(join(dir, "folder.toml"))).toBeNull();
+  });
+});
+
+describe("Gemini CLI's allow settings", () => {
+  it("finds tools.allowed, autoAccept, allowed and trusted MCP servers, old names included", () => {
+    expect(
+      geminiAllowRules({
+        tools: { allowed: ["run_shell_command"], autoAccept: true },
+        mcp: { allowed: ["linear"] },
+        mcpServers: { github: { trust: true }, docs: { trust: false } },
+        allowedTools: ["write_file"],
+      }),
+    ).toEqual([
+      "tools.allowed (run_shell_command)",
+      "allowedTools (write_file)",
+      "tools.autoAccept",
+      "mcp.allowed (linear)",
+      "mcpServers.github.trust",
+    ]);
+    expect(geminiAllowRules({ general: { vimMode: true } })).toEqual([]);
+  });
+
+  it("names them from .gemini/settings.json, comments allowed", () => {
+    const dir = worktree({
+      ".gemini/settings.json":
+        '{\n  // project settings\n  "tools": { "allowed": ["run_shell_command"], },\n}',
+    });
+    expect(geminiAllowListNotice(dir)).toContain(
+      "without asking: `.gemini/settings.json`: tools.allowed (run_shell_command). CodeDen starts Gemini CLI so that commands still ask",
+    );
+    expect(geminiAllowListNotice(worktree({ ".gemini/settings.json": "{}" }))).toBeUndefined();
+  });
+
+  it("names the project's policy files with allow rules", () => {
+    const allow = '[[rule]]\ntoolName = "run_shell_command"\ndecision = "allow"\npriority = 100\n';
+    const deny = '[[rule]]\ntoolName = "web_fetch"\ndecision = "deny"\npriority = 100\n';
+    const dir = worktree({
+      ".gemini/policies/b-allow.toml": allow,
+      ".gemini/policies/a-deny.toml": deny,
+      ".gemini/policies/notes.md": 'decision = "allow"',
+    });
+    expect(geminiAllowListNotice(dir)).toContain(
+      "without asking: allow rules in `.gemini/policies/b-allow.toml`. CodeDen starts",
+    );
+    expect(geminiAllowListNotice(worktree({ ".gemini/policies/a.toml": deny }))).toBeUndefined();
+    // Only small regular files are read: a folder named like a policy is skipped.
+    expect(
+      geminiAllowListNotice(worktree({ ".gemini/policies/dir.toml/x": allow })),
+    ).toBeUndefined();
+    expect(geminiAllowListNotice(worktree({ ".gemini/settings.json/x": "" }))).toContain(
+      "`.gemini/settings.json`: CodeDen couldn't read it safely",
+    );
+    const both = worktree({
+      ".gemini/settings.json": '{ "mcp": { "allowed": ["linear"] } }',
+      ".gemini/policies/allow.toml": allow,
+    });
+    expect(geminiAllowListNotice(both)).toContain(
+      "`.gemini/settings.json`: mcp.allowed (linear); allow rules in `.gemini/policies/allow.toml`.",
+    );
+  });
+});
+
+describe("Gemini CLI's admin policy", () => {
+  it("is written to CodeDen's home once and passed with --admin-policy", () => {
+    const home = mkdtempSync(join(tmpdir(), "codeden-home-"));
+    const file = writeGeminiAdminPolicy(home);
+    expect(file).toBe(geminiAdminPolicyPath(home));
+    expect(file).toBe(join(home, "gemini", "admin-policy.toml"));
+    expect(readFileSync(file, "utf8")).toBe(GEMINI_ADMIN_POLICY);
+    writeFileSync(file, "tampered");
+    expect(readFileSync(writeGeminiAdminPolicy(home), "utf8")).toBe(GEMINI_ADMIN_POLICY);
+    expect(geminiSessionArgs(["--acp"], file)).toEqual(["--acp", "--admin-policy", file]);
+  });
+
+  it("without CodeDen's home, goes to a private temp folder of its own, not a fixed name", () => {
+    const file = writeGeminiAdminPolicy();
+    expect(file).toBe(geminiAdminPolicyPath());
+    expect(dirname(file)).not.toBe(join(tmpdir(), "codeden-gemini"));
+    expect(basename(dirname(file))).toMatch(/^codeden-gemini-.+/);
+    expect(dirname(dirname(file))).toBe(tmpdir());
+    if (process.platform !== "win32") expect(statSync(dirname(file)).mode & 0o077).toBe(0);
+    expect(readFileSync(file, "utf8")).toBe(GEMINI_ADMIN_POLICY);
+  });
+
+  it("asks before commands everywhere, and before edits and MCP tools outside plan mode", () => {
+    const rules = GEMINI_ADMIN_POLICY.split("[[rule]]").slice(1);
+    expect(rules).toHaveLength(3);
+    for (const rule of rules) {
+      expect(rule).toContain('decision = "ask_user"');
+      expect(rule).toContain("priority = 999");
+    }
+    expect(rules[0]).toContain('toolName = "run_shell_command"');
+    expect(rules[0]).not.toContain("modes");
+    expect(rules[1]).toContain('toolName = ["write_file", "replace"]');
+    expect(rules[2]).toContain('mcpName = "*"');
+    for (const rule of rules.slice(1)) {
+      expect(rule).toContain('modes = ["default", "autoEdit", "yolo"]');
+    }
+  });
+});
+
+describe("a session in a worktree with an allow-list", () => {
+  const acp = fakeAcp();
+
+  it("warns in its first turn, with the code the factory looks for", async () => {
+    mkdirSync(join(acp.dir, ".cursor"));
+    writeFileSync(
+      join(acp.dir, ".cursor", "cli.json"),
+      JSON.stringify({ permissions: { allow: ["Shell(*)"] } }),
+    );
+    const { reader } = await acp.open([chunk("Hi"), { stopReason: "end_turn" }]);
+    const notices = completedOf(await reader.turn("Go"), "notice") as ItemOf<"notice">[];
+    expect(notices).toEqual([
+      expect.objectContaining({
+        level: "warning",
+        code: AGENT_ALLOW_LIST_NOTICE,
+        message: expect.stringContaining("`.cursor/cli.json` (Shell(*))"),
+      }),
+    ]);
+  });
+});

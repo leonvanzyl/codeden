@@ -1,6 +1,7 @@
 import { isFactoryMode, type Session } from "@codeden/contracts";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import {
+  ArrowRightLeft,
   Bot,
   FolderPlus,
   GitFork,
@@ -107,6 +108,28 @@ function ForkCurrentSession({ session, close }: { session: Session; close: () =>
       onSelect={() => {
         actions.fork();
         close();
+      }}
+    />
+  );
+}
+
+/**
+ * Hand off the session on screen (§9): open the handoff dialog to continue it in a new session,
+ * on any provider. Disabled, with the reason, while a turn runs or before it has done anything.
+ */
+function HandoffCurrentSession({ session, close }: { session: Session; close: () => void }) {
+  const actions = useSessionActions(session);
+  if (!actions.canHandoff) return null;
+  return (
+    <Row
+      icon={<ArrowRightLeft />}
+      label="Hand off this session…"
+      hint={actions.handoffBlocked ?? "Continue in a new session, on any provider"}
+      value="hand off this session handoff continue another provider switch"
+      disabled={actions.handoffBlocked !== null}
+      onSelect={() => {
+        close();
+        actions.handoff();
       }}
     />
   );
@@ -227,6 +250,7 @@ export function CommandPalette() {
           <CommandSeparator />
           <CommandGroup heading="Actions">
             {current && <ForkCurrentSession session={current} close={() => setOpen(false)} />}
+            {current && <HandoffCurrentSession session={current} close={() => setOpen(false)} />}
             {automationSource?.projectId && (
               <Row
                 icon={<Workflow />}

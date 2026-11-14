@@ -118,7 +118,11 @@ export function scriptedTurn(
             id: uid("u"),
             kind: "user_message",
             status: "completed",
-            input: { text: input.text, attachments: input.attachments ?? [] },
+            input: {
+              text: input.text,
+              attachments: input.attachments ?? [],
+              ...(input.from ? { from: input.from } : {}),
+            },
           });
         },
       },

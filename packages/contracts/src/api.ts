@@ -210,6 +210,37 @@ export type ForkSessionRequest = z.infer<typeof ForkSessionRequest>;
 export const ForkSessionResponse = z.object({ sessionId: Id });
 export type ForkSessionResponse = z.infer<typeof ForkSessionResponse>;
 
+/** Longest note a handoff passes on ("What should it do next?"). */
+export const HANDOFF_NOTE_MAX = 4_000;
+
+/**
+ * `POST /api/sessions/:id/handoff`: continue an agent session in a new one, on any provider
+ * (§9). The new session gets the source's code as a fork does (a new branch from the source's
+ * branch, its latest checkpoint restored as uncommitted changes) and, instead of a copy of the
+ * conversation, a brief of the work so far as its first message, which starts a turn at once.
+ * The source is only read.
+ */
+export const HandoffSessionRequest = z.object({
+  /** The provider the work continues on; the source's own gives a fresh conversation. */
+  provider: ProviderId,
+  /**
+   * The model; omitted or null: the source's model when the provider is the same, else the
+   * provider's default.
+   */
+  model: z.string().trim().min(1).nullable().optional(),
+  /** The reasoning effort, chosen the same way as `model`. */
+  effort: ReasoningEffort.nullable().optional(),
+  /** Defaults to the source's title followed by "(to <provider>)". */
+  title: z.string().trim().min(1).max(200).optional(),
+  /** What the new session should do next, added to the brief; "continue" when omitted. */
+  note: z.string().trim().min(1).max(HANDOFF_NOTE_MAX).optional(),
+});
+export type HandoffSessionRequest = z.infer<typeof HandoffSessionRequest>;
+
+/** `POST /api/sessions/:id/handoff` response: the new session (it starts in the background). */
+export const HandoffSessionResponse = z.object({ sessionId: Id });
+export type HandoffSessionResponse = z.infer<typeof HandoffSessionResponse>;
+
 /** Recorded with a session about how it was started (forced starts keep their reason). */
 export const SessionStartMeta = z.object({
   workspaceMode: WorkspaceRequest.shape.mode,

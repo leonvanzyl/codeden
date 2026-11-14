@@ -267,6 +267,22 @@ describe("entities", () => {
       ...sampleSession,
       forkedFrom: { sessionId: "s0", checkpoint: 1, turnId: "turn-2", turnNumber: 2 },
     });
+    roundTrip(Session, {
+      ...sampleSession,
+      forkedFrom: { sessionId: "s0", checkpoint: 3, kind: "fork" },
+    });
+    expect(
+      roundTrip(Session, {
+        ...sampleSession,
+        forkedFrom: { sessionId: "s0", checkpoint: null, kind: "handoff" },
+      }).forkedFrom?.kind,
+    ).toBe("handoff");
+    expect(
+      Session.safeParse({
+        ...sampleSession,
+        forkedFrom: { sessionId: "s0", checkpoint: 1, kind: "copy" },
+      }).success,
+    ).toBe(false);
     expect(
       Session.safeParse({
         ...sampleSession,

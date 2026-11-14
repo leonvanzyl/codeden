@@ -9,6 +9,7 @@ import {
   SessionStartMeta,
   type ThreadItemsPage,
   type ThreadItemsQuery,
+  type ToolCallItem,
   type Turn,
   type Usage,
   type UserInput,
@@ -24,6 +25,9 @@ import type { EventStore } from "../../events/store";
 import { notFound } from "../errors";
 import { ACTIVE_RUN_STATUSES, ACTIVE_SESSION_STATUSES } from "./conflicts";
 import type { ForkStart } from "./fork";
+
+/** A `file_edit` tool call. */
+export type FileEditCall = Extract<ToolCallItem, { toolKind: "file_edit" }>;
 
 /** What a queued session needs to start later (kept with its start metadata). */
 export interface PendingStart {
@@ -47,6 +51,11 @@ export type StoredStartMeta = SessionStartMeta & {
   turnFromUser?: boolean;
   /** A fork's workspace plan (§9): prepared before any start until the worktree exists. */
   forkStart?: ForkStart | null;
+  /**
+   * A handoff's brief (§9) until a start delivers it: a first start that fails keeps it, and
+   * the next start sends it first, with the message that starts it.
+   */
+  handoffBrief?: UserInput | null;
 };
 
 /**
@@ -367,6 +376,48 @@ export class SessionRepo {
       .orderBy(...turnsOldestFirst)
       .all()
       .map((r) => r.id);
+  }
+
+  /**
+   * Root-thread items of the given kinds, in thread order: all of them, or with `newest` only
+   * that many of the latest (still oldest first).
+   */
+  rootItems(session: Session, kinds: Item["kind"][], newest?: number): Item[] {
+    if (!session.rootThreadId) return [];
+    const query = this.db
+      .select({ data: items.data })
+      .from(items)
+      .where(
+        and(
+          eq(items.sessionId, session.id),
+          eq(items.threadId, session.rootThreadId),
+          inArray(items.kind, kinds),
+        ),
+      )
+      .orderBy(newest === undefined ? asc(items.position) : desc(items.position));
+    const rows = (newest === undefined ? query.all() : query.limit(newest).all()).map(
+      (r) => r.data,
+    );
+    return newest === undefined ? rows : rows.reverse();
+  }
+
+  /** Every `file_edit` tool call of the session, subagents' included, oldest first. */
+  fileEdits(sessionId: string): FileEditCall[] {
+    return this.db
+      .select({ data: items.data })
+      .from(items)
+      .where(
+        and(
+          eq(items.sessionId, sessionId),
+          eq(items.kind, "tool_call"),
+          sql`json_extract(${items.data}, '$.toolKind') = 'file_edit'`,
+        ),
+      )
+      .orderBy(asc(items.createdAt), asc(items.position))
+      .all()
+      .flatMap((r) =>
+        r.data.kind === "tool_call" && r.data.toolKind === "file_edit" ? [r.data] : [],
+      );
   }
 
   /** Follow-ups of the latest root-thread turn that produced some (§7.5). */

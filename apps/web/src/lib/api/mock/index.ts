@@ -1,4 +1,9 @@
-import { Settings, type SettingsPatch, utf8ByteLength } from "@codeden/contracts";
+import {
+  type MessageSender,
+  Settings,
+  type SettingsPatch,
+  utf8ByteLength,
+} from "@codeden/contracts";
 import type { CodeDenClient } from "../client";
 import { startAmbient } from "./ambient";
 import { mockAutomationsApi } from "./automations";
@@ -36,8 +41,8 @@ export function createMockClient(opts: MockClientOptions = {}): CodeDenClient {
   const queue = new MockQueue(world);
   if (opts.ambient) startAmbient(world);
 
-  const runTurn = (sessionId: string, text: string) => {
-    const script = scriptedTurn(world, sessionId, { text }, () => {
+  const runTurn = (sessionId: string, text: string, from?: MessageSender) => {
+    const script = scriptedTurn(world, sessionId, { text, ...(from ? { from } : {}) }, () => {
       running.delete(sessionId);
       const next = queue.shift(sessionId);
       if (next) runTurn(sessionId, next.input.text);
@@ -235,6 +240,52 @@ export function createMockClient(opts: MockClientOptions = {}): CodeDenClient {
       });
       world.emitDomain({ type: "session.created", sessionId: null, payload: { session } });
       return delay({ sessionId: id }, 200);
+    },
+    async handoffSession(sessionId, req) {
+      const source = world.snapshot.sessions.find((s) => s.id === sessionId);
+      if (!source) throw new Error("Session not found");
+      if (running.has(sessionId)) throw new Error("Wait for the running turn to finish");
+      const target = world.snapshot.runner.providers.find((p) => p.id === req.provider);
+      if (!target) throw new Error(`Provider ${req.provider} is not available`);
+      const id = uid("s");
+      const project = world.snapshot.projects.find((p) => p.id === source.projectId);
+      const same = target.id === source.provider;
+      const now = new Date().toISOString();
+      const session = makeSession({
+        ...source,
+        id,
+        provider: target.id,
+        model: req.model ?? (same ? source.model : null),
+        effort: req.effort ?? (same ? source.effort : null),
+        title: req.title ?? `${source.title ?? source.purpose} (to ${target.displayName})`,
+        status: "starting",
+        startedBy: { kind: "user" },
+        parentSessionId: null,
+        pr: null,
+        progress: null,
+        result: null,
+        resumeToken: null,
+        archivedAt: null,
+        worktreeRemovedAt: null,
+        branch: `codeden/${id.slice(2, 10)}`,
+        worktreePath: `~/.codeden/wt/${project?.slug ?? "project"}/${id.slice(2, 10)}`,
+        forkedFrom: { sessionId, checkpoint: null, kind: "handoff" },
+        rootThreadId: `t-${id.slice(2)}`,
+        createdAt: now,
+        updatedAt: now,
+        endedAt: null,
+      });
+      world.emitDomain({ type: "session.created", sessionId: null, payload: { session } });
+      const brief = [
+        `You are taking over a coding task from another CodeDen session, "${source.title ?? source.purpose}". You don't have its conversation: this brief is what it did.`,
+        `## The task\n\n${source.purpose}`,
+        "## Where it got to\n\nThe server writes this from the session's transcript.",
+        req.note
+          ? `## What to do next (from the user)\n\n${req.note}`
+          : "## What to do next\n\nContinue the work where it left off.",
+      ].join("\n\n");
+      runTurn(id, brief, "codeden");
+      return delay({ sessionId: id }, 400);
     },
     queue: queue.api({
       running: (sessionId) => running.has(sessionId),

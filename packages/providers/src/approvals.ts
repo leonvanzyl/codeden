@@ -12,7 +12,19 @@ type Request = ItemOf<"approval_request"> | ItemOf<"user_question">;
 interface Pending {
   ctx: ItemCtx;
   item: Request;
+  review: AnswerReview | undefined;
   resolve: (response: RuntimeResponse) => void;
+}
+
+/** How the asker takes a response, when it has rules of its own (an MCP server's form). */
+export interface AnswerReview {
+  /**
+   * What doesn't fit in the response, if anything: `respond` rejects it with this message
+   * (`invalid_answer`) and the request stays open, so nothing is sent until it fits.
+   */
+  problem?: (response: RuntimeResponse) => string | undefined;
+  /** True when an answer turns the request down (a form's Decline): recorded as declined. */
+  declines?: (response: RuntimeResponse) => boolean;
 }
 
 /**
@@ -30,16 +42,22 @@ export class ApprovalBroker {
   }
 
   /** Open a request and wait for its response. Resolves `{ kind: "cancel" }` if aborted. */
-  request(ctx: ItemCtx, item: Request, signal?: AbortSignal): Promise<RuntimeResponse> {
+  request(
+    ctx: ItemCtx,
+    item: Request,
+    signal?: AbortSignal,
+    review?: AnswerReview,
+  ): Promise<RuntimeResponse> {
     return new Promise((resolve) => {
       const finish = (response: RuntimeResponse) => {
         if (!this.pending.delete(item.requestId)) return;
         signal?.removeEventListener("abort", onAbort);
-        this.emit({ type: "item.completed", ...ctx, item: completed(item, response) });
+        const declined = response.kind === "answer" && review?.declines?.(response) === true;
+        this.emit({ type: "item.completed", ...ctx, item: completed(item, response, declined) });
         resolve(response);
       };
       const onAbort = () => finish({ kind: "cancel" });
-      this.pending.set(item.requestId, { ctx, item, resolve: finish });
+      this.pending.set(item.requestId, { ctx, item, review, resolve: finish });
       this.emit({ type: "item.started", ...ctx, item });
       if (signal?.aborted) onAbort();
       else signal?.addEventListener("abort", onAbort, { once: true });
@@ -54,10 +72,15 @@ export class ApprovalBroker {
     this.emit({ type: "item.completed", ...ctx, item });
   }
 
-  /** Answer a pending request. Throws `unknown_request` for unknown ids. */
+  /**
+   * Answer a pending request. Throws `unknown_request` for unknown ids, and `invalid_answer`
+   * (leaving the request open) for a response its {@link AnswerReview} finds a problem with.
+   */
   respond(requestId: string, response: RuntimeResponse): void {
     const pending = this.pending.get(requestId);
     if (!pending) throw new ProviderSessionError("unknown_request", `Unknown request ${requestId}`);
+    const problem = pending.review?.problem?.(response);
+    if (problem) throw new ProviderSessionError("invalid_answer", problem);
     pending.resolve(response);
   }
 
@@ -71,7 +94,7 @@ export class ApprovalBroker {
   }
 }
 
-function completed(item: Request, response: RuntimeResponse): Request {
+function completed(item: Request, response: RuntimeResponse, declined: boolean): Request {
   if (item.kind === "approval_request") {
     if (response.kind === "approval") {
       return {
@@ -83,7 +106,8 @@ function completed(item: Request, response: RuntimeResponse): Request {
     }
     return { ...item, status: "cancelled" };
   }
-  if (response.kind === "answer")
-    return { ...item, status: "completed", answers: response.answers };
+  if (response.kind === "answer") {
+    return { ...item, status: declined ? "declined" : "completed", answers: response.answers };
+  }
   return { ...item, status: "cancelled" };
 }

@@ -12,6 +12,7 @@ import { and, asc, desc, eq, gt, gte, inArray, isNull, lte, or, type SQL } from 
 import type { Db } from "../../db/client";
 import { notices } from "../../db/schema-orchestration";
 import type { EventStore } from "../../events/store";
+import type { SessionRepo } from "../sessions/repo";
 import { clipKeepingEnd } from "./digest";
 
 /** A notice before it is stored (`deliveredAt` is set by delivery). */
@@ -32,6 +33,18 @@ export interface NoticeLookup {
   session(id: string): Session | undefined;
   /** Text of the final assistant message of a turn. */
   finalMessage(sessionId: string, turnId: string): string | null;
+  /** The MCP server whose form a transcript item is (an elicitation), if it is one. */
+  mcpServer?(sessionId: string, itemId: string): string | undefined;
+}
+
+/** {@link NoticeLookup.mcpServer} over the session transcripts. */
+export function formServerOf(
+  repo: Pick<SessionRepo, "item">,
+  sessionId: string,
+  itemId: string,
+): string | undefined {
+  const item = repo.item(sessionId, itemId)?.item;
+  return item?.kind === "user_question" ? item.mcpServer : undefined;
 }
 
 const clip = (text: string, max = 300) =>
@@ -104,6 +117,10 @@ export function deriveNotices(events: RawEventEnvelope[], lookup: NoticeLookup):
       const s = agentSession(item.sessionId);
       if (!s) continue;
       if (item.kind === "question" || item.kind === "approval") {
+        const mcpServer =
+          item.kind === "question" && item.itemId
+            ? lookup.mcpServer?.(s.id, item.itemId)
+            : undefined;
         out.push({
           wake: wakesPm(s),
           notice: {
@@ -113,7 +130,13 @@ export function deriveNotices(events: RawEventEnvelope[], lookup: NoticeLookup):
             target: "pm",
             sessionId: s.id,
             title: `Needs input: ${s.title ?? s.purpose}`,
-            data: { ...workRef(s), inboxItemId: item.id, kind: item.kind, question: item.title },
+            data: {
+              ...workRef(s),
+              inboxItemId: item.id,
+              kind: item.kind,
+              question: item.title,
+              ...(mcpServer ? { mcpServer } : {}),
+            },
           },
         });
       } else if (item.kind === "run_failed") {

@@ -32,6 +32,8 @@ const RESTORE = "restore_";
 const CONFLICT_FROM = "conflict_from_";
 /** `update_<sha>`: the merge queue asked GitHub to bring that head up to date. */
 export const UPDATE = "update_";
+/** `refused_<sha>_<n>`: the n-th time GitHub refused to merge or update that head (`queue.ts`). */
+export const REFUSED = "refused_";
 
 /** The branch factory PRs target. */
 export function baseBranchOf(project: Project): string {
@@ -66,8 +68,9 @@ export function trackedHead(item: FactoryItem): string | null {
 
 /**
  * The item's nudges for this verification pass: when the head was first seen (`head_<sha>`,
- * the start of its CI clock), its worktree restore request (`restore_<sha>`) and the merge
- * queue's update request (`update_<sha>`), with older heads' dropped; and the rebase requests,
+ * the start of its CI clock), its worktree restore request (`restore_<sha>`), the merge
+ * queue's update request (`update_<sha>`) and GitHub's refusals to merge or update it
+ * (`refused_<sha>_<n>`), with older heads' dropped; and the rebase requests,
  * which end once GitHub reports the PR mergeable (not while it is still working that out), so
  * the next conflict starts afresh.
  */
@@ -83,7 +86,8 @@ export function trackHead(
   const otherHead = (k: string) =>
     (k.startsWith(HEAD) && k !== key) ||
     (k.startsWith(RESTORE) && k !== `${RESTORE}${sha}`) ||
-    (k.startsWith(UPDATE) && k !== `${UPDATE}${sha}`);
+    (k.startsWith(UPDATE) && k !== `${UPDATE}${sha}`) ||
+    (k.startsWith(REFUSED) && !k.startsWith(`${REFUSED}${sha}_`));
   // Keeps the order of what stays, so an unchanged item isn't written again.
   const next: FactoryItem["nudges"] = {};
   for (const [k, v] of Object.entries(nudges)) {

@@ -203,25 +203,55 @@ export type PickerTab =
       availability: Availability;
       /** Set when the tab cannot be opened, e.g. a session's provider is fixed. */
       lockedReason: string | null;
+      /**
+       * A locked provider the session can be handed off to (§9): `ready` opens the handoff
+       * dialog on click, `blocked` says why not now. Absent when no handoff is offered.
+       */
+      handoff?: "ready" | "blocked";
     };
 export type ProviderTab = Extract<PickerTab, { kind: "provider" }>;
 
-/** The rail's tabs: Favourites first (when offered), then one per provider. */
+/** "Wait for the turn" → "wait for the turn", to follow a colon. */
+const lowerFirst = (text: string) => text.charAt(0).toLowerCase() + text.slice(1);
+
+/** Why a provider is locked in this session, and whether a handoff to it is offered. */
+function lockedTab(
+  provider: ProviderInfo,
+  lockedProvider: string | undefined,
+  handoff: { blocked: string | null } | undefined,
+): Pick<ProviderTab, "lockedReason" | "handoff"> {
+  if (!lockedProvider || provider.id === lockedProvider) return { lockedReason: null };
+  const name = provider.displayName;
+  if (!handoff) {
+    return {
+      lockedReason: `${name} can't be used in this session. Start a new session to switch providers.`,
+    };
+  }
+  return handoff.blocked
+    ? {
+        lockedReason: `Continue in a new ${name} session. Not available now: ${lowerFirst(handoff.blocked)}.`,
+        handoff: "blocked",
+      }
+    : { lockedReason: `Continue in a new ${name} session`, handoff: "ready" };
+}
+
+/**
+ * The rail's tabs: Favourites first (when offered), then one per provider. In a session
+ * (`lockedProvider`) the other providers are locked; with `handoff` they offer to continue the
+ * session in a new one on that provider instead.
+ */
 export function providerTabs(
   providers: readonly ProviderInfo[],
   checks: readonly SetupCheck[] | undefined,
   lockedProvider: string | undefined,
-  opts: { favorites?: boolean } = {},
+  opts: { favorites?: boolean; handoff?: { blocked: string | null } } = {},
 ): PickerTab[] {
   const tabs: PickerTab[] = providers.map((provider) => ({
     kind: "provider" as const,
     id: provider.id,
     provider,
     availability: providerAvailability(provider.id, checks),
-    lockedReason:
-      lockedProvider && provider.id !== lockedProvider
-        ? `${provider.displayName} can't be used in this session. Start a new session to switch providers.`
-        : null,
+    ...lockedTab(provider, lockedProvider, opts.handoff),
   }));
   return opts.favorites
     ? [{ kind: "favorites", id: FAVORITES_TAB, lockedReason: null }, ...tabs]

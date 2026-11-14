@@ -1,5 +1,5 @@
 import type { FactoryItem, FactoryLoop, GitHubPrRef, Project } from "@codeden/contracts";
-import { errorMessage } from "../errors";
+import { errorMessage, ServiceError } from "../errors";
 import { type FactoryContext, factoryNotice, raiseInbox } from "./context";
 import type { FactoryPr } from "./github-port";
 import { stuckDecisionId, stuckInboxId } from "./stuck";
@@ -127,6 +127,33 @@ export async function readyForYou(
   });
 }
 
+/** The error codes GitHub's refusals to merge or update a PR map to (`toGithubError`). */
+const REFUSAL_CODES = new Set([
+  "github_not_allowed", // 405: not mergeable, a required status check is expected
+  "github_conflict", // 409: the head moved, a merge conflict
+  "github_validation", // 422
+  "github_forbidden", // 403 without a rate limit: e.g. "Resource not accessible by integration"
+]);
+
+/**
+ * Whether GitHub answered and refused the request, as opposed to not answering properly: a
+ * rate limit, a 5xx or network failure, or GitHub not being connected. Only refusals count
+ * against a PR in the merge queue; the rest is tried again on the next tick.
+ */
+export function githubRefused(error: unknown): boolean {
+  return error instanceof ServiceError && REFUSAL_CODES.has(error.code);
+}
+
+/** What GitHub said when it didn't merge the queue's head; `refusal` when it refused it. */
+export interface MergeFailed {
+  failed: string;
+  refusal: boolean;
+}
+
+/**
+ * Squash-merge the head of the merge queue. When GitHub doesn't merge it, nothing changes
+ * here: what it said comes back, and the queue counts the refusals (`queue.ts`).
+ */
 export async function autoMerge(
   ctx: FactoryContext,
   project: Project,
@@ -134,15 +161,20 @@ export async function autoMerge(
   current: FactoryItem,
   pr: FactoryPr,
   checks: FactoryItem["checks"],
-): Promise<FactoryLoop> {
+): Promise<FactoryLoop | MergeFailed> {
   const title = `${current.title} (#${pr.ref.number})`;
   const res = await ctx.github
     .merge(project.id, pr.ref.number, { sha: pr.headSha, title })
-    .catch((error: unknown) => ({ merged: false, sha: null, error: errorMessage(error) }));
+    .catch((error: unknown) => ({
+      merged: false,
+      sha: null,
+      error: errorMessage(error),
+      refusal: githubRefused(error),
+    }));
   if (!res.merged) {
-    const why = "error" in res ? res.error : "GitHub did not merge it";
-    ctx.store.updateItem(current.id, (i) => ({ ...i, note: `Merge failed: ${why}` }));
-    return loop;
+    // A 200 with `merged: false` is GitHub's own answer.
+    if (!("error" in res)) return { failed: "GitHub did not merge it", refusal: true };
+    return { failed: res.error, refusal: res.refusal };
   }
   const at = ctx.now().toISOString();
   ctx.store.updateItem(current.id, (i) => ({

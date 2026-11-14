@@ -35,6 +35,11 @@ export interface UtilityService {
    */
   speechSummary(text: string): Promise<SpeechSummaryResponse>;
   /**
+   * Where a session's work got to, for the brief of a handoff (§9), from a compact transcript
+   * of it; null when the job is off or no model answered.
+   */
+  handoffSummary(transcript: string): Promise<string | null>;
+  /**
    * A one-shot answer from the utility model for a server-side job, such as the software
    * factory's "Identify type" step; null when no model answered.
    */
@@ -51,6 +56,9 @@ export class NoopUtilityService implements UtilityService {
   }
   async speechSummary(text: string): Promise<SpeechSummaryResponse> {
     return { text: shortSpeech(plainSpeech(text)), source: "plain" };
+  }
+  async handoffSummary(): Promise<string | null> {
+    return null;
   }
   async complete(): Promise<string | null> {
     return null;
@@ -109,6 +117,15 @@ const TLDR_SYSTEM = [
   "Reply with at most two short sentences, under 200 characters in total.",
   "Say what was done and whether anything needs the user (a decision, a review, a failure). If nothing needs them, don't mention it.",
   "Plain spoken English only: no markdown, code, file paths, lists, numbers of lines or preamble such as 'Summary:'.",
+].join(" ");
+
+/** A handoff waits on its brief, so the summary gets less time than the other jobs. */
+const HANDOFF_TIMEOUT_MS = 45_000;
+
+const HANDOFF_SYSTEM = [
+  "You brief a coding agent that takes over another agent's unfinished work in the same repository. It can't see the transcript below, only your summary and the code.",
+  "Reply with at most 12 short Markdown bullet lines: what the task is, what was done (and how), decisions and constraints that came up, what remains, and known problems or failing checks.",
+  "Be concrete: name files, commands and errors. Don't invent anything the transcript doesn't show. No preamble and no closing remarks.",
 ].join(" ");
 
 /** Server-side warnings for utility jobs, shown whatever the debug setting (stderr). */
@@ -188,6 +205,15 @@ export class ProviderUtilityService implements UtilityService {
     if (tldr) return { text: shortSpeech(tldr), source: "utility" };
     this.warn("utility: read-aloud TL;DR unavailable, speaking the message's first sentences");
     return { text: shortSpeech(plain), source: "plain" };
+  }
+
+  async handoffSummary(transcript: string): Promise<string | null> {
+    if (!this.deps.settings().utilityModel.jobs.handoffSummaries || !transcript.trim()) return null;
+    const prompt = `Transcript:\n${transcript}`;
+    const out = await this.run("handoff summary", HANDOFF_SYSTEM, prompt, {
+      timeoutMs: HANDOFF_TIMEOUT_MS,
+    });
+    return out ? out.slice(0, 4_000) : null;
   }
 
   complete(job: string, system: string, prompt: string): Promise<string | null> {

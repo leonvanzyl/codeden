@@ -6,7 +6,7 @@ import { ProviderMark } from "@/components/common/bits";
 import { AutonomyBadge } from "@/components/thread/autonomy";
 import { Switch } from "@/components/ui/switch";
 import { SessionCostText } from "@/components/usage/session-cost";
-import { forkOriginText } from "@/lib/fork-origin";
+import { forkOriginText, isHandoff } from "@/lib/fork-origin";
 import { ago, compact, statusLabel } from "@/lib/format";
 import { useSession } from "@/lib/queries";
 import { useTranscriptsStore } from "@/stores/transcripts";
@@ -30,14 +30,14 @@ const startedByLabel = {
 };
 
 /**
- * The session a fork came from, the checkpoint its worktree started at and, for a fork from a
- * turn ("Fork from here"), where its conversation ends (§9).
+ * The session a fork or a handoff came from, the checkpoint its worktree started at and, for a
+ * fork from a turn ("Fork from here"), where its conversation ends (§9).
  */
 function ForkedFromRow({ origin }: { origin: ForkOrigin }) {
   const source = useSession(origin.sessionId);
   const text = forkOriginText(origin);
   return (
-    <Row label="Forked from">
+    <Row label={isHandoff(origin) ? "Handed off from" : "Forked from"}>
       <Link
         to="/sessions/$sessionId"
         params={{ sessionId: origin.sessionId }}

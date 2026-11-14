@@ -13,13 +13,21 @@ function tabLabel(tab: PickerTab): string {
   return `${provider.displayName}: ${availability.reason}${availability.detail ? `. ${availability.detail}` : ""}`;
 }
 
-/** Up and Down move between open tabs and select them; Right goes to the search box. */
+/** A locked provider's tile that opens the handoff dialog instead of a tab (§9). */
+const offersHandoff = (tab: PickerTab, onHandoff: unknown) =>
+  Boolean(onHandoff) && tab.kind === "provider" && tab.handoff === "ready";
+
+/**
+ * Up and Down move between open tabs and select them, and stop on tiles that offer a handoff
+ * without selecting them (Enter or Space opens it); Right goes to the search box.
+ */
 function onRailKeyDown(
   e: KeyboardEvent<HTMLDivElement>,
   tabs: PickerTab[],
   selectedId: string,
   onSelect: (id: string) => void,
   onFocusSearch: () => void,
+  onHandoff: ((providerId: string) => void) | undefined,
 ) {
   if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
   if (e.key === "ArrowRight") {
@@ -29,12 +37,17 @@ function onRailKeyDown(
   }
   if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
   e.preventDefault();
-  const open = tabs.filter((t) => !t.lockedReason);
-  const index = open.findIndex((t) => t.id === selectedId);
+  const reachable = tabs.filter((t) => !t.lockedReason || offersHandoff(t, onHandoff));
+  // From the tile that has focus (a handoff tile is focused, never selected), else the selection.
+  const focused = (e.target as HTMLElement).closest?.<HTMLElement>("[data-picker-tab]");
+  const from = focused?.dataset.pickerTab ?? selectedId;
+  const index = reachable.findIndex((t) => t.id === from);
   const next =
-    open[Math.min(open.length - 1, Math.max(0, index + (e.key === "ArrowDown" ? 1 : -1)))];
+    reachable[
+      Math.min(reachable.length - 1, Math.max(0, index + (e.key === "ArrowDown" ? 1 : -1)))
+    ];
   if (!next) return;
-  onSelect(next.id);
+  if (!next.lockedReason) onSelect(next.id);
   const tiles = e.currentTarget.querySelectorAll<HTMLElement>("[data-picker-tab]");
   Array.from(tiles)
     .find((tile) => tile.dataset.pickerTab === next.id)
@@ -45,19 +58,22 @@ function onRailKeyDown(
  * The provider rail on the left of the picker: Favourites, then one tile per provider. Tiles of
  * providers that are not set up are dimmed (and still open, to show how to fix them); tiles
  * that can't be used here, such as other providers in a running session, are disabled with the
- * reason on hover.
+ * reason on hover, unless they offer a handoff (§9): those open it on click.
  */
 export function ProviderRail({
   tabs,
   selectedId,
   onSelect,
   onFocusSearch,
+  onHandoff,
   refresh,
 }: {
   tabs: PickerTab[];
   selectedId: string;
   onSelect: (id: string) => void;
   onFocusSearch: () => void;
+  /** A locked provider's tile that offers a handoff was clicked. */
+  onHandoff?: (providerId: string) => void;
   /** "Refresh models" at the foot of the rail, for the shown tab's provider(s). */
   refresh?: { label: string; busy: boolean; onRefresh: () => void };
 }) {
@@ -68,11 +84,12 @@ export function ProviderRail({
       aria-orientation="vertical"
       data-picker-rail
       className="flex w-11 shrink-0 flex-col gap-1 overflow-y-auto border-r border-border bg-muted/20 p-1 no-scrollbar"
-      onKeyDown={(e) => onRailKeyDown(e, tabs, selectedId, onSelect, onFocusSearch)}
+      onKeyDown={(e) => onRailKeyDown(e, tabs, selectedId, onSelect, onFocusSearch, onHandoff)}
     >
       {tabs.map((tab) => {
         const selected = tab.id === selectedId;
-        const locked = Boolean(tab.lockedReason);
+        const handoff = offersHandoff(tab, onHandoff) ? onHandoff : undefined;
+        const locked = Boolean(tab.lockedReason) && !handoff;
         const label = tabLabel(tab);
         return (
           <Fragment key={tab.id}>
@@ -81,15 +98,21 @@ export function ProviderRail({
                 <button
                   type="button"
                   data-picker-tab={tab.id}
+                  data-picker-handoff={handoff ? true : undefined}
                   aria-label={label}
-                  aria-pressed={selected}
+                  aria-pressed={handoff ? undefined : selected}
+                  aria-haspopup={handoff ? "dialog" : undefined}
                   aria-disabled={locked || undefined}
                   tabIndex={selected ? 0 : -1}
-                  onClick={() => !locked && onSelect(tab.id)}
+                  onClick={() => {
+                    if (handoff) handoff(tab.id);
+                    else if (!locked) onSelect(tab.id);
+                  }}
                   className={cn(
                     "relative flex aspect-square w-full items-center justify-center rounded-md outline-none transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring/50",
                     selected && "bg-accent",
                     locked && "cursor-not-allowed opacity-40 hover:bg-transparent",
+                    handoff && "opacity-60 hover:opacity-100",
                   )}
                 >
                   {tab.kind === "favorites" ? (
@@ -100,7 +123,7 @@ export function ProviderRail({
                       className={cn("size-6 text-[11px]", !tab.availability.ready && "opacity-50")}
                     />
                   )}
-                  {tab.kind === "provider" && !tab.availability.ready && !locked && (
+                  {tab.kind === "provider" && !tab.availability.ready && !tab.lockedReason && (
                     <span
                       aria-hidden
                       className="absolute right-1 bottom-1 size-1.5 rounded-full bg-status-waiting ring-2 ring-popover"

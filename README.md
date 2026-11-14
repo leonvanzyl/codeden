@@ -108,6 +108,7 @@ Everything an agent touches, next to the chat:
 - **Diffs and checkpoints.** Every turn is snapshotted into a hidden git ref, so you get exact per-turn and whole-session diffs and can restore files to any earlier turn. Commit and push from the git bar.
 - **Diff comments.** Comment on the agent's changes line by line, then send them all back as one message. [Comment on lines](docs/workbench.md#comment-on-lines).
 - **Fork a session**, or fork from an earlier turn, to try another approach with the same conversation and code while the original carries on. [Fork a session](docs/workbench.md#fork-a-session).
+- **Hand a session off** to another provider (or a fresh conversation) when one hits its limit or you want a second opinion: the new session gets the same code and a brief of the work so far. [Hand a session off](docs/workbench.md#hand-a-session-off).
 - **Plan mode** (Claude Code). The agent explores and proposes a plan, and only starts changing code once you approve it. [Plan mode](docs/security.md#plan-mode).
 - **Files.** A file tree and a syntax-highlighted viewer for the session's worktree.
 - **Terminal.** Real PTY terminals owned by the runner, so they survive server restarts.

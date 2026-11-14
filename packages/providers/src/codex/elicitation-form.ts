@@ -1,11 +1,18 @@
-import type { UserQuestion } from "@codeden/contracts";
+import {
+  answerFormatName,
+  parseNumberAnswer,
+  parseYesNo,
+  type UserQuestion,
+} from "@codeden/contracts";
 import type { JsonValue } from "./protocol/serde_json/JsonValue";
 import type { McpElicitationPrimitiveSchema, McpElicitationSchema } from "./protocol/v2";
 
 /**
  * An MCP server's form (the `requestedSchema` of an elicitation) as CodeDen questions, and the
  * answers back as the form's content. One question per field: choices become options, yes/no
- * fields Yes and No, text and numbers free text. Optional fields can be left empty.
+ * fields Yes and No, text and numbers free text (numbers carry their `format`, which the card
+ * checks). Optional fields can be left empty. Answers that don't fit their field are reported,
+ * never sent as a refusal the user didn't give.
  */
 
 /** One field of a form. */
@@ -27,7 +34,7 @@ export const LEAVE_EMPTY = "Leave empty";
 /** A form without fields is a confirmation: one question, accept or decline. */
 export const CONFIRM_ID = "confirm";
 export const ACCEPT = "Accept";
-const DECLINE = "Decline";
+export const DECLINE = "Decline";
 
 export function formFields(schema: McpElicitationSchema): FormField[] {
   const required = new Set(schema.required ?? []);
@@ -91,10 +98,8 @@ function unique(choices: { value: string; label: string }[]): { value: string; l
   });
 }
 
-const HINTS: Partial<Record<FormField["type"], string>> = {
-  integer: " (a whole number)",
-  number: " (a number)",
-};
+const isNumber = (f: FormField): f is FormField & { type: "number" | "integer" } =>
+  f.type === "number" || f.type === "integer";
 
 /** The form as questions; the first one carries the server's message. */
 export function formQuestions(
@@ -116,7 +121,7 @@ export function formQuestions(
     ];
   }
   return fields.map((f, i) => {
-    const ask = `${f.description ?? f.label}${HINTS[f.type] ?? ""}`;
+    const ask = `${f.description ?? f.label}${isNumber(f) ? ` (${answerFormatName(f.type)})` : ""}`;
     // A lone field the message already asks for needs no more words.
     const plain = fields.length === 1 && ask === f.label;
     const question = i > 0 ? ask : plain ? lead : `${lead} — ${ask}`;
@@ -130,32 +135,35 @@ export function formQuestions(
       question,
       options: f.required ? options : [...options, { label: LEAVE_EMPTY }],
       multiSelect: f.type === "choices",
-      allowFreeText: f.type === "text" || f.type === "number" || f.type === "integer",
+      allowFreeText: f.type === "text" || isNumber(f),
+      ...(isNumber(f) ? { format: f.type } : {}),
     };
   });
 }
 
 /**
- * The form's content from the answers (keyed by question id), or undefined when a required
- * field has no answer or an answer doesn't fit its field.
+ * The form's content from the answers (keyed by question id), or what doesn't fit: a required
+ * field without an answer, or an answer its field can't take ("five" for a number), one line
+ * per field, naming it.
  */
 export function formContent(
   fields: FormField[],
   answers: Record<string, string[]>,
-): Record<string, JsonValue> | undefined {
+): { content: Record<string, JsonValue> } | { problems: string[] } {
   const content: Record<string, JsonValue> = {};
+  const problems: string[] = [];
   for (const f of fields) {
     const given = (answers[f.id] ?? []).map((a) => a.trim()).filter(Boolean);
     const values = f.required ? given : given.filter((a) => a !== LEAVE_EMPTY);
     if (values.length === 0) {
-      if (f.required) return undefined;
+      if (f.required) problems.push(`${f.label}: needs an answer.`);
       continue;
     }
     const value = parse(f, values);
-    if (value === undefined) return undefined;
-    content[f.name] = value;
+    if (value === undefined) problems.push(`${f.label}: ${expected(f, values)}`);
+    else content[f.name] = value;
   }
-  return content;
+  return problems.length > 0 ? { problems } : { content };
 }
 
 function parse(f: FormField, values: string[]): JsonValue | undefined {
@@ -164,20 +172,34 @@ function parse(f: FormField, values: string[]): JsonValue | undefined {
     case "text":
       return values.join("\n");
     case "number":
-    case "integer": {
-      const n = values.length === 1 ? Number(one) : Number.NaN;
-      return Number.isFinite(n) && (f.type === "number" || Number.isInteger(n)) ? n : undefined;
-    }
-    case "boolean": {
-      const v = values.length === 1 ? one?.toLowerCase() : undefined;
-      return v === "yes" || v === "true" ? true : v === "no" || v === "false" ? false : undefined;
-    }
+    case "integer":
+      return values.length === 1 && one !== undefined ? parseNumberAnswer(one, f.type) : undefined;
+    case "boolean":
+      return values.length === 1 && one !== undefined ? parseYesNo(one) : undefined;
     case "choice":
       return values.length === 1 && one !== undefined ? choice(f, one) : undefined;
     case "choices": {
       const picked = values.map((v) => choice(f, v));
       return picked.every((v) => v !== undefined) ? (picked as string[]) : undefined;
     }
+  }
+}
+
+/** Why `values` don't fit `f`, saying what it takes. */
+function expected(f: FormField, values: string[]): string {
+  const given = values.map((v) => `"${v.length > 60 ? `${v.slice(0, 59)}…` : v}"`).join(", ");
+  switch (f.type) {
+    case "number":
+    case "integer":
+      return `${given} isn't ${answerFormatName(f.type)}. Type ${answerFormatName(f.type)}, like ${f.type === "integer" ? "3 or 1,000" : "2.5 or 1,000"}.`;
+    case "boolean":
+      return `${given} isn't Yes or No.`;
+    case "choice":
+      return `${given} isn't one of the options. Pick one of: ${f.choices.map((c) => c.label).join(", ")}.`;
+    case "choices":
+      return `${given} aren't all options. Pick from: ${f.choices.map((c) => c.label).join(", ")}.`;
+    case "text":
+      return `${given} doesn't fit.`;
   }
 }
 

@@ -1,4 +1,5 @@
 import { CODEDEN_VERSION } from "@codeden/contracts";
+import { agentEnv } from "../util/agent-env";
 import { type ResolvedCommand, spawnResolved } from "../util/exec";
 import { ACP_PROTOCOL_VERSION, type AcpInitializeResult } from "./protocol";
 import { AcpRpc, AcpRpcError, type AcpRpcHandlers } from "./rpc";
@@ -13,7 +14,10 @@ export interface StartAgentOptions {
   /** Extra `clientCapabilities` fields (vendor flags). */
   clientCapabilities?: Record<string, unknown>;
   cwd?: string;
-  /** Extra env vars for the agent (merged over the runner's environment). */
+  /**
+   * Extra env vars for the agent (`SessionOptions.env`), kept as given over the runner's
+   * environment without CodeDen's own variables (`agentEnv`).
+   */
   env?: Record<string, string>;
   timeoutMs?: number;
 }
@@ -36,7 +40,7 @@ export async function startAgent(
 ): Promise<{ rpc: AcpRpc; info: AcpInitializeResult }> {
   const child = spawnResolved(exe, opts.args, {
     stdio: ["pipe", "pipe", "pipe"],
-    env: { ...process.env, ...opts.env },
+    env: agentEnv(opts.env),
     ...(opts.cwd ? { cwd: opts.cwd } : {}),
   });
   const rpc = new AcpRpc(child, handlers, opts.label);

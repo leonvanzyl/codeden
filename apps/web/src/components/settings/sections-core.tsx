@@ -265,6 +265,11 @@ export function UtilitySettings() {
     ["followups", "Follow-up suggestions", "When the agent didn't suggest any itself."],
     ["sessionTitles", "Session titles", "Short titles from the first message."],
     ["noticeSummaries", "Notice summaries", "One-line summaries in PM wake-ups."],
+    [
+      "handoffSummaries",
+      "Handoff summaries",
+      "What a session did, in the brief of a handoff. Off: its last reply.",
+    ],
   ] as const;
   const utilityAuto = settings.utilityModel.provider === "auto";
   return (
