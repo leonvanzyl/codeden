@@ -84,13 +84,29 @@ export type SessionResult = z.infer<typeof SessionResult>;
 
 // ---------------------------------------------------------------------------- diffs
 
-/** What a diff covers: the whole session, one turn, or uncommitted changes in the worktree. */
+/**
+ * What a diff covers: the whole session, one turn, uncommitted changes in the worktree, or
+ * `compare`: another session's latest checkpoint against this session's working tree (§12.3),
+ * so `+` lines are this session's and `−` lines the other's. The other session must be in the
+ * same project and on the same runner (it shares the repository's objects).
+ */
 export const DiffScope = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("session") }),
   z.object({ kind: z.literal("turn"), turnId: Id }),
   z.object({ kind: z.literal("uncommitted") }),
+  z.object({ kind: z.literal("compare"), sessionId: Id }),
 ]);
 export type DiffScope = z.infer<typeof DiffScope>;
+
+/** The other session's checkpoint a `compare` diff starts from. */
+export const DiffAgainst = z.object({
+  sessionId: Id,
+  /** Its checkpoint number (0 is its baseline). */
+  index: CheckpointIndex,
+  /** When that checkpoint was written. */
+  at: Timestamp,
+});
+export type DiffAgainst = z.infer<typeof DiffAgainst>;
 
 /** One file of a diff, with its unified patch. */
 export const DiffFile = z.object({
@@ -111,6 +127,8 @@ export const DiffResult = z.object({
   files: z.array(DiffFile),
   /** Turns that have checkpoints, oldest first. */
   turns: z.array(z.object({ id: Id, index: CheckpointIndex, label: z.string(), at: Timestamp })),
+  /** For a `compare` diff: the other session's checkpoint it starts from. */
+  against: DiffAgainst.optional(),
 });
 export type DiffResult = z.infer<typeof DiffResult>;
 

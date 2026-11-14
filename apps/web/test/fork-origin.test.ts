@@ -1,5 +1,55 @@
+import type { Session } from "@codeden/contracts";
 import { describe, expect, it } from "vitest";
-import { forkOriginText, isHandoff } from "@/lib/fork-origin";
+import { sessions as fixtureSessions } from "@/lib/api/mock/fixtures/sessions";
+import { forkOriginText, isHandoff, relatedSessions } from "@/lib/fork-origin";
+
+const base = fixtureSessions.find((s) => s.role === "agent" && s.projectId) as Session;
+const at = (minute: number) => `2026-11-14T10:${String(minute).padStart(2, "0")}:00.000Z`;
+const session = (id: string, patch: Partial<Session> = {}): Session => ({
+  ...base,
+  id,
+  projectId: "p1",
+  forkedFrom: null,
+  createdAt: at(0),
+  ...patch,
+});
+
+describe("relatedSessions", () => {
+  const source = session("src");
+  const fork = session("fork", {
+    forkedFrom: { sessionId: "src", checkpoint: 2 },
+    createdAt: at(1),
+  });
+  const sibling = session("sib", {
+    forkedFrom: { sessionId: "src", checkpoint: 2 },
+    createdAt: at(2),
+  });
+  const handoff = session("hand", {
+    forkedFrom: { sessionId: "src", checkpoint: 3, kind: "handoff" },
+    createdAt: at(3),
+  });
+  const grandchild = session("grand", { forkedFrom: { sessionId: "fork", checkpoint: 1 } });
+  const unrelated = session("other");
+  const elsewhere = session("elsewhere", {
+    projectId: "p2",
+    forkedFrom: { sessionId: "src", checkpoint: 1 },
+  });
+  const all = [source, fork, sibling, handoff, grandchild, unrelated, elsewhere];
+  const names = (s: Session) => relatedSessions(s, all).map((r) => `${r.relation}:${r.session.id}`);
+
+  it("lists a fork's source, its own forks, then its siblings newest first", () => {
+    expect(names(fork)).toEqual(["source:src", "fork:grand", "sibling:hand", "sibling:sib"]);
+  });
+
+  it("lists a source's forks and handoffs newest first, from its own project only", () => {
+    expect(names(source)).toEqual(["handoff:hand", "fork:sib", "fork:fork"]);
+  });
+
+  it("lists nothing for a session with no relatives or no project", () => {
+    expect(names(unrelated)).toEqual([]);
+    expect(relatedSessions({ ...fork, projectId: null }, all)).toEqual([]);
+  });
+});
 
 describe("forkOriginText", () => {
   it("names a fork from a turn by its turn number, even when its checkpoint's differs", () => {

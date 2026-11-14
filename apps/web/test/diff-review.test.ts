@@ -168,6 +168,7 @@ describe("diffScopeKey", () => {
     expect(diffScopeKey({ kind: "session" })).toBe("session");
     expect(diffScopeKey({ kind: "uncommitted" })).toBe("uncommitted");
     expect(diffScopeKey({ kind: "turn", turnId: "t-3" })).toBe("turn:t-3");
+    expect(diffScopeKey({ kind: "compare", sessionId: "s-2" })).toBe("compare:s-2");
   });
 });
 

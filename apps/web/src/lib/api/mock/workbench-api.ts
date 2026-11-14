@@ -208,6 +208,16 @@ export function workbenchApi(world: MockWorld): WorkbenchApi {
         scope,
         files: scope.kind === "uncommitted" ? [] : scoped,
         turns,
+        // A comparison starts from the other session's latest checkpoint, a few minutes old.
+        ...(scope.kind === "compare"
+          ? {
+              against: {
+                sessionId: scope.sessionId,
+                index: 1,
+                at: new Date(Date.now() - 4 * 60_000).toISOString(),
+              },
+            }
+          : {}),
       };
       return delay(result, 150);
     },
