@@ -81,6 +81,7 @@ const RUNNER_WORKTREE_TESTS = [
   "test/workspace-base.test.ts",
   "test/workspace-fork.test.ts",
   "test/workspace-remove.test.ts",
+  "test/workspace-clone.test.ts",
   "test/checkpoints.test.ts",
 ];
 

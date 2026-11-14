@@ -9,7 +9,7 @@ import {
 import { Hono } from "hono";
 import { z } from "zod";
 import type { AppServices } from "../services/container";
-import { listSessionFiles } from "../services/files/session-files";
+import { listFolderFiles } from "../services/files/session-files";
 import { jsonBody, queryOf } from "./validate";
 
 /**
@@ -39,7 +39,9 @@ export function projectRoutes(s: AppServices) {
       ),
     )
     .get("/:id/files", (c) =>
-      c.json<SessionFileList>(listSessionFiles(s.projects.get(c.req.param("id")).path)),
+      c.json<SessionFileList>(
+        listFolderFiles(s.projects.get(c.req.param("id")).path, s.paths.home),
+      ),
     )
     .post("/:id/refresh", async (c) => c.json(await s.redetector.refresh(c.req.param("id"))))
     .post("/:id/disconnect-github", async (c) =>

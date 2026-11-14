@@ -10,6 +10,7 @@ import type {
 import { defaultShell } from "@codeden/providers";
 import type * as NodePty from "node-pty";
 import { CommandError } from "../errors";
+import { cwdMissing } from "../git/exec";
 import { childEnv } from "../process/env";
 import type { ProcessSupervisor } from "../process/supervisor";
 import { killTree } from "../process/tree";
@@ -107,7 +108,7 @@ export class TerminalHost {
     if (this.terminals.has(cmd.ptyId)) {
       throw new CommandError("pty_exists", `Terminal ${cmd.ptyId} already exists`);
     }
-    if (!existsSync(cmd.cwd)) throw new CommandError("not_found", `${cmd.cwd} not found`);
+    if (!existsSync(cmd.cwd)) throw cwdMissing(cmd.cwd);
     const pty = ptyModule.spawn(cmd.shell ?? defaultShell(), cmd.args ?? [], {
       name: "xterm-256color",
       cols: cmd.cols,

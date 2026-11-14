@@ -120,9 +120,13 @@ A versioned, zod-typed message protocol over one connection (a WebSocket, or an 
   - `exec`: newline-delimited JSON, one message per line and at most 16 MiB a line, on the stdin and stdout of `codeden runner-link`, run inside a sandbox (§4.2). The link writes nothing else to stdout. It exits with distinct codes when no runner is running (3) and when the runner refuses it (4).
   - A `dial-out` transport, where the runner connects to the server, is deferred to the §15.2 decision.
 - **`welcome` reports where the runner runs:** `platform`, `arch`, `home` and `backend`, all optional so older runners still connect.
-- **Additions for remote runners** (planned, [remote-runners.md](remote-runners.md) §18):
-  - `workspace.prepare` gains a `clone` strategy whose path the runner chooses.
-  - `fs.list/stat/read/write` and a chunked `transfer.*` stream, so the server never reads a remote worktree from its own disk.
+- **Workspaces on a runner's own disk** (built, [remote-runners.md](remote-runners.md) §9, §10):
+  - `workspace.prepare` has a `clone` strategy. A runner whose `welcome.backend` isn't `local` clones the project's `origin` into `<runnerHome>/ws/<session>`, a path it chooses, and the session's `cwd` is that path, shown as is. Local runners keep worktrees.
+  - `fs.list/stat/read/write` (at most 4 MiB a call) and a chunked, pull-based `transfer.*` stream. The server reads and writes a session's files through a `WorkspaceFs`: its own disk for the home runner, these commands for every other runner. It picks by its own runner record, never by what a runner reports. Both sides refuse the same paths with the same codes: anything outside the root (by text, then through links), CodeDen's credential files and their `.invalid-*` copies, writes to agents' allow-lists and inside `.git`.
+  - `browser.screenshot` returns the PNG instead of writing a path on the server's machine.
+  - `workspace.prepare` (clone, fetch) and `git.push` take a brokered git credential for that one operation (§15.2).
+  - A command whose working folder is gone fails with `cwd_missing`.
+- **Planned for remote runners** ([remote-runners.md](remote-runners.md) §18):
   - `mcp.request`/`mcp.response` frames tunnel MCP (§4.4).
   - `runner.credentials` delivers provider credentials into runner memory after each handshake.
 
@@ -807,7 +811,7 @@ Details are in [remote-runners.md](remote-runners.md) §7 and §9.2. Nothing her
 - **Deferred:** an internet-facing UI for a self-hosted server. The user's VPN works today.
 - **Sandbox runners are untrusted.** A sandbox runner shares its sandbox with an agent that has a shell, so the server treats what it sends as untrusted input; only the home runner is trusted. An event that names a session is stored only when that session is routed to the runner that sent it (its `sessions.runnerId` is that runner's journal id); anything else is dropped, logged and acknowledged. Terminal output and exits count only for ptys the server opened on that runner, and browser streams only for its sessions. A journal id keys a runner's ack position and its sessions' routing, so it must be the runner's own: a `welcome` reporting an id another runner record carries (deleted ones too) is refused; a runner other than the home runner must report a new id on its first connection (one no session or ack position carries) and keep it afterwards (under a new one its sessions would fall back to the home runner). Details in [remote-runners.md](remote-runners.md) §8.
 - **Tokens are the boundary.** Docker Desktop forwards `host.docker.internal` to the host's loopback, so a local container reaches 127.0.0.1 services as a loopback peer (seen in the spike). The install token and the server's own secrets never enter a sandbox. Provider credentials are sent over the link into runner memory only, never into images, snapshots or container config.
-- **GitHub credentials in sandboxes:** brokered per server-initiated git operation (recommended), a token scoped to the repo in the sandbox, or none (git bundles through the server). The user picks one.
+- **GitHub credentials in sandboxes:** brokered per server-initiated git operation (option A, built). The server sends the GitHub token with a clone, fetch or push on a runner other than the home runner, and only for an https remote on github.com. The runner hands it to that one git process through its environment, behind an emptied credential-helper list and a helper scoped to `https://github.com`, so a remote an agent rewrote to point elsewhere gets nothing. It is never stored (no helper, no `.git/config`, no remote URL), and never journaled, logged or put in an event. Agents in a sandbox get no token; they use CodeDen's GitHub tools. A token scoped to the repo in the sandbox (B) or git bundles through the server (C) remain possible later.
 
 ## 16. Distribution and operations
 

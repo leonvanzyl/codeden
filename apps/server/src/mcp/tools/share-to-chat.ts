@@ -5,6 +5,8 @@ import { z } from "zod";
 import { MAX_ATTACHMENT_BYTES } from "../../services/artifacts";
 import { realPathOf } from "../../services/files/path-guard";
 import { assertNotSecret } from "../../services/secret-files";
+import { readOutgoingFile } from "../../services/workspace-fs/outgoing";
+import { remoteWorkspaceFs } from "../../services/workspace-fs/workspace-fs";
 import { defineTool, ToolError } from "../define";
 import { postSharedArtifact } from "../transcript";
 
@@ -52,7 +54,17 @@ export const shareToChat = defineTool({
     let bytes: Buffer;
     let name: string;
     let mediaType: string;
-    if (input.path) {
+    const remote = input.path ? remoteWorkspaceFs(services, session) : undefined;
+    if (input.path && remote) {
+      // A workspace on another runner's disk (§10): read through the runner, never this disk.
+      const read = await readOutgoingFile(remote, input.path, {
+        name: input.name,
+        home: services.paths.home,
+      });
+      ({ bytes, name } = read);
+      mediaType =
+        input.mediaType ?? MEDIA_TYPES[extname(name).toLowerCase()] ?? "application/octet-stream";
+    } else if (input.path) {
       const absolute = resolve(session.cwd, input.path);
       // Checks and the read use the real file (links, junctions and short names resolved).
       const real = existsSync(absolute) && statSync(absolute).isFile() && realPathOf(absolute);

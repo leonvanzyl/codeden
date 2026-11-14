@@ -7,13 +7,15 @@ import {
   type Item,
   type RawEventEnvelope,
 } from "@codeden/contracts";
-import { imageInfo } from "@codeden/providers";
+import { imageInfo, platformPath } from "@codeden/providers";
 import { and, eq, sql } from "drizzle-orm";
 import type { Db } from "../../db/client";
 import { items } from "../../db/schema";
 import type { EventStore } from "../../events/store";
 import { type ArtifactService, MAX_ATTACHMENT_BYTES, sharedArtifactNotice } from "../artifacts";
 import { errorMessage } from "../errors";
+import { isRemoteRunner, type RunnerDeps, type RunnerPort, runnerForSession } from "../runner-port";
+import { RunnerWorkspaceFs } from "../workspace-fs/runner";
 import type { SessionRepo } from "./repo";
 
 /** Captions are cut to the length `share_to_chat` accepts. */
@@ -21,7 +23,7 @@ const MAX_CAPTION = 1_000;
 
 type Completed = AgentEventOf<"item.completed">;
 
-export interface GeneratedImagesDeps {
+export interface GeneratedImagesDeps extends Partial<RunnerDeps> {
   db: Db;
   store: EventStore;
   repo: SessionRepo;
@@ -111,7 +113,7 @@ export class GeneratedImages {
       if (this.posting.has(key) || this.posted(sessionId, noticeId)) continue;
       this.posting.add(key);
       try {
-        const file = await readImage(image.path);
+        const file = await readImage(image.path, this.remoteRunner(sessionId));
         const artifact = this.deps.artifacts.save({
           bytes: file.bytes,
           name: basename(image.path),
@@ -129,6 +131,17 @@ export class GeneratedImages {
         this.posting.delete(key);
       }
     }
+  }
+
+  /**
+   * The session's runner when it isn't the home runner: its images are on its own disk and are
+   * read through it, never from this disk at a path it reported (§10).
+   */
+  private remoteRunner(sessionId: string): RunnerPort | undefined {
+    const { runner, runners } = this.deps;
+    if (!runner) return undefined;
+    const port = runnerForSession({ runner, runners }, sessionId);
+    return isRemoteRunner(port) ? port : undefined;
   }
 
   private append(sessionId: string, event: Completed, item: Item): void {
@@ -186,17 +199,38 @@ function unavailableNotice(id: string, image: GeneratedImage, error: unknown): I
 
 /**
  * Read a generated image: an absolute path to a file of at most 20 MB whose bytes are a PNG,
- * JPEG, GIF or WebP image. Anything else is refused, so no other file becomes an artifact.
+ * JPEG, GIF or WebP image. Anything else is refused, so no other file becomes an artifact. On a
+ * runner that doesn't share this disk (`remote`), the path is the runner's and is read through
+ * it, in its folder (its own guards apply).
  */
-async function readImage(path: string): Promise<{ bytes: Buffer; mediaType: string }> {
-  if (!isAbsolute(path)) throw new Error("not an absolute path");
-  const info = await stat(path).catch((error: unknown) => {
-    const missing = (error as { code?: string }).code === "ENOENT";
-    throw missing ? new Error("the file no longer exists") : error;
-  });
-  if (!info.isFile()) throw new Error("not a file");
-  if (info.size > MAX_ATTACHMENT_BYTES) throw new Error("larger than 20 MB");
-  const bytes = await readFile(path);
+async function readImage(
+  path: string,
+  remote: RunnerPort | undefined,
+): Promise<{ bytes: Buffer; mediaType: string }> {
+  let bytes: Buffer;
+  if (remote) {
+    const platform = platformPath(remote.remote?.().platform);
+    if (!platform.isAbsolute(path)) throw new Error("not an absolute path");
+    const files = new RunnerWorkspaceFs(remote, platform.dirname(path));
+    ({ bytes } = await files
+      .readFile(platform.basename(path), MAX_ATTACHMENT_BYTES)
+      .catch((error: unknown) => {
+        const code = (error as { code?: string }).code;
+        if (code === "not_found" || code === "cwd_missing") {
+          throw new Error("the file no longer exists");
+        }
+        throw code === "too_large" ? new Error("larger than 20 MB") : error;
+      }));
+  } else {
+    if (!isAbsolute(path)) throw new Error("not an absolute path");
+    const info = await stat(path).catch((error: unknown) => {
+      const missing = (error as { code?: string }).code === "ENOENT";
+      throw missing ? new Error("the file no longer exists") : error;
+    });
+    if (!info.isFile()) throw new Error("not a file");
+    if (info.size > MAX_ATTACHMENT_BYTES) throw new Error("larger than 20 MB");
+    bytes = await readFile(path);
+  }
   const meta = imageInfo(bytes);
   if (!meta) throw new Error("not an image");
   return { bytes, mediaType: meta.mimeType };

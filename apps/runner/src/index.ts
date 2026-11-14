@@ -15,3 +15,4 @@ export { Scrollback } from "./pty/scrollback";
 export { TerminalHost } from "./pty/terminal-host";
 export { type RunningRunner, type StartRunnerOptions, startRunner } from "./runner";
 export { SessionHost } from "./session-host";
+export { WorkspaceFsHost } from "./workspace/fs";

@@ -19,6 +19,7 @@ import { listPorts } from "./ports";
 import type { ProcessSupervisor } from "./process/supervisor";
 import type { TerminalHost } from "./pty/terminal-host";
 import type { SessionHost } from "./session-host";
+import type { WorkspaceFsHost } from "./workspace/fs";
 import { removeWithLeftovers, stopWithLeftovers } from "./workspace/leftover-processes";
 import { prepareWorkspace } from "./workspace/worktree";
 
@@ -35,6 +36,8 @@ export interface RunnerCore {
   registry: ProviderRegistry;
   /** `browser.*` handlers over the runner's `BrowserManager` (§12.2). */
   browser: BrowserCommandHandlers;
+  /** `fs.*` and `transfer.*`: workspace files for a server that doesn't share this disk. */
+  files: WorkspaceFsHost;
   startedAt: string;
   emit: (event: RunnerEvent) => void;
   /** The runner's log (background work such as emptying the worktree trash). */
@@ -239,6 +242,16 @@ export async function executeCommand(core: RunnerCore, command: RunnerCommand): 
         supervisor: core.supervisor,
       });
     }
+
+    case "fs.list":
+    case "fs.stat":
+    case "fs.read":
+    case "fs.write":
+    case "transfer.open":
+    case "transfer.read":
+    case "transfer.write":
+    case "transfer.close":
+      return core.files.execute(command);
 
     default: {
       // Only `browser.*` commands reach here (checked by the type below).

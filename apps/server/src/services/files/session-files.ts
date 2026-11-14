@@ -1,86 +1,52 @@
-import {
-  closeSync,
-  type Dirent,
-  existsSync,
-  openSync,
-  readdirSync,
-  readSync,
-  statSync,
-} from "node:fs";
-import { join } from "node:path";
-import type { SessionFileContent, SessionFileEntry, SessionFileList } from "@codeden/contracts";
-import { badRequest, notFound } from "../errors";
-import { resolveInside } from "./path-guard";
+import type { SessionFileContent, SessionFileList } from "@codeden/contracts";
+import { DiskWorkspace } from "@codeden/providers";
+import type { WorkspaceFs } from "../workspace-fs/workspace-fs";
+import { workspaceHttpError } from "../workspace-fs/workspace-fs";
 
-const MAX_ENTRIES = 5000;
 const MAX_READ_BYTES = 1024 * 1024;
-/** Skipped wherever they appear (a worktree has a `.git` file, not a folder). */
-const SKIP = new Set([".git", "node_modules"]);
+
+/** The files panel's own error codes, kept from before workspaces could be remote. */
+const FILES_ERRORS = {
+  cwd_missing: { code: "folder_not_found", message: "The session folder no longer exists" },
+  not_found: { code: "file_not_found", message: "No such file" },
+};
 
 /**
- * List a session's working directory for the files panel (§12.3): depth-first, folders
- * first, `.git` and `node_modules` skipped, capped at 5000 entries. Symlinks are listed but
- * not followed.
+ * List a session's working directory for the files panel (§12.3), wherever it is (`WorkspaceFs`):
+ * depth-first, folders first, `.git` and `node_modules` skipped, capped at 5000 entries.
+ * Symlinks are listed but not followed.
  */
-export function listSessionFiles(root: string): SessionFileList {
-  if (!existsSync(root)) throw notFound("The session folder no longer exists", "folder_not_found");
-  const entries: SessionFileEntry[] = [];
-  let truncated = false;
-  const walk = (dir: string, prefix: string) => {
-    let dirents: Dirent[];
-    try {
-      dirents = readdirSync(dir, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    dirents.sort((a, b) =>
-      a.isDirectory() === b.isDirectory() ? a.name.localeCompare(b.name) : a.isDirectory() ? -1 : 1,
-    );
-    for (const d of dirents) {
-      if (entries.length >= MAX_ENTRIES) {
-        truncated = true;
-        return;
-      }
-      if (SKIP.has(d.name)) continue;
-      const path = prefix ? `${prefix}/${d.name}` : d.name;
-      if (d.isDirectory()) {
-        entries.push({ path, kind: "dir" });
-        walk(join(dir, d.name), path);
-      } else {
-        let sizeBytes: number | undefined;
-        try {
-          sizeBytes = statSync(join(dir, d.name)).size;
-        } catch {
-          sizeBytes = undefined;
-        }
-        entries.push({ path, kind: "file", ...(sizeBytes === undefined ? {} : { sizeBytes }) });
-      }
-    }
-  };
-  walk(root, "");
-  return { root, entries, truncated };
+export async function listSessionFiles(fs: WorkspaceFs): Promise<SessionFileList> {
+  try {
+    const { entries, truncated } = await fs.list();
+    return { root: fs.root, entries, truncated };
+  } catch (error) {
+    throw workspaceHttpError(error, FILES_ERRORS);
+  }
+}
+
+/** The same listing of a project folder on the server's disk (the composer's `@` menu). */
+export function listFolderFiles(root: string, home: string): SessionFileList {
+  try {
+    return { root, ...new DiskWorkspace(root, home).list() };
+  } catch (error) {
+    throw workspaceHttpError(error, FILES_ERRORS);
+  }
 }
 
 /** Read one file (first 1 MB) from a session's working directory, inside the path guard. */
-export function readSessionFile(root: string, path: string): SessionFileContent {
-  const absolute = resolveInside(root, path);
-  if (!existsSync(absolute)) throw notFound("No such file", "file_not_found");
-  const stat = statSync(absolute);
-  if (!stat.isFile()) throw badRequest("Not a file", "not_a_file");
-  const length = Math.min(stat.size, MAX_READ_BYTES);
-  const buffer = Buffer.alloc(length);
-  const fd = openSync(absolute, "r");
+export async function readSessionFile(fs: WorkspaceFs, path: string): Promise<SessionFileContent> {
   try {
-    readSync(fd, buffer, 0, length, 0);
-  } finally {
-    closeSync(fd);
+    const { bytes, sizeBytes } = await fs.read(path, 0, MAX_READ_BYTES);
+    const binary = bytes.subarray(0, 8000).includes(0);
+    return {
+      path: path.replace(/\\/g, "/"),
+      content: binary ? "" : bytes.toString("utf8"),
+      sizeBytes,
+      binary,
+      truncated: sizeBytes > MAX_READ_BYTES,
+    };
+  } catch (error) {
+    throw workspaceHttpError(error, FILES_ERRORS);
   }
-  const binary = buffer.subarray(0, 8000).includes(0);
-  return {
-    path: path.replace(/\\/g, "/"),
-    content: binary ? "" : buffer.toString("utf8"),
-    sizeBytes: stat.size,
-    binary,
-    truncated: stat.size > MAX_READ_BYTES,
-  };
 }

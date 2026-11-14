@@ -1,6 +1,13 @@
-import { type GitHubRepo, GithubPr, githubPrId, type Session } from "@codeden/contracts";
+import {
+  type GitCredential,
+  type GitHubRepo,
+  GithubPr,
+  githubPrId,
+  type Session,
+} from "@codeden/contracts";
 import type { EventStore } from "../../events/store";
 import { badRequest, conflict, notFound } from "../errors";
+import { type GitBroker, githubCloneUrl } from "../git-broker";
 import { type RunnerDeps, type RunnerPort, runnerForSession, toServiceError } from "../runner-port";
 import { ownBranch } from "../sessions/own-branch";
 import type { SessionRepo } from "../sessions/repo";
@@ -40,6 +47,8 @@ export interface PullRequestDeps extends RunnerDeps {
   store: GithubStore;
   events: EventStore;
   repo: SessionRepo;
+  /** Brokers the push credential for a runner that doesn't share this disk (§9.2). */
+  git?: GitBroker;
 }
 
 const SESSION_MARKER = "<!-- codeden:session=";
@@ -73,8 +82,15 @@ async function pushBranch(
   session: Session,
   cwd: string,
   branch: string,
+  credential: GitCredential | undefined,
 ): Promise<void> {
-  const push = { name: "git.push", cwd, branch, setUpstream: true } as const;
+  const push = {
+    name: "git.push",
+    cwd,
+    branch,
+    setUpstream: true,
+    ...(credential ? { credential } : {}),
+  } as const;
   try {
     await runner.request(push, 5 * 60_000);
   } catch (error) {
@@ -121,7 +137,9 @@ export async function createPullRequest(
         await runner.request({ name: "git.commit", cwd, message: input.commitMessage }, 5 * 60_000)
       ).commit;
     }
-    await pushBranch(runner, session, cwd, branch);
+    // A runner in a sandbox gets the token for this push only (§9.2); others use their own git.
+    const credential = await deps.git?.credentialFor(runner, githubCloneUrl(repo.owner, repo.repo));
+    await pushBranch(runner, session, cwd, branch, credential);
   } catch (error) {
     throw toServiceError(error);
   }

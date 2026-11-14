@@ -11,15 +11,18 @@ import {
 import { codedenSystemPrompt, MCP_SERVER_NAME } from "../../mcp/prompt";
 import type { McpTokenStore } from "../../mcp/tokens";
 import { errorMessage, ServiceError } from "../errors";
+import type { GitBroker } from "../git-broker";
 import type { InboxService } from "../inbox-service";
 import type { ProjectService } from "../projects/project-service";
 import {
+  clonesWorkspaces,
   type RunnerDeps,
   type RunnerPort,
   runnerErrorCode,
   runnerForSession,
   runnerUnavailable,
 } from "../runner-port";
+import { type PreparedWorkspace, prepareCloneWorkspace } from "./clone-workspace";
 import { slugWords } from "./conflicts";
 import type { ForkStart } from "./fork";
 import { withHandoffBrief } from "./handoff";
@@ -45,6 +48,8 @@ export interface LauncherDeps extends RunnerDeps {
   log?: (message: string) => void;
   /** How long to wait for the runner before failing a start. */
   connectTimeoutMs?: number;
+  /** Clone URLs and brokered credentials for runners that don't share this disk (§9). */
+  git?: GitBroker;
 }
 
 /**
@@ -64,17 +69,6 @@ export interface LaunchOptions {
   input?: UserInput;
   workspace: WorkspaceRequest;
   fork?: LaunchFork;
-}
-
-interface PreparedWorkspace {
-  cwd: string;
-  worktreePath: string | null;
-  branch: string | null;
-  baseBranch: string | null;
-  /** Why the requested workspace could not be used, when CodeDen fell back. */
-  fallback: string | null;
-  /** A failed setup command, told to the agent with its first input. */
-  setupNote: string | null;
 }
 
 const PREPARE_TIMEOUT_MS = 10 * 60_000;
@@ -368,6 +362,13 @@ export class SessionLauncher {
     if (!project) {
       mkdirSync(this.deps.orchestratorDir, { recursive: true });
       return plain(this.deps.orchestratorDir);
+    }
+    // A sandbox's runner works in its own clone, at a path it chooses (§9.1).
+    if (clonesWorkspaces(runner)) {
+      return prepareCloneWorkspace(this.deps.git, runner, session, project, req, {
+        fork: fork !== undefined,
+        timeoutMs: PREPARE_TIMEOUT_MS,
+      });
     }
     if (req.mode === "repo_root") return plain(project.path);
     if (req.mode === "existing") {

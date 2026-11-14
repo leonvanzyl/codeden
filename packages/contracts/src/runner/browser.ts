@@ -1,6 +1,9 @@
 import { z } from "zod";
 import { Id } from "../common";
 
+/** Most bytes of a PNG `browser.screenshot` returns inline (12 MiB), to fit one link frame. */
+export const SCREENSHOT_INLINE_MAX_BYTES = 12 * 1024 * 1024;
+
 /** Runner-assigned tab id, unique within a session's browser context (`t1`, `t2`, ...). */
 export const BrowserTabId = z.string().min(1).max(100);
 export type BrowserTabId = z.infer<typeof BrowserTabId>;
@@ -432,11 +435,16 @@ export const BrowserCommands = [
   z
     .object({ name: z.literal("browser.mouse"), ...TabTarget, ...BrowserMouseFields })
     .superRefine(checkBrowserMouse),
-  /** PNG screenshot of the viewport, the full page, or one element (`ref`) to an absolute path. */
+  /**
+   * PNG screenshot of the viewport, the full page, or one element (`ref`): written to `path`
+   * (an absolute path on the runner's machine), or without `path` returned as `data`, for a
+   * runner that doesn't share the server's disk (at most `SCREENSHOT_INLINE_MAX_BYTES`, else
+   * `too_large`).
+   */
   z.object({
     name: z.literal("browser.screenshot"),
     ...TabTarget,
-    path: z.string().min(1),
+    path: z.string().min(1).optional(),
     fullPage: z.boolean().optional(),
     ref: BrowserElementRef.optional(),
   }),
@@ -541,7 +549,13 @@ export const BrowserCommandResults = {
   "browser.press": ActionResult,
   "browser.mouse": ActionResult,
   "browser.screenshot": z.object({
-    path: z.string(),
+    /** Where it was written, when the command named a path. */
+    path: z.string().optional(),
+    /** The PNG as base64, when the command named no path. */
+    data: z
+      .base64()
+      .max(Math.ceil(SCREENSHOT_INLINE_MAX_BYTES / 3) * 4)
+      .optional(),
     width: z.int().positive(),
     height: z.int().positive(),
     bytes: z.int().positive(),
