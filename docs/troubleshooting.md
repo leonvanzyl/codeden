@@ -120,7 +120,18 @@ The Codex apps (the ChatGPT desktop app's Codex, the Codex IDE extension) list e
 
 Sessions from older CodeDen versions are still listed. To hide them, open **Settings → Providers → Provider apps** and choose **Review** next to **Hide CodeDen's sessions from the Codex app**. CodeDen lists the conversations it started that the Codex app still shows (found by its own record of them, never by their titles) and archives them once you confirm. They are archived, not deleted: they appear under the Codex app's archived conversations, and CodeDen can still resume and fork them.
 
-Claude Code, OpenCode and Gemini CLI don't add CodeDen's sessions to your own lists. Claude Code labels them as SDK sessions, which its `/resume` leaves out. OpenCode's are archived. Gemini CLI lists sessions per folder, and CodeDen's run in their own worktrees.
+Claude Code, OpenCode and Gemini CLI don't add CodeDen's sessions to your own lists. Claude Code labels them as SDK sessions, which its `/resume` leaves out. OpenCode's are archived. Gemini CLI lists sessions per folder, and CodeDen's run in their own worktrees. The Cursor CLI does list them; see the next section.
+
+### CodeDen's sessions show up in the Cursor CLI's chat list
+
+Since Cursor CLI 2026.07.06, its chat picker (`agent ls`, `agent --resume` and `/resume`) opens on **All chats**, which lists the CLI chats from every folder on your machine. That includes the chats CodeDen starts for its Cursor sessions: agent sessions, factory builders and reviewers, PMs and the orchestrator. The Cursor CLI has no way to archive or hide a chat, and no way to start one it doesn't keep, so CodeDen can't keep its chats out of that list as it does for [Codex](#codedens-sessions-show-up-in-the-codex-app). **Settings → Providers → Provider apps** doesn't offer Cursor for the same reason.
+
+To see only your own chats:
+
+- Switch the picker to its **This workspace** tab, or run `agent resume` (or `agent --continue`) from your project folder. Cursor keeps each folder's chats apart. CodeDen's agent sessions run in their own worktrees under `~/.codeden/wt/`, and the orchestrator runs in `~/.codeden/orchestrator/`, so their chats aren't in your project's list. The exception is a PM on Cursor: it works in the project root, so its chat is listed there too.
+- The Cursor editor keeps its chats apart from the CLI's, so CodeDen's never appear in the editor's chat history or its Agents window.
+
+Don't delete CodeDen's chats (with Backspace or Delete in `agent ls`, or from Cursor's folders on disk). CodeDen resumes a Cursor session by loading its chat, for example after a restart or when it brings an archived session back. Once the chat is gone, the session says *"Could not resume Cursor session … started a new one"* and the agent starts over without its earlier turns. CodeDen's own transcript of the session is kept.
 
 ### The Cursor CLI asks for `agent update`
 
