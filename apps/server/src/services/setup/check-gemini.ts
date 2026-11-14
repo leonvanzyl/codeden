@@ -1,6 +1,6 @@
 import {
-  GEMINI_MIN_VERSION,
   GEMINI_UPGRADE_COMMAND,
+  geminiTooOldMessage,
   isSupportedGeminiVersion,
   readGeminiAuth,
 } from "@codeden/providers";
@@ -34,10 +34,11 @@ export async function checkGemini({
     executablePath: tool.path,
   };
   if (!isSupportedGeminiVersion(tool.version)) {
+    // Sessions refuse to open on it: "Gemini CLI 0.36.0 is too old (needs 0.68.0+)".
     return {
       ...installed,
       state: "missing",
-      message: `Gemini CLI ${tool.version ?? "(unknown version)"} is older than ${GEMINI_MIN_VERSION}; update it`,
+      message: geminiTooOldMessage(tool.version),
       fix: { kind: "upgrade", command: GEMINI_UPGRADE_COMMAND },
     };
   }

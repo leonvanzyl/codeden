@@ -15,7 +15,12 @@ import type { ResolvedCommand } from "../util/exec";
 import { findExecutable, type LocateOptions } from "../util/locate";
 import { geminiSessionArgs, writeGeminiAdminPolicies } from "./admin-policy";
 import { geminiAllowListNotice } from "./allow-list";
-import { detectGemini, GEMINI_MIN_VERSION, isSupportedGeminiVersion } from "./detect";
+import {
+  detectGemini,
+  GEMINI_UPGRADE_COMMAND,
+  geminiTooOldMessage,
+  isSupportedGeminiVersion,
+} from "./detect";
 import { geminiExtensions } from "./extensions";
 import { fallbackGeminiModels, geminiModelInfos } from "./models";
 import { GEMINI_ACP_ARGS, type GeminiProbe, probeGemini } from "./probe";
@@ -147,7 +152,8 @@ export class GeminiAdapter implements ProviderAdapter {
     if (version && !isSupportedGeminiVersion(version)) {
       throw new ProviderSessionError(
         "version_unsupported",
-        `Gemini CLI ${version} is older than ${GEMINI_MIN_VERSION}, the oldest CodeDen supports. Update it with \`npm install -g @google/gemini-cli@latest\`.`,
+        `${geminiTooOldMessage(version)}. Update it with \`${GEMINI_UPGRADE_COMMAND}\`.`,
+        "setup",
       );
     }
     // Allow-lists in Gemini CLI's settings and policy files don't skip CodeDen's approvals, and
@@ -198,5 +204,6 @@ function signInError(error: unknown): unknown {
   return new ProviderSessionError(
     "not_logged_in",
     `Gemini CLI is not signed in (${message.replace(/\.$/, "")}). Run \`gemini\` and sign in with Google, or set GEMINI_API_KEY.`,
+    "auth",
   );
 }

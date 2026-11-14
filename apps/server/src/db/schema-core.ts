@@ -121,6 +121,8 @@ export const sessions = sqliteTable(
     startMeta: json<StoredStartMeta>("start_meta"),
     /** Structured result from the agent's `finish` tool. */
     result: json<SessionResult>("result"),
+    /** Why the provider last refused to open the session (`Session.startError`). */
+    startError: json<ErrorInfo>("start_error"),
   },
   (t) => [
     index("sessions_project").on(t.projectId),

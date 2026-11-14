@@ -318,6 +318,7 @@ describe("Gemini CLI session over ACP", () => {
       adapter.openSession(options([], { env: { FAKE_GEMINI_AUTH: "missing" } })),
     ).rejects.toMatchObject({
       code: "not_logged_in",
+      kind: "auth",
       message: expect.stringMatching(/not signed in.*Run `gemini`/),
     });
   });

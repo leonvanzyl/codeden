@@ -42,8 +42,19 @@ export function reduceProcessEvent(
   }
 
   if (event.state === "crashed") {
-    if (!FINAL.has(session.status)) {
-      d.putSession({ ...session, status: "failed", updatedAt: ts }, record.usage);
+    // The provider refused to open the session: kept with it, so the factory can tell a CLI too
+    // old to run (`kind: "setup"`) or signed out from a session that died.
+    const refused = event.error?.code === "open_failed" ? event.error : undefined;
+    if (!FINAL.has(session.status) || refused) {
+      d.putSession(
+        {
+          ...session,
+          status: FINAL.has(session.status) ? session.status : "failed",
+          ...(refused ? { startError: refused } : {}),
+          updatedAt: ts,
+        },
+        record.usage,
+      );
     }
     const message = event.error?.message ?? "The agent process crashed";
     const id = `inbox:${session.id}:process:${runnerSeq}`;

@@ -11,6 +11,7 @@ import {
   MAX_PROVIDER_RESTARTS,
   providerFailure,
   providerRestarts,
+  providerWide,
   skipProvider,
   skippedProviders,
 } from "./provider-failure";
@@ -315,11 +316,11 @@ export async function reviewerStalled(
 }
 
 /**
- * The reviewer failed because of its provider (usage limit, sign-in, never started), not the
- * work: a fresh reviewer starts on the fallback, never the same provider, and the failure uses
- * neither a revise round nor the reviewer's restarts. A usage limit or sign-in problem also keeps
- * other factory work off that provider for a while. Its session, which may be waiting to retry
- * after the limit resets, is stopped.
+ * The reviewer failed because of its provider (usage limit, sign-in, a CLI too old, never
+ * started), not the work: a fresh reviewer starts on the fallback, never the same provider, and
+ * the failure uses neither a revise round nor the reviewer's restarts. A usage limit, sign-in
+ * problem or CLI too old also keeps other factory work off that provider for a while. Its
+ * session, which may be waiting to retry after the limit resets, is stopped.
  */
 async function reviewerProviderFailed(
   ctx: FactoryContext,
@@ -328,9 +329,7 @@ async function reviewerProviderFailed(
   s: Session,
   cause: Unavailable,
 ): Promise<FactoryLoop> {
-  if (cause.reason !== "failing to start") {
-    ctx.sessions.providerFailed(s.provider, cause.reason, cause.until);
-  }
+  if (providerWide(cause)) ctx.sessions.providerFailed(s.provider, cause.reason, cause.until);
   if (s.status === "idle") await ctx.sessions.stop(s.id);
   const name = ctx.sessions.displayName(s.provider);
   ctx.log?.(`factory: ${item.id}: reviewer on ${s.provider} failed (${cause.reason})`);

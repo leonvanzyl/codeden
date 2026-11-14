@@ -21,6 +21,11 @@ export function isSupportedGeminiVersion(version: string | null | undefined): bo
   return !!version && compareVersions(version, GEMINI_MIN_VERSION) >= 0;
 }
 
+/** "Gemini CLI 0.36.0 is too old (needs 0.68.0+)": detection, the setup check and a refused open. */
+export function geminiTooOldMessage(version: string | null | undefined): string {
+  return `Gemini CLI ${version || "(unknown version)"} is too old (needs ${GEMINI_MIN_VERSION}+)`;
+}
+
 export interface GeminiDetectOptions extends DetectExeOptions {
   /** Start `gemini --acp` once to check it answers (`probeGemini`); supported versions only. */
   probe?: (exe: ResolvedCommand, version: string | null) => Promise<GeminiProbe>;
@@ -77,10 +82,12 @@ export async function detectGemini(opts: GeminiDetectOptions = {}): Promise<Prov
     executablePath: exe.kind === "node-script" ? exe.script : exe.path,
   };
   if (!isSupportedGeminiVersion(lookup.version)) {
+    // Sessions refuse to open on it (`GeminiAdapter.openSession`): `minVersion` makes it unavailable.
     issues.push({
       code: "version_unsupported",
-      message: `Gemini CLI ${lookup.version ?? "(unknown version)"} is older than ${GEMINI_MIN_VERSION}, the oldest CodeDen supports. Update it.`,
+      message: `${geminiTooOldMessage(lookup.version)}. Update it.`,
       fix: upgrade,
+      minVersion: GEMINI_MIN_VERSION,
     });
     return { ...found, issues };
   }
