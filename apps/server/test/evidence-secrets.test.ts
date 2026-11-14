@@ -8,7 +8,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { CODEDEN_CREDENTIAL_FILES, INVALID_COPY_SUFFIX } from "@codeden/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { shareToChat } from "../src/mcp/tools/share-to-chat";
@@ -254,15 +254,53 @@ describe("copies CodeDen keeps of a damaged credential file", () => {
     nothingStored(session.id);
   });
 
-  it("refuses the backup through a symlink with a harmless name", async (ctx) => {
+  for (const [kind, link] of LINKS) {
+    it(`refuses the backup through ${kind} with a harmless name`, async (ctx) => {
+      const copy = remoteAccessBackup();
+      link(copy, join(env.dir, "report.txt"), () => ctx.skip());
+      const session = issueSession();
+      await expect(
+        env.service.attachEvidence(session.id, { files: [{ path: "report.txt" }] }),
+      ).rejects.toMatchObject(refused);
+      await expect(share(session.id, { path: "report.txt" })).rejects.toMatchObject(refused);
+      nothingStored(session.id);
+    });
+
+    it(`refuses an artifact whose file is ${kind} to the backup, attached by id`, async (ctx) => {
+      const copy = remoteAccessBackup();
+      const session = issueSession();
+      const artifact = saveArtifact(session.id, "shot.png", Buffer.from([0x89, 0x50]));
+      const file = env.artifacts.filePath(artifact);
+      unlinkSync(file);
+      link(copy, file, () => ctx.skip());
+      await expect(
+        env.service.attachEvidence(session.id, {
+          files: [{ artifactId: artifact.id, name: "shot.png" }],
+        }),
+      ).rejects.toMatchObject(refused);
+      nothingPublished();
+    });
+  }
+
+  it("refuses the backup reached through a junction to the data folder", async () => {
     const copy = remoteAccessBackup();
-    fileSymlinkOrSkip(copy, join(env.dir, "report.txt"), () => ctx.skip());
-    const session = issueSession();
-    await expect(
-      env.service.attachEvidence(session.id, { files: [{ path: "report.txt" }] }),
-    ).rejects.toMatchObject(refused);
-    await expect(share(session.id, { path: "report.txt" })).rejects.toMatchObject(refused);
-    nothingStored(session.id);
+    // A directory junction needs no privilege on Windows (a directory symlink elsewhere).
+    const temp = mkdtempSync(join(tmpdir(), "codeden-alias-"));
+    try {
+      const alias = join(temp, "data");
+      symlinkSync(env.dir, alias, "junction");
+      const aliased = join(alias, basename(copy));
+      const session = issueSession();
+      await expect(
+        env.service.attachEvidence(session.id, { files: [{ path: aliased, name: "notes.txt" }] }),
+      ).rejects.toMatchObject(refused);
+      await expect(share(session.id, { path: aliased, name: "notes.txt" })).rejects.toMatchObject(
+        refused,
+      );
+      nothingStored(session.id);
+    } finally {
+      rmSync(temp, { recursive: true, force: true });
+    }
   });
 
   it.each(CODEDEN_CREDENTIAL_FILES)("refuses a copy of %s", async (name) => {
