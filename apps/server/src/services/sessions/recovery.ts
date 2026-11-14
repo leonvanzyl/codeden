@@ -1,7 +1,8 @@
 import type { ProviderInfo, Session } from "@codeden/contracts";
 import { errorMessage } from "../errors";
-import { type RunnerDeps, runnerForSession } from "../runner-port";
+import { type RunnerDeps, type RunnerPort, runnerForSession } from "../runner-port";
 import type { SessionLauncher } from "./launcher";
+import { isTurnRunningError } from "./outbox-holds";
 import type { SessionRepo } from "./repo";
 import type { SessionService } from "./session-service";
 
@@ -17,6 +18,7 @@ export interface RecoveryDeps extends RunnerDeps {
 }
 
 const CUT_OFF = ["running", "waiting", "interrupted"] as const;
+const isCutOff = (status: string) => (CUT_OFF as readonly string[]).includes(status);
 
 /**
  * After a runner (re)connects: resume its sessions whose turn was cut off by a runner drain,
@@ -44,7 +46,7 @@ export class SessionRecovery {
   }
 
   private async recover(runnerId: string | undefined): Promise<void> {
-    const { repo, sessions, log } = this.deps;
+    const { repo, sessions } = this.deps;
     const runner =
       runnerId && this.deps.runners ? this.deps.runners.forRunnerId(runnerId) : this.deps.runner;
     const onThisRunner = (id: string) => runnerForSession(this.deps, id) === runner;
@@ -55,30 +57,49 @@ export class SessionRecovery {
       .list({ status: [...CUT_OFF] })
       .filter((s) => !sessions.launching.has(s.id) && onThisRunner(s.id))
       .map((s) => s.id);
-    let hosted: Set<string>;
-    try {
-      const status = await runner.request({ name: "runner.status" }, 10_000);
-      hosted = new Set(status.sessions.map((s) => s.sessionId));
-    } catch (error) {
-      log?.(`recovery: runner status failed: ${errorMessage(error)}`);
-      return;
-    }
+    // Still cut off: not being started, and no message, Retry or queued delivery on its way.
+    const stillCutOff = (id: string) => {
+      const session = repo.find(id)?.session;
+      return (
+        !!session &&
+        isCutOff(session.status) &&
+        !sessions.launching.has(id) &&
+        !sessions.isDelivering(id)
+      );
+    };
+    let hosted = await this.hostedSessions(runner);
+    if (!hosted) return;
     for (const id of candidates) {
-      const found = repo.find(id)?.session;
-      if (!found || hosted.has(id) || sessions.launching.has(id)) continue;
-      if (!(CUT_OFF as readonly string[]).includes(found.status)) continue;
+      if (!stillCutOff(id)) continue;
+      // Resuming the candidates before this one took a while, and the session may have come
+      // back by another path meanwhile: ask the runner again what it hosts now.
+      hosted ??= await this.hostedSessions(runner);
+      if (!hosted) return;
+      if (hosted.has(id) || !stillCutOff(id)) continue;
       // A runner that died without a word left its turns and approvals open: close them
       // first, so a dead approval can't keep the resumed session waiting.
       repo.closeOrphanedTurns(id);
       const session = repo.find(id)?.session;
-      if (session && (CUT_OFF as readonly string[]).includes(session.status)) {
+      if (session && isCutOff(session.status)) {
         await this.resume(session, runner.providers());
+        hosted = undefined;
       }
     }
 
     sessions.releaseOutboxes(onThisRunner);
     for (const id of sessions.sessionsWithQueuedMessages().filter(onThisRunner)) {
       await sessions.flushOutbox(id).catch(() => undefined);
+    }
+  }
+
+  /** The sessions the runner hosts right now; undefined (and logged) when it can't say. */
+  private async hostedSessions(runner: RunnerPort): Promise<Set<string> | undefined> {
+    try {
+      const status = await runner.request({ name: "runner.status" }, 10_000);
+      return new Set(status.sessions.map((s) => s.sessionId));
+    } catch (error) {
+      this.deps.log?.(`recovery: runner status failed: ${errorMessage(error)}`);
+      return undefined;
     }
   }
 
@@ -96,6 +117,11 @@ export class SessionRecovery {
       this.deps.log?.(`recovery: resuming session ${session.id}`);
       await this.deps.sessions.continueAfterRestart(session.id, RESTART_CONTINUE_MESSAGE);
     } catch (error) {
+      // A turn is running: the session came back by another path, so there is nothing to resume.
+      if (isTurnRunningError(error)) {
+        this.deps.log?.(`recovery: session ${session.id} already has a turn running`);
+        return;
+      }
       this.deps.launcher.fail(session.id, "restart", error);
     }
   }
