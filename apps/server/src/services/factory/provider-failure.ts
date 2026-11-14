@@ -31,9 +31,9 @@ export function providerWide(cause: Unavailable): boolean {
 
 /**
  * Why `s` failed because of its provider, or null when it didn't (or didn't fail). A session
- * that could not start has a `run_failed` inbox item keyed `start` (the launcher's, or the
- * runner's report of the refused open), and the provider's classification of a refused open in
- * `startError.kind`: `setup` (its CLI is too old to run) or `auth` (not signed in).
+ * that could not start has the runner's report of the refused open (`startError`, with the
+ * provider's classification: `setup` for a CLI too old to run, `auth` for one not signed in),
+ * or the launcher's `run_failed` inbox item keyed `start`.
  */
 export function providerFailure(
   repo: SessionRepo,
@@ -43,10 +43,11 @@ export function providerFailure(
   if (s.status !== "failed" && s.status !== "idle") return null;
   const last = repo.rootTurnIds(s).at(-1);
   if (!last) {
-    if (s.status !== "failed" || !inbox.find(`inbox:${s.id}:start`)) return null;
+    if (s.status !== "failed") return null;
     if (s.startError?.kind === "setup") return { reason: TOO_OLD, until: null };
     if (s.startError?.kind === "auth") return { reason: "not signed in", until: null };
-    return { reason: FAILING_TO_START, until: null };
+    const notStarted = s.startError || inbox.find(`inbox:${s.id}:start`);
+    return notStarted ? { reason: FAILING_TO_START, until: null } : null;
   }
   const turn = repo.turn(s.id, last);
   if (turn?.status !== "failed" || !turn.error) return null;

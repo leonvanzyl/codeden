@@ -35,7 +35,7 @@ import type { RunnerPort } from "../runner-port";
 import type { SessionRepo } from "../sessions/repo";
 import type { SessionService } from "../sessions/session-service";
 import { flagAllowList, isAllowListNotice } from "./allow-lists";
-import { ProviderAvailability } from "./availability";
+import { ProviderAvailability, type ProviderRunnable } from "./availability";
 import { SessionArchiver } from "./cleanup";
 import type { FactoryContext } from "./context";
 import { assertCanEnter, haltProject } from "./controls";
@@ -445,6 +445,16 @@ export class FactoryService {
     );
     this.soon(projectId);
     return res;
+  }
+
+  /**
+   * Whether new work can start on `provider` now and, if not, why and what fixes it ("Gemini
+   * CLI is too old (0.36.0, needs 0.68.0+): run `npm install -g @google/gemini-cli@latest`"):
+   * not offered by the runner, not installed, too old to run, signed out, at its usage limit or
+   * backed off after a provider failure (§10.1, Provider availability).
+   */
+  providerRunnable(provider: string): ProviderRunnable {
+    return this.ctx.sessions.runnable(provider);
   }
 
   /** Whether a session is a factory builder (it may report a reproduction or analysis). */

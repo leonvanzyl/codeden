@@ -57,12 +57,7 @@ export function reduceProcessEvent(
       );
     }
     const message = event.error?.message ?? "The agent process crashed";
-    // A first open that failed: the launcher reports the same failure under its `start` key,
-    // so both land in one inbox item.
-    const id =
-      refused && !session.rootThreadId
-        ? `inbox:${session.id}:start`
-        : `inbox:${session.id}:process:${runnerSeq}`;
+    const id = `inbox:${session.id}:process:${runnerSeq}`;
     d.putInbox(runFailedInbox(session, id, message, session.rootThreadId, ts));
   } else if (!FINAL.has(session.status)) {
     d.putSession(

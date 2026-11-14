@@ -77,6 +77,17 @@ describe("ProviderAvailability", () => {
     expect(availability.unavailable("gemini")).toMatchObject({
       reason: expect.stringMatching(/too old/),
     });
+    // The one check other features reuse (e.g. Retry): why, and the fix.
+    expect(availability.runnable("claude").runnable).toBe(true);
+    expect(availability.runnable("gemini", "Gemini CLI")).toEqual({
+      runnable: false,
+      reason: "too old (0.36.0, needs 0.68.0+)",
+      until: null,
+      detail: "Gemini CLI 0.36.0 is too old (needs 0.68.0+). Update it.",
+      fix: { kind: "upgrade", command: "npm install -g @google/gemini-cli@latest" },
+      message:
+        "Gemini CLI is too old (0.36.0, needs 0.68.0+): run `npm install -g @google/gemini-cli@latest`",
+    });
   });
 });
 
@@ -98,6 +109,19 @@ describe("factory with a provider whose CLI is too old", () => {
     expect(item(created.id).stage).toBe("verifying");
     expect(item(created.id).reviewerProvider).not.toBe("gemini");
     expect(env.starts.map((s) => s.provider)).not.toContain("gemini");
+    expect(env.factory.providerRunnable("gemini")).toMatchObject({
+      runnable: false,
+      fix: { kind: "upgrade" },
+    });
+    expect(env.factory.providerRunnable("opencode")).toMatchObject({
+      runnable: false,
+      reason: "not signed in",
+    });
+    expect(env.factory.providerRunnable("claude").runnable).toBe(true);
+    expect(env.factory.providerRunnable("cursor")).toMatchObject({
+      runnable: false,
+      reason: "not offered by the runner",
+    });
   });
 
   it("doesn't start a builder on it", async () => {

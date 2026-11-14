@@ -11,7 +11,7 @@ import { errorMessage } from "../errors";
 import type { RunnerPort } from "../runner-port";
 import type { SessionRepo } from "../sessions/repo";
 import type { SessionService } from "../sessions/session-service";
-import type { ProviderAvailability, Unavailable } from "./availability";
+import type { ProviderAvailability, ProviderRunnable, Unavailable } from "./availability";
 import { builderPrompt, revertPrompt, reviewerPrompt } from "./prompts";
 import { FACTORY_STARTER, isFactorySession } from "./starter";
 
@@ -84,6 +84,28 @@ export class FactorySessions {
       const u = this.deps.availability.unavailable(provider);
       return u ? [{ provider, ...u }] : [];
     });
+  }
+
+  /**
+   * Whether new work can start on `provider` now and, if not, why and the fix (see
+   * `ProviderAvailability.runnable`). A provider the runner doesn't offer can't run either.
+   * Starts a background detection when the last one is old; never waits for it.
+   */
+  runnable(provider: string): ProviderRunnable {
+    this.deps.availability.refresh();
+    const name = this.displayName(provider);
+    if (!this.deps.runner.providers().some((p) => p.id === provider)) {
+      const reason = "not offered by the runner";
+      return {
+        runnable: false,
+        reason,
+        until: null,
+        detail: null,
+        fix: null,
+        message: `${name} is ${reason}`,
+      };
+    }
+    return this.deps.availability.runnable(provider, name);
   }
 
   /** The provider's name for notes ("Codex"), from the runner's provider list. */

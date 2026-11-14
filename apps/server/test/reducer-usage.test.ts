@@ -124,7 +124,7 @@ describe("process lifecycle", () => {
     });
   });
 
-  it("keeps a refused first open with the session, in the launcher's start item (#269)", () => {
+  it("keeps a refused open with the session (#269)", () => {
     const error = {
       code: "open_failed",
       message: "Gemini CLI 0.36.0 is too old (needs 0.68.0+)",
@@ -135,9 +135,7 @@ describe("process lifecycle", () => {
     fresh.addSession({ ...sampleSession, status: "starting", projectId: "p1" });
     fresh.applyProcess({ kind: "session.process", sessionId: "s1", state: "crashed", error }, 3);
     expect(fresh.session()).toMatchObject({ status: "failed", startError: error });
-    // The launcher's own report of the failed start updates this item instead of adding one.
-    expect([...fresh.inbox.keys()]).toEqual(["inbox:s1:start"]);
-    expect(fresh.inbox.get("inbox:s1:start")).toMatchObject({
+    expect(fresh.inbox.get("inbox:s1:process:3")).toMatchObject({
       kind: "run_failed",
       body: error.message,
     });
