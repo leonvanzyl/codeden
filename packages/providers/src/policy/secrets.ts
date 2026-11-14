@@ -67,13 +67,23 @@ export function secretArgument(
     if (w.pattern || written.includes(w.text)) return false;
     const candidates = w.arg >= 0 ? paths(args[w.arg] as string, w.from) : [w.text];
     return candidates.some((word) =>
-      braceAlternatives(word).some((alt) => {
-        const value = asPath(alt);
-        return value !== undefined && isSecret(value);
-      }),
+      braceAlternatives(word).some((alt) =>
+        [alt, uploaded(alt)].some((form) => {
+          const value = asPath(form);
+          return value !== undefined && isSecret(value);
+        }),
+      ),
     );
   });
   return found?.text;
+}
+
+/**
+ * The file an upload word names (`curl -F file=@x`, `--data-binary @x`, `--data=@x`): the word
+ * without its option, field name and `@`. Unchanged when it has no `@`.
+ */
+function uploaded(word: string): string {
+  return word.replace(/^(-+[a-z-]*=)?([\w.-]*=)?@(?=.)/i, "");
 }
 
 /** The most words one argument's brace expansion is followed to. */

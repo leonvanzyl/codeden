@@ -203,6 +203,69 @@ describe("attach_evidence refuses secrets", () => {
     });
   }
 
+  // #283: the agent CLIs' own logins, in a temp folder standing in for the user's home.
+  describe.each([
+    ["Codex's login", [".codex", "auth.json"]],
+    ["Claude's credentials", [".claude", ".credentials.json"]],
+    ["Claude's global config", [".claude.json"]],
+    ["Gemini CLI's OAuth file", [".gemini", "oauth_creds.json"]],
+    ["Gemini CLI's accounts", [".gemini", "google_accounts.json"]],
+    ["OpenCode's login", [".local", "share", "opencode", "auth.json"]],
+    ["gh's hosts.yml", [".config", "gh", "hosts.yml"]],
+  ])("%s in the user's home", (_label, parts) => {
+    let home: string;
+    let file: string;
+    beforeEach(() => {
+      home = mkdtempSync(join(tmpdir(), "codeden-home-"));
+      file = join(home, ...parts);
+      mkdirSync(dirname(file), { recursive: true });
+      writeFileSync(file, '{"refresh_token":"hunter2"}\n');
+    });
+    afterEach(() => rmSync(home, { recursive: true, force: true }));
+
+    it("attach_evidence refuses it, under any published name", async () => {
+      const session = issueSession();
+      for (const files of [[{ path: file }], [{ path: file, name: "notes.txt" }]]) {
+        await expect(env.service.attachEvidence(session.id, { files })).rejects.toMatchObject(
+          refused,
+        );
+      }
+      nothingPublished();
+    });
+
+    it("share_to_chat refuses it, under any name", async () => {
+      const session = issueSession();
+      for (const input of [{ path: file }, { path: file, name: "shot.png" }]) {
+        await expect(share(session.id, input)).rejects.toMatchObject(refused);
+      }
+      expect(env.artifacts.list({ sessionId: session.id })).toEqual([]);
+    });
+  });
+
+  it("refuses a login in a home the user moved (CODEX_HOME), but not that home's settings", async () => {
+    const home = mkdtempSync(join(tmpdir(), "codeden-codex-home-"));
+    vi.stubEnv("CODEX_HOME", home);
+    try {
+      writeFileSync(join(home, "auth.json"), '{"refresh_token":"hunter2"}\n');
+      writeFileSync(join(home, "config.toml"), 'model = "x"\n');
+      const session = issueSession();
+      await expect(
+        env.service.attachEvidence(session.id, { files: [{ path: join(home, "auth.json") }] }),
+      ).rejects.toMatchObject(refused);
+      await expect(share(session.id, { path: join(home, "auth.json") })).rejects.toMatchObject(
+        refused,
+      );
+      nothingPublished();
+      const result = await env.service.attachEvidence(session.id, {
+        files: [{ path: join(home, "config.toml") }],
+      });
+      expect(result.files.map((f) => f.name)).toEqual(["config.toml"]);
+    } finally {
+      vi.unstubAllEnvs();
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
   it("still attaches .env.example, screenshots and oddly named ordinary files", async () => {
     writeFileSync(join(env.dir, ".env.example"), "SECRET=\n");
     writeFileSync(join(env.dir, "shot.png"), Buffer.from([0x89, 0x50, 0x4e, 0x47]));

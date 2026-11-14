@@ -15,6 +15,7 @@ import {
   type PathContext,
   resolveAgainst,
 } from "./paths";
+import { loginRisk, providerLoginCommand, touchesProviderLogin } from "./provider-logins";
 import { pipesDownloadIntoInterpreter } from "./remote-scripts";
 import { braceAlternatives, dumpsEnvironment, secretArgument, toolOutputs } from "./secrets";
 import {
@@ -52,15 +53,17 @@ const MAX_DEPTH = 4;
  * Classify a shell command (any shell: POSIX, PowerShell or cmd). Downloads piped into an
  * interpreter (`curl … | sh`, `irm … | iex`) are found on the parsed pipeline in
  * `classifyList`; here, a download run through a substitution (`iex (irm …)`,
- * `bash -c "$(curl …)"`, `bash <(curl …)`). CodeDen's own credentials are looked for first,
- * across the whole command, so an earlier ordinary risk (`cat .env; …`) can't hide them.
+ * `bash -c "$(curl …)"`, `bash <(curl …)`). CodeDen's own credentials, then the agent CLIs'
+ * logins, are looked for first, across the whole command, so an earlier ordinary risk
+ * (`cat .env; …`) can't hide them.
  */
 export function classifyCommand(command: string, ctx: RiskContext): RiskAssessment {
   const list = parseShell(command, ctx.shell ?? "auto");
   // What every level asks about, looked for across the whole command first: CodeDen's own
-  // credentials, then a write of an agent's own allow-list.
+  // credentials, an agent CLI's login, then a write of an agent's own allow-list.
   const always =
     firstInList(list, ctx, 0, credentialCommand) ??
+    firstInList(list, ctx, 0, (cmd, here) => providerLoginCommand(cmd, here)) ??
     firstInList(list, ctx, 0, (cmd, here) => agentPermissionsCommand(cmd, here));
   if (always) return always;
   if (
@@ -352,12 +355,13 @@ export function classifyWrite(target: string, ctx: RiskContext): RiskAssessment 
 
 /**
  * Classify a file read or search. Reads anywhere are fine except credential files; CodeDen's own
- * (or a folder holding them) ask at every level.
+ * and the agent CLIs' logins (or a folder holding them) ask at every level.
  */
 export function classifyRead(target: string, ctx: RiskContext): RiskAssessment {
   if (touchesCodedenCredentials(target, ctx)) {
     return credentialsRisk(`Reads CodeDen's own credentials: ${target}`);
   }
+  if (touchesProviderLogin(target, ctx)) return loginRisk(`Reads an agent CLI's login: ${target}`);
   if (isSecretPath(target)) return risky("secrets", `Reads the secrets file ${target}`);
   return SAFE;
 }

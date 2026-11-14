@@ -1,5 +1,5 @@
 import { basename } from "node:path";
-import { isCodedenCredentialFile, isSecretPath } from "@codeden/providers";
+import { isCodedenCredentialFile, isProviderLoginFile, isSecretPath } from "@codeden/providers";
 import { forbidden } from "./errors";
 import { safeFileName } from "./github/evidence";
 
@@ -22,8 +22,10 @@ export interface OutgoingFile {
  * Refuse secrets on their way out (§9 Evidence, §15). `attach_evidence` publishes files to
  * GitHub, and `share_to_chat` stores artifacts `attach_evidence` can publish by id. Calls to
  * CodeDen's own tools skip the risk classifier, so these tools check here: a file `isSecretPath`
- * matches by any of its names (`.env`, SSH keys, `.npmrc`, `*.pem`, ...), or one of CodeDen's
- * own credential files in `home`, is refused with `403 secret_file` at every permission level.
+ * matches by any of its names (`.env`, SSH keys, `.npmrc`, `*.pem`, the agent CLIs' login files
+ * such as `~/.codex/auth.json`, ...), one of CodeDen's own credential files in `home`, or an agent
+ * CLI's login in a home this machine's environment moved (`CODEX_HOME`, ...) is refused with
+ * `403 secret_file` at every permission level.
  * Names are also checked as evidence publishes them (`safeFileName`, which turns anything but
  * `[A-Za-z0-9._-]`, separators included, into `-`), so `-id_rsa`, `notes.p!em` and
  * `service/account.json` can't go out as `id_rsa`, `notes.pem` and `service-account.json`;
@@ -55,6 +57,12 @@ export function assertNotSecret(file: OutgoingFile, home: string | undefined): v
   if (file.realPath && home && isCodedenCredentialFile(file.realPath, home)) {
     throw forbidden(
       `${basename(file.realPath)} is one of CodeDen's own credential files, which are never attached or shared.`,
+      "secret_file",
+    );
+  }
+  if (file.realPath && isProviderLoginFile(file.realPath)) {
+    throw forbidden(
+      `${basename(file.realPath)} is an agent CLI's login, which is never attached or shared.`,
       "secret_file",
     );
   }

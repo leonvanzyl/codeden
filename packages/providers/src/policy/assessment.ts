@@ -16,7 +16,8 @@ export type RiskAssessment =
       /**
        * Asks at every level, Full included, like `codeden`, but without its read-only refusal:
        * writing an agent's own allow-list (`./agent-permissions`), which would let that agent
-       * run what it lists without CodeDen asking.
+       * run what it lists without CodeDen asking, and reading an agent CLI's login
+       * (`./provider-logins`), which would hand over the user's account.
        */
       always?: true;
     };
@@ -33,7 +34,10 @@ export const risky = (action: ApprovalAction, reason: string): RiskAssessment =>
 export const touchesCodeden = (risk: RiskAssessment): boolean =>
   risk.risky && risk.codeden === true;
 
-/** True for a verdict every level asks about: CodeDen's credentials, an agent's allow-list. */
+/**
+ * True for a verdict every level asks about: CodeDen's credentials, an agent's allow-list, an
+ * agent CLI's login.
+ */
 export const asksAtEveryLevel = (risk: RiskAssessment): boolean =>
   risk.risky && (risk.codeden === true || risk.always === true);
 
