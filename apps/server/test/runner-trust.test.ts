@@ -1,46 +1,37 @@
-import { once } from "node:events";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { createServer } from "node:http";
-import type { AddressInfo } from "node:net";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import {
-  CODEDEN_VERSION,
-  HOME_RUNNER_ID,
-  RUNNER_PROTOCOL_VERSION,
-  type RunnerEvent,
-  type RunnerLock,
-  type RunnerWelcome,
-} from "@codeden/contracts";
+import { HOME_RUNNER_ID, type RunnerEvent, type RunnerStream } from "@codeden/contracts";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type WebSocket from "ws";
-import { WebSocketServer } from "ws";
 import { type Database, openDatabase } from "../src/db/client";
-import { lastAckedSeq } from "../src/events/ingest";
+import { ingestRunnerEvent, lastAckedSeq } from "../src/events/ingest";
 import { findRunnerRecord } from "../src/events/runner-projection";
 import { EventStore } from "../src/events/store";
 import { RunnerHub } from "../src/runner/hub";
+import { journalIdRefusal } from "../src/runner/identity";
 import { sampleSession } from "./helpers";
+import { type FakeRunner, startFakeRunner } from "./support/fake-runner";
 import { waitUntil } from "./support/harness";
 
 /**
  * A sandbox runner shares its sandbox with an agent that has a shell, so to the server its
  * messages are untrusted input. These tests drive the real `RunnerHub` and `RunnerClient`
- * against scripted runners (a WebSocket endpoint speaking the runner protocol) that send what a
- * compromised sandbox runner could: events for other runners' sessions, or another runner's
- * journal id in its welcome.
+ * against scripted runners that send what a compromised sandbox runner could: events and
+ * streams for other runners' sessions and ptys, or a journal id that isn't its own.
  */
 
 let dir: string;
 let database: Database;
 let store: EventStore;
 let hub: RunnerHub | undefined;
+let streams: RunnerStream[];
 const runners: FakeRunner[] = [];
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "codeden-runner-trust-"));
   database = openDatabase(join(dir, "codeden.db"));
   store = new EventStore(database.db);
+  streams = [];
 });
 
 afterEach(async () => {
@@ -51,99 +42,11 @@ afterEach(async () => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-const ts = "2026-11-14T10:00:00.000Z";
-
-interface FakeRunner {
-  lockFile: string;
-  /** Seqs the server acknowledged. */
-  acked: number[];
-  /** Whether a server connection is open. */
-  open: () => boolean;
-  /** Send a durable event; resolves once the server acked it or dropped the connection. */
-  send: (seq: number, event: RunnerEvent) => Promise<void>;
-  /** Report this journal id in later welcomes. */
-  claim: (runnerId: string) => void;
-  /** Drop the server's connection (it reconnects). */
-  drop: () => void;
-  close: () => Promise<void>;
-}
-
-/** A runner endpoint that welcomes the server with `runnerId` and lets the test send events. */
-async function fakeRunner(runnerId: string): Promise<FakeRunner> {
-  const token = "t".repeat(32);
-  const acked: number[] = [];
-  let claimed = runnerId;
-  let socket: WebSocket | undefined;
-  const wss = new WebSocketServer({ noServer: true });
-  const http = createServer((req, res) => {
-    const ok = req.url === "/health" && req.headers.authorization === `Bearer ${token}`;
-    res.writeHead(ok ? 200 : 401).end();
-  });
-  http.on("upgrade", (req, sock, head) => {
-    wss.handleUpgrade(req, sock, head, (ws) => {
-      socket = ws;
-      ws.on("message", (data) => {
-        const msg = JSON.parse(data.toString()) as { type: string; seq?: number };
-        if (msg.type === "hello") ws.send(JSON.stringify(welcome(claimed)));
-        if (msg.type === "ack" && msg.seq !== undefined) acked.push(msg.seq);
-      });
-    });
-  });
-  http.listen(0, "127.0.0.1");
-  await once(http, "listening");
-  const port = (http.address() as AddressInfo).port;
-  const lockFile = join(dir, `runner-${port}.json`);
-  const lock: RunnerLock = {
-    pid: process.pid,
-    port,
-    token,
-    version: CODEDEN_VERSION,
-    protocolVersion: RUNNER_PROTOCOL_VERSION,
-    runnerId,
-    startedAt: ts,
-    providers: [],
-  };
-  writeFileSync(lockFile, JSON.stringify(lock));
-  const open = () => socket?.readyState === 1;
-  const runner: FakeRunner = {
-    lockFile,
-    acked,
-    open,
-    send: async (seq, event) => {
-      if (!open()) return;
-      socket?.send(JSON.stringify({ type: "event", seq, ts, event }));
-      await waitUntil(() => acked.includes(seq) || !open(), 15_000);
-    },
-    claim: (id) => {
-      claimed = id;
-    },
-    drop: () => socket?.terminate(),
-    close: async () => {
-      for (const client of wss.clients) client.terminate();
-      wss.close();
-      http.close();
-      await once(http, "close");
-    },
-  };
+const fakeRunner = async (runnerId: string) => {
+  const runner = await startFakeRunner(dir, runnerId);
   runners.push(runner);
   return runner;
-}
-
-function welcome(runnerId: string): RunnerWelcome {
-  return {
-    type: "welcome",
-    protocolVersion: RUNNER_PROTOCOL_VERSION,
-    runnerId,
-    runnerVersion: CODEDEN_VERSION,
-    pid: process.pid,
-    startedAt: ts,
-    capabilities: { pty: false, browser: false, git: true, mcpProxy: false },
-    providers: [],
-    sessions: [],
-    journal: { lastSeq: 0, unacked: 0 },
-    draining: false,
-  };
-}
+};
 
 const createSession = (id: string, runnerId: string | null) =>
   store.append([
@@ -158,7 +61,7 @@ const createSession = (id: string, runnerId: string | null) =>
 async function homeAndSandbox(sandboxClaims: string) {
   const home = await fakeRunner("r-home");
   const sandbox = await fakeRunner(sandboxClaims);
-  hub = new RunnerHub({ db: database.db, store });
+  hub = new RunnerHub({ db: database.db, store, onStream: (s) => streams.push(s) });
   const homeClient = hub.add({
     id: HOME_RUNNER_ID,
     backend: "local",
@@ -179,6 +82,14 @@ async function homeAndSandbox(sandboxClaims: string) {
   return { home, sandbox, homeClient, sandboxClient };
 }
 
+/** As `homeAndSandbox`, with the sandbox connected as `r-1` and session `sbx-s` placed on it. */
+async function sandboxWithSession() {
+  const runners = await homeAndSandbox("r-1");
+  await runners.sandboxClient.start();
+  createSession("sbx-s", "r-1");
+  return runners;
+}
+
 const thread = (sessionId: string, id: string): RunnerEvent => ({
   kind: "agent",
   sessionId,
@@ -188,13 +99,14 @@ const thread = (sessionId: string, id: string): RunnerEvent => ({
 const eventsFor = (sessionId: string, after: number) =>
   store.listAfter(after, 10_000).filter((e) => e.sessionId === sessionId);
 
+const refused = (client: { status: { lastError: string | null } }) =>
+  waitUntil(() => client.status.lastError?.includes("refused"), 15_000);
+
 describe("events from a sandbox runner", () => {
   it("are stored for sessions routed to it; others are dropped and acked", async () => {
     createSession("home-s", "r-home");
     createSession("unplaced-s", null);
-    createSession("sbx-s", "r-1");
-    const { sandbox, sandboxClient } = await homeAndSandbox("r-1");
-    await sandboxClient.start();
+    const { sandbox, sandboxClient } = await sandboxWithSession();
     const before = store.headSeq();
 
     // The sandbox's own session: stored, as for any runner.
@@ -236,6 +148,32 @@ describe("events from a sandbox runner", () => {
     expect(sandbox.open()).toBe(true);
     expect(sandboxClient.status.state).toBe("connected");
   });
+
+  it("reach the UI and the log only for its own ptys and sessions", async () => {
+    createSession("home-s", "r-home");
+    const { sandbox, sandboxClient } = await sandboxWithSession();
+    await sandboxClient.request({ name: "pty.open", ptyId: "p-sbx", cwd: "/", cols: 80, rows: 24 });
+
+    // A home terminal and a home session's browser: dropped.
+    sandbox.stream({ kind: "pty.output", ptyId: "p-home", data: "forged prompt$ " });
+    sandbox.stream({ kind: "browser.tabs", sessionId: "home-s", tabs: [] });
+    sandbox.stream({ kind: "browser.dialogs", sessionId: "home-s", dialogs: [] });
+    // Its own: delivered, in order, after the forged ones were handled.
+    sandbox.stream({ kind: "pty.output", ptyId: "p-sbx", data: "$ " });
+    sandbox.stream({ kind: "browser.tabs", sessionId: "sbx-s", tabs: [] });
+    await waitUntil(() => streams.length >= 2, 15_000);
+    expect(streams).toEqual([
+      { kind: "pty.output", ptyId: "p-sbx", data: "$ " },
+      { kind: "browser.tabs", sessionId: "sbx-s", tabs: [] },
+    ]);
+
+    const before = store.headSeq();
+    await sandbox.send(1, { kind: "pty.exited", ptyId: "p-home", exitCode: 0 });
+    await sandbox.send(2, { kind: "pty.exited", ptyId: "p-sbx", exitCode: 0 });
+    const exits = store.listAfter(before, 100).filter((e) => e.type === "pty.exited");
+    expect(exits.map((e) => e.payload)).toEqual([{ ptyId: "p-sbx", exitCode: 0 }]);
+    expect(sandbox.acked).toEqual([1, 2]);
+  });
 });
 
 describe("a runner's journal id", () => {
@@ -247,7 +185,7 @@ describe("a runner's journal id", () => {
     const before = store.headSeq();
 
     void sandboxClient.start().catch(() => undefined);
-    await waitUntil(() => sandboxClient.status.lastError?.includes("refused"), 15_000);
+    await refused(sandboxClient);
     expect(sandboxClient.status.lastError).toBe(
       "Runner rn-1 (docker) was refused: journal id r-home belongs to runner home",
     );
@@ -269,24 +207,51 @@ describe("a runner's journal id", () => {
     expect(findRunnerRecord(database.db, "rn-1")?.runnerId).toBeNull();
   });
 
+  it("must be new on a sandbox runner's first connection", async () => {
+    // A session from before the home runner's journal was reset: no record carries its id, so
+    // it routes to the home runner. A sandbox runner must not take it over by claiming the id.
+    createSession("old-s", "r-old");
+    const { sandboxClient } = await homeAndSandbox("r-old");
+    void sandboxClient.start().catch(() => undefined);
+    await refused(sandboxClient);
+    expect(sandboxClient.status.lastError).toBe(
+      "Runner rn-1 (docker) was refused: journal id r-old is not new: sessions already carry it",
+    );
+    expect(hub?.forSession("old-s")).toBe(hub?.home());
+    expect(findRunnerRecord(database.db, "rn-1")?.runnerId).toBeNull();
+
+    // An id with stored events (an ack position) isn't new either; the home runner, trusted,
+    // may still come back under any id no other record carries.
+    ingestRunnerEvent(database.db, store, "r-gone", {
+      type: "event",
+      seq: 1,
+      ts: sampleSession.createdAt,
+      event: { kind: "runner.draining", reason: "upgrade" },
+    });
+    expect(journalIdRefusal(database.db, "rn-2", "r-gone", true)).toBe(
+      "journal id r-gone is not new: events were already stored under it",
+    );
+    expect(journalIdRefusal(database.db, "rn-2", "r-fresh", true)).toBeNull();
+    expect(journalIdRefusal(database.db, HOME_RUNNER_ID, "r-old", false)).toBeNull();
+  });
+
   it("stays what a sandbox runner first connected with", async () => {
-    createSession("sbx-s", "r-1");
-    const { sandbox, sandboxClient } = await homeAndSandbox("r-1");
-    await sandboxClient.start();
+    const { sandbox, sandboxClient } = await sandboxWithSession();
     const port = hub?.forSession("sbx-s");
     expect(port).not.toBe(hub?.home());
+    await sandbox.send(1, thread("sbx-s", "t-1"));
 
     // Under a new journal id its sessions would match no record and fall back to the home runner.
     sandbox.claim("r-2");
     sandbox.drop();
-    await waitUntil(() => sandboxClient.status.lastError?.includes("refused"), 15_000);
+    await refused(sandboxClient);
     expect(sandboxClient.status.lastError).toBe(
       "Runner rn-1 (docker, runner r-1) was refused: journal id r-2 is not its own (r-1)",
     );
     expect(findRunnerRecord(database.db, "rn-1")?.runnerId).toBe("r-1");
     expect(hub?.forSession("sbx-s")).toBe(port);
 
-    // Back under its own id, it connects again.
+    // Back under its own id (which its sessions and ack position carry), it connects again.
     sandbox.claim("r-1");
     await waitUntil(() => sandboxClient.status.state === "connected", 15_000);
   });

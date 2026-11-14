@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 import type { Db } from "../db/client";
-import { runners } from "../db/schema";
+import { runnerState, runners, sessions } from "../db/schema";
 
 /**
  * Why a runner's `welcome` must be refused, or `null` to accept it (`docs/remote-runners.md`
@@ -15,6 +15,12 @@ import { runners } from "../db/schema";
  * - An untrusted runner (any but the home runner) keeps the journal id it first connected with:
  *   under a new one, the sessions routed to its old id would match no record and fall back to
  *   the home runner. The home runner may come back with a new id (its journal was reset).
+ * - An untrusted runner's first journal id must be new to the server: no session may carry it
+ *   and no ack position may exist for it. An id only a session or `runner_state` still holds
+ *   (the home runner's from before a journal reset, say) would otherwise hand it those
+ *   sessions, which route to the home runner today, and their ack position. A backend that
+ *   assigns journal ids itself records the id on the runner's record before placing sessions
+ *   under it, which makes it the runner's own.
  *
  * `recordId` is the connecting runner's own record (`runners.id`).
  */
@@ -37,8 +43,23 @@ export function journalIdRefusal(
     .from(runners)
     .where(eq(runners.id, recordId))
     .get();
-  if (own?.runnerId && own.runnerId !== runnerId) {
-    return `journal id ${runnerId} is not its own (${own.runnerId})`;
+  if (own?.runnerId) {
+    return own.runnerId === runnerId
+      ? null
+      : `journal id ${runnerId} is not its own (${own.runnerId})`;
   }
+  const session = db
+    .select({ id: sessions.id })
+    .from(sessions)
+    .where(eq(sessions.runnerId, runnerId))
+    .limit(1)
+    .get();
+  if (session) return `journal id ${runnerId} is not new: sessions already carry it`;
+  const acked = db
+    .select({ runnerId: runnerState.runnerId })
+    .from(runnerState)
+    .where(eq(runnerState.runnerId, runnerId))
+    .get();
+  if (acked) return `journal id ${runnerId} is not new: events were already stored under it`;
   return null;
 }

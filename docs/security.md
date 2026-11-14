@@ -40,8 +40,8 @@ Off by default. When you turn it on:
 - The **home runner** runs next to the server on your machine and is trusted like the server. It is the only runner CodeDen connects today.
 - **Sandbox runners** (runners in a container or a remote sandbox, coming with remote runners) share their sandbox with an agent that has a shell, so CodeDen treats everything they send as untrusted input. The server checks:
   - **Events against routing.** An event that names a session (agent output, turns, usage, approvals, provider crashes, checkpoints, setup output) is stored only when that session is routed to the runner that sent it. Anything else is dropped, logged and acknowledged, so a sandbox runner can't write into your other sessions.
-  - **Journal ids.** Each runner reports a journal id when it connects; it keys that runner's event stream and which sessions are sent to it. A runner reporting an id another runner already has is refused, so it can't stall or take over that runner's stream or its sessions, and a sandbox runner must keep the id it first connected with.
-  - **Not checked yet:** terminal output, browser frames and terminal exits a sandbox runner streams. They are display-only, and get the same check before sandbox runners ship.
+  - **Terminals and the browser.** Terminal output and exits are shown only for terminals CodeDen opened on that runner, and browser frames, tabs and dialogs only for its own sessions, so a sandbox runner can't write into your other terminals or browser panels.
+  - **Journal ids.** Each runner reports a journal id when it connects; it keys that runner's event stream and which sessions are sent to it. A runner reporting an id another runner already has is refused, so it can't stall or take over that runner's stream or its sessions. A sandbox runner's first id must also be new to CodeDen (no session or stored event uses it), and it must keep that id afterwards.
 
 ## The orchestrator and PMs can't write code
 

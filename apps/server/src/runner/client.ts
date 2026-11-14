@@ -26,6 +26,7 @@ import type { EventStore } from "../events/store";
 import { journalIdRefusal } from "./identity";
 import { type RunnerLaunchConfig, type RunnerStartTimeouts, startRunnerProcess } from "./launcher";
 import { isProcessAlive, probeRunnerLock, readLiveRunnerLock } from "./lock";
+import { UntrustedRunnerGuard } from "./untrusted";
 
 export interface RunnerClientOptions {
   /**
@@ -40,8 +41,9 @@ export interface RunnerClientOptions {
   describe?: () => string;
   /**
    * The runner's messages are untrusted input: every runner but the home runner (a sandbox
-   * runner shares its sandbox with an agent that has a shell). Its events are stored only for
-   * sessions routed to it, and it must keep the journal id it first connected with.
+   * runner shares its sandbox with an agent that has a shell). Its events and streams count only
+   * for sessions routed to it and ptys the server opened on it, and its journal id must be new
+   * on its first connection and the same on every later one (`identity.ts`, `untrusted.ts`).
    */
   untrusted?: boolean;
   home: string;
@@ -128,7 +130,12 @@ export class RunnerClient {
     lastError: null,
   };
 
-  constructor(private readonly opts: RunnerClientOptions) {}
+  /** What an untrusted runner may send beyond its sessions' events; none for the home runner. */
+  private readonly guard: UntrustedRunnerGuard | undefined;
+
+  constructor(private readonly opts: RunnerClientOptions) {
+    this.guard = opts.untrusted ? new UntrustedRunnerGuard(opts.db) : undefined;
+  }
 
   get status(): RunnerConnectionStatus {
     return this.current;
@@ -174,6 +181,7 @@ export class RunnerClient {
       }, deadlineMs);
       this.pending.set(id, { name: command.name, resolve, reject, timer });
     });
+    this.guard?.sending(command as RunnerCommand);
     this.send({ type: "command", id, command: command as RunnerCommand });
     const raw = await result;
     return RunnerCommandResults[command.name as N].parse(raw) as RunnerCommandResult<N>;
@@ -308,7 +316,7 @@ export class RunnerClient {
               return settle(new Error(refused));
             }
             welcomed = true;
-          } else if (msg.type === "event" && !welcomed) {
+          } else if ((msg.type === "event" || msg.type === "stream") && !welcomed) {
             return;
           }
           this.handle(msg, settle);
@@ -366,6 +374,8 @@ export class RunnerClient {
         this.onEvent(msg);
         return;
       case "stream":
+        // An untrusted runner's stream for a pty or session that isn't its own is dropped.
+        if (this.guard && !this.guard.allowsStream(msg.stream, this.runnerId)) return;
         this.opts.onStream?.(msg.stream);
         return;
       case "providers":
@@ -466,13 +476,18 @@ export class RunnerClient {
     if (!runnerId) return;
     if (msg.seq > this.lastAckedSeq) {
       try {
+        const guard = this.guard;
         const { refused } = ingestRunnerEvent(this.opts.db, this.opts.store, runnerId, msg, {
           recordId: this.opts.recordId,
-          untrusted: this.opts.untrusted,
+          untrusted: !!guard,
+          ownsPty: guard && ((ptyId) => guard.ownsPty(ptyId)),
         });
         // Acked like any other, so the runner stops redelivering it, but never stored.
-        if (refused)
+        if (refused) {
           this.opts.log?.(`runner: dropped event ${msg.seq} (${msg.event.kind}): ${refused}`);
+        } else if (msg.event.kind === "pty.exited") {
+          guard?.ptyExited(msg.event.ptyId);
+        }
       } catch (error) {
         // Not acked: the runner keeps it journaled and redelivers it after a reconnect.
         this.opts.log?.(`runner: failed to store event ${msg.seq}: ${String(error)}`);
