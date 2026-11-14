@@ -63,7 +63,7 @@ While the factory runs you mostly just want to glance at it. The **Factory view*
 
 Open it with **Factory view** on the project page or the factory panel, or **Factory view · <project>** in the command palette (Ctrl K). It has its own address, `/projects/<projectId>/factory/view`, so you can bookmark it. **Full screen** in its header fills the screen (in the desktop app, F11 does the same), and **Exit** goes back to the project page. It's only offered for projects in software factory or dark factory mode.
 
-- **The header** shows the project, its mode and the loop state (with the reason when it's paused, or "stopped" when a kill switch is on). Two counters answer "is anything waiting on me?": how many items **need you** (exactly what the **Needs you** lane lists) and how many **failed**. The kill switch, **Check now** and **Run scout now** work here as on the panel.
+- **The header** shows the project, its mode and the loop state (with the reason when it's paused, "stopped" when a kill switch is on, or **Draining: N items in flight** while it [finishes current work before stopping](#the-kill-switch)). Two counters answer "is anything waiting on me?": how many items **need you** (exactly what the **Needs you** lane lists) and how many **failed**. The kill switch (**Finish current work, then stop** or **Stop now**; **Resume** while draining), **Check now** and **Run scout now** work here as on the panel.
 - **The figures**, in one row: spend today against the daily budget, merges today (against the daily cap when auto-merge is on), agents working against the limit, the factory's open pull requests, failures and reverts today, and the median time from issue to merge over the last 7 days (from when the factory took the issue in). Where the panel shows the same figure, it's the same number.
 - **The pipeline**, left to right: **Intake** (new issues before their type is known, and in a dark factory the scout's round and its area reviewers), **Identify type** (sorted into bug, feature or docs, waiting for a free agent), **Building** (reproduce or analyze, then implement), **Reviewing** (the independent review, the merge checks and CI), **Merge queue** (in the order they merge, each pull request with its state and place, such as "Updating · #1" or "Queued #2", plus the ones rebasing or rebuilding) and **Merged** (today's merges).
   - **Cards.** Each item is a card with its issue number and title, its type, what it's doing now (its agent's latest progress line), and how long it's been in its step. It also shows its pull request's state and, while it's reviewed or queued, how many merge checks passed (for example 5/8).
@@ -91,6 +91,7 @@ On tablets and phones the stages stack as sections you can fold, the figures wra
 - Whatever needs you sits on broken machines along the bottom: a red lamp and smoke for a failure, an amber lamp otherwise, and a flag above each.
 - In a dark factory, the scout walks the floor with a magnifying glass during a round, and its area reviewers write on notepads in the corner.
 - On the wall, a gauge shows spend against the daily budget, and a counter board shows today's merges.
+- While the factory finishes current work before stopping, a red **CLOSED** sign hangs on the IN door and the workers on the floor carry on.
 - With the kill switch on or the loop stopped, the lights dim and everyone sits down.
 
 Hover a worker, ticket, crate or machine to see its issue number and title (a builder also shows its latest progress line). Click it to open the same side sheet as on the board. Workers, crates and machines can also be reached with Tab. Under the scene, a line says what it shows ("4 building, 1 in review, 3 merged today, 2 need you") and updates for screen readers.
@@ -136,7 +137,7 @@ The rules that keep it cheap are enforced by the server, not left to the agents:
 - **At most `discoveryPerRound` review areas per round**, however many the scout asks for, and only as many as there are free agent slots: reviews, fixes, rebases and builds waiting for an agent come first. The scout ends its turn once it has planned, so its own slot goes to an area reviewer. When an area gets no reviewer, `factory_plan_round` tells the scout why (not an allowed area, asked for twice, over the round's limit, or no free slot under **Agents at once**).
 - **A scheduled round only starts when the queue runs low** and the interval has passed; at most `maxIssuesPerRound` issues come out of it; a round that runs over three hours is closed.
 - **No round and no filing at the work-in-progress limit** ([PRs open at most](#finish-before-starting)). A round already running keeps its area reviewers' findings and files them once a PR has merged; a round without area reviewers reviews then. The time a round waits doesn't count against its three hours.
-- **Run scout now** skips the interval and the threshold, nothing else. It's disabled, with the reason in its tooltip, while a round is running, when no agent slot is free (or other work waits for the free ones), at the work-in-progress limit, while the loop is paused or over today's budget, or while a kill switch is on. The next scheduled round counts its interval from the end of the manual one.
+- **Run scout now** skips the interval and the threshold, nothing else. It's disabled, with the reason in its tooltip, while a round is running, when no agent slot is free (or other work waits for the free ones), at the work-in-progress limit, while the loop is paused or over today's budget, while a kill switch is on, or while the factory finishes current work before stopping (that also ends a running round and stops the scout and its area reviewers). The next scheduled round counts its interval from the end of the manual one.
 - The scout and its area reviewers hold agent slots and count against the daily budget like every other factory session.
 
 ### Nobody waits on you in a dark factory
@@ -352,10 +353,19 @@ Spend comes from the same ledger as the [usage reports](usage-and-costs.md).
 
 ## The kill switch
 
-- **Per project:** **Kill switch** on the factory panel.
-- **Global:** **Settings → General → Global factory kill switch** stops every project's loop.
+- **Per project:** **Kill switch** on the factory panel and in the Factory view's header. It offers two ways to stop:
+  - **Finish current work, then stop** (offered first). The factory starts no new work: no intake or classification of new issues, no new builds, no scout rounds or area reviewers, and the scout can't file anything. The work already in flight carries on to the end of its pipeline under the usual rules: builders keep building, and their pull requests are reviewed, revised, rebased and merged as always (CI, the review, protected areas, the auto-merge setting, the limits). Reviews and merges of that work keep their place in the [slot order](#finish-before-starting), and nothing new claims a slot. Items that are only queued stay queued, untouched. Failed and escalated work waits for you as usual, without rebases or automatic re-reviews meanwhile.
+  - **Stop now**, for emergencies. One click stops the loop and **every factory session** (builders, reviewers, the scout, its area reviewers), and items that were building go back to the queue.
+- **Global:** **Settings → General → Global factory kill switch** stops every project's loop at once. It has no drain.
 
-One click stops the loop and **every factory session** (builders, reviewers, the scout, its area reviewers); items that were building go back to the queue. The loop stays stopped until you turn the switch off. A kill switch never hands work back to automations.
+While the factory drains, the header, the factory panel, the Factory view and the pixel scene show **Draining: N items in flight**. When the last of them merges, fails or comes to you, the factory stops by itself, as if you had pressed Stop now with nothing left to stop. You get one inbox notice, "Factory stopped after finishing N items", listing what happened to each item. The project manager hears it too, and sees the drain in `factory_status` and its status digest. A drain doesn't give up while anything is still moving: a revert opened because CI on the default branch failed after a merge counts as in flight. Work waiting for a provider that is signed out or at its usage limit doesn't hold it up.
+
+- **Resume** cancels a drain and the factory takes on new work again. **Stop now** stays available to stop everything at once.
+- **A time limit** is optional, with none by default. You can pick 30 minutes, 1, 2 or 4 hours when you start the drain. If work is still in flight when it runs out, the factory falls back to Stop now and tells you in the inbox what was still in flight.
+- **A restart** of CodeDen keeps draining. It never quietly goes back to normal work.
+- **The API:** `POST /api/projects/:id/kill-switch` takes `{ "on": true, "mode": "drain", "drainLimitMin": 60 }`. `mode` defaults to `now`, as before, and `drainLimitMin` is optional. `{ "on": false }` releases the switch and cancels a drain, as does `POST /api/projects/:id/factory/resume`. The global switch refuses `drain` (400 `drain_per_project`).
+
+Either way, the loop stays stopped until you release the switch (**Release kill switch**). After a drain there's nothing half done to recover. A kill switch never hands work back to automations.
 
 When the loop **pauses** by itself (budget, repeated failures, a revert), resume it from the panel once you've looked at the reason; that also clears the failure count.
 
