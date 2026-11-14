@@ -4,6 +4,7 @@ import {
   type FactoryItem,
   FactoryItemResponse,
   FactoryLoop,
+  type FactoryRetryOptions,
   type FactorySetTypeRequest,
   FactoryStatus,
   KillSwitchResponse,
@@ -48,8 +49,12 @@ export interface FactoryApi {
   admit(projectId: string, req: FactoryAdmitRequest): Promise<FactoryItem>;
   /** Move an item that hasn't started to another pipeline. */
   setType(projectId: string, req: FactorySetTypeRequest): Promise<FactoryItem>;
-  /** Run a stopped item again. */
-  retry(projectId: string, itemId: string): Promise<FactoryItem>;
+  /**
+   * Run a stopped item again: with its PR open, a fresh review of that PR (`rereview`, the
+   * default then); otherwise, or with `rebuild`, from the first step. 409 `no_open_pr` when a
+   * re-review is asked for without an open PR.
+   */
+  retry(projectId: string, itemId: string, opts?: FactoryRetryOptions): Promise<FactoryItem>;
 }
 
 const enc = encodeURIComponent;
@@ -78,6 +83,7 @@ export function httpFactoryApi(http: Fetcher): FactoryApi {
     digest: (id) => post(`${p(id)}/factory/digest`, {}, (v) => FactoryDigest.parse(v)),
     admit: (id, req) => post(`${p(id)}/factory/admit`, req, item),
     setType: (id, req) => post(`${p(id)}/factory/set-type`, req, item),
-    retry: (id, itemId) => post(`${p(id)}/factory/items/${enc(itemId)}/retry`, {}, item),
+    retry: (id, itemId, opts) =>
+      post(`${p(id)}/factory/items/${enc(itemId)}/retry`, opts ?? {}, item),
   };
 }

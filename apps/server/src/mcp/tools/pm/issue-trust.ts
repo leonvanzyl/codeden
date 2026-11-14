@@ -59,6 +59,26 @@ export function assertMayAdmit(services: AppServices, caller: Caller): void {
   );
 }
 
+/**
+ * Refuse `factory_retry_item` on work from an untrusted author (let in by a person) unless the
+ * user asked for it in this turn: running it again is the same call as letting it in. Work from
+ * trusted authors the PM may retry on its own.
+ */
+export function assertMayRetry(
+  services: AppServices,
+  caller: Caller,
+  item: { trust: "trusted" | "untrusted" | "admitted" },
+): void {
+  if (item.trust === "trusted" || userAskedThisTurn(services, caller)) return;
+  const raise =
+    caller.sessionId && services.factory.isUnattended(caller.sessionId)
+      ? "record it with factory_record_decision (needsHuman: true)"
+      : "ask them with ask_user";
+  throw new ToolError(
+    `Not retried: this work comes from an issue whose author isn't trusted, and this turn wasn't started by the user's own message, so only the user can run it again. If it looks worth retrying, ${raise}. Don't call factory_retry_item for it again in this turn.`,
+  );
+}
+
 function startRefusal(number: number, { author, checked }: AuthorTrust): string {
   const who = author ? `@${author}` : "an unknown author";
   const why = checked

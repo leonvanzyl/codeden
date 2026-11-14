@@ -14,16 +14,24 @@ import {
 } from "./rebase";
 import { adoptAgentPr, rebuildOriginal } from "./rebuild";
 import { recoverable } from "./recover";
+import {
+  autoReReview,
+  autoReReviews,
+  MAX_AUTO_REREVIEWS,
+  resumeReview,
+  stoppedNote,
+} from "./rereview";
 import { isBusy } from "./sessions";
 
 /**
  * Ownership (§10.1): the loop owns every PR the factory opened until it merges or closes,
  * whatever the item's stage. Verification looks after its own PRs; this step looks after the
- * PRs of items that ended `failed` or `escalated`, which wait for a person. A person merging or
- * closing one finishes its item; one that becomes conflicting is rebased (not a revise round),
- * or rebuilt after three requests, so nobody ever opens a factory PR that rotted into conflicts.
- * A rebuild that ended without its new PR leaves the PR it was replacing with the item. The
- * factory never merges these: a person does.
+ * PRs of items that ended `failed` or `escalated`. A person merging or closing one finishes its
+ * item; one that becomes conflicting is rebased (not a revise round), or rebuilt after three
+ * requests, so nobody ever opens a factory PR that rotted into conflicts. A failed item whose PR
+ * moved past its last review goes back to review by itself (`rereview.ts`); otherwise it waits
+ * for a Retry. A rebuild that ended without its new PR leaves the PR it was replacing with the
+ * item. The factory never merges these from here: escalated work is a person's to merge.
  */
 
 /** How often an owned PR outside verification is read from GitHub (its mergeability). */
@@ -80,9 +88,10 @@ export async function advanceOwned(
     return loop;
   }
   if (pr.mergeable !== "conflicting") {
-    if (rebaseAsks(item) > 0 && pr.mergeable === "mergeable") {
-      note(ctx, current, "Merge conflicts resolved; waiting for a person to merge it");
-    }
+    const resolved = rebaseAsks(item) > 0 && pr.mergeable === "mergeable";
+    if (current.stage === "failed") return settleStopped(ctx, loop, current, pr, resolved);
+    // Escalated (a protected area): only a person merges it.
+    if (resolved) note(ctx, current, "Merge conflicts resolved; waiting for a person to merge it");
     return loop;
   }
   // Rebasing work a person will merge spends an agent turn: not while paused, and only on a
@@ -94,6 +103,36 @@ export async function advanceOwned(
     return loop;
   }
   return advanceConflicting(ctx, project, loop, current, pr);
+}
+
+/**
+ * A failed item's PR without conflicts. When its head moved past the last verdict, with CI
+ * green, it goes back to a fresh review by itself, once per head (`rereview.ts`); not while the
+ * loop is paused, since a review spends an agent turn. Otherwise its note says what it needs.
+ */
+function settleStopped(
+  ctx: FactoryContext,
+  loop: FactoryLoop,
+  item: FactoryItem,
+  pr: FactoryPr,
+  resolved: boolean,
+): FactoryLoop {
+  const due = autoReReview(item, pr, loop.tuning.requireCi);
+  if (due === "now" && pr.headSha && loop.state !== "paused") {
+    const n = autoReReviews(item) + 1;
+    resumeReview(ctx, item, pr.ref, {
+      note: `Back in review by itself: #${pr.ref.number} has commits its last review didn't cover (${n} of ${MAX_AUTO_REREVIEWS})`,
+      autoHead: pr.headSha,
+    });
+    ctx.log?.(`factory: ${item.id}: #${pr.ref.number} re-reviewed after it stopped (new head)`);
+    return loop;
+  }
+  const waiting = due === "now" ? "resume" : due === "after_ci" ? "ci" : null;
+  const label = stoppedNote(item, pr.ref, waiting);
+  const prefix = resolved ? "Merge conflicts resolved" : null;
+  const text = [prefix, label].filter(Boolean).join(". ");
+  if (text) note(ctx, item, text);
+  return loop;
 }
 
 /**

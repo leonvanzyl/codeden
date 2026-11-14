@@ -106,7 +106,11 @@ describe("closing the PRs a newer one replaced", () => {
       const next = env.gh.openPr({ sessionId: integrator, title: "Add a counter", files });
       await env.setStatus(integrator, "idle");
       await tick();
-      expect(item(id)).toMatchObject({ stage, pr: { number: next.ref.number } });
+      // A failed item's new PR, green and past its last review, is re-reviewed by itself (#259).
+      expect(item(id)).toMatchObject({
+        stage: stage === "failed" ? "verifying" : stage,
+        pr: { number: next.ref.number },
+      });
       expect(item(id).nudges.rebase_1).toBeUndefined();
       expect(item(id).nudges.rebase_2).toBeUndefined();
       expect(env.gh.closed).toEqual([
@@ -118,7 +122,7 @@ describe("closing the PRs a newer one replaced", () => {
       if (stage === "escalated") {
         expect(env.inbox.find(`inbox:factory-escalated:${id}`)?.pr?.number).toBe(next.ref.number);
       }
-      // Still a person's to merge.
+      // Still a person's to merge, or not before a fresh review.
       expect(env.gh.merges).toEqual([]);
     },
   );

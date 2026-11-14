@@ -118,7 +118,13 @@ describe("a retried item's PRs", () => {
     readAgainSoon(id);
     await tick();
     const integrator = item(id).builderSessionId as string;
-    const second = env.gh.openPr({ sessionId: integrator, title: "Add a counter", files });
+    // CI still runs on it, so the failed item isn't re-reviewed by itself yet (#259).
+    const second = env.gh.openPr({
+      sessionId: integrator,
+      title: "Add a counter",
+      files,
+      checks: "pending",
+    });
     env.gh.closeFailures = 1;
     await env.setStatus(integrator, "idle");
     await tick();
@@ -126,8 +132,8 @@ describe("a retried item's PRs", () => {
     expect(env.gh.closeAttempts).toBe(1);
     expect(item(id).nudges[`supersede_${first.ref.number}`]).toBeDefined();
 
-    // A person retries the item: both PRs stay tracked while the new attempt builds.
-    env.factory.retry(env.project.id, id);
+    // A person retries the item as a rebuild: both PRs stay tracked while the new attempt builds.
+    env.factory.retry(env.project.id, id, "rebuild");
     await tick();
     await tick();
     expect(item(id)).toMatchObject({ stage: "building", pr: null });

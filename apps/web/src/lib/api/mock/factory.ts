@@ -292,6 +292,13 @@ export function mockFactoryApi(world: MockWorld): FactoryApi {
       admittedBy: "user",
     }),
     setType: async (id, req) => ({ ...item(id, req.itemId), type: req.type }),
-    retry: async (id, itemId) => ({ ...item(id, itemId), stage: "backlog" }),
+    retry: async (id, itemId, opts) => {
+      const it = item(id, itemId);
+      const open = it.pr?.state === "open" || it.pr?.state === "draft";
+      // With its PR open the PR goes back to review; otherwise the work starts over.
+      return opts?.mode !== "rebuild" && open
+        ? { ...it, stage: "verifying", review: null, attempts: 0 }
+        : { ...it, stage: "backlog", pr: null };
+    },
   };
 }

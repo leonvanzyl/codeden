@@ -1,7 +1,7 @@
-import { type FactoryItem, type MergeCheck, WorkType } from "@codeden/contracts";
+import { type FactoryItem, type MergeCheck, stoppedRetry, WorkType } from "@codeden/contracts";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { AlertTriangle, RotateCcw, UserCheck } from "lucide-react";
+import { AlertTriangle, UserCheck } from "lucide-react";
 import { toast } from "sonner";
 import { SectionLabel } from "@/components/common/bits";
 import { Button } from "@/components/ui/button";
@@ -11,6 +11,7 @@ import { ago } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { CheckPill } from "./factory-columns";
 import { CHECK_HELP, TYPE_LABEL } from "./meta";
+import { RetryButton } from "./retry-button";
 
 /**
  * Parts of the factory item page and the Factory view's item sheet (§10.1): the first step's
@@ -96,11 +97,6 @@ export function ItemActions({ item, projectId }: { item: FactoryItem; projectId:
     onSuccess: done("Let in: a person merges the result"),
     onError: fail("Couldn't let it in"),
   });
-  const retry = useMutation({
-    mutationFn: () => client.factory.retry(projectId, item.id),
-    onSuccess: done("Queued again"),
-    onError: fail("Couldn't retry"),
-  });
   const setType = useMutation({
     mutationFn: (type: WorkType) => client.factory.setType(projectId, { itemId: item.id, type }),
     onSuccess: done("Pipeline changed"),
@@ -119,17 +115,37 @@ export function ItemActions({ item, projectId }: { item: FactoryItem; projectId:
       </Button>
     );
   }
-  if (item.stage === "rejected" || item.stage === "failed") {
+  const stopped = stoppedRetry(item);
+  if (stopped) {
+    const pr = stopped.pr;
     return (
-      <Button
-        size="sm"
-        variant="outline"
-        className="w-full"
-        onClick={() => retry.mutate()}
-        disabled={retry.isPending}
-      >
-        <RotateCcw /> Retry
-      </Button>
+      <div className="space-y-1.5">
+        {stopped.label && <p className="text-2xs text-muted-foreground">{stopped.label}</p>}
+        <div className="flex gap-1.5">
+          <RetryButton
+            projectId={projectId}
+            item={item}
+            size="sm"
+            variant="outline"
+            className="flex-1"
+          />
+          {/* With its PR open, Retry re-reviews it; starting over is the other choice. */}
+          {pr && (
+            <RetryButton
+              projectId={projectId}
+              item={item}
+              mode="rebuild"
+              size="sm"
+              variant="ghost"
+            />
+          )}
+        </div>
+        {pr && (
+          <p className="text-3xs text-muted-foreground">
+            Retry sends #{pr.number} back to a fresh review; Rebuild starts over and replaces it.
+          </p>
+        )}
+      </div>
     );
   }
   if (!notStarted) return null;

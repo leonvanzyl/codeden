@@ -1,10 +1,12 @@
-import type {
-  Classification,
-  FactoryAdmitRequest,
-  FactoryItem,
-  FactorySetTypeRequest,
-  ReviewVerdict,
-  Session,
+import {
+  type Classification,
+  type FactoryAdmitRequest,
+  type FactoryItem,
+  type FactoryRetryMode,
+  type FactorySetTypeRequest,
+  type ReviewVerdict,
+  type Session,
+  stoppedRetry,
 } from "@codeden/contracts";
 import { badRequest, conflict, notFound } from "../errors";
 import { sessionsToArchive } from "./cleanup";
@@ -14,6 +16,7 @@ import { lateReviewPrompt } from "./prompts";
 import { trackedHead } from "./rebase";
 import { ownershipAfterRetry } from "./rebuild";
 import { approveRecheck, recheckOf, recheckSentFor, withoutRecheck } from "./recheck";
+import { resumeReview, withVerdictHead } from "./rereview";
 import { environmentBlocked, environmentOnly, withoutStrikes } from "./review-environment";
 
 /**
@@ -104,15 +107,41 @@ export async function setType(
 }
 
 /**
- * Run an item that stopped (not reproduced, declined, failed checks, closed) again, with fresh
- * sessions. The earlier attempt's sessions go to `earlierSessionIds`, which the loop archives
- * once none of them is busy, so none is left behind. If they were archived already, nothing
- * is: a session someone restored since stays.
+ * Run an item that stopped (not reproduced, declined, failed checks, closed) again. `rereview`
+ * (the default while its PR is open): the open PR goes straight back to a fresh review of its
+ * current head, with fresh revise rounds; no reproduce or analyze, no second PR. `rebuild` (the
+ * default without one): a fresh attempt from the first step with fresh sessions; its open PR is
+ * closed with a link once the new one is open. A rebuild's earlier sessions go to
+ * `earlierSessionIds`, which the loop archives once none of them is busy, so none is left
+ * behind. If they were archived already, nothing is: a session someone restored since stays.
  */
-export function retry(ctx: FactoryContext, projectId: string, itemId: string): FactoryItem {
+export function retry(
+  ctx: FactoryContext,
+  projectId: string,
+  itemId: string,
+  mode?: FactoryRetryMode,
+  by: DecidedBy = "user",
+): FactoryItem {
   const item = projectItem(ctx, projectId, itemId);
-  if (item.stage !== "rejected" && item.stage !== "failed") {
+  // The shared rule (`stoppedRetry`), with the PR's state as last synced from GitHub.
+  const synced = item.pr ? (ctx.github.prRef(item.projectId, item.pr.number) ?? item.pr) : null;
+  const can = stoppedRetry({ ...item, pr: synced });
+  if (!can) {
     throw conflict(`Only stopped items can be retried (this one is ${item.stage})`, "not_stopped");
+  }
+  const pr = can.pr;
+  if ((mode ?? can.mode) === "rereview") {
+    if (!pr) {
+      throw conflict(
+        `Item ${item.id} has no open pull request to re-review: retry it as a rebuild`,
+        "no_open_pr",
+      );
+    }
+    const who = by === "user" ? "you" : "the PM";
+    return resumeReview(ctx, item, pr, {
+      note: `Retried by ${who}: #${pr.number} goes back to a fresh review`,
+      retry: true,
+    });
   }
   const earlier = item.sessionsArchivedAt ? [] : sessionsToArchive(ctx, item).map((s) => s.id);
   return ctx.store.updateItem(item.id, (i) => ({
@@ -169,7 +198,12 @@ export function submitReview(
     };
   }
   if (item.stage === "failed") {
-    ctx.store.updateItem(item.id, (i) => ({ ...i, review: verdict }));
+    const at = ctx.now().toISOString();
+    ctx.store.updateItem(item.id, (i) => ({
+      ...i,
+      review: verdict,
+      nudges: withVerdictHead(i.nudges, trackedHead(i), at),
+    }));
     return {
       recorded: true,
       message: `Verdict recorded on the failed item (${verdict.verdict}); it stays with the pull request for whoever picks it up.`,
@@ -189,10 +223,12 @@ export function submitReview(
   ctx.store.updateItem(item.id, (i) => {
     const { rereview_sent: _s, reviewer: _r, ...rest } = withoutStrikes(i.nudges);
     const keep = recheck && verdict.verdict === "approve" && i.review;
+    const nudges = keep ? approveRecheck(rest, at) : withoutRecheck(rest);
     return {
       ...i,
       review: keep ? i.review : verdict,
-      nudges: keep ? approveRecheck(rest, at) : withoutRecheck(rest),
+      // The head it covers: a stopped item whose PR moves past it is reviewed again.
+      nudges: withVerdictHead(nudges, trackedHead(i), at),
     };
   });
   return {
