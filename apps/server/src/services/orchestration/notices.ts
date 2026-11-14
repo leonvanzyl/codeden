@@ -75,7 +75,7 @@ export function prOpenedNoticeId(projectId: string, number: number): string {
 }
 
 /** An open `run_failed` item updated by a further failure of its session (`attempts` > 1). */
-function isRepeatFailure(item: InboxItem): boolean {
+export function isRepeatFailure(item: InboxItem): boolean {
   return item.kind === "run_failed" && item.status === "open" && inboxAttempts(item) > 1;
 }
 

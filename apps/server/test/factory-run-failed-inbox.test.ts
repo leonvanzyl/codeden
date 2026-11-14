@@ -499,15 +499,8 @@ describe("a session that fails again (#275)", () => {
     const open = [...p.inbox.values()].filter((i) => i.status === "open");
     expect(open).toEqual([expect.objectContaining({ attempts: 2 })]);
   });
-
-  it("gets a notice when a closed item of the same key opens again", async () => {
-    env = createFactoryEnv();
-    const s = await userSession();
-    const first = env.inbox.raiseRunFailed(s, "start", "spawn opencode.exe ENOENT");
-    env.inbox.close(first, "dismissed", null);
-    const again = env.inbox.raiseRunFailed(s, "start", "spawn opencode.exe ENOENT");
-    expect(again).toMatchObject({ id: first.id, status: "open", attempts: 2 });
-  });
+  // Failures raised through InboxService (auto-retry, the launcher, a closed item opening again)
+  // are covered end to end, notices included, in `run-failed-notices.test.ts`.
 });
 
 describe("a failed run's item (#275)", () => {
