@@ -32,6 +32,7 @@ export function UpdateCheck() {
   const rollbackLabel = data.rollbackTo
     ? `Roll back to ${data.rollbackTo}`
     : "Roll back to the previous version";
+  const showInstall = data.updateAvailable && canUpdate(data) && data.state === "idle";
 
   return (
     <div className="mt-2 space-y-1.5 text-2xs" data-testid="update-check">
@@ -39,20 +40,25 @@ export function UpdateCheck() {
         <span className={data.updateAvailable ? "text-status-waiting" : "text-muted-foreground"}>
           {text}
         </span>
-        {data.updateAvailable && canUpdate(data) && data.state === "idle" && (
-          <Button size="xs" onClick={() => actions.install.mutate()} disabled={busy}>
-            Update now
-          </Button>
-        )}
-        {data.enabled && (
-          <Button
-            size="xs"
-            variant="ghost"
-            onClick={() => refresh.mutate()}
-            disabled={refresh.isPending}
-          >
-            <RefreshCw className={refresh.isPending ? "animate-spin" : undefined} /> Check now
-          </Button>
+        {/* One group, so on a narrow card the buttons wrap together under the text. */}
+        {(showInstall || data.enabled) && (
+          <div className="flex flex-wrap items-center gap-2">
+            {showInstall && (
+              <Button size="xs" onClick={() => actions.install.mutate()} disabled={busy}>
+                Update now
+              </Button>
+            )}
+            {data.enabled && (
+              <Button
+                size="xs"
+                variant="ghost"
+                onClick={() => refresh.mutate()}
+                disabled={refresh.isPending}
+              >
+                <RefreshCw className={refresh.isPending ? "animate-spin" : undefined} /> Check now
+              </Button>
+            )}
+          </div>
         )}
       </div>
       {data.source === "source" ? (

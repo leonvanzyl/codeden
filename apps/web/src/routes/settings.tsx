@@ -45,23 +45,28 @@ function About() {
   const version = useSnapshot().data?.serverVersion ?? CODEDEN_VERSION;
   return (
     <SettingsSection title="About">
-      <div className="flex items-center gap-4 p-5">
-        <Logo className="size-12" />
-        <div>
-          <div className="text-[15px] font-semibold">
-            CodeDen{" "}
-            <span className="font-mono text-xs font-normal text-muted-foreground">v{version}</span>
-          </div>
-          <p className="mt-0.5 text-[13px] text-muted-foreground">
-            A local-first harness for coding agents. Open source under the MIT license. No accounts,
-            no telemetry.
-          </p>
-          <UpdateCheck />
-          {isMockMode && (
-            <p className="mt-1 text-2xs text-status-waiting">
-              Running against the built-in mock server.
+      {/* A narrow card (a phone, a squeezed column): the logo above the text, which keeps the width. */}
+      <div className="@container">
+        <div className="flex flex-col items-start gap-3 p-5 @[30rem]:flex-row @[30rem]:items-center @[30rem]:gap-4">
+          <Logo className="size-10 @[30rem]:size-12" />
+          <div className="min-w-0">
+            <div className="text-[15px] font-semibold">
+              CodeDen{" "}
+              <span className="font-mono text-xs font-normal text-muted-foreground">
+                v{version}
+              </span>
+            </div>
+            <p className="mt-0.5 text-[13px] text-muted-foreground">
+              A local-first harness for coding agents. Open source under the MIT license. No
+              accounts, no telemetry.
             </p>
-          )}
+            <UpdateCheck />
+            {isMockMode && (
+              <p className="mt-1 text-2xs text-status-waiting">
+                Running against the built-in mock server.
+              </p>
+            )}
+          </div>
         </div>
       </div>
     </SettingsSection>
