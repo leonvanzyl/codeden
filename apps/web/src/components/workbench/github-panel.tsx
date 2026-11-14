@@ -13,6 +13,7 @@ import { useClient } from "@/lib/api";
 import { platform } from "@/lib/platform";
 import { useProject, useSession } from "@/lib/queries";
 import { useAskForPullRequest, usePullRequestOffer } from "./open-pr";
+import { PrRequestedButton } from "./open-pr-controls";
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -103,15 +104,22 @@ export function GitHubPanel({ sessionId }: { sessionId: string }) {
         title="No issue or PR linked"
         className="h-full"
         action={
-          offer.canAsk && (
-            <Button size="sm" disabled={askForPr.isPending} onClick={() => askForPr.mutate()}>
-              <GitPullRequest /> Open pull request
-            </Button>
+          offer.requested ? (
+            <PrRequestedButton requested={offer.requested} size="sm" />
+          ) : (
+            offer.canAsk && (
+              <Button size="sm" onClick={askForPr}>
+                <GitPullRequest /> Open pull request
+              </Button>
+            )
           )
         }
       >
-        Sessions started from an issue link it here. When the work is ready, ask the agent to open a
-        pull request and it appears here.
+        {offer.requested === "queued"
+          ? "The agent was asked to open a pull request. The request is queued behind the running turn, and the PR appears here once it's open."
+          : offer.requested === "sent"
+            ? "The agent was asked to open a pull request. It appears here once it's open."
+            : "Sessions started from an issue link it here. When the work is ready, ask the agent to open a pull request and it appears here."}
       </EmptyState>
     );
   }
