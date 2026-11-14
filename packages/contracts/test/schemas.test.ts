@@ -56,9 +56,8 @@ describe("agent events", () => {
     expect(ErrorInfo.parse({ message: "boom" })).toEqual({ message: "boom" });
     expect(ErrorInfo.safeParse({ message: "x", kind: "flaky" }).success).toBe(false);
     expect(ErrorInfo.safeParse({ message: "x", retryAt: "tomorrow" }).success).toBe(false);
-    for (const kind of ["transient", "usage_limit", "context_full", "auth", "fatal"] as const) {
-      roundTrip(ErrorInfo, { message: "x", kind });
-    }
+    const kinds = ["transient", "usage_limit", "context_full", "auth", "setup", "fatal"] as const;
+    for (const kind of kinds) roundTrip(ErrorInfo, { message: "x", kind });
   });
 
   it("narrows tool calls by toolKind", () => {
@@ -259,6 +258,16 @@ describe("entities", () => {
     roundTrip(Session, sampleSession);
     roundTrip(Session, { ...sampleSession, forkedFrom: { sessionId: "s0", checkpoint: 2 } });
     roundTrip(Session, { ...sampleSession, forkedFrom: { sessionId: "s0", checkpoint: null } });
+    // The provider refused to open it because its CLI is too old (#269).
+    const refused = {
+      code: "open_failed",
+      message: "Gemini CLI 0.36.0 is too old",
+      kind: "setup" as const,
+    };
+    expect(roundTrip(Session, { ...sampleSession, startError: refused }).startError).toEqual(
+      refused,
+    );
+    roundTrip(Session, { ...sampleSession, startError: null });
     roundTrip(Session, {
       ...sampleSession,
       forkedFrom: { sessionId: "s0", checkpoint: 1, turnId: "turn-1" },
@@ -464,6 +473,28 @@ describe("provider contracts", () => {
       checkedAt: ts,
     });
     expect(broken.broken?.[0]?.reason).toBe("points at a missing package");
+    // A CLI too old to run names the oldest version that does (#269).
+    const tooOld = roundTrip(ProviderStatus, {
+      providerId: "gemini",
+      installed: true,
+      version: "0.36.0",
+      executablePath: "/usr/bin/gemini",
+      loggedIn: null,
+      authMethod: null,
+      account: null,
+      loginExpiresAt: null,
+      supported: false,
+      issues: [
+        {
+          code: "version_unsupported",
+          message: "Gemini CLI 0.36.0 is too old (needs 0.68.0+). Update it.",
+          fix: { kind: "upgrade", command: "npm install -g @google/gemini-cli@latest" },
+          minVersion: "0.68.0",
+        },
+      ],
+      checkedAt: ts,
+    });
+    expect(tooOld.issues[0]?.minVersion).toBe("0.68.0");
     roundTrip(RuntimeResponse, { kind: "approval", decision: "deny", message: "no" });
     roundTrip(RuntimeResponse, {
       kind: "approval",

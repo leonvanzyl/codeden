@@ -100,11 +100,14 @@ export class SessionHost {
         opened = await adapter.openSession(agentSessionOptions(cmd.options));
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
+        // How the provider classified it (a CLI too old, not signed in): the server keeps new
+        // work off the provider instead of trying it again.
+        const kind = error instanceof ProviderSessionError ? error.kind : undefined;
         this.emit({
           kind: "session.process",
           sessionId: cmd.sessionId,
           state: "crashed",
-          error: { code: "open_failed", message },
+          error: { code: "open_failed", message, ...(kind ? { kind } : {}) },
         });
         throw new CommandError("open_failed", `Could not open the session: ${message}`);
       }

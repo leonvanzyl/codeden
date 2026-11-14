@@ -47,9 +47,18 @@ export type ProviderId = z.infer<typeof ProviderId>;
  * - `usage_limit`: the account's usage limit is reached; it works again at `retryAt`.
  * - `context_full`: the conversation no longer fits the model's context window.
  * - `auth`: the provider's login or credentials need the user.
+ * - `setup`: the provider's CLI can't run sessions as installed: it is older than the oldest
+ *   version CodeDen supports, so the user has to update it. Given when a session can't open.
  * - `fatal`: anything else; retrying the same turn won't help.
  */
-export const ErrorKind = z.enum(["transient", "usage_limit", "context_full", "auth", "fatal"]);
+export const ErrorKind = z.enum([
+  "transient",
+  "usage_limit",
+  "context_full",
+  "auth",
+  "setup",
+  "fatal",
+]);
 export type ErrorKind = z.infer<typeof ErrorKind>;
 
 /** Structured error carried by events, results and entities. */
@@ -62,7 +71,10 @@ export const ErrorInfo = z.object({
   retryable: z.boolean().optional(),
   /** Optional extra detail (stack trace excerpt, stderr tail). */
   detail: z.string().optional(),
-  /** How a failed agent turn can be recovered from; absent where nobody classified it. */
+  /**
+   * How a failed agent turn, or a session that couldn't open, can be recovered from; absent
+   * where nobody classified it.
+   */
   kind: ErrorKind.optional(),
   /** For `usage_limit`: when the limit resets, if the provider said. */
   retryAt: Timestamp.optional(),

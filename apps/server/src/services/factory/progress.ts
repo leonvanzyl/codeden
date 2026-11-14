@@ -4,6 +4,7 @@ import { type FactoryContext, factoryNotice, pauseLoop, raiseInbox } from "./con
 import { stoppedSinceNudge } from "./idle";
 import { failItem } from "./outcomes";
 import { ANALYZE_NUDGE, BUILDER_NUDGE, REPRODUCE_NUDGE } from "./prompts";
+import { providerFailure, providerWide } from "./provider-failure";
 import { rebuildFailed, unreplacedOriginal } from "./rebuild";
 import { awaitTurnRaceResume, BUILDER_FAILED_REASON } from "./turn-race";
 
@@ -49,8 +50,15 @@ export async function advanceBuilding(
     // Failed only because a message raced its turn: told to carry on instead.
     if (await awaitTurnRaceResume(ctx, project, loop, item, s)) return loop;
     // A session that died otherwise (an error, a runner restart) is no fault of the work
-    // either; one a person stopped is their call.
-    if (s.status === "failed") return failItem(ctx, loop, item, BUILDER_FAILED_REASON, infra);
+    // either; one a person stopped is their call. One its provider refused to open (a CLI too
+    // old, signed out) also keeps new work off the provider, so the retry starts elsewhere.
+    if (s.status === "failed") {
+      const cause = providerFailure(ctx.repo, ctx.inbox, s);
+      if (cause && providerWide(cause)) {
+        ctx.sessions.providerFailed(s.provider, cause.reason, cause.until);
+      }
+      return failItem(ctx, loop, item, BUILDER_FAILED_REASON, infra);
+    }
     return fail("The builder session stopped without a pull request");
   }
   const investigating = !item.investigation && (item.type === "bug" || item.type === "feature");
