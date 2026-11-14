@@ -337,6 +337,7 @@ export function createServices(opts: ServicesOptions): AppServices {
     options: opts.orchestration,
     log: opts.log,
   });
+  const providerHistory = new ProviderHistoryService({ db: opts.db, runner: opts.runner, runners });
   const worktreeCleanup = new WorktreeCleanup({
     repo: sessionRepo,
     projects,
@@ -397,6 +398,7 @@ export function createServices(opts: ServicesOptions): AppServices {
       launcher,
       runner: opts.runner,
       runners,
+      sweepVendorHistory: (runner, skip) => providerHistory.sweep(runner, skip),
       log: opts.log,
     }),
     inbox,
@@ -448,7 +450,7 @@ export function createServices(opts: ServicesOptions): AppServices {
       trustedAuthors,
       log: opts.log,
     }),
-    providerHistory: new ProviderHistoryService({ db: opts.db, runner: opts.runner, runners }),
+    providerHistory,
     autoRetry: new AutoRetry({
       db: opts.db,
       store: opts.store,

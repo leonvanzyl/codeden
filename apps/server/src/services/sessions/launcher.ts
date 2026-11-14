@@ -241,6 +241,7 @@ export class SessionLauncher {
           projectId: session.projectId,
         })
       : null;
+    this.markVendorHistory(runner, session);
     try {
       const result = await runner.request(
         {
@@ -260,6 +261,18 @@ export class SessionLauncher {
       if (token && NOTHING_RUNS.has(code ?? "")) this.deps.tokens.revokeSession(session.id);
       throw error;
     }
+  }
+
+  /**
+   * Mark a session whose provider hides its conversations from its own apps as it goes
+   * (`StoredStartMeta.vendorHistory`): from now on the runner-start sweep covers it.
+   */
+  private markVendorHistory(runner: RunnerPort, session: Session): void {
+    const provider = runner.providers().find((p) => p.id === session.provider);
+    if (!provider?.capabilities.vendorHistory) return;
+    const meta = this.deps.repo.find(session.id)?.startMeta;
+    if (!meta || meta.vendorHistory) return;
+    this.deps.repo.setStartMeta(session.id, (m) => ({ ...(m ?? meta), vendorHistory: true }));
   }
 
   /**

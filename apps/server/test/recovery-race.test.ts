@@ -2,7 +2,7 @@ import type { Session } from "@codeden/contracts";
 import { describe, expect, it, vi } from "vitest";
 import type { RunnerPort, RunnerRouter } from "../src/services/runner-port";
 import type { SessionLauncher } from "../src/services/sessions/launcher";
-import { SessionRecovery } from "../src/services/sessions/recovery";
+import { type RecoveryDeps, SessionRecovery } from "../src/services/sessions/recovery";
 import type { SessionRepo } from "../src/services/sessions/repo";
 import type { SessionService } from "../src/services/sessions/session-service";
 import { sampleSession } from "./helpers";
@@ -15,7 +15,11 @@ import { sampleSession } from "./helpers";
  * delivery) while recovery is still resuming the ones before it.
  */
 describe("session recovery", () => {
-  function setup(initial: Session[], runners?: (home: RunnerPort) => RunnerRouter) {
+  function setup(
+    initial: Session[],
+    runners?: (home: RunnerPort) => RunnerRouter,
+    sweepVendorHistory?: RecoveryDeps["sweepVendorHistory"],
+  ) {
     const sessions = new Map(initial.map((s) => [s.id, s]));
     const repo = {
       list: ({ status }: { status?: string[] }) =>
@@ -59,6 +63,7 @@ describe("session recovery", () => {
       launcher,
       runner,
       runners: runners?.(runner),
+      ...(sweepVendorHistory ? { sweepVendorHistory } : {}),
     });
     return {
       recovery,
@@ -208,5 +213,26 @@ describe("session recovery", () => {
     await t.recovery.onRunnerReady();
     expect(t.continueAfterRestart).toHaveBeenCalledWith("cut", expect.any(String));
     expect(t.fail).not.toHaveBeenCalled();
+  });
+
+  it("then sweeps what a crash left in providers' own apps, after resuming", async () => {
+    const order: string[] = [];
+    const sweep = vi.fn(async (_runner: RunnerPort, skip: (id: string) => boolean) => {
+      order.push("sweep");
+      expect(skip("on-its-way")).toBe(true);
+      expect(skip("idle")).toBe(false);
+      return { hidden: [], failed: 0 };
+    });
+    const t = setup(
+      [{ ...sampleSession, id: "cut", status: "running", provider: "fake", resumeToken: "r" }],
+      undefined,
+      sweep,
+    );
+    t.continueAfterRestart.mockImplementation(async () => {
+      order.push("resume");
+    });
+    t.delivering.add("on-its-way");
+    await t.recovery.onRunnerReady();
+    expect(order).toEqual(["resume", "sweep"]);
   });
 });

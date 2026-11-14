@@ -7,11 +7,15 @@ import type {
   RunnerCommand,
   Session,
 } from "@codeden/contracts";
+import { eq } from "drizzle-orm";
 import { afterEach, describe, expect, it } from "vitest";
 import { type Database, openDatabase } from "../src/db/client";
+import { sessions } from "../src/db/schema";
 import { EventStore } from "../src/events/store";
 import { ProviderHistoryService } from "../src/services/providers/history";
 import type { RunnerPort } from "../src/services/runner-port";
+import { type LauncherDeps, SessionLauncher } from "../src/services/sessions/launcher";
+import { SessionRepo } from "../src/services/sessions/repo";
 import { sampleSession } from "./helpers";
 
 const CAPS: ProviderCapabilities = {
@@ -61,6 +65,23 @@ function setup(visible = ["t-reviewer", "t-builder", "t-running", "users-own"]) 
   session("s-claude", { provider: "claude", resumeToken: "c-1" });
   session("s-new", { provider: "codex", resumeToken: null });
 
+  /** Started since Codex hides as it goes (`StoredStartMeta.vendorHistory`). */
+  const mark = (id: string) =>
+    db.db
+      .update(sessions)
+      .set({
+        startMeta: {
+          workspaceMode: "existing",
+          workspaceFallback: null,
+          forced: null,
+          queuedBehind: [],
+          vendorHistory: true,
+        },
+      })
+      .where(eq(sessions.id, id))
+      .run();
+  /** Sessions the runner hosts (`runner.status`). */
+  const hosted = new Set<string>();
   const commands: RunnerCommand[] = [];
   const providers: ProviderInfo[] = [
     { id: "codex", displayName: "Codex", capabilities: CAPS, models: [] },
@@ -92,11 +113,24 @@ function setup(visible = ["t-reviewer", "t-builder", "t-running", "users-own"]) 
       if (command.name === "provider.history.hide") {
         return { hidden: command.resumeTokens, missing: [], failed: [] };
       }
+      if (command.name === "runner.status") {
+        return {
+          sessions: [...hosted].map((sessionId) => ({
+            sessionId,
+            providerId: "codex",
+            state: "idle",
+            resumeToken: null,
+          })),
+          ptys: [],
+          journal: { lastSeq: 0, unacked: 0 },
+          draining: false,
+        };
+      }
       throw new Error(`unexpected ${command.name}`);
     },
   } as unknown as RunnerPort;
   const service = new ProviderHistoryService({ db: db.db, runner });
-  return { service, commands };
+  return { service, commands, session, mark, hosted, visible, runner };
 }
 
 describe("hiding CodeDen's conversations from a provider's own apps", () => {
@@ -172,5 +206,94 @@ describe("hiding CodeDen's conversations from a provider's own apps", () => {
       code: "unsupported",
     });
     expect(commands).toEqual([]);
+  });
+});
+
+describe("the sweep when a runner starts", () => {
+  it("hides what a crash left listed, only for sessions run since Codex hides as it goes", async () => {
+    const t = setup();
+    t.visible.push("t-hosted", "t-starting");
+    // Run since the provider hides its conversations, idle: a killed runner never archived it.
+    t.mark("s-reviewer");
+    t.mark("s-running");
+    // Hosted again (its provider process holds the thread) or being started: left alone.
+    t.session("s-hosted", { provider: "codex", resumeToken: "t-hosted" });
+    t.mark("s-hosted");
+    t.hosted.add("s-hosted");
+    t.session("s-starting", { provider: "codex", resumeToken: "t-starting" });
+    t.mark("s-starting");
+    // s-builder is from before: the user confirms hiding it (Settings > Providers).
+
+    const result = await t.service.sweep(t.runner, (id) => id === "s-starting");
+
+    expect(result).toEqual({ hidden: ["t-reviewer"], failed: 0 });
+    const asked = t.commands.find((c) => c.name === "provider.history.list") as {
+      resumeTokens: string[];
+    };
+    expect(asked.resumeTokens).toEqual(["t-reviewer"]);
+    expect(t.commands.filter((c) => c.name === "provider.history.hide")).toEqual([
+      { name: "provider.history.hide", providerId: "codex", resumeTokens: ["t-reviewer"] },
+    ]);
+  });
+
+  it("does nothing when no conversation needs it, and never throws", async () => {
+    const t = setup();
+    expect(await t.service.sweep(t.runner)).toEqual({ hidden: [], failed: 0 });
+    expect(t.commands.some((c) => c.name === "provider.history.hide")).toBe(false);
+
+    t.mark("s-reviewer");
+    const away = { ...t.runner, isConnected: () => false } as RunnerPort;
+    expect(await t.service.sweep(away)).toEqual({ hidden: [], failed: 0 });
+    const failing = {
+      ...t.runner,
+      request: async () => {
+        throw new Error("runner gone");
+      },
+    } as unknown as RunnerPort;
+    expect(await t.service.sweep(failing)).toEqual({ hidden: [], failed: 0 });
+  });
+});
+
+describe("which sessions the sweep covers", () => {
+  it("marks a session when it is started on a provider that hides as it goes", async () => {
+    const db = openDatabase(join(mkdtempSync(join(tmpdir(), "codeden-history-")), "codeden.db"));
+    open.push(db);
+    const repo = new SessionRepo(db.db, new EventStore(db.db));
+    const meta = {
+      workspaceMode: "existing" as const,
+      workspaceFallback: null,
+      forced: null,
+      queuedBehind: [],
+    };
+    for (const provider of ["codex", "claude"]) {
+      repo.create({ ...sampleSession, id: `s-${provider}`, provider, status: "created" }, meta);
+    }
+    const runner = {
+      mcpProxyUrl: () => null,
+      providers: () => [
+        { id: "codex", displayName: "Codex", capabilities: CAPS, models: [] },
+        {
+          id: "claude",
+          displayName: "Claude Code",
+          capabilities: { ...CAPS, vendorHistory: false },
+        },
+      ],
+      request: async () => ({ resumeToken: "t-1" }),
+    } as unknown as RunnerPort;
+    const launcher = new SessionLauncher({
+      runner,
+      repo,
+      home: tmpdir(),
+    } as unknown as LauncherDeps);
+    // Every start and resume goes through `open` (`session.start`).
+    const start = (
+      launcher as unknown as { open: (...a: unknown[]) => Promise<unknown> }
+    ).open.bind(launcher);
+    await start(runner, repo.get("s-codex"), undefined);
+    await start(runner, repo.get("s-claude"), undefined);
+    expect(repo.find("s-codex")?.startMeta?.vendorHistory).toBe(true);
+    expect(repo.find("s-claude")?.startMeta?.vendorHistory).toBeUndefined();
+    // The rest of the start metadata is kept.
+    expect(repo.find("s-codex")?.startMeta).toMatchObject(meta);
   });
 });

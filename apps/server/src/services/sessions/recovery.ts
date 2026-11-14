@@ -14,6 +14,14 @@ export interface RecoveryDeps extends RunnerDeps {
   repo: SessionRepo;
   sessions: SessionService;
   launcher: SessionLauncher;
+  /**
+   * After recovery: hide the provider conversations a crash or kill left in a provider's own
+   * apps, skipping sessions given to `skip` (`ProviderHistoryService.sweep`).
+   */
+  sweepVendorHistory?: (
+    runner: RunnerPort,
+    skip: (sessionId: string) => boolean,
+  ) => Promise<{ hidden: string[]; failed: number }>;
   log?: (message: string) => void;
 }
 
@@ -89,6 +97,18 @@ export class SessionRecovery {
     sessions.releaseOutboxes(onThisRunner);
     for (const id of sessions.sessionsWithQueuedMessages().filter(onThisRunner)) {
       await sessions.flushOutbox(id).catch(() => undefined);
+    }
+
+    // Sessions resumed above are mid-turn again (and hosted): the sweep leaves them alone.
+    const swept = await this.deps.sweepVendorHistory?.(
+      runner,
+      (id) => sessions.launching.has(id) || sessions.isDelivering(id),
+    );
+    if (swept?.hidden.length || swept?.failed) {
+      this.deps.log?.(
+        `recovery: hid ${swept.hidden.length} conversations a restart left in a provider's app` +
+          (swept.failed ? ` (${swept.failed} failed)` : ""),
+      );
     }
   }
 

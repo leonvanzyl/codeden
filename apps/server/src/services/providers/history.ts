@@ -99,35 +99,98 @@ export class ProviderHistoryService {
   }
 
   /**
-   * CodeDen's recorded conversations on `providerId`, by the runner that holds them, newest
-   * first. Sessions that may be running a turn, and runners that are away or can't hide, are
-   * left out. Throws when no runner can.
+   * When `runner` starts or reconnects (after recovery): archive the conversations CodeDen
+   * manages that a crash or kill left in the vendor's apps. A provider normally hides them when
+   * a turn ends or the session closes, which a killed runner never gets to. Covers only sessions
+   * on this runner that ran since their provider hides as it goes (`StoredStartMeta
+   * .vendorHistory`), so conversations from before stay for the user to confirm. Sessions that
+   * may be mid-turn are left alone: busy by status, hosted by the runner (its provider process
+   * holds the conversation), or `skip` (being started or sent a message). No confirmation:
+   * this is the hiding the provider does itself. Returns what was hidden; never throws.
    */
-  private recorded(providerId: string): { recorded: number; groups: RunnerGroup[] } {
-    const rows = this.deps.db
+  async sweep(
+    runner: RunnerPort,
+    skip: (sessionId: string) => boolean = () => false,
+  ): Promise<{ hidden: string[]; failed: number }> {
+    const out = { hidden: [] as string[], failed: 0 };
+    try {
+      if (!runner.isConnected()) return out;
+      const providers = runner.providers().filter((p) => p.capabilities.vendorHistory);
+      if (providers.length === 0) return out;
+      const status = await runner.request({ name: "runner.status" }, 10_000);
+      const hosted = new Set(status.sessions.map((s) => s.sessionId));
+      for (const provider of providers) {
+        const byToken = new Map<string, Recorded>();
+        for (const row of this.rows(provider.id)) {
+          if (!row.resumeToken || !row.startMeta?.vendorHistory) continue;
+          if (BUSY.has(row.status as SessionStatus) || hosted.has(row.id) || skip(row.id)) continue;
+          if (this.runnerOf(row.runnerId) !== runner) continue;
+          byToken.set(row.resumeToken, {
+            sessionId: row.id,
+            title: row.title,
+            resumeToken: row.resumeToken,
+          });
+        }
+        const listed = (await this.list({ runner, byToken }, provider.id)).filter((e) =>
+          byToken.has(e.resumeToken),
+        );
+        if (listed.length === 0) continue;
+        const done = await runner.request(
+          {
+            name: "provider.history.hide",
+            providerId: provider.id,
+            resumeTokens: listed.map((e) => e.resumeToken),
+          },
+          HIDE_TIMEOUT_MS,
+        );
+        out.hidden.push(...done.hidden);
+        out.failed += done.failed.length;
+      }
+    } catch {
+      // Best effort: the next start, turn end or session close hides them.
+    }
+    return out;
+  }
+
+  /** The runner that holds a session's conversations, by its recorded runner id. */
+  private runnerOf(runnerId: string | null): RunnerPort {
+    return runnerId && this.deps.runners
+      ? this.deps.runners.forRunnerId(runnerId)
+      : this.deps.runner;
+  }
+
+  /** Sessions on `providerId` with a resume token, newest first. */
+  private rows(providerId: string) {
+    return this.deps.db
       .select({
         id: sessions.id,
         title: sessions.title,
         status: sessions.status,
         resumeToken: sessions.resumeToken,
         runnerId: sessions.runnerId,
+        startMeta: sessions.startMeta,
       })
       .from(sessions)
       .where(and(eq(sessions.provider, providerId), isNotNull(sessions.resumeToken)))
       .orderBy(desc(sessions.createdAt))
       .limit(PROVIDER_HISTORY_MAX)
       .all();
+  }
+
+  /**
+   * CodeDen's recorded conversations on `providerId`, by the runner that holds them, newest
+   * first. Sessions that may be running a turn, and runners that are away or can't hide, are
+   * left out. Throws when no runner can.
+   */
+  private recorded(providerId: string): { recorded: number; groups: RunnerGroup[] } {
+    const rows = this.rows(providerId);
     const byRunner = new Map<string, RunnerGroup>();
     for (const row of rows) {
       if (!row.resumeToken || BUSY.has(row.status as SessionStatus)) continue;
       const key = row.runnerId ?? "";
       let group = byRunner.get(key);
       if (!group) {
-        const runner =
-          row.runnerId && this.deps.runners
-            ? this.deps.runners.forRunnerId(row.runnerId)
-            : this.deps.runner;
-        group = { runner, byToken: new Map() };
+        group = { runner: this.runnerOf(row.runnerId), byToken: new Map() };
         byRunner.set(key, group);
       }
       if (!group.byToken.has(row.resumeToken)) {
