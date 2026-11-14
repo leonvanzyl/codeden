@@ -109,7 +109,14 @@ OpenCode with no connected provider is a warning rather than an error: its own f
 
 ### CodeDen's sessions show up in the Codex app
 
-The Codex apps (the ChatGPT desktop app's Codex, the Codex IDE extension) list every Codex conversation on your machine as yours, including the ones CodeDen starts for factory reviewers, builders, PMs and other sessions. CodeDen keeps its own out of that list: it archives a session's Codex conversation whenever no turn of it is running, and unarchives it just before the next turn, a resume or a fork. Your own conversations are never touched. A session that is running a turn shows in the Codex app until the turn ends, and one whose agent started Codex sub-agents stays until you stop or archive the session. A turn that fails to start, or a Codex process that crashes, still has its conversation archived. If CodeDen itself is killed mid-turn, it archives what was left listed the next time it starts.
+The Codex apps (the ChatGPT desktop app's Codex, the Codex IDE extension) list every Codex conversation on your machine as yours, including the ones CodeDen starts for factory reviewers, builders, PMs and other sessions. CodeDen keeps its own out of that list.
+
+**A CodeDen conversation is visible in the Codex app only while one of its turns is running.** The rest of the time it is under the app's **Archived** conversations. CodeDen archives it when the turn ends, and unarchives it just before the next turn, a resume or a fork, so CodeDen's sessions keep their full history. Your own conversations are never touched.
+
+- A copy CodeDen makes when you fork a session is archived as soon as it is made.
+- A turn that fails to start, an interrupted turn, and a Codex process that crashes all leave the conversation archived.
+- If CodeDen itself is killed mid-turn, it archives what was left in the list the next time it starts.
+- One exception: a session whose agent started Codex sub-agents stays visible until you stop or archive the session (or CodeDen restarts). Archiving it earlier could cut off agents its next turn still talks to.
 
 Sessions from older CodeDen versions are still listed. To hide them, open **Settings → Providers → Provider apps** and choose **Review** next to **Hide CodeDen's sessions from the Codex app**. CodeDen lists the conversations it started that the Codex app still shows (found by its own record of them, never by their titles) and archives them once you confirm. They are archived, not deleted: they appear under the Codex app's archived conversations, and CodeDen can still resume and fork them.
 
