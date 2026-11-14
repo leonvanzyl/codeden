@@ -23,8 +23,8 @@ Everything an agent touches sits next to its chat. Open the right panel with **C
 
 - Text, pasted images and file attachments.
 - `@` to mention files, `/` for commands and skills.
-- Pickers for **provider**, **model** and **reasoning effort**, plus the session's **Permissions** (Read-only, Supervised, Auto or Full; see [Security](security.md#permissions)). Model and effort can be changed mid-session; they apply from the next turn. Permissions can be changed too: the level is saved on the session and applies from the next tool call where the provider allows (Claude), otherwise from the next turn (Codex).
-- **Plan** (agent sessions, on providers with a plan mode: Claude Code today): the agent explores and proposes a plan before it changes anything. Turn it on in the composer, in a new session before its first message or any time after. The plan arrives as a card: **Approve plan** and the agent implements it with the session's permissions, or **Keep planning** with a note on what to change. While it plans, edits and writing commands are refused (see [Security](security.md#plan-mode)).
+- Pickers for **provider**, **model** and **reasoning effort**, plus the session's **Permissions** (Read-only, Supervised, Auto or Full; see [Security](security.md#permissions)). Model and effort can be changed mid-session; they apply from the next turn. Permissions can be changed too: the level is saved on the session and applies from the next tool call on Claude Code, OpenCode, Cursor and Gemini CLI, and from the next turn on Codex (the composer tells you which).
+- **Plan** (agent sessions, on providers with a plan mode: Claude Code, Cursor and Gemini CLI today): the agent explores and proposes a plan before it changes anything. Turn it on in the composer, in a new session before its first message or any time after. The plan arrives as a card: **Approve plan** and the agent implements it with the session's permissions, or **Keep planning** with a note on what to change. While it plans, edits and writing commands are refused (see [Security](security.md#plan-mode)).
 - **Your own models in the picker:** star models to pin them to Favourites, hide the ones you never use, and add **custom model ids** a provider doesn't list yet (Settings › Providers › Custom models). A custom id is marked *Custom*, gets the effort levels of the provider's default model, and is sent to the provider unchanged; if the provider doesn't know it, the turn fails with the provider's error.
 - **While a turn runs:** Enter **queues** your message for when it ends. With providers that support it, you can **steer** instead, injecting the message into the running turn.
 - **Stop** the running turn with **Ctrl/Cmd+.**.
@@ -162,6 +162,15 @@ The runner launches one Chromium (your installed **Edge** or **Chrome**; Edge fi
 | Enter / Shift+Enter | Send (queue while running) / new line |
 | Ctrl/Cmd+. | Stop the running turn |
 | Ctrl/Cmd+Shift+M | Start / stop dictation |
+
+## Search transcripts
+
+Find what was asked, answered or run in any session, archived ones included.
+
+- **In the command palette.** Type at least 3 characters in **Ctrl/Cmd+K** and a **Transcripts** group appears under the matching sessions, with the five newest matches. Each shows the session and its project, a PM or Orchestrator badge for those sessions, **Archived** when it is, the matching text highlighted and how long ago it was said.
+- **Search all transcripts**, at the end of that group, opens the **Search transcripts** page (`/search`; also **Search transcripts** in the palette) with every match, newest first, 50 at a time with **Load more**. Narrow it to one project or one role (Agents, PMs, Orchestrator), or turn off **Archived sessions** to leave those out. The query and filters are part of the address (`/search?q=…&project=…&role=…&archived=false`), so a search can be bookmarked.
+- **What's searched.** Prompts, replies and plans, commands, file paths read or edited, search and web queries, subagent tasks and results, questions, approvals, notices and errors; not reasoning, tool output or diffs. Every word you type must appear, in any order, ignoring case and accents, and inside longer words and paths too (`cart` finds `src/cart.ts`).
+- **Opening a match** opens its session at that item instead of the end: it scrolls there, opens its work block if it was folded, and highlights it briefly. A match inside a subagent's thread opens that thread in the right panel, at the item.
 
 ## The utility model
 

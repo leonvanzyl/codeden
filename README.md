@@ -109,7 +109,8 @@ Everything an agent touches, next to the chat:
 - **Diff comments.** Comment on the agent's changes line by line, then send them all back as one message. [Comment on lines](docs/workbench.md#comment-on-lines).
 - **Fork a session**, or fork from an earlier turn, to try another approach with the same conversation and code while the original carries on. [Fork a session](docs/workbench.md#fork-a-session).
 - **Hand a session off** to another provider (or a fresh conversation) when one hits its limit or you want a second opinion: the new session gets the same code and a brief of the work so far. [Hand a session off](docs/workbench.md#hand-a-session-off).
-- **Plan mode** (Claude Code). The agent explores and proposes a plan, and only starts changing code once you approve it. [Plan mode](docs/security.md#plan-mode).
+- **Plan mode** (on providers with a plan mode: Claude Code, Cursor and Gemini CLI today). The agent explores and proposes a plan, and only starts changing code once you approve it. [Plan mode](docs/security.md#plan-mode).
+- **Transcript search.** Find what was asked, answered or run in any session, archived ones included, from the command palette or the search page. [Search transcripts](docs/workbench.md#search-transcripts).
 - **Files.** A file tree and a syntax-highlighted viewer for the session's worktree.
 - **Terminal.** Real PTY terminals owned by the runner, so they survive server restarts.
 - **Browser.** A Chromium the agents drive (navigate, snapshot, click, type, screenshot, console and network logs, plus click, hover, drag and scroll at screenshot coordinates for canvases, maps and other things without an element to pick), streamed edge to edge into the panel at the panel's own size. Click, type and scroll in it at any time.
@@ -160,9 +161,10 @@ When an agent finishes, CodeDen suggests two to four next prompts as one-click c
                 │ runner protocol over WebSocket        │ events + acks
 ┌───────────────▼──────────────────────────────────────┴──────────────┐
 │ RUNNER  (separate process, next to the code)                        │
-│  Claude Agent SDK · codex app-server · opencode serve · node-pty    │
-│  Chromium over CDP · worktrees, checkpoints, git · MCP proxy        │
-└──────────────────────────────────────────────────────────────────────┘
+│  Claude Agent SDK · codex app-server · opencode serve               │
+│  ACP client (Cursor, Gemini CLI) · node-pty · Chromium over CDP     │
+│  worktrees, checkpoints, git · MCP proxy                            │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
 - **Two processes.** The **server** owns the database, orchestration, the inbox, automations and GitHub sync, and serves the UI. The **runner** hosts the agent processes, terminals, the browser and git. If the server restarts (an update, a crash), running agents keep going; the runner journals their events until the server is back.
@@ -305,7 +307,7 @@ It's experimental. Read [The software factory and the dark factory](docs/softwar
 | [GitHub](docs/github.md) | Issues, PRs, checks, reviews and the evidence branch |
 | [Automations](docs/automations.md) | Triggers, guards, templates and writing your own |
 | [The software factory and the dark factory](docs/software-factory.md) | Modes, pipelines, trusted authors, the scout, the vision file, merge checks, limits and the kill switch |
-| [Workbench](docs/workbench.md) | Diffs, diff comments, checkpoints, forks, files, terminal, browser, composer, shortcuts |
+| [Workbench](docs/workbench.md) | Diffs, diff comments, checkpoints, forks, files, terminal, browser, composer, shortcuts, transcript search |
 | [Agent configuration](docs/agent-config.md) | Memory, skills and skill switches, subagents, MCP servers and hooks |
 | [Voice and images](docs/voice-and-images.md) | Dictation, read-aloud and image generation |
 | [Usage and costs](docs/usage-and-costs.md) | The ledger, reports, budgets and rate limits |
