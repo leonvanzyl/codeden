@@ -211,7 +211,8 @@ Opt-in proxies next to the browser's speech APIs (which stay the default). Keys 
 | `POST /api/projects/:id/github/issues/:number/comments` | `GithubCommentRequest` -> `GithubCommentResponse` (201) |
 | `POST /api/projects/:id/github/issues/:number/labels` | `GithubLabelRequest` -> `GithubIssue` |
 | `POST /api/projects/:id/github/issues/:number/triage` | `TriageIssueRequest` -> `TriageIssueResult` |
-| `GET /api/prs/:id` (`<projectId>:<number>`) | -> `GithubPrDetails` (live status, body, files) |
+| `GET /api/prs/:id` (`<projectId>:<number>`) | -> `GithubPrDetails` (live status, body, every changed file up to GitHub's 3000) |
+| `GET /api/prs/:id/diff` | -> `GithubPrDiff` (each changed file with its unified patch; `patch: null` for binary or too-large files) |
 | `POST /api/prs/:id/merge` | `MergePrRequest` (squash by default) -> `MergePrResponse` |
 | `GET /api/sessions/:id/github` | -> `SessionGithubResponse` |
 

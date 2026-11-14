@@ -660,7 +660,7 @@ node-pty sessions owned by the runner, so they survive server restarts, with bou
 
 ### 12.3 Files and diffs
 
-A file tree for the worktree, a file viewer and editor (CodeMirror 6), turn and session diffs from checkpoints, and a PR view. Line comments drafted on a diff are sent to the agent as one review message, through the same send-or-queue path as the composer; the drafts live in the web app only.
+A file tree for the worktree, a file viewer and editor (CodeMirror 6), turn and session diffs from checkpoints, and a PR view. Line comments drafted on a diff are sent to the agent as one review message, through the same send-or-queue path as the composer; the drafts live in the web app only. The PR view shows every changed file of the PR (up to GitHub's 3,000) with its diff from GitHub, so a PR can be reviewed without its worktree.
 
 **Compare with** (diff scope `compare`) diffs another session's latest checkpoint against this session's working tree, so a fork or handoff can be judged against its source (§9). `−` lines are the other session's, `+` lines this one's. The server takes the checkpoint commit from its `checkpoints` projection and asks this session's runner for a plain `git.diff`. That works because worktrees of one project on one runner share the repository's refs and objects. Other sessions are refused: another project (400 `compare_other_project`) or another runner (409 `compare_other_runner`, e.g. a sandbox with its own clone). The UI offers the fork relatives: the source, the session's own forks and handoffs, and its siblings. The comparison is read-only, with no restore and no line comments.
 

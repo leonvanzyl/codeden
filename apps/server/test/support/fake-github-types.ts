@@ -16,6 +16,16 @@ export interface FakeReview {
   submittedAt: string;
 }
 
+/** One entry of `GET /pulls/:n/files`, in GitHub's shape. */
+export interface FakePrFile {
+  filename: string;
+  status: string;
+  additions: number;
+  deletions: number;
+  patch?: string;
+  previous_filename?: string;
+}
+
 export interface FakeIssue {
   number: number;
   title: string;
@@ -39,5 +49,7 @@ export interface FakeIssue {
     /** Pending review requests (logins). */
     requestedReviewers?: string[];
     mergeable: "MERGEABLE" | "CONFLICTING" | "UNKNOWN";
+    /** Changed files (default: one modified `src/app.ts`), served 30 or `per_page` at a time. */
+    files?: FakePrFile[];
   };
 }

@@ -186,7 +186,7 @@ export function ProjectGithub({ project }: { project: Project }) {
         )}
       </section>
       <Dialog open={Boolean(openPr)} onOpenChange={(o) => !o && setOpenPr(null)}>
-        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
+        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-4xl">
           <DialogHeader>
             <DialogTitle>Pull request #{openPr?.number}</DialogTitle>
           </DialogHeader>

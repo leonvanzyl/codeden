@@ -24,6 +24,7 @@ import type {
   GithubIssuesResponse,
   GithubListQuery,
   GithubPrDetails,
+  GithubPrDiff,
   GithubPrsResponse,
   GithubSyncStatus,
   HookChangeRequest,
@@ -231,6 +232,8 @@ export interface GithubApi {
   sync(projectId: string): Promise<GithubSyncStatus>;
   /** `prId` is `<projectId>:<number>` (`githubPrId`). */
   pr(prId: string): Promise<GithubPrDetails>;
+  /** Every changed file of a PR with its patch, at the PR's current head. */
+  prDiff(prId: string): Promise<GithubPrDiff>;
   merge(prId: string, req?: Partial<MergePrRequest>): Promise<MergePrResponse>;
   session(sessionId: string): Promise<SessionGithubResponse>;
   triage(
