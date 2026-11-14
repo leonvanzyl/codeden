@@ -1,6 +1,6 @@
 # Remote runners: design and plan
 
-> Status: **proposed 2026-11-12**, from a design spike. Once merged, it is part of the design (`docs/DESIGN.md` §4.2, §4.3, §15.2, §19 point here). Anything marked **Needs the user's decision** touches the network or security rules and stays unchanged until the user decides. Provider homes and logins, on any runner, are refined by [agent-execution.md](agent-execution.md) (proposed 2026-11-14).
+> Status: **proposed 2026-11-12**, from a design spike. Once merged, it is part of the design (`docs/DESIGN.md` §4.2, §4.3, §15.2, §19 point here). Anything marked **Needs the user's decision** touches the network or security rules and stays unchanged until the user decides.
 
 CodeDen should scale out: run self-hosted, and run agents in sandboxes (Docker containers on the same machine, or Upstash Box in the cloud). Each sandbox clones its own copy of the code instead of filling the project folder with worktrees. This document records what the spike verified, the decisions, and a phased plan of shippable pull requests.
 
@@ -292,11 +292,7 @@ Credentials are stored in the OS keychain on the server's machine (as other secr
 
 Setup gets a **Sandboxes** section: per provider, which credential sandboxes will use, with a test that starts a throwaway sandbox and runs `<cli> --version` plus the provider's auth status, with no model call.
 
-**Refined by [agent-execution.md](agent-execution.md) §4–§5 (proposed).**
-- Inside a sandbox, each session also gets its own provider homes.
-- The runner's login broker hands each login over per turn.
-- Refreshed logins come back to the server in command results that aren't journaled. They are kept only when newer.
-- With Codex's external tokens, if its spike works out, a sandboxed Codex holds only an access token and the refresh token never enters the sandbox.
+A proposal awaiting the user's decision, [agent-execution.md](agent-execution.md), adds per-session provider homes and a login broker for sandboxed sessions.
 
 ## 15. Orchestrator and PMs
 
