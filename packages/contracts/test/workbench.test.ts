@@ -122,11 +122,27 @@ describe("workbench contracts", () => {
 
   it("validates diffs, restores, results and terminal messages", () => {
     roundTrip(DiffScope, { kind: "turn", turnId: "u1" });
+    roundTrip(DiffScope, { kind: "compare", sessionId: "s2" });
+    expect(DiffScope.safeParse({ kind: "compare" }).success).toBe(false);
     roundTrip(DiffResult, {
       scope: { kind: "session" },
       files: [{ path: "a.txt", change: "add", additions: 1, deletions: 0, patch: "+hi" }],
       turns: [{ id: "u1", index: 1, label: "Turn 1", at: ts }],
     });
+    roundTrip(DiffResult, {
+      scope: { kind: "compare", sessionId: "s2" },
+      files: [],
+      turns: [],
+      against: { sessionId: "s2", index: 3, at: ts },
+    });
+    expect(
+      DiffResult.safeParse({
+        scope: { kind: "compare", sessionId: "s2" },
+        files: [],
+        turns: [],
+        against: { sessionId: "s2", index: -1, at: ts },
+      }).success,
+    ).toBe(false);
     expect(RestoreFilesRequest.safeParse({}).success).toBe(false);
     expect(RestoreFilesRequest.safeParse({ turnId: "u1", index: 1 }).success).toBe(false);
     roundTrip(RestoreFilesRequest, { index: 0, paths: ["a.txt"] });
