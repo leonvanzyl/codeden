@@ -27,6 +27,14 @@ const delay = <T>(value: T, ms = 120): Promise<T> =>
 /** Providers whose (mock) history was hidden in this page load. */
 const hiddenHistory = new Set<string>();
 
+/**
+ * Open the mock UI with `?mock-update` to see the update banner and Settings > About as a
+ * packaged install with a newer release out (read once per page load, so it survives navigation).
+ */
+const mockUpdate =
+  typeof window !== "undefined" && /[?&]mock-update\b/.test(window.location.search);
+const [major = 0, minor = 0, patch = 0] = CODEDEN_VERSION.split(".").map((n) => Number(n) || 0);
+
 const artifacts: Record<string, () => string> = {
   "art-ci-shot": ciFailureShot,
   "art-contrast": contrastComparison,
@@ -124,14 +132,14 @@ export function workbenchApi(world: MockWorld): WorkbenchApi {
     getUpdates: () =>
       delay({
         current: CODEDEN_VERSION,
-        latest: CODEDEN_VERSION,
-        updateAvailable: false,
+        latest: mockUpdate ? `${major}.${minor}.${patch + 1}` : CODEDEN_VERSION,
+        updateAvailable: mockUpdate,
         enabled: true,
         mode: "notify" as const,
         checkedAt: new Date().toISOString(),
         error: null,
         command: "npm i -g codeden@latest",
-        source: "source" as const,
+        source: mockUpdate ? ("packaged" as const) : ("source" as const),
         state: "idle" as const,
         target: null,
         progress: null,

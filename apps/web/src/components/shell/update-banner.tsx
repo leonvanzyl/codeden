@@ -16,13 +16,22 @@ import { WhatsNewDialog } from "./whats-new-dialog";
 
 type Tone = "info" | "busy" | "done" | "warn";
 
+// Stacked, the icon sits beside the message's first line; in one row it is centred in the row.
+const icon = "mt-0.5 size-4 shrink-0 @[40rem]:mt-0";
 const icons: Record<Tone, ReactNode> = {
-  info: <ArrowUpCircle className="size-4 text-status-running" />,
-  busy: <Loader2 className="size-4 animate-spin text-status-running" />,
-  done: <CheckCircle2 className="size-4 text-status-done" />,
-  warn: <AlertTriangle className="size-4 text-status-failed" />,
+  info: <ArrowUpCircle className={cn(icon, "text-status-running")} />,
+  busy: <Loader2 className={cn(icon, "animate-spin text-status-running")} />,
+  done: <CheckCircle2 className={cn(icon, "text-status-done")} />,
+  warn: <AlertTriangle className={cn(icon, "text-status-failed")} />,
 };
 
+/**
+ * One banner row when it gets 40rem (640 px) or more: icon, message, actions, ×. Narrower (a
+ * phone, or a desktop column squeezed by the sidebar and panel) it stacks so the message keeps
+ * the full width: the icon and message on top, the actions on a row below (wrapping if needed,
+ * their text in line with the message) and × in the top-right corner. A container query, so it
+ * follows the space the banner gets rather than the window's width.
+ */
 function Bar({
   tone,
   state,
@@ -37,23 +46,40 @@ function Bar({
   onClose?: () => void;
 }) {
   return (
-    <div
-      role="status"
-      data-testid="update-banner"
-      data-state={state}
-      className={cn(
-        "mx-3 mt-2 flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg border bg-card px-3 py-2 text-sm shadow-xs",
-        tone === "warn" && "border-status-failed/40",
-      )}
-    >
-      {icons[tone]}
-      <div className="min-w-0 flex-1">{children}</div>
-      {actions && <div className="flex items-center gap-1.5">{actions}</div>}
-      {onClose && (
-        <Button size="icon-xs" variant="ghost" aria-label="Dismiss" onClick={onClose}>
-          <X />
-        </Button>
-      )}
+    <div className="@container shrink-0 px-3 pt-2">
+      <div
+        role="status"
+        data-testid="update-banner"
+        data-state={state}
+        className={cn(
+          "relative flex flex-col gap-1.5 rounded-lg border bg-card px-3 py-2 text-sm shadow-xs @[40rem]:flex-row @[40rem]:flex-wrap @[40rem]:items-center @[40rem]:gap-x-3",
+          tone === "warn" && "border-status-failed/40",
+        )}
+      >
+        <div
+          className={cn(
+            "flex min-w-0 items-start gap-2 @[40rem]:flex-1 @[40rem]:items-center @[40rem]:gap-3",
+            onClose && "pr-6 @[40rem]:pr-0",
+          )}
+        >
+          {icons[tone]}
+          <div className="min-w-0 flex-1">{children}</div>
+        </div>
+        {actions && (
+          <div className="flex flex-wrap items-center gap-1.5 pl-4 @[40rem]:pl-0">{actions}</div>
+        )}
+        {onClose && (
+          <Button
+            size="icon-xs"
+            variant="ghost"
+            aria-label="Dismiss"
+            className="absolute top-1.5 right-1.5 @[40rem]:static"
+            onClick={onClose}
+          >
+            <X />
+          </Button>
+        )}
+      </div>
     </div>
   );
 }
