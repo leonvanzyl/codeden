@@ -138,22 +138,43 @@ export class GithubClient {
   }
 }
 
-/** Map an Octokit failure to a `ServiceError` (rate limits to `GithubRateLimitError`). */
+/** How long to wait after a secondary rate limit that doesn't say (GitHub: at least a minute). */
+const SECONDARY_LIMIT_WAIT_MS = 60_000;
+
+/** GitHub's messages for a secondary rate limit (formerly "abuse detection"). */
+const SECONDARY_LIMIT_MESSAGE = /secondary rate limit|abuse detection/i;
+
+/**
+ * Map an Octokit failure to a `ServiceError`. Rate limits become `GithubRateLimitError`: a 429,
+ * or a 403 that is out of the primary limit, has `retry-after`, or says it hit a secondary limit
+ * (those often come with neither header). The wait is `retry-after`, else the primary limit's
+ * reset when it is used up, else a minute.
+ */
 export function toGithubError(error: unknown): Error {
   if (error instanceof ServiceError) return error;
   const http = httpError(error);
   if (!http)
     return new ServiceError(502, "github_error", `GitHub request failed: ${errorMessage(error)}`);
   const headers = http.response?.headers ?? {};
-  const remaining = headers["x-ratelimit-remaining"];
+  const message = githubMessage(http);
+  const primary = String(headers["x-ratelimit-remaining"]) === "0";
   const retryAfter = headers["retry-after"];
-  if (http.status === 429 || (http.status === 403 && (String(remaining) === "0" || retryAfter))) {
-    const resetAt = retryAfter
-      ? Date.now() + Number(retryAfter) * 1000
-      : Number(headers["x-ratelimit-reset"] ?? 0) * 1000 || Date.now() + 60_000;
+  const limited =
+    http.status === 429 ||
+    (http.status === 403 &&
+      (primary || retryAfter !== undefined || SECONDARY_LIMIT_MESSAGE.test(message)));
+  if (limited) {
+    const now = Date.now();
+    const seconds = Number(retryAfter); // NaN without the header, or when it isn't a number
+    const primaryReset = primary ? Number(headers["x-ratelimit-reset"] ?? 0) * 1000 : 0;
+    const resetAt =
+      seconds >= 0
+        ? now + seconds * 1000
+        : primaryReset > now
+          ? primaryReset
+          : now + SECONDARY_LIMIT_WAIT_MS;
     return new GithubRateLimitError(resetAt);
   }
-  const message = githubMessage(http);
   if (http.status === 404) return new ServiceError(404, "github_not_found", message);
   if (http.status === 403) return new ServiceError(403, "github_forbidden", message);
   if (http.status === 409) return new ServiceError(409, "github_conflict", message);
