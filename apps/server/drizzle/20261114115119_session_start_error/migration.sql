@@ -1,0 +1,1 @@
+ALTER TABLE `sessions` ADD `start_error` text;

@@ -201,6 +201,26 @@ describe("availability", () => {
     ).toBe("Installed but broken");
   });
 
+  it("says a CLI that needs an update to run is too old (#269)", () => {
+    const old = check({
+      id: "gemini",
+      state: "missing",
+      installed: true,
+      version: "0.36.0",
+      loggedIn: null,
+      message: "Gemini CLI 0.36.0 is too old (needs 0.68.0+)",
+      fix: { kind: "upgrade", command: "npm install -g @google/gemini-cli@latest" },
+    });
+    const availability = providerAvailability("gemini", [old]);
+    expect(availability).toEqual({
+      ready: false,
+      reason: "Too old",
+      detail: "Gemini CLI 0.36.0 is too old (needs 0.68.0+)",
+      command: "npm install -g @google/gemini-cli@latest",
+    });
+    expect(providerOptionLabel("Gemini CLI", availability)).toBe("Gemini CLI (too old)");
+  });
+
   it("treats providers without a check (or before detection) as ready", () => {
     expect(providerAvailability("fake", [check({ id: "claude" })]).ready).toBe(true);
     expect(providerAvailability("codex", undefined).ready).toBe(true);

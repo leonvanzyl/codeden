@@ -350,7 +350,12 @@ describe("SetupService", () => {
     expect(signedOut.check).toMatchObject({ state: "missing", installed: true, loggedIn: false });
 
     const old = await run("0.67.0");
-    expect(old.check).toMatchObject({ state: "missing", installed: true, version: "0.67.0" });
+    expect(old.check).toMatchObject({
+      state: "missing",
+      installed: true,
+      version: "0.67.0",
+      message: "Gemini CLI 0.67.0 is too old (needs 0.68.0+)",
+    });
     expect(old.check?.fix).toEqual({
       kind: "upgrade",
       command: "npm install -g @google/gemini-cli@latest",

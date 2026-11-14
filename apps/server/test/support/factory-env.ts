@@ -222,6 +222,8 @@ export function createFactoryEnv(
           providerId,
           installed: true,
           loggedIn: true,
+          supported: true,
+          issues: [],
           ...env.detected[providerId],
         })),
       };

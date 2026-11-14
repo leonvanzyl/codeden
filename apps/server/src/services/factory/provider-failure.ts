@@ -5,8 +5,9 @@ import { PROVIDER_FAILURE_BACKOFF_MS, type Unavailable } from "./availability";
 
 /**
  * A factory session that failed because of its provider rather than its work (§10.1, Provider
- * availability): the provider's usage limit, a sign-in problem, or a session that never
- * started. Read from the error kind the provider adapters give a failed turn.
+ * availability): the provider's usage limit, a sign-in problem, a CLI too old to run, or a
+ * session that never started. Read from the error kind the provider adapters give a failed
+ * turn, or a refused open (`Session.startError`).
  */
 
 /** Nudge key prefix: this item's reviews skip the provider until the stored time. */
@@ -15,10 +16,24 @@ const SKIP = "reviewer_skip_";
 const PROVIDER_FAILED = "reviewer_provider_failed_";
 /** Provider failures in a row after which a dead reviewer counts as an ordinary failure. */
 export const MAX_PROVIDER_RESTARTS = 5;
+/**
+ * A start that failed for a reason the provider didn't classify: it may be the item's own (its
+ * worktree), so only that item's reviews skip the provider.
+ */
+const FAILING_TO_START = "failing to start";
+/** A refused open the provider classified as `setup`: its CLI is older than CodeDen runs. */
+const TOO_OLD = "too old to run (update it)";
+
+/** Whether the failure keeps all new factory work off the provider, not just the item's reviews. */
+export function providerWide(cause: Unavailable): boolean {
+  return cause.reason !== FAILING_TO_START;
+}
 
 /**
  * Why `s` failed because of its provider, or null when it didn't (or didn't fail). A session
- * that could not start has the launcher's `run_failed` inbox item keyed `start`.
+ * that could not start has a `run_failed` inbox item keyed `start` (the launcher's, or the
+ * runner's report of the refused open), and the provider's classification of a refused open in
+ * `startError.kind`: `setup` (its CLI is too old to run) or `auth` (not signed in).
  */
 export function providerFailure(
   repo: SessionRepo,
@@ -28,8 +43,10 @@ export function providerFailure(
   if (s.status !== "failed" && s.status !== "idle") return null;
   const last = repo.rootTurnIds(s).at(-1);
   if (!last) {
-    const notStarted = s.status === "failed" && inbox.find(`inbox:${s.id}:start`);
-    return notStarted ? { reason: "failing to start", until: null } : null;
+    if (s.status !== "failed" || !inbox.find(`inbox:${s.id}:start`)) return null;
+    if (s.startError?.kind === "setup") return { reason: TOO_OLD, until: null };
+    if (s.startError?.kind === "auth") return { reason: "not signed in", until: null };
+    return { reason: FAILING_TO_START, until: null };
   }
   const turn = repo.turn(s.id, last);
   if (turn?.status !== "failed" || !turn.error) return null;

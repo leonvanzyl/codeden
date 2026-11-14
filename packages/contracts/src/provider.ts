@@ -107,6 +107,12 @@ export const ProviderIssue = z.object({
       command: z.string(),
     })
     .optional(),
+  /**
+   * For `version_unsupported`: the oldest version CodeDen runs at all. Set when sessions can't
+   * open on the installed version, so the provider counts as unavailable; absent when the version
+   * is only older than the one CodeDen was tested with and still runs.
+   */
+  minVersion: z.string().optional(),
 });
 export type ProviderIssue = z.infer<typeof ProviderIssue>;
 

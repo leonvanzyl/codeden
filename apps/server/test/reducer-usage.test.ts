@@ -124,6 +124,25 @@ describe("process lifecycle", () => {
     });
   });
 
+  it("keeps a refused first open with the session, in the launcher's start item (#269)", () => {
+    const error = {
+      code: "open_failed",
+      message: "Gemini CLI 0.36.0 is too old (needs 0.68.0+)",
+      kind: "setup" as const,
+    };
+    // A session that never opened: no thread yet.
+    const fresh = new MemoryProjection();
+    fresh.addSession({ ...sampleSession, status: "starting", projectId: "p1" });
+    fresh.applyProcess({ kind: "session.process", sessionId: "s1", state: "crashed", error }, 3);
+    expect(fresh.session()).toMatchObject({ status: "failed", startError: error });
+    // The launcher's own report of the failed start updates this item instead of adding one.
+    expect([...fresh.inbox.keys()]).toEqual(["inbox:s1:start"]);
+    expect(fresh.inbox.get("inbox:s1:start")).toMatchObject({
+      kind: "run_failed",
+      body: error.message,
+    });
+  });
+
   it("stops the session on a normal exit and ignores start/ready", () => {
     expect(p.applyProcess({ kind: "session.process", sessionId: "s1", state: "ready" }, 1)).toEqual(
       [],

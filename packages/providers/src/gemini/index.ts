@@ -21,6 +21,7 @@ export {
   GEMINI_LOGIN_COMMAND,
   GEMINI_MIN_VERSION,
   GEMINI_UPGRADE_COMMAND,
+  geminiTooOldMessage,
   isSupportedGeminiVersion,
 } from "./detect";
 export { geminiExtensions, geminiToolFacts, readPlan } from "./extensions";

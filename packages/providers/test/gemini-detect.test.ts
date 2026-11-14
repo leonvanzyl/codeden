@@ -243,11 +243,14 @@ describe("detectGemini", () => {
     });
     expect(probed).toBe(false);
     expect(status.supported).toBe(false);
+    // `minVersion`: sessions refuse to open on it, so the factory counts it unavailable (#269).
     expect(status.issues).toEqual([
-      expect.objectContaining({
+      {
         code: "version_unsupported",
+        message: "Gemini CLI 0.67.0 is too old (needs 0.68.0+). Update it.",
         fix: { kind: "upgrade", command: GEMINI_UPGRADE_COMMAND },
-      }),
+        minVersion: "0.68.0",
+      },
     ]);
   });
 

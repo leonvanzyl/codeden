@@ -4,11 +4,12 @@ import type { RunnerPort } from "../runner-port";
 
 /**
  * Which providers can take new factory work (§10.1, Provider availability). A provider is
- * available unless the runner's `detect()` says it isn't installed or isn't signed in, its
- * usage service window is `limited` until a reset still ahead, or a factory session on it just
- * failed because of the provider (usage limit, sign-in, start failure). Detection is cached and
- * refreshed in the background every few minutes; a tick never waits for it, and a provider not
- * detected yet counts as available.
+ * available unless the runner's `detect()` says it isn't installed, is older than CodeDen runs
+ * at all (a `version_unsupported` issue with a `minVersion`) or isn't signed in, its usage
+ * service window is `limited` until a reset still ahead, or a factory session on it just failed
+ * because of the provider (usage limit, sign-in, a CLI too old, start failure). Detection is
+ * cached and refreshed in the background every few minutes; a tick never waits for it, and a
+ * provider not detected yet counts as available.
  */
 
 /** Why a provider can't take new work, and until when (null: not known). */
@@ -86,6 +87,11 @@ export class ProviderAvailability {
     const now = this.deps.now().getTime();
     const status = this.statuses.get(provider);
     if (status && !status.installed) return { reason: "not installed", until: null };
+    const tooOld = status?.issues.find((i) => i.code === "version_unsupported" && i.minVersion);
+    if (tooOld) {
+      const version = status?.version ?? "unknown version";
+      return { reason: `too old (${version}, needs ${tooOld.minVersion}+)`, until: null };
+    }
     if (status && status.loggedIn === false) return { reason: "not signed in", until: null };
     const limited = this.limitedUntil(provider, now);
     if (limited !== undefined) return { reason: "at its usage limit", until: limited };

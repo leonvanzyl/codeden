@@ -168,6 +168,9 @@ export interface Availability {
 
 const READY: Availability = { ready: true, reason: null, detail: null, command: null };
 
+/** The reason for an installed CLI that can't run until it is updated (its check's fix). */
+export const TOO_OLD = "Too old";
+
 /**
  * Availability from the setup checks, matched by provider id. A provider without a check (or
  * before the first check finishes) counts as ready: the runner loaded it.
@@ -184,7 +187,9 @@ export function providerAvailability(
       : "Not installed"
     : check.loggedIn === false
       ? "Not signed in"
-      : "Not ready";
+      : check.fix?.kind === "upgrade"
+        ? TOO_OLD
+        : "Not ready";
   return { ready: false, reason, detail: check.message, command: check.fix?.command ?? null };
 }
 

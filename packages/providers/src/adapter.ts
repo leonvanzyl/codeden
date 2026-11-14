@@ -1,6 +1,7 @@
 import type {
   AgentEvent,
   AutonomyLevel,
+  ErrorKind,
   ModelInfo,
   ProviderCapabilities,
   ProviderInfo,
@@ -148,11 +149,17 @@ export function providerInfo(adapter: ProviderAdapter): ProviderInfo {
   };
 }
 
-/** Error thrown by sessions for invalid calls (unknown request id, turn already running). */
+/**
+ * Error thrown by sessions for invalid calls (unknown request id, turn already running), and by
+ * `openSession` when the provider can't run. `kind` classifies a refused open where the adapter
+ * knows why (`setup`: the CLI is too old; `auth`: it isn't signed in), so CodeDen keeps new work
+ * off the provider instead of trying it again.
+ */
 export class ProviderSessionError extends Error {
   constructor(
     readonly code: string,
     message: string,
+    readonly kind?: ErrorKind,
   ) {
     super(message);
     this.name = "ProviderSessionError";

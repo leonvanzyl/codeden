@@ -5,6 +5,7 @@ import {
   lowerFirst,
   providerAvailability,
   providerOptionLabel,
+  TOO_OLD,
 } from "@/components/composer/model-picker/logic";
 import { useSetupStatus, useSnapshotData } from "@/lib/queries";
 
@@ -52,7 +53,8 @@ export function AgentsTuning({
         <p className="text-[13px] font-medium">Agents</p>
         <p className="text-3xs text-muted-foreground">
           A reviewer on a different provider from the builder gives the most independent review.
-          Providers that aren't signed in or are at their usage limit are skipped.
+          Providers that aren't signed in, are too old to run or are at their usage limit are
+          skipped.
         </p>
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
@@ -142,9 +144,14 @@ function ProviderSelect({
   const availability = chosen ? providerAvailability(chosen.id, checks) : null;
   let help: ReactNode;
   if (chosen && availability && !availability.ready) {
+    // A CLI too old says which version it needs: "Gemini CLI 0.36.0 is too old (needs 0.68.0+)".
+    const why =
+      availability.reason === TOO_OLD && availability.detail
+        ? availability.detail
+        : `${chosen.displayName}: ${lowerFirst(availability.reason ?? "Not ready")}`;
     help = (
       <span className="text-status-waiting">
-        {chosen.displayName}: {lowerFirst(availability.reason ?? "Not ready")}
+        {why}
         {availability.command && (
           <>
             {" "}

@@ -127,6 +127,12 @@ export const Session = z.object({
   worktreeRemovedAt: Timestamp.nullable().optional(),
   /** Set when the session was forked from another one (its conversation and code). */
   forkedFrom: ForkOrigin.nullable().optional(),
+  /**
+   * Why the provider last refused to open the session, as the runner reported it (code
+   * `open_failed`), with its `kind` when the provider classified it: `setup` for a CLI too old to
+   * run, `auth` for one that isn't signed in. Absent or null when no open failed.
+   */
+  startError: ErrorInfo.nullable().optional(),
   createdAt: Timestamp,
   updatedAt: Timestamp,
   endedAt: Timestamp.nullable(),
