@@ -21,7 +21,8 @@
   "mcp": true,
   "skills": true,
   "liveAutonomy": false,
-  "readOnly": true
+  "readOnly": true,
+  "vendorHistory": true
  },
  "preamble": [],
  "turns": [

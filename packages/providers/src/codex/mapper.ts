@@ -126,6 +126,11 @@ export class CodexEventMapper {
     return { threadId: this.rootThreadId, turnId };
   }
 
+  /** True once the session's agent spawned a sub-agent (running or not). */
+  hasSubagents(): boolean {
+    return this.subagents.any();
+  }
+
   /** Running sub-agent turns. */
   runningSubagentTurns(): { codexThreadId: string; turnId: string }[] {
     return this.subagents.runningTurns();

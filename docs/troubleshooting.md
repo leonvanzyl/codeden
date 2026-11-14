@@ -107,6 +107,21 @@ A Claude login close to expiry shows as a warning; signing in again clears it.
 
 OpenCode with no connected provider is a warning rather than an error: its own free models work without an account. `opencode auth login` connects a provider (Anthropic, OpenAI, and many more); API keys in your environment and providers in `opencode.json` count too. CodeDen checks with `opencode auth list --standalone`, which runs a private OpenCode server for a few seconds and never starts or touches OpenCode's background service.
 
+### CodeDen's sessions show up in the Codex app
+
+The Codex apps (the ChatGPT desktop app's Codex, the Codex IDE extension) list every Codex conversation on your machine as yours, including the ones CodeDen starts for factory reviewers, builders, PMs and other sessions. CodeDen keeps its own out of that list.
+
+**A CodeDen conversation is visible in the Codex app only while one of its turns is running.** The rest of the time it is under the app's **Archived** conversations. CodeDen archives it when the turn ends, and unarchives it just before the next turn, a resume or a fork, so CodeDen's sessions keep their full history. Your own conversations are never touched.
+
+- A copy CodeDen makes when you fork a session is archived as soon as it is made.
+- A turn that fails to start, an interrupted turn, and a Codex process that crashes all leave the conversation archived.
+- If CodeDen itself is killed mid-turn, it archives what was left in the list the next time it starts.
+- One exception: a session whose agent started Codex sub-agents stays visible until you stop or archive the session (or CodeDen restarts). Archiving it earlier could cut off agents its next turn still talks to.
+
+Sessions from older CodeDen versions are still listed. To hide them, open **Settings → Providers → Provider apps** and choose **Review** next to **Hide CodeDen's sessions from the Codex app**. CodeDen lists the conversations it started that the Codex app still shows (found by its own record of them, never by their titles) and archives them once you confirm. They are archived, not deleted: they appear under the Codex app's archived conversations, and CodeDen can still resume and fork them.
+
+Claude Code, OpenCode and Gemini CLI don't add CodeDen's sessions to your own lists. Claude Code labels them as SDK sessions, which its `/resume` leaves out. OpenCode's are archived. Gemini CLI lists sessions per folder, and CodeDen's run in their own worktrees.
+
 ### The Cursor CLI asks for `agent update`
 
 CodeDen drives the Cursor CLI through its ACP server (`agent acp`), which older builds don't have. Run `agent update` (or reinstall with `curl https://cursor.com/install -fsS | bash`, or `irm 'https://cursor.com/install?win32=true' | iex` on Windows), then press **Re-check**. Another program named `agent` on your PATH isn't Cursor's: CodeDen only uses an `agent` whose `--version` is a Cursor build, and prefers `cursor-agent` when both are installed.

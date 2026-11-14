@@ -9,6 +9,7 @@ import { AutonomyLevel, Id, ProviderId, ReasoningEffort } from "../common";
 import { UserInput } from "../input";
 import { ProjectConfigFile } from "../project-config";
 import { ProviderInfo, ProviderStatus, RuntimeResponse, SessionOptions } from "../provider";
+import { ProviderHistoryCommandResults, ProviderHistoryCommands } from "../provider-history";
 import { BrowserCommandResults, BrowserCommands } from "./browser";
 
 /** Terminal (node-pty) id, unique per runner. */
@@ -98,6 +99,8 @@ export const RunnerCommand = z.discriminatedUnion("name", [
      */
     upTo: z.string().min(1).optional(),
   }),
+  /** `provider.history.*` (`capabilities.vendorHistory`), defined in `../provider-history`. */
+  ...ProviderHistoryCommands,
   /** Create or reuse the working directory for a session (worktree + setup commands). */
   z.object({
     name: z.literal("workspace.prepare"),
@@ -322,6 +325,7 @@ export const RunnerCommandResults = {
   }),
   "provider.oneShot": z.object({ text: z.string(), model: z.string() }),
   "provider.fork": z.object({ resumeToken: z.string().min(1) }),
+  ...ProviderHistoryCommandResults,
   "workspace.prepare": z.object({
     cwd: z.string(),
     branch: z.string().nullable(),

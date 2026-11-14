@@ -1,4 +1,10 @@
-import type { AutonomyLevel, McpServerConfig, SessionOptions, UserInput } from "@codeden/contracts";
+import type {
+  AutonomyLevel,
+  McpServerConfig,
+  ReasoningEffort,
+  SessionOptions,
+  UserInput,
+} from "@codeden/contracts";
 import { osTempRoots } from "../policy/paths";
 import type { JsonValue } from "./protocol/serde_json/JsonValue";
 import type {
@@ -139,4 +145,17 @@ export function toCodexInput(input: UserInput): CodexUserInput[] {
     }
   }
   return parts;
+}
+
+/**
+ * CodeDen effort -> Codex reasoning effort. `max` is sent only to models that list it
+ * (`supported`); older models top out at `xhigh`.
+ */
+export function codexEffort(
+  effort: ReasoningEffort | undefined,
+  supported?: readonly ReasoningEffort[],
+): string | undefined {
+  if (!effort) return undefined;
+  if (effort !== "max") return effort;
+  return supported?.includes("max") ? "max" : "xhigh";
 }

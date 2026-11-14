@@ -31,6 +31,7 @@ import {
 import type { AutomationPort, GithubPort } from "./orchestration/ports";
 import { ProjectService } from "./projects/project-service";
 import { ProjectRedetector } from "./projects/redetector";
+import { ProviderHistoryService } from "./providers/history";
 import { type RunnerPort, type RunnerRouter, redetectProviders, singleRunner } from "./runner-port";
 import type { SecretStore } from "./secrets";
 import { AutoRetry, type AutoRetryDeps } from "./sessions/auto-retry";
@@ -175,6 +176,8 @@ export interface AppServices {
   prFeedback: PrFeedbackService;
   /** Continues agent sessions after transient failures and usage limits. */
   autoRetry: AutoRetry;
+  /** Hides CodeDen's conversations from providers' own apps (Settings → Providers). */
+  providerHistory: ProviderHistoryService;
   userHome: string;
 }
 
@@ -334,6 +337,7 @@ export function createServices(opts: ServicesOptions): AppServices {
     options: opts.orchestration,
     log: opts.log,
   });
+  const providerHistory = new ProviderHistoryService({ db: opts.db, runner: opts.runner, runners });
   const worktreeCleanup = new WorktreeCleanup({
     repo: sessionRepo,
     projects,
@@ -394,6 +398,7 @@ export function createServices(opts: ServicesOptions): AppServices {
       launcher,
       runner: opts.runner,
       runners,
+      sweepVendorHistory: (runner, skip) => providerHistory.sweep(runner, skip),
       log: opts.log,
     }),
     inbox,
@@ -445,6 +450,7 @@ export function createServices(opts: ServicesOptions): AppServices {
       trustedAuthors,
       log: opts.log,
     }),
+    providerHistory,
     autoRetry: new AutoRetry({
       db: opts.db,
       store: opts.store,

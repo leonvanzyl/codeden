@@ -118,7 +118,7 @@ Open **Settings** (**Ctrl/Cmd+,**):
 | Section | What's there |
 |---|---|
 | General | Theme, follow-up chips, the automations master switch, the global factory kill switch, updates, worktree cleanup |
-| Providers | Default provider, model and effort for the orchestrator, PMs and agents |
+| Providers | Default provider, model and effort for the orchestrator, PMs and agents; hiding CodeDen's older sessions from the Codex app ([details](troubleshooting.md#codedens-sessions-show-up-in-the-codex-app)) |
 | Autonomy | The default autonomy level for new sessions |
 | GitHub | Connection status |
 | Voice | Dictation engine, push-to-talk, read-aloud |

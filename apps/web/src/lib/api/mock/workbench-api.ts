@@ -24,6 +24,9 @@ import type { MockWorld } from "./world";
 const delay = <T>(value: T, ms = 120): Promise<T> =>
   new Promise((resolve) => setTimeout(() => resolve(structuredClone(value)), ms));
 
+/** Providers whose (mock) history was hidden in this page load. */
+const hiddenHistory = new Set<string>();
+
 const artifacts: Record<string, () => string> = {
   "art-ci-shot": ciFailureShot,
   "art-contrast": contrastComparison,
@@ -39,6 +42,8 @@ type WorkbenchApi = Pick<
   | "auth"
   | "loginCommand"
   | "refreshModels"
+  | "getProviderHistory"
+  | "hideProviderHistory"
   | "getClaudeSdkStatus"
   | "installClaudeSdk"
   | "completeSetup"
@@ -143,6 +148,31 @@ export function workbenchApi(world: MockWorld): WorkbenchApi {
       world.snapshot.runner.providers.some((p) => p.id === providerId)
         ? delay({ providers: world.snapshot.runner.providers }, 700)
         : Promise.reject(new Error(`No provider "${providerId}" is loaded`)),
+    // Three reviewer threads the vendor's app still lists, until they are hidden.
+    getProviderHistory: (providerId) =>
+      delay(
+        {
+          providerId,
+          recorded: 5,
+          entries: hiddenHistory.has(providerId)
+            ? []
+            : [1, 2, 3].map((n) => ({
+                resumeToken: `mock-thread-${n}`,
+                preview: `You are the independent reviewer of pull request #${40 + n}.`,
+                updatedAt: new Date(Date.now() - n * 3_600_000).toISOString(),
+                sessionId: `mock-review-${n}`,
+                sessionTitle: `Review PR #${40 + n}`,
+              })),
+        },
+        500,
+      ),
+    hideProviderHistory: (providerId) => {
+      const hidden = hiddenHistory.has(providerId)
+        ? []
+        : ["mock-thread-1", "mock-thread-2", "mock-thread-3"];
+      hiddenHistory.add(providerId);
+      return delay({ providerId, hidden, missing: [], failed: [] }, 700);
+    },
     updates: mockUpdatesApi(),
     network: mockNetworkApi(),
     auth: mockAuthApi(),

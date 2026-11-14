@@ -125,6 +125,21 @@ export async function executeCommand(core: RunnerCore, command: RunnerCommand): 
         );
       }
     }
+    // Only the conversations the server names (from its own record) are looked at or hidden.
+    case "provider.history.list": {
+      const adapter = registry.get(command.providerId);
+      if (!adapter?.capabilities().vendorHistory || !adapter.listVendorHistory) {
+        throw new CommandError("unsupported", `Provider ${command.providerId} has no own history`);
+      }
+      return { entries: await adapter.listVendorHistory(command.resumeTokens) };
+    }
+    case "provider.history.hide": {
+      const adapter = registry.get(command.providerId);
+      if (!adapter?.capabilities().vendorHistory || !adapter.hideVendorHistory) {
+        throw new CommandError("unsupported", `Provider ${command.providerId} has no own history`);
+      }
+      return adapter.hideVendorHistory(command.resumeTokens);
+    }
 
     case "workspace.prepare":
       if (core.isDraining()) throw new CommandError("draining", "Runner is draining");

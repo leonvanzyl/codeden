@@ -9,9 +9,11 @@ import {
   GitPushResponse,
   GitStatusResponse,
   HandoffSessionResponse,
+  HideProviderHistoryResponse,
   InboxItem,
   LoginCommandResponse,
   Project,
+  ProviderHistoryResponse,
   RefreshModelsResponse,
   RefreshProjectResponse,
   ReorderProjectsResponse,
@@ -157,6 +159,14 @@ export function createHttpClient(origin: string, opts: HttpClientOptions = {}): 
     refreshModels: (providerId) =>
       post(`/providers/${encodeURIComponent(providerId)}/refresh-models`, {}, (v) =>
         RefreshModelsResponse.parse(v),
+      ),
+    getProviderHistory: (providerId) =>
+      get(`/providers/${encodeURIComponent(providerId)}/history`, (v) =>
+        ProviderHistoryResponse.parse(v),
+      ),
+    hideProviderHistory: (providerId) =>
+      post(`/providers/${encodeURIComponent(providerId)}/history/hide`, { confirm: true }, (v) =>
+        HideProviderHistoryResponse.parse(v),
       ),
     getClaudeSdkStatus: () => get("/setup/claude-sdk", (v) => ClaudeSdkStatus.parse(v)),
     installClaudeSdk: () => post("/setup/claude-sdk/install", {}, (v) => ClaudeSdkStatus.parse(v)),

@@ -9,12 +9,20 @@
 // every turn, one after the other (`notify: true` ones as notifications); each answer is logged as `{ method: "answer:<method>", params }`
 // and the turn completes once all are answered.
 // FAKE_CODEX_TURN=hang starts turns that never complete and never answers `turn/interrupt`.
+// FAKE_CODEX_TURN=fail refuses `turn/start`; FAKE_CODEX_TURN=exit starts the turn, then the
+// process exits mid-turn (a crash).
 // FAKE_CODEX_TURN=open sends the scripted requests but keeps the turn open until
 // `turn/interrupt`, which ends it as interrupted; interrupts for other threads (sub-agents) are
 // answered but their turns never end. Scripted entries with `afterInterrupt: true` are held
 // back and sent as notifications once the root turn has been interrupted.
 // FAKE_CODEX_ECHO=1 echoes each turn/start and turn/steer input as a userMessage item.
-import { appendFileSync, readFileSync } from "node:fs";
+// FAKE_CODEX_ARCHIVE names a JSON file holding the ids of archived threads (an array; a missing
+// file is none), shared by every app-server process of a test like Codex's own archive folder.
+// thread/archive and thread/unarchive answer as Codex 0.160 does, and an archived thread can't
+// be resumed, forked or given a turn until it is unarchived. Without it, nothing stays archived.
+// FAKE_CODEX_THREADS names a JSON file of the threads in the Codex home (`{ id, preview }`):
+// thread/list returns those not archived, two per page.
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { createInterface } from "node:readline";
 
 const log = process.env.FAKE_CODEX_LOG;
@@ -103,6 +111,34 @@ function echoUserMessage(turnId, params) {
 }
 let echoes = 0;
 
+const archiveFile = process.env.FAKE_CODEX_ARCHIVE;
+const archived = () =>
+  archiveFile && existsSync(archiveFile) ? new Set(JSON.parse(readFileSync(archiveFile, "utf8"))) : new Set();
+const saveArchived = (ids) => archiveFile && writeFileSync(archiveFile, JSON.stringify([...ids]));
+const fail = (msg, message) => send({ id: msg.id, error: { code: -32600, message } });
+/** Codex 0.160's refusal to resume or fork an archived thread. */
+const isArchived = (msg, threadId) => {
+  if (!archived().has(threadId)) return false;
+  fail(msg, `session ${threadId} is archived. Run \`codex unarchive ${threadId}\` to unarchive it first.`);
+  return true;
+};
+
+/** thread/archive and thread/unarchive (without FAKE_CODEX_ARCHIVE, nothing stays archived). */
+function archiveRequest(msg) {
+  const threadId = msg.params?.threadId;
+  const ids = archived();
+  if (msg.method === "thread/archive") {
+    if (threadId === "missing") return fail(msg, `no rollout found for thread id ${threadId}`);
+    ids.add(threadId);
+    saveArchived(ids);
+    return send({ id: msg.id, result: {} });
+  }
+  if (!ids.has(threadId)) return fail(msg, `no archived rollout found for thread id ${threadId}`);
+  ids.delete(threadId);
+  saveArchived(ids);
+  return send({ id: msg.id, result: { thread: { id: threadId } } });
+}
+
 createInterface({ input: process.stdin }).on("line", (line) => {
   const msg = JSON.parse(line);
   if (msg.id !== undefined && !msg.method && waiting.has(msg.id)) {
@@ -117,8 +153,25 @@ createInterface({ input: process.stdin }).on("line", (line) => {
       if (mode === "hang") return;
       return send({ id: msg.id, result: { userAgent: "fake-codex/0.0.0" } });
     case "thread/start":
-    case "thread/resume":
       return send({ id: msg.id, result: { thread: { id: "thread-1" }, model: "gpt-configured" } });
+    case "thread/resume":
+      if (isArchived(msg, msg.params?.threadId)) return;
+      return send({ id: msg.id, result: { thread: { id: "thread-1" }, model: "gpt-configured" } });
+    case "thread/archive":
+    case "thread/unarchive":
+      return archiveRequest(msg);
+    case "thread/list": {
+      const file = process.env.FAKE_CODEX_THREADS;
+      const all = file ? JSON.parse(readFileSync(file, "utf8")) : [];
+      const hidden = archived();
+      const listed = all.filter((t) => !hidden.has(t.id));
+      const from = Number(msg.params?.cursor ?? 0);
+      const data = listed
+        .slice(from, from + 2)
+        .map((t) => ({ name: null, updatedAt: 1794650000, ...t, source: "vscode" }));
+      const nextCursor = from + 2 < listed.length ? String(from + 2) : null;
+      return send({ id: msg.id, result: { data, nextCursor, backwardsCursor: null } });
+    }
     // "thread-source" holds turn-1 to turn-3, listed two per page (newest first); "old-codex"
     // stands for an app-server without the method. Any other thread answers like Codex 0.160
     // does for a thread a short-lived app-server hasn't loaded.
@@ -140,21 +193,25 @@ createInterface({ input: process.stdin }).on("line", (line) => {
     // thread doesn't hold, "turn-running" a turn still in progress.
     case "thread/fork": {
       const { threadId, lastTurnId } = msg.params ?? {};
-      const fail = (message) => send({ id: msg.id, error: { code: -32600, message } });
-      if (threadId === "missing") return fail(`no rollout found for thread id ${threadId}`);
-      if (lastTurnId === "turn-gone") return fail(`turn not found: ${lastTurnId}`);
+      if (threadId === "missing") return fail(msg, `no rollout found for thread id ${threadId}`);
+      if (isArchived(msg, threadId)) return;
+      if (lastTurnId === "turn-gone") return fail(msg, `turn not found: ${lastTurnId}`);
       if (lastTurnId === "turn-running") {
-        return fail(`lastTurnId '${lastTurnId}' identifies an in-progress turn`);
+        return fail(msg, `lastTurnId '${lastTurnId}' identifies an in-progress turn`);
       }
       return send({ id: msg.id, result: { thread: { id: "thread-fork-1" }, model: "gpt-configured" } });
     }
     case "model/list":
       return modelList(msg);
     case "turn/start": {
+      // Archiving unloads a thread: a turn on it fails until it is unarchived and resumed.
+      if (archived().has(msg.params?.threadId)) return fail(msg, `thread not found: ${msg.params.threadId}`);
+      if (turnMode === "fail") return fail(msg, "turn refused");
       const turn = { id: `turn-${++turns}`, status: "completed", items: [], error: null };
       send({ id: msg.id, result: { turn: { ...turn, status: "inProgress" } } });
       echoUserMessage(turn.id, msg.params);
       if (turnMode === "hang") return;
+      if (turnMode === "exit") return setTimeout(() => process.exit(3), 50);
       // Like the real server: the turn completes after the response has been handled.
       setTimeout(async () => {
         for (const [i, r] of scripted.entries()) {

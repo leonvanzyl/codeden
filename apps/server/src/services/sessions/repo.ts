@@ -56,6 +56,13 @@ export type StoredStartMeta = SessionStartMeta & {
    * the next start sends it first, with the message that starts it.
    */
   handoffBrief?: UserInput | null;
+  /**
+   * The session was started or resumed on a provider that keeps its conversations out of its own
+   * apps' history (`capabilities.vendorHistory`). When a runner starts, its sweep archives such
+   * sessions' conversations that a crash or kill left listed (`ProviderHistoryService.sweep`).
+   * Older conversations stay for the user to hide (Settings > Providers).
+   */
+  vendorHistory?: boolean;
 };
 
 /**

@@ -44,6 +44,13 @@ export const ProviderCapabilities = z.object({
    * cannot use `read_only`.
    */
   readOnly: z.boolean().optional(),
+  /**
+   * The provider's own apps list the conversations CodeDen starts as the user's history (Codex:
+   * the Recents of the Codex apps). The adapter hides them as it goes, and the runner's
+   * `provider.history.*` commands find and hide the ones already listed (`./provider-history`).
+   * False or absent: the provider's apps don't list them, or CodeDen can't hide them.
+   */
+  vendorHistory: z.boolean().optional(),
 });
 export type ProviderCapabilities = z.infer<typeof ProviderCapabilities>;
 

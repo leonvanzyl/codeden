@@ -147,6 +147,11 @@ export class CodexSubagents implements ThreadLinks {
     return { threadId: thread.threadId, turnId };
   }
 
+  /** True once any agent was spawned, whatever became of it. */
+  any(): boolean {
+    return this.runs.size > 0;
+  }
+
   /** Running sub-agent turns, by Codex thread id. */
   runningTurns(): { codexThreadId: string; turnId: string }[] {
     const out: { codexThreadId: string; turnId: string }[] = [];

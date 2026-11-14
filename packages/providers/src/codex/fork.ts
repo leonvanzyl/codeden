@@ -1,5 +1,6 @@
 import { FORK_POINT_MISSING, ProviderSessionError } from "../adapter";
 import type { ResolvedCommand } from "../util/exec";
+import { archiveThread, unarchiveThread } from "./history";
 import { startAppServer } from "./process";
 import type { ThreadForkParams, ThreadForkResponse, ThreadTurnsListResponse } from "./protocol/v2";
 import { type CodexRpc, CodexRpcError } from "./rpc";
@@ -43,6 +44,8 @@ export async function forkCodexThread(
     },
     { cwd: opts.cwd },
   );
+  // CodeDen keeps idle threads archived (`./history`), and Codex forks no archived thread.
+  const unarchived = await unarchiveThread(rpc, threadId);
   try {
     if (opts.upTo && (await holdsTurn(rpc, threadId, opts.upTo)) === false) {
       throw new ProviderSessionError(
@@ -57,6 +60,8 @@ export async function forkCodexThread(
       ...(opts.upTo ? { lastTurnId: opts.upTo } : {}),
     };
     const res = await rpc.request<ThreadForkResponse>("thread/fork", params);
+    // The copy stays out of the Codex apps' recents too, until a session resumes it.
+    await archiveThread(rpc, res.thread.id);
     return res.thread.id;
   } catch (error) {
     if (error instanceof ProviderSessionError) throw error;
@@ -69,6 +74,7 @@ export async function forkCodexThread(
     }
     throw new Error(`Could not fork Codex thread ${threadId}: ${message}`);
   } finally {
+    if (unarchived) await archiveThread(rpc, threadId);
     await rpc.close();
   }
 }

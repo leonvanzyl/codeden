@@ -13,18 +13,20 @@ import type { ResolvedCommand } from "../util/exec";
 import { interruptWithDeadline } from "../util/interrupt";
 import { explicitModel } from "../util/model";
 import { handleServerRequest } from "./approvals";
-import { codexConfigOverrides, codexPolicy, codexSandboxPolicy, toCodexInput } from "./config";
+import {
+  codexConfigOverrides,
+  codexEffort,
+  codexPolicy,
+  codexSandboxPolicy,
+  toCodexInput,
+} from "./config";
+import { archiveThread, archiveThreadOnce } from "./history";
 import { CodexEventMapper } from "./mapper";
 import { startAppServer } from "./process";
 import type { ServerNotification } from "./protocol";
-import type {
-  Model,
-  ThreadResumeResponse,
-  ThreadStartResponse,
-  TurnStartParams,
-  TurnStartResponse,
-} from "./protocol/v2";
+import type { Model, TurnStartParams, TurnStartResponse } from "./protocol/v2";
 import type { CodexRpc } from "./rpc";
+import { openCodexThread } from "./thread-open";
 
 export interface CodexSessionConfig {
   executable: ResolvedCommand;
@@ -34,22 +36,19 @@ export interface CodexSessionConfig {
   interruptTimeoutMs?: number;
 }
 
-/**
- * CodeDen effort -> Codex reasoning effort. `max` is sent only to models that list it
- * (`supported`); older models top out at `xhigh`.
- */
-export function codexEffort(
-  effort: ReasoningEffort | undefined,
-  supported?: readonly ReasoningEffort[],
-): string | undefined {
-  if (!effort) return undefined;
-  if (effort !== "max") return effort;
-  return supported?.includes("max") ? "max" : "xhigh";
-}
+/** Re-exported for callers that know it from here. */
+export { codexEffort };
 
 /**
  * A Codex session over `codex app-server` (§7.2): one app-server process and one thread per
  * session. If the process exits, the next `send()` restarts it and resumes the thread.
+ *
+ * The Codex apps list every thread in the user's Codex home as the user's own recents, so the
+ * thread is archived whenever no turn of it runs: when a turn ends and when the session closes
+ * (`./history`). Archiving unloads it, so the next `send()` unarchives and resumes it first. A
+ * session whose agent spawned Codex sub-agents is only archived when it closes: unloading the
+ * thread could cut off agents a later turn still talks to. A failed `turn/start` archives it
+ * too, and so does an app-server that dies with the thread open (through a short-lived one).
  */
 export class CodexSession implements ProviderSession {
   readonly events = new AsyncQueue<AgentEvent>();
@@ -67,21 +66,24 @@ export class CodexSession implements ProviderSession {
   /** The model the thread started with (the user's Codex config when none was chosen). */
   private threadModel: string | undefined;
   private readonly filePaths = new Map<string, string[]>();
+  /** The thread being archived (or archived) on `rpc` after its turn; true once archived. */
+  private parked: { rpc: CodexRpc; archived: Promise<boolean> } | undefined;
+  /** The app-server that has the thread open, if any. */
+  private openedOn: CodexRpc | undefined;
 
   constructor(
     private readonly opts: SessionOptions,
     private readonly config: CodexSessionConfig,
   ) {
     const emit = (event: AgentEvent) => {
-      if (
+      const rootTurnEnded =
         (event.type === "turn.completed" ||
           event.type === "turn.failed" ||
           event.type === "turn.interrupted") &&
-        event.threadId === this.mapper.rootThreadId
-      ) {
-        this.turnPending = false;
-      }
+        event.threadId === this.mapper.rootThreadId;
+      if (rootTurnEnded) this.turnPending = false;
       this.events.push(event);
+      if (rootTurnEnded) this.park();
     };
     this.mapper = new CodexEventMapper(opts.sessionId, emit, {
       // An agent Stop cancelled before it ran started a turn after all: stop that too.
@@ -124,6 +126,7 @@ export class CodexSession implements ProviderSession {
     this.turnPending = true;
     try {
       const rpc = await this.ensureServer();
+      await this.unpark(rpc);
       const model = await this.turnModel(rpc);
       const inUse = model ?? explicitModel(this.opts.model) ?? this.threadModel;
       const effort = codexEffort(
@@ -142,6 +145,8 @@ export class CodexSession implements ProviderSession {
       this.mapper.beginTurn(res.turn.id);
     } catch (error) {
       this.turnPending = false;
+      // No turn started (a failed start): the thread may be open again, so archive it.
+      if (!this.mapper.currentTurnId) this.park();
       throw error;
     }
   }
@@ -214,7 +219,12 @@ export class CodexSession implements ProviderSession {
     this.broker.cancelAll();
     this.mapper.endAll({ type: "interrupted" });
     this.events.close();
-    await this.rpc?.close();
+    // Out of the Codex apps' recents until CodeDen resumes it (which unarchives it first).
+    const rpc = this.rpc;
+    const threadId = this.mapper.codexThreadId;
+    if (this.parked) await this.parked.archived;
+    else if (rpc && !rpc.isClosed && threadId) await archiveThread(rpc, threadId);
+    await rpc?.close();
   }
 
   // ---------------------------------------------------------------- internals
@@ -247,7 +257,32 @@ export class CodexSession implements ProviderSession {
     return this.starting;
   }
 
+  /**
+   * A root turn ended: archive the thread so the Codex apps don't list it, unless the session is
+   * closing (close archives it), app-server is gone, or the agent spawned sub-agents.
+   */
+  private park(): void {
+    const rpc = this.rpc;
+    const threadId = this.mapper.codexThreadId;
+    if (this.closed || this.parked || !rpc || rpc.isClosed || !threadId) return;
+    if (this.mapper.hasSubagents()) return;
+    this.parked = { rpc, archived: archiveThread(rpc, threadId) };
+  }
+
+  /**
+   * Before a turn: wait for an archive still in flight, then open the thread again on `rpc`
+   * (unarchive + resume). A restarted app-server already reopened it in `boot`.
+   */
+  private async unpark(rpc: CodexRpc): Promise<void> {
+    const parked = this.parked;
+    if (!parked) return;
+    this.parked = undefined;
+    if (!(await parked.archived) || parked.rpc !== rpc || rpc.isClosed) return;
+    await this.openThread(rpc);
+  }
+
   private async boot(): Promise<CodexRpc> {
+    let started: CodexRpc | undefined;
     const { rpc } = await startAppServer(
       this.config.executable,
       {
@@ -265,58 +300,15 @@ export class CodexSession implements ProviderSession {
             ctx: (threadId, turnId) => this.mapper.requestCtx(threadId, turnId),
             filePaths: (itemId) => this.filePaths.get(itemId),
           }),
-        onExit: (code, stderr) => this.onExit(code, stderr),
+        onExit: (code, stderr) => this.onExit(code, stderr, started),
       },
       { env: this.opts.env, cwd: this.opts.cwd },
     );
+    started = rpc;
     this.rpc = rpc;
-    const opts = this.currentOptions();
-    const { approvalPolicy, sandbox } = codexPolicy(opts.autonomy, opts.readOnly);
-    const common = {
-      cwd: this.opts.cwd,
-      approvalPolicy,
-      sandbox,
-      config: codexConfigOverrides(opts),
-      // "Default" is left out so Codex uses the model from the user's config.
-      ...(explicitModel(this.opts.model) ? { model: explicitModel(this.opts.model) } : {}),
-      ...(this.opts.systemPrompt ? { developerInstructions: this.opts.systemPrompt } : {}),
-    };
-    let res: ThreadStartResponse | ThreadResumeResponse | undefined;
-    const resumeId = this.mapper.codexThreadId;
-    if (resumeId) {
-      // A thread has a single writer: while a previous app-server is still shutting down,
-      // resume fails with "already has an active writer". Retry briefly, then give up loudly.
-      for (let attempt = 0; !res; attempt += 1) {
-        try {
-          res = await rpc.request<ThreadResumeResponse>("thread/resume", {
-            threadId: resumeId,
-            excludeTurns: true,
-            ...common,
-          });
-        } catch (error) {
-          const message = (error as Error).message;
-          if (/active writer/i.test(message)) {
-            if (attempt < 5) {
-              await new Promise((r) => setTimeout(r, 500 * (attempt + 1)));
-              continue;
-            }
-            await rpc.close();
-            throw new ProviderSessionError(
-              "resume_conflict",
-              `Codex thread ${resumeId} is still open in another process`,
-            );
-          }
-          this.noticeOutsideTurn(
-            `Could not resume Codex thread ${resumeId}; started a new one. ${message}`,
-          );
-          break;
-        }
-      }
-    }
-    res ??= await rpc.request<ThreadStartResponse>("thread/start", common);
-    this.mapper.codexThreadId = res.thread.id;
-    this.threadModel = res.model || undefined;
-    this.events.push({ type: "session.updated", resumeToken: res.thread.id, model: res.model });
+    // The thread may still be archived through a short-lived app-server after a crash.
+    await this.parked?.archived;
+    await this.openThread(rpc, { report: true });
     if (this.config.onModels) {
       rpc.request<{ data: Model[] }>("model/list", {}).then(
         (r) => this.config.onModels?.(r.data),
@@ -324,6 +316,36 @@ export class CodexSession implements ProviderSession {
       );
     }
     return rpc;
+  }
+
+  /**
+   * Resume the session's thread on `rpc` (unarchived first), or start one. `session.updated`
+   * reports the thread: always with `report`, else only when it is a different thread.
+   */
+  private async openThread(rpc: CodexRpc, { report = false } = {}): Promise<void> {
+    const opts = this.currentOptions();
+    const { approvalPolicy, sandbox } = codexPolicy(opts.autonomy, opts.readOnly);
+    const resumeId = this.mapper.codexThreadId;
+    const res = await openCodexThread(
+      rpc,
+      resumeId,
+      {
+        cwd: this.opts.cwd,
+        approvalPolicy,
+        sandbox,
+        config: codexConfigOverrides(opts),
+        // "Default" is left out so Codex uses the model from the user's config.
+        ...(explicitModel(this.opts.model) ? { model: explicitModel(this.opts.model) } : {}),
+        ...(this.opts.systemPrompt ? { developerInstructions: this.opts.systemPrompt } : {}),
+      },
+      (message) => this.noticeOutsideTurn(message),
+    );
+    this.openedOn = rpc;
+    this.mapper.codexThreadId = res.thread.id;
+    this.threadModel = res.model || undefined;
+    if (report || res.thread.id !== resumeId) {
+      this.events.push({ type: "session.updated", resumeToken: res.thread.id, model: res.model });
+    }
   }
 
   /**
@@ -378,7 +400,7 @@ export class CodexSession implements ProviderSession {
     this.mapper.handle(n);
   }
 
-  private onExit(code: number | null, stderr: string): void {
+  private onExit(code: number | null, stderr: string, exited?: CodexRpc): void {
     if (this.closed) return;
     this.broker.cancelAll();
     // Sub-agents ran in the same process: their turns end with it.
@@ -391,5 +413,26 @@ export class CodexSession implements ProviderSession {
       ...(stderr ? { detail: stderr.slice(-2000) } : {}),
     });
     this.turnPending = false;
+    this.archiveAfterExit(exited);
+  }
+
+  /**
+   * The app-server that had the thread open died (mid-turn, or holding a thread kept loaded for
+   * its sub-agents): archive the thread through a short-lived one, so the crash doesn't leave it
+   * listed. Not for an app-server that never opened it (a resume refused because another process
+   * still writes to the thread). The next start waits for this archive (`boot`).
+   */
+  private archiveAfterExit(exited: CodexRpc | undefined): void {
+    const threadId = this.mapper.codexThreadId;
+    if (!exited || exited !== this.openedOn || !threadId) return;
+    this.openedOn = undefined;
+    const before = this.parked;
+    const archived = (async () =>
+      (await before?.archived) ||
+      archiveThreadOnce(this.config.executable, threadId, {
+        ...(this.opts.env ? { env: this.opts.env } : {}),
+        cwd: this.opts.cwd,
+      }))();
+    this.parked = { rpc: exited, archived };
   }
 }
