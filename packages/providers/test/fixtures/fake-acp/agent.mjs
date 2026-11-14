@@ -15,10 +15,13 @@
 //   { "stopReason": "...", "usage": {} }  how the prompt ends (default end_turn)
 // FAKE_ACP_LOAD=fail makes session/load fail; otherwise it replays a short history first,
 // a subagent's child session included.
+// FAKE_ACP_HOLD=<method> with FAKE_ACP_GATE=<file>: that request (`initialize`, `session/new`,
+// ...) is answered only once the file exists, like a CLI slow to start; a gate file that says
+// "exit" makes the agent exit instead of answering.
 // Subagents: a client that opts in (`clientCapabilities.subagents` or `_meta.subagents`) gets
 // `sessionCapabilities.subagents` back, as Cursor 2026.09.15+ does; FAKE_ACP_SUBAGENTS=0 acts
 // like an older CLI that never reports it.
-import { appendFileSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import { createInterface } from "node:readline";
 
 const args = process.argv.slice(2);
@@ -113,6 +116,20 @@ createInterface({ input: process.stdin }).on("line", (line) => {
     return resolve?.(msg.result ?? { error: msg.error });
   }
   record({ method: msg.method, params: msg.params });
+  const gate = process.env.FAKE_ACP_GATE;
+  if (gate && msg.method === process.env.FAKE_ACP_HOLD && !existsSync(gate)) {
+    const retry = setInterval(() => {
+      if (!existsSync(gate)) return;
+      clearInterval(retry);
+      if (readFileSync(gate, "utf8").trim() === "exit") process.exit(1);
+      handle(msg);
+    }, 10);
+    return;
+  }
+  handle(msg);
+});
+
+function handle(msg) {
   switch (msg.method) {
     case "initialize": {
       const caps = msg.params?.clientCapabilities ?? {};
@@ -168,4 +185,4 @@ createInterface({ input: process.stdin }).on("line", (line) => {
     default:
       if (msg.id !== undefined) send({ id: msg.id, result: {} });
   }
-});
+}
