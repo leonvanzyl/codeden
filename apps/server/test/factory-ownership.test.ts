@@ -56,7 +56,10 @@ describe("PRs of failed and escalated items", () => {
     await tick();
     await env.factory.archiver.idle();
     expect(item(id).nudges.rebase_1).toBeUndefined();
-    expect(item(id).note).toMatch(/resolved; waiting for a person/);
+    // Red CI on the rebased head: no automatic re-review, and it says what it needs (#259).
+    expect(item(id).note).toBe(
+      "Merge conflicts resolved. Stopped after 0 revise rounds; needs a re-review (Retry)",
+    );
     // Done: cleanup archives it again, and the factory never merges it.
     expect(env.repo.get(builder).archivedAt).not.toBeNull();
     expect(env.archived.filter((s) => s === builder)).toHaveLength(2);

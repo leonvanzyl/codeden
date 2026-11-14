@@ -66,6 +66,11 @@ export function trackedHead(item: FactoryItem): string | null {
   return key ? key.slice(HEAD.length) : null;
 }
 
+/** When the factory first saw `sha` as the PR's head (`head_<sha>`); null when it didn't. */
+export function headSeenAt(item: Pick<FactoryItem, "nudges">, sha: string): string | null {
+  return item.nudges[`${HEAD}${sha}`] ?? null;
+}
+
 /**
  * The item's nudges for this verification pass: when the head was first seen (`head_<sha>`,
  * the start of its CI clock), its worktree restore request (`restore_<sha>`), the merge

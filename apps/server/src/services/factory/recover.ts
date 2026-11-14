@@ -8,6 +8,7 @@ import { continuePrompt } from "./prompts-integration";
 import { awaitedProvider, noteProviderWaits, type ProviderWait } from "./provider-wait";
 import { prAgent } from "./rebase";
 import { isRecheckObligation } from "./recheck";
+import { isReReviewRecord } from "./rereview";
 import { CLEAN_REVIEW } from "./review-environment";
 import { isBusy } from "./sessions";
 import { claimSlot } from "./slots";
@@ -69,8 +70,8 @@ function openPr(ctx: FactoryContext, project: Project, item: FactoryItem, builde
  * The nudges a recovered item starts from: the earlier attempt's waits and reminders are
  * dropped (they would stop the fresh one at once), but every obligation it still owes is kept:
  * its recoveries, revise rounds and rebase requests, a conflict resolution the reviewer still
- * has to re-check (`recheck.ts`; asked again of whichever reviewer takes it), and PRs still to
- * be closed.
+ * has to re-check (`recheck.ts`; asked again of whichever reviewer takes it), PRs still to
+ * be closed, and the heads its verdicts and automatic re-reviews covered (`rereview.ts`).
  */
 function freshNudges(nudges: FactoryItem["nudges"], at: string): FactoryItem["nudges"] {
   const keep = Object.entries(nudges).filter(
@@ -81,6 +82,7 @@ function freshNudges(nudges: FactoryItem["nudges"], at: string): FactoryItem["nu
       k.startsWith("conflict_from_") ||
       isRecheckObligation(k) ||
       k.startsWith("supersede_") ||
+      isReReviewRecord(k) ||
       k === CLEAN_REVIEW,
   );
   return {

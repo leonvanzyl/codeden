@@ -2,11 +2,12 @@ import {
   FactoryAdmitRequest,
   FactoryAllowLargeChangeRequest,
   FactoryDecisionRequest,
+  FactoryRetryRequest,
   FactorySetTypeRequest,
 } from "@codeden/contracts";
 import { z } from "zod";
 import { type AnyServerTool, defineTool } from "../../define";
-import { assertMayAdmit } from "../pm/issue-trust";
+import { assertMayAdmit, assertMayRetry } from "../pm/issue-trust";
 import { factoryReportReproduction, factorySubmitAnalysis, factorySubmitReview } from "./builder";
 import { factoryFileIssue, factoryPlanRound, factoryReportFindings } from "./scout";
 import { asTool, forSession, inFactoryProject } from "./shared";
@@ -118,6 +119,28 @@ export const factoryAllowLargeChange = defineTool({
     }),
 });
 
+/** `factory_retry_item`: the PM runs a stopped item again (its open PR back to review, or a rebuild). */
+export const factoryRetryItem = defineTool({
+  name: "factory_retry_item",
+  description:
+    "Run a stopped factory item (failed, or stopped at its first step) again. While its pull request is open, `rereview` (the default then) sends that PR straight back to a fresh review of its current head, with fresh revise rounds: no new build, no second PR; it merges on approve as usual. `rebuild` (the default without an open PR) starts over from the first step (reproduce or analyze) and replaces the PR. Use it for an item factory_status shows as stopped with a note like 'needs a re-review (Retry)', for example when its PR was fixed or rebased after its last review; not for one that fails for a reason nobody fixed. Work let in from an untrusted author is retried only when the user asked you to in this turn.",
+  roles: ["pm"],
+  scope: "project",
+  alwaysLoad: true,
+  isAvailable: inFactoryProject,
+  input: FactoryRetryRequest,
+  handler: async (input, { services, projectId, sessionId, caller }) =>
+    asTool(() => {
+      assertMayRetry(
+        services,
+        { caller, sessionId },
+        services.factory.item(projectId, input.itemId),
+      );
+      const item = services.factory.retry(projectId, input.itemId, input.mode, "pm");
+      return { itemId: item.id, stage: item.stage, pr: item.pr?.number ?? null, note: item.note };
+    }),
+});
+
 /** `factory_record_decision`: a dark-factory agent records a call it made instead of asking. */
 export const factoryRecordDecision = defineTool({
   name: "factory_record_decision",
@@ -143,5 +166,6 @@ export const factoryTools: AnyServerTool[] = [
   factoryAdmitIssue,
   factorySetType,
   factoryAllowLargeChange,
+  factoryRetryItem,
   factoryRecordDecision,
 ];

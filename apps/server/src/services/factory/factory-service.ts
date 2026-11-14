@@ -10,6 +10,7 @@ import {
   type FactoryLoop,
   type FactoryPlanRoundRequest,
   type FactoryReproductionReport,
+  type FactoryRetryMode,
   type FactorySetTypeRequest,
   type FactoryStatus,
   isFactoryMode,
@@ -389,9 +390,17 @@ export class FactoryService {
     return item;
   }
 
-  /** Run a stopped item again (the loop archives the earlier attempt's sessions). */
-  retry(projectId: string, itemId: string): FactoryItem {
-    const item = decisions.retry(this.ctx, projectId, itemId);
+  /**
+   * Run a stopped item again: its open PR back to review (`rereview`, the default while it is
+   * open), or a fresh attempt from the first step (`rebuild`).
+   */
+  retry(
+    projectId: string,
+    itemId: string,
+    mode?: FactoryRetryMode,
+    by: decisions.DecidedBy = "user",
+  ): FactoryItem {
+    const item = decisions.retry(this.ctx, projectId, itemId, mode, by);
     this.soon(projectId);
     return item;
   }

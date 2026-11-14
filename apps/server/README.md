@@ -252,10 +252,10 @@ Opt-in proxies next to the browser's speech APIs (which stay the default). Keys 
 | `POST /api/projects/:id/factory/digest` | -> `FactoryDigest` (today's digest now) |
 | `POST /api/projects/:id/factory/admit` | `FactoryAdmitRequest` -> `FactoryItemResponse` |
 | `POST /api/projects/:id/factory/set-type` | `FactorySetTypeRequest` -> `FactoryItemResponse` |
-| `POST /api/projects/:id/factory/items/:itemId/retry` | -> `FactoryItemResponse` |
+| `POST /api/projects/:id/factory/items/:itemId/retry` | `FactoryRetryOptions` (`{ mode?: "rereview" \| "rebuild" }`) -> `FactoryItemResponse`; 409 `no_open_pr` |
 | `GET /api/projects/:id/factory/items/:itemId` | -> `FactoryItemResponse` |
 
-Tools (`src/mcp/tools/factory/`): builders `factory_report_reproduction`, `factory_submit_analysis` (listed only to a session building a factory item); reviewers `factory_submit_review` (`factory:review:*`); the scout `factory_plan_round`, `factory_file_issue`; area reviewers `factory_report_findings`; PM `factory_status`, `factory_admit_issue`, `factory_set_type`, `factory_allow_large_change` (factory-mode projects); `factory_record_decision` for unattended dark-factory sessions.
+Tools (`src/mcp/tools/factory/`): builders `factory_report_reproduction`, `factory_submit_analysis` (listed only to a session building a factory item); reviewers `factory_submit_review` (`factory:review:*`); the scout `factory_plan_round`, `factory_file_issue`; area reviewers `factory_report_findings`; PM `factory_status`, `factory_admit_issue`, `factory_set_type`, `factory_allow_large_change`, `factory_retry_item` (factory-mode projects); `factory_record_decision` for unattended dark-factory sessions.
 
 ## Tests
 

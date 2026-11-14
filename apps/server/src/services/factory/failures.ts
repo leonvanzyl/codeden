@@ -6,6 +6,7 @@ import { failItem, markStuck } from "./outcomes";
 import { fixPrompt, tooLargePrompt } from "./prompts";
 import { MERGE_QUEUED } from "./queue";
 import { repairSlot } from "./rebase";
+import { reviseRoundsAllowed } from "./rereview";
 
 /**
  * Failed merge checks (§10.1, Review and revise): a revise round when one is allowed, the
@@ -50,7 +51,8 @@ export async function handleFailure(
   const builder = item.builderSessionId ? ctx.repo.find(item.builderSessionId)?.session : undefined;
   const fixable =
     failed.some((c) => !notAuthorFixable(c)) &&
-    item.attempts < loop.tuning.maxFixAttempts &&
+    // An automatic re-review of a stopped PR brings one more round (`rereview.ts`).
+    item.attempts < reviseRoundsAllowed(item, loop.tuning.maxFixAttempts) &&
     builder !== undefined &&
     builder.status !== "stopped" &&
     item.review?.verdict !== "reject";
