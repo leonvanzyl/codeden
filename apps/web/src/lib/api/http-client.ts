@@ -3,6 +3,7 @@ import {
   CreateProjectResponse,
   DiffResult,
   DisconnectGithubResponse,
+  DismissInboxResponse,
   ForkSessionResponse,
   FsListResponse,
   GitCommitResponse,
@@ -18,6 +19,7 @@ import {
   RefreshProjectResponse,
   ReorderProjectsResponse,
   RestoreFilesResponse,
+  RetryInboxResponse,
   type SendMessageRequestInit,
   SessionDetail,
   SessionFileContent,
@@ -133,6 +135,10 @@ export function createHttpClient(origin: string, opts: HttpClientOptions = {}): 
     ...httpSessionConflictApi(http),
     resolveInbox: (id, resolution) =>
       post(`/inbox/${enc(id)}/resolve`, resolution, (v) => InboxItem.parse(v)),
+    retryInbox: (id) =>
+      post(`/inbox/${enc(id)}/retry`, undefined, (v) => RetryInboxResponse.parse(v).item),
+    dismissInbox: (ids) =>
+      post("/inbox/dismiss", { ids }, (v) => DismissInboxResponse.parse(v).dismissed),
 
     createProject: (input) => post("/projects", input, (v) => CreateProjectResponse.parse(v)),
     updateProject: (id, patch) =>

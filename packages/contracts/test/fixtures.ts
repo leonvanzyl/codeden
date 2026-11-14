@@ -272,6 +272,7 @@ export const sampleInboxItem: InboxItem = {
   issue: null,
   pr: null,
   automationRunId: null,
+  attempts: 1,
   createdAt: ts,
   updatedAt: ts,
   resolvedAt: null,

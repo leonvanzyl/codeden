@@ -487,7 +487,8 @@ describe("a recovered builder's factory tools (#96)", () => {
     const { runner } = realDelivery();
     runner.up = true;
     const recovered = await failedBeforeTheFix(91, "stopped");
-    const [failure] = env.inbox.list({ sessionId: recovered.builderId });
+    // A factory session's failure is recorded settled: the factory handles it (#275).
+    const [failure] = env.inbox.list({ sessionId: recovered.builderId, status: "resolved" });
     // What a server stopped while the builder was starting leaves: the item back in building
     // with the recovery marked as under way, the builder still stopped.
     env.factory.data.updateItem(recovered.id, (i) => ({

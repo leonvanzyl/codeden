@@ -58,10 +58,37 @@ export const InboxItem = z.object({
   issue: GitHubIssueRef.nullable(),
   pr: GitHubPrRef.nullable(),
   automationRunId: Id.nullable(),
+  /**
+   * How many times it happened; absent means once (`inboxAttempts`). A session has one
+   * `run_failed` item: a later failure of the same session (a failed Retry, another crash)
+   * updates it in place, counting here, with the latest error as its `body`.
+   */
+  attempts: z.int().positive().optional(),
   createdAt: Timestamp,
   updatedAt: Timestamp,
   resolvedAt: Timestamp.nullable(),
-  /** How it was resolved (decision, answers, note). */
+  /**
+   * How it was resolved (decision, answers, note). Items CodeDen settles by itself carry
+   * `{ by: "codeden" | "factory", note }` (`InboxSettlement`).
+   */
   resolution: JsonValue.nullable(),
 });
 export type InboxItem = z.infer<typeof InboxItem>;
+
+/** How many times an item happened (`InboxItem.attempts`, absent: once). */
+export function inboxAttempts(item: Pick<InboxItem, "attempts">): number {
+  return item.attempts ?? 1;
+}
+
+/**
+ * The resolution of an item CodeDen closed by itself, never a person: a `run_failed` item the
+ * factory handles (`factory`: it restarts the work, on another provider when this one can't
+ * run), or one whose work moved on (`codeden`: the session ran again, another session of the same
+ * work succeeded, its pull request merged or closed, its factory item finished). `note` says
+ * which, in a few words.
+ */
+export const InboxSettlement = z.object({
+  by: z.enum(["codeden", "factory"]),
+  note: z.string(),
+});
+export type InboxSettlement = z.infer<typeof InboxSettlement>;

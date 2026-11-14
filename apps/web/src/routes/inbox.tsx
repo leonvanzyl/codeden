@@ -1,9 +1,12 @@
-import { useQuery } from "@tanstack/react-query";
+import type { InboxItem } from "@codeden/contracts";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { CheckCheck, Inbox } from "lucide-react";
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import { EmptyState, SectionLabel } from "@/components/common/bits";
 import { FOCUSED_ENTRY, InboxEntry, inboxEntryId } from "@/components/inbox/inbox-entry";
 import { ConflictCard } from "@/components/project/conflict-card";
+import { Button } from "@/components/ui/button";
 import { useClient } from "@/lib/api";
 import { groupInbox, type InboxFilter, inboxCounts } from "@/lib/inbox";
 import { useSnapshotData } from "@/lib/queries";
@@ -16,6 +19,27 @@ const FILTERS: { id: InboxFilter; label: string }[] = [
   { id: "reviews", label: "Reviews" },
   { id: "problems", label: "Problems" },
 ];
+
+/** Bulk clean-up of a group (§11.1): dismiss every item in it at once. */
+function DismissAll({ items, what }: { items: InboxItem[]; what: string }) {
+  const client = useClient();
+  const dismiss = useMutation({
+    mutationFn: () => client.dismissInbox(items.map((i) => i.id)),
+    onError: (e: Error) => toast.error(`Couldn't dismiss the ${what}`, { description: e.message }),
+    onSuccess: (n) => toast.success(`Dismissed ${n} ${what}`),
+  });
+  return (
+    <Button
+      size="sm"
+      variant="ghost"
+      className="ml-auto h-6 px-2 text-2xs text-muted-foreground"
+      onClick={() => dismiss.mutate()}
+      disabled={dismiss.isPending}
+    >
+      Dismiss all
+    </Button>
+  );
+}
 
 /**
  * Inbox (§11.1): everything waiting on you, answerable in place. `focusItemId` (a toast's Open)
@@ -101,9 +125,14 @@ export function InboxPage({ focusItemId }: { focusItemId?: string }) {
               )}
               {groups.map((g) => (
                 <section key={g.id}>
-                  <SectionLabel className="mb-3">
-                    {g.title} · {g.items.length}
-                  </SectionLabel>
+                  <div className="mb-3 flex items-center gap-2">
+                    <SectionLabel>
+                      {g.title} · {g.items.length}
+                    </SectionLabel>
+                    {g.id === "run_failed" && g.items.length > 1 && (
+                      <DismissAll items={g.items} what="failed runs" />
+                    )}
+                  </div>
                   <div className="space-y-5">
                     {g.items.map((item) => (
                       <InboxEntry key={item.id} item={item} focused={item.id === focusItemId} />

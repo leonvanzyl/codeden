@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   type ConflictRecord,
+  type InboxItem,
   messageFrom,
   type Notice,
   type Overview,
@@ -36,7 +37,13 @@ import {
 import { deriveGithubNotices, GITHUB_NOTICE_EVENTS } from "./github-notices";
 import { type HeldMessage, LoopGuard, type MessageOrigin, turnOriginsIn } from "./loop-guard";
 import { ProjectNotes } from "./notes";
-import { deriveNotices, formServerOf, type NoticeDraft, NoticeStore } from "./notices";
+import {
+  deriveNotices,
+  formServerOf,
+  isRepeatFailure,
+  type NoticeDraft,
+  NoticeStore,
+} from "./notices";
 import {
   type AutomationPort,
   type GithubPort,
@@ -401,6 +408,8 @@ export class OrchestrationService {
         e.type === "agent.turn.failed" ||
         e.type === "agent.turn.started" ||
         e.type === "inbox.created" ||
+        // A session's repeat failure updates its open item (InboxService appends it alone).
+        (e.type === "inbox.updated" && isRepeatFailure((e.payload as { item: InboxItem }).item)) ||
         e.type === "session.updated" ||
         e.type === "automation_run.updated" ||
         GITHUB_NOTICE_EVENTS.has(e.type),

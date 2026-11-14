@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { useClient } from "@/lib/api";
 import { platform } from "@/lib/platform";
 import { useLayoutStore } from "@/stores/layout";
+import { RunFailedActions } from "./run-failed-actions";
 
 const prIdOf = (item: InboxItem) =>
   item.projectId && item.pr ? githubPrId(item.projectId, item.pr.number) : null;
@@ -62,15 +63,6 @@ export function InboxActions({ item }: { item: InboxItem }) {
       void queryClient.invalidateQueries({ queryKey: ["github"] });
     },
   });
-  const retry = useMutation({
-    mutationFn: async () => {
-      if (item.sessionId)
-        await client.sendMessage(item.sessionId, { text: "Retry the failed step." }, "send");
-      await client.resolveInbox(item.id, { status: "resolved", note: "retry" });
-    },
-    onError: fail,
-    onSuccess: () => toast.success("Retrying"),
-  });
   // Archiving again retries the worktree removal; the server resolves the item when it works.
   const removeAgain = useMutation({
     mutationFn: async () => {
@@ -87,7 +79,7 @@ export function InboxActions({ item }: { item: InboxItem }) {
       }
     },
   });
-  const busy = dismiss.isPending || merge.isPending || retry.isPending || removeAgain.isPending;
+  const busy = dismiss.isPending || merge.isPending || removeAgain.isPending;
   const dismissButton = (
     <Button
       size="sm"
@@ -129,14 +121,7 @@ export function InboxActions({ item }: { item: InboxItem }) {
       );
     }
     case "run_failed":
-      return (
-        <>
-          <Button size="sm" onClick={() => retry.mutate()} disabled={busy}>
-            <RotateCcw /> Retry
-          </Button>
-          {dismissButton}
-        </>
-      );
+      return <RunFailedActions item={item} busy={busy} dismissButton={dismissButton} />;
     case "cleanup_failed":
       return (
         <>

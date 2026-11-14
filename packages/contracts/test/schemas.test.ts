@@ -13,7 +13,9 @@ import {
   ErrorInfo,
   EventEnvelope,
   InboxItem,
+  InboxSettlement,
   Item,
+  inboxAttempts,
   isAgentEnvelope,
   Project,
   ProviderStatus,
@@ -350,6 +352,24 @@ describe("entities", () => {
     const { notify: _, ...stored } = sampleInboxItem;
     expect(InboxItem.parse(stored).notify).toBe("needs_you");
     expect(InboxItem.safeParse({ ...sampleInboxItem, notify: "noise" }).success).toBe(false);
+  });
+
+  it("counts a failed run's attempts, reading items stored without them as 1 (#275)", () => {
+    const { attempts: _, ...stored } = sampleInboxItem;
+    expect(inboxAttempts(InboxItem.parse(stored))).toBe(1);
+    const settled = roundTrip(InboxItem, {
+      ...sampleInboxItem,
+      kind: "run_failed",
+      status: "resolved",
+      attempts: 3,
+      resolvedAt: sampleInboxItem.createdAt,
+      resolution: { by: "codeden", note: "PR #12 merged" },
+    });
+    expect(InboxSettlement.parse(settled.resolution)).toEqual({
+      by: "codeden",
+      note: "PR #12 merged",
+    });
+    expect(InboxItem.safeParse({ ...sampleInboxItem, attempts: 0 }).success).toBe(false);
   });
 
   it("orders projects pinned first, then by sortOrder, then by name", () => {

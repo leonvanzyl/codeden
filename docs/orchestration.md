@@ -135,6 +135,14 @@ The inbox collects everything waiting on you:
 
 Each item links to its session, issue and PR, and can be answered in place. The sidebar shows the count, and the **Waiting on you** box lists the top items. Toasts are on by default; browser notifications are opt-in in **Settings → Notifications**.
 
+### Failed runs
+
+- **One item per run.** A session has one **Failed run** item. If it fails again (another crash, a Retry that fails), the same item is updated with the latest error and counts the attempts ("Failed 3 times"). A second item is never added, but each failure still wakes the PM, reaches the orchestrator for work it passed on, and fires `session.failed` automations.
+- **Retry is honest.** **Retry** runs the session again on its provider. While that provider can't run (not installed, too old, signed out, at its usage limit), Retry is off. The item says why and what fixes it ("Codex is not signed in. Fix it with `codex login`"), and **Continue on another provider** hands the work off instead. A retry that fails says why in its toast ("Retry failed", with the error) and updates the same item. Before refusing, CodeDen checks the provider again, so Retry works right after you sign in or update the CLI.
+- **Failed runs settle on their own.** An item resolves itself, with a short note, once its work has moved on: the session ran again, another session doing the same work succeeded (a re-run, a hand-off or a fork; not a reviewer on the same issue), a pull request of the work merged (or the session's own was closed), the factory item for the work is done or dropped, or the same work failed again the same way in a later session (its newer item is the one that counts). This also runs when CodeDen starts, so items left from earlier settle too. The note shows under **Recently resolved** ("Resolved 2m ago · PR #12 merged").
+- **The factory's own failures never wait on you.** A factory reviewer or builder that fails is restarted by the factory, on another provider when its own can't run, so its failure is recorded already settled (see [the software factory](software-factory.md#settings-and-limits)).
+- **Dismiss all** next to **Failed runs** clears them all at once.
+
 Not everything that lands in the inbox needs you, so CodeDen tags each item and only some kinds raise a toast or a notification. **Settings → Notifications → Notify me about** has four switches:
 
 | Category | What it covers | Default |

@@ -1,6 +1,6 @@
 import type { RunnerEvent, SessionStatus } from "@codeden/contracts";
 import { Draft } from "./draft";
-import { closeInbox, runFailedInbox } from "./items";
+import { closeInbox, openRunFailed, runFailedAgain, runFailedInbox } from "./items";
 import type { Mutation, ProjectionReader } from "./types";
 
 type ProcessEvent = Extract<RunnerEvent, { kind: "session.process" }>;
@@ -9,7 +9,8 @@ const FINAL: ReadonlySet<SessionStatus> = new Set(["completed", "stopped", "fail
 
 /**
  * Provider process lifecycle (runner `session.process` events) -> projection changes. A crash
- * fails the session and raises a `run_failed` inbox item; a normal exit stops it; an exit
+ * fails the session and raises a `run_failed` inbox item (or updates the session's open one: one
+ * item per run); a normal exit stops it; an exit
  * because the runner is going away keeps it resumable (`interrupted` if a turn was cut off). Either way,
  * open questions and approvals can no longer be answered and are dismissed. Pure.
  */
@@ -57,8 +58,13 @@ export function reduceProcessEvent(
       );
     }
     const message = event.error?.message ?? "The agent process crashed";
-    const id = `inbox:${session.id}:process:${runnerSeq}`;
-    d.putInbox(runFailedInbox(session, id, message, session.rootThreadId, ts));
+    // One item per run: a session that fails again (a Retry refused at open) updates its open one.
+    const open = openRunFailed(d.openInboxForSession(session.id));
+    if (open) d.putInbox(runFailedAgain(open, message, ts));
+    else {
+      const id = `inbox:${session.id}:process:${runnerSeq}`;
+      d.putInbox(runFailedInbox(session, id, message, session.rootThreadId, ts));
+    }
   } else if (!FINAL.has(session.status)) {
     d.putSession(
       { ...session, status: "stopped", endedAt: session.endedAt ?? ts, updatedAt: ts },

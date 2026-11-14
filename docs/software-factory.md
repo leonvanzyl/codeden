@@ -348,6 +348,8 @@ New builders and reviewers start only on an **available** provider: installed, s
 
 The item's page notes when a review didn't run where the settings asked, and why.
 
+**Failures the factory handles don't wait on you.** When one of its reviewers or builders can't start on its provider (a CLI too old, signed out, not installed) or its session dies, the factory starts the work again by itself, on another provider when that one can't run. The failure is recorded on the item ("The reviewer stopped: Gemini CLI is too old … A fresh reviewer starts on an available provider"), as an already settled **Failed run** in the inbox's history, and in the daily digest under **Failures it handled on its own**. It is never counted as waiting on you, in the inbox, the Factory view's **Needs you** or the digest. What does need you still raises its own item: a paused loop, stuck work, a protected area.
+
 Spend comes from the same ledger as the [usage reports](usage-and-costs.md).
 
 ## The kill switch

@@ -205,6 +205,8 @@ export const inboxItems = sqliteTable(
     issue: json<GitHubIssueRef>("issue"),
     pr: json<GitHubPrRef>("pr"),
     automationRunId: text("automation_run_id"),
+    /** How many times it happened (`InboxItem.attempts`): a failed run counts each retry. */
+    attempts: integer("attempts").notNull().default(1),
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at").notNull(),
     resolvedAt: text("resolved_at"),

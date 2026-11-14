@@ -91,7 +91,7 @@ export class FactorySessions {
    * `ProviderAvailability.runnable`). A provider the runner doesn't offer can't run either.
    * Starts a background detection when the last one is old; never waits for it.
    */
-  runnable(provider: string): ProviderRunnable {
+  runnable(provider: string, opts: { ignoreFailures?: boolean } = {}): ProviderRunnable {
     this.deps.availability.refresh();
     const name = this.displayName(provider);
     if (!this.deps.runner.providers().some((p) => p.id === provider)) {
@@ -105,7 +105,19 @@ export class FactorySessions {
         message: `${name} is ${reason}`,
       };
     }
-    return this.deps.availability.runnable(provider, name);
+    return this.deps.availability.runnable(provider, name, opts);
+  }
+
+  /**
+   * Whether a person's action (Retry) can run on `provider` now. The factory's back-off after its
+   * own sessions failed there doesn't apply, and before refusing, providers are detected again
+   * and waited for, so a CLI just signed in or updated isn't refused from an old detection.
+   */
+  async runnableNow(provider: string): Promise<ProviderRunnable> {
+    const cached = this.runnable(provider, { ignoreFailures: true });
+    if (cached.runnable) return cached;
+    await this.deps.availability.detectNow();
+    return this.runnable(provider, { ignoreFailures: true });
   }
 
   /** The provider's name for notes ("Codex"), from the runner's provider list. */

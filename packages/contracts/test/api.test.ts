@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   CreateProjectRequest,
+  DismissInboxRequest,
+  DismissInboxResponse,
   defaultSettings,
   ForkSessionRequest,
   ForkSessionResponse,
@@ -12,6 +14,7 @@ import {
   LoginToolId,
   RefreshModelsResponse,
   ReorderProjectsRequest,
+  RetryInboxResponse,
   SendMessageRequest,
   SetupCheck,
   SetupToolId,
@@ -22,6 +25,7 @@ import {
   UiServerMessage,
   UpdateProjectRequest,
 } from "../src";
+import { sampleInboxItem } from "./fixtures";
 
 function roundTrip<T>(schema: { parse: (v: unknown) => T }, value: unknown): T {
   const first = schema.parse(value);
@@ -38,6 +42,14 @@ describe("api schemas", () => {
     expect(req.startedBy).toEqual({ kind: "user" });
     expect(req.input?.attachments).toEqual([]);
     expect(req.replacesConflict).toBeUndefined();
+  });
+
+  it("round-trips the inbox retry and bulk dismiss (#275)", () => {
+    const res = roundTrip(RetryInboxResponse, { item: sampleInboxItem });
+    expect(res.item.attempts).toBe(1);
+    expect(roundTrip(DismissInboxRequest, { ids: ["a", "b"] }).ids).toEqual(["a", "b"]);
+    expect(DismissInboxRequest.safeParse({ ids: [] }).success).toBe(false);
+    expect(roundTrip(DismissInboxResponse, { dismissed: 2 }).dismissed).toBe(2);
   });
 
   it("names the open conflict a start replaces", () => {

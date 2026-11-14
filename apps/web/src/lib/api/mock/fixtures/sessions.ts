@@ -275,6 +275,18 @@ export const inboxItems: InboxItem[] = [
     createdAt: ago(288),
   }),
   inbox({
+    id: "ib-failed-a11y",
+    kind: "run_failed",
+    notify: "failure",
+    title: "Run failed: UI review: product page accessibility",
+    body: "The agent process crashed (exit code 1)",
+    projectId: "p-storefront",
+    sessionId: "s-a11y",
+    attempts: 2,
+    createdAt: ago(90),
+    updatedAt: ago(12),
+  }),
+  inbox({
     id: "ib-triage",
     kind: "triage",
     notify: "automation",

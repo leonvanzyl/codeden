@@ -14,9 +14,11 @@ import {
   inboxForRequest,
   isOpenRequest,
   isRequestItem,
+  openRunFailed,
   type RequestItem,
   requestInboxId,
   requestResolution,
+  runFailedAgain,
   runFailedInbox,
 } from "./items";
 import { awaitsRetryDecision } from "./retry";
@@ -163,7 +165,13 @@ function onTurnEnded(
     const session = d.getSession(sessionId)?.session;
     if (session) {
       const id = `inbox:${sessionId}:${event.turnId}:failed`;
-      if (!d.getInbox(id)) {
+      // One item per run: a session whose earlier failure is still open updates that item.
+      const open = openRunFailed(d.openInboxForSession(sessionId));
+      if (d.getInbox(id)) {
+        // Already raised for this turn.
+      } else if (open) {
+        d.putInbox(runFailedAgain(open, event.error.message, ts));
+      } else {
         d.putInbox(runFailedInbox(session, id, event.error.message, event.threadId, ts));
       }
     }

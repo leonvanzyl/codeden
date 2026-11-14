@@ -1,12 +1,13 @@
-import type {
-  AgentEventOf,
-  AutomationRun,
-  InboxItem,
-  ListNoticesQuery,
-  Notice,
-  NoticeTarget,
-  RawEventEnvelope,
-  Session,
+import {
+  type AgentEventOf,
+  type AutomationRun,
+  type InboxItem,
+  inboxAttempts,
+  type ListNoticesQuery,
+  type Notice,
+  type NoticeTarget,
+  type RawEventEnvelope,
+  type Session,
 } from "@codeden/contracts";
 import { and, asc, desc, eq, gt, gte, inArray, isNull, lte, or, type SQL } from "drizzle-orm";
 import type { Db } from "../../db/client";
@@ -73,6 +74,20 @@ export function prOpenedNoticeId(projectId: string, number: number): string {
   return `pr.opened:${projectId}:${number}`;
 }
 
+/** An open `run_failed` item updated by a further failure of its session (`attempts` > 1). */
+export function isRepeatFailure(item: InboxItem): boolean {
+  return item.kind === "run_failed" && item.status === "open" && inboxAttempts(item) > 1;
+}
+
+/**
+ * One failure of a run: the item, and from its second failure on the attempt, so every failure
+ * gets its own notice while replays of the same one never duplicate it.
+ */
+function failureKey(item: InboxItem): string {
+  const attempts = inboxAttempts(item);
+  return attempts > 1 ? `${item.id}:${attempts}` : item.id;
+}
+
 function workRef(s: Session) {
   return { sessionId: s.id, workKey: s.workKey, purpose: s.purpose, startedBy: s.startedBy };
 }
@@ -112,8 +127,11 @@ export function deriveNotices(events: RawEventEnvelope[], lookup: NoticeLookup):
       if (reportsToOrchestrator(s) && s.result) {
         out.push(forOrchestrator(finished, `session.finished:orchestrator:${s.id}:${s.result.at}`));
       }
-    } else if (e.type === "inbox.created") {
+    } else if (e.type === "inbox.created" || e.type === "inbox.updated") {
       const { item } = e.payload as { item: InboxItem };
+      // A session that fails again updates its open `run_failed` item in place (one item per
+      // run): each new failure still reaches the PM, the orchestrator and automations.
+      if (e.type === "inbox.updated" && !isRepeatFailure(item)) continue;
       const s = agentSession(item.sessionId);
       if (!s) continue;
       if (item.kind === "question" || item.kind === "approval") {
@@ -141,7 +159,7 @@ export function deriveNotices(events: RawEventEnvelope[], lookup: NoticeLookup):
         });
       } else if (item.kind === "run_failed") {
         const failed: NoticeDraft = {
-          id: `session.failed:${item.id}`,
+          id: `session.failed:${failureKey(item)}`,
           type: "session.failed",
           projectId: s.projectId,
           target: "pm",
@@ -151,7 +169,7 @@ export function deriveNotices(events: RawEventEnvelope[], lookup: NoticeLookup):
         };
         out.push({ wake: wakesPm(s), notice: failed });
         if (reportsToOrchestrator(s)) {
-          out.push(forOrchestrator(failed, `session.failed:orchestrator:${item.id}`));
+          out.push(forOrchestrator(failed, `session.failed:orchestrator:${failureKey(item)}`));
         }
       }
     } else if (e.type === "session.updated") {

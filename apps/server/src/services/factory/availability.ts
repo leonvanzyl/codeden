@@ -86,6 +86,21 @@ export class ProviderAvailability {
     });
   }
 
+  /**
+   * Detect now and wait for it (joining one already running), whatever the interval: for a
+   * person's action, such as Retry right after signing in or updating a CLI.
+   */
+  async detectNow(): Promise<void> {
+    if (!this.running) {
+      if (!this.deps.runner.isConnected()) return;
+      this.checkedAt = this.deps.now().getTime();
+      this.running = this.detect().finally(() => {
+        this.running = undefined;
+      });
+    }
+    await this.running;
+  }
+
   private async detect(): Promise<void> {
     try {
       const res = await this.deps.runner.request(
@@ -114,10 +129,15 @@ export class ProviderAvailability {
   /**
    * Whether `provider` can run new work now and, when it can't, why, until when, and the fix
    * detection names (the issue's message and command). `name` is the provider's name for the
-   * message ("Gemini CLI").
+   * message ("Gemini CLI"). `ignoreFailures` leaves out the back-off after a factory session
+   * failed on it (a person's own Retry decides for itself).
    */
-  runnable(provider: string, name = provider): ProviderRunnable {
-    const found = this.check(provider);
+  runnable(
+    provider: string,
+    name = provider,
+    opts: { ignoreFailures?: boolean } = {},
+  ): ProviderRunnable {
+    const found = this.check(provider, opts.ignoreFailures);
     if (!found) {
       return { runnable: true, reason: null, until: null, detail: null, fix: null, message: null };
     }
@@ -134,7 +154,7 @@ export class ProviderAvailability {
   }
 
   /** Why `provider` can't take new work, with the detection issue that explains it, if any. */
-  private check(provider: string): Blocked | null {
+  private check(provider: string, ignoreFailures = false): Blocked | null {
     const now = this.deps.now().getTime();
     const status = this.statuses.get(provider);
     const issue = (...codes: ProviderIssue["code"][]) =>
@@ -156,6 +176,7 @@ export class ProviderAvailability {
     }
     const limited = this.limitedUntil(provider, now);
     if (limited !== undefined) return because("at its usage limit", null, limited);
+    if (ignoreFailures) return null;
     const failed = this.failures.get(provider);
     if (failed?.until && Date.parse(failed.until) > now) {
       return { unavailable: failed, issue: null };

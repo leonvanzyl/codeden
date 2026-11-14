@@ -205,7 +205,11 @@ export class SessionLauncher {
     return { session: updated, setupNote: setupFailureNote(result.setup) };
   }
 
-  /** Mark a session failed with an inbox item explaining why. */
+  /**
+   * Mark a session failed with an inbox item explaining why. A provider that refused to open it
+   * (`open_failed`) was reported by the runner first, as the process crash that raised the item
+   * (or updated the session's open one), so no second item is raised for the same failure.
+   */
   fail(sessionId: string, key: string, error: unknown): void {
     const message = errorMessage(error);
     this.deps.log?.(`session ${sessionId}: ${message}`);
@@ -214,6 +218,7 @@ export class SessionLauncher {
     const session = this.deps.repo.update(sessionId, (s) =>
       s.status === "stopped" ? s : { ...s, status: "failed" },
     );
+    if (runnerErrorCode(error) === "open_failed") return;
     this.deps.inbox.raiseRunFailed(session, key, message);
   }
 
