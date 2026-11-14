@@ -220,11 +220,12 @@ export const BrowserDialogClosed = BrowserDialog.extend({
 export type BrowserDialogClosed = z.infer<typeof BrowserDialogClosed>;
 
 /**
- * The result of an agent action (click, type, press, pointer action). `dialog`: the action opened
- * a page dialog, which now waits for an answer (`browser.dialog`); the action finishes once it is
- * answered.
+ * The result of an agent action (click, type, press, pointer action, select, upload). `dialog`:
+ * the action opened a page dialog, which now waits for an answer (`browser.dialog`); the action
+ * finishes once it is answered.
  */
-const ActionResult = z.object({ dialog: BrowserDialog.optional() });
+export const BrowserActionResult = z.object({ dialog: BrowserDialog.optional() });
+const ActionResult = BrowserActionResult;
 
 /** A key held down during an agent pointer action (`browser.mouse`). */
 export const BrowserModifierKey = z.enum(["Alt", "Control", "Meta", "Shift"]);

@@ -11,6 +11,7 @@ import { ProjectConfigFile } from "../project-config";
 import { ProviderInfo, ProviderStatus, RuntimeResponse, SessionOptions } from "../provider";
 import { ProviderHistoryCommandResults, ProviderHistoryCommands } from "../provider-history";
 import { BrowserCommandResults, BrowserCommands } from "./browser";
+import { BrowserFormCommandResults, BrowserFormCommands } from "./browser-forms";
 import { GitCredential, WorkspaceFsCommandResults, WorkspaceFsCommands } from "./workspace-fs";
 
 /** Terminal (node-pty) id, unique per runner. */
@@ -228,8 +229,9 @@ export const RunnerCommand = z.discriminatedUnion("name", [
   z.object({ name: z.literal("pty.close"), ptyId: PtyId }),
   /** Scrollback and state of a terminal, for (re)attaching a view. */
   z.object({ name: z.literal("pty.attach"), ptyId: PtyId }),
-  /** `browser.*` (§12.2), defined in `./browser`. */
+  /** `browser.*` (§12.2), defined in `./browser`; `<select>` menus and file inputs in `./browser-forms`. */
   ...BrowserCommands,
+  ...BrowserFormCommands,
   /** Snapshot the worktree into `refs/codeden/checkpoints/<session>/<n>` (§9). */
   z.object({
     name: z.literal("git.checkpoint"),
@@ -404,6 +406,7 @@ export const RunnerCommandResults = {
     exitCode: z.int().nullable(),
   }),
   ...BrowserCommandResults,
+  ...BrowserFormCommandResults,
   "git.checkpoint": z.object({ ref: z.string(), commit: z.string() }),
   "git.status": z.object({
     branch: z.string().nullable(),

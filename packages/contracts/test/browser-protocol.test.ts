@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { BrowserInput, RunnerCommand, RunnerCommandResults, RunnerStream } from "../src";
+import {
+  BrowserInput,
+  MAX_SELECT_VALUES,
+  MAX_UPLOAD_FILES,
+  RunnerCommand,
+  RunnerCommandResults,
+  RunnerStream,
+} from "../src";
 
 function roundTrip<T>(schema: { parse: (v: unknown) => T }, value: unknown): T {
   const first = schema.parse(value);
@@ -97,6 +104,44 @@ describe("browser protocol", () => {
       { ...base, action: "tap" },
     ];
     for (const value of refused) expect(() => RunnerCommand.parse(value)).toThrow();
+  });
+
+  it("round-trips <select> choices and file uploads, with their limits", () => {
+    const select = { name: "browser.select", sessionId: "s1", ref: "e3" };
+    roundTrip(RunnerCommand, { ...select, values: ["Netherlands"] });
+    roundTrip(RunnerCommand, { ...select, tabId: "t2", ref: "f1e4", values: ["za", "nl"] });
+    roundTrip(RunnerCommand, { ...select, values: Array(MAX_SELECT_VALUES).fill("x") });
+    for (const refused of [
+      { ...select, values: [] },
+      { ...select, values: Array(MAX_SELECT_VALUES + 1).fill("x") },
+      { ...select, values: ["x".repeat(1_001)] },
+      { ...select, ref: "select#country", values: ["nl"] },
+    ]) {
+      expect(() => RunnerCommand.parse(refused)).toThrow();
+    }
+    const dialog = { dialogId: "d0f", tabId: "t1", type: "confirm", message: "Switch country?" };
+    roundTrip(RunnerCommandResults["browser.select"], {
+      selected: [{ value: "nl", label: "Netherlands" }],
+    });
+    roundTrip(RunnerCommandResults["browser.select"], { selected: [] });
+    roundTrip(RunnerCommandResults["browser.select"], { dialog });
+
+    const upload = { name: "browser.upload", sessionId: "s1", ref: "e5" };
+    roundTrip(RunnerCommand, { ...upload, paths: ["/work/repo/fixtures/data.csv"] });
+    roundTrip(RunnerCommand, { ...upload, tabId: "t1", paths: ["C:\\wt\\a.png", "C:\\wt\\b.png"] });
+    for (const refused of [
+      { ...upload, paths: [] },
+      { ...upload, paths: [""] },
+      { ...upload, paths: Array(MAX_UPLOAD_FILES + 1).fill("/tmp/a.csv") },
+      { ...upload, paths: ["/tmp/a.csv"], ref: undefined },
+    ]) {
+      expect(() => RunnerCommand.parse(refused)).toThrow();
+    }
+    roundTrip(RunnerCommandResults["browser.upload"], { via: "input" });
+    roundTrip(RunnerCommandResults["browser.upload"], { via: "chooser" });
+    roundTrip(RunnerCommandResults["browser.upload"], { dialog, via: "input" });
+    roundTrip(RunnerCommandResults["browser.upload"], { dialog });
+    expect(() => RunnerCommandResults["browser.upload"].parse({ via: "drop" })).toThrow();
   });
 
   it("types at the focused element without a ref, up to a cap", () => {
