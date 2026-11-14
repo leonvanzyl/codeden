@@ -9,7 +9,7 @@ Everything an agent touches sits next to its chat. Open the right panel with **C
 | Browser | Alt+3 | The session's browser, shared with the agent |
 | Terminal | Alt+4 | Terminals in the worktree |
 | Issue / PR | Alt+5 | The linked issue and pull request (see [GitHub](github.md)) |
-| Details | Alt+6 | Status, purpose, work key, who started it, what it was forked from, provider, autonomy, branch, worktree, scope, what's loaded, read-aloud mute |
+| Details | Alt+6 | Status, purpose, work key, who started it, what it was forked or handed off from, provider, autonomy, branch, worktree, scope, what's loaded, read-aloud mute |
 
 ## The transcript
 
@@ -78,6 +78,19 @@ Did the agent go the wrong way a few turns ago? Hover the line under that turn's
 - **The code is as it was right after that turn**, uncommitted changes included, in a new worktree and branch.
 
 The original session is unchanged. The fork's empty transcript and **Details** say which turn it was forked from. You can fork from turns that ran in this version of CodeDen or later; for older turns, only the latest one offers it, and forking from it is the same as **Fork session**. If the agent's own record of the conversation changed since that turn (it was replaced or deleted), CodeDen says it can't fork from there and creates nothing, rather than copying the whole conversation.
+
+## Hand a session off
+
+Hit a usage limit, want a second opinion, or want another model's strengths? Hand the work to another provider (or to a fresh conversation on the same one) without losing the code. Open the session's **⋯** menu and choose **Hand off…**, or use **Hand off this session…** in the command palette (**Ctrl/Cmd+K**). In the session's model picker, the other providers' tiles do the same: hover one and it says **Continue in a new … session**.
+
+In the dialog, pick the provider, model and effort, and optionally say what the new session should do next ("Review the approach before changing anything"). Then choose **Continue in new … session**. CodeDen starts a new session in the same project:
+
+- **Same code.** Like a fork: its own worktree on a new branch from the original's branch, with the original's files at the end of its last turn copied in, uncommitted changes included.
+- **A brief instead of the conversation.** The conversation can't move between providers, so the new session's first message is a brief CodeDen writes from the original's transcript. It holds the task, the requests you made along the way, where the work got to, the result the agent recorded, its open todos, why its last turn stopped if it failed, the files it edited and your note. "Where the work got to" is a short summary by the utility model; with no utility model (or **Handoff summaries** off in **Settings > Utility model**), it quotes the agent's last reply. The brief shows in the transcript as a message from CodeDen, and the agent starts on it straight away.
+- **Same work.** It keeps the permissions, plan mode, work key and linked issue. Its pull request is a new one that targets the same base branch.
+- **Original unchanged.** Nothing about the original session changes.
+
+The new session's header shows **Handed off from …** with a link back, and **Details** shows where it came from. Hand off works on every provider and needs no fork support. It's available once the session has done some work, and while no turn is running and nothing waits on you: a session that failed or was stopped (after a usage limit, say) can be handed off. CodeDen won't hand off to a provider that can't keep the session's permissions: read-only needs a provider that enforces it, and a session that's still planning needs one with plan mode.
 
 ## Files
 
