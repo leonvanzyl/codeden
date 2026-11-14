@@ -105,6 +105,25 @@ async function startReviewer(
 }
 
 /**
+ * The item with a newly started reviewer session. A nudge for its verdict was sent to the
+ * session it replaces (one that died, was stopped, or whose provider failed), so it goes with
+ * that session: the new reviewer is reminded once itself before its review can fail.
+ */
+function withReviewer(
+  item: FactoryItem,
+  res: { sessionId: string; provider: string; note: string | null },
+): FactoryItem {
+  const { reviewer: _nudged, ...nudges } = item.nudges;
+  return {
+    ...item,
+    reviewerSessionId: res.sessionId,
+    reviewerProvider: res.provider,
+    reviewerNote: res.note,
+    nudges,
+  };
+}
+
+/**
  * A slot for the item's review, ahead of fixes, rebases and builds once its CI passed
  * (`slots.ts`). `wake` is the reviewer session a message wakes, when it is between turns; a
  * message to one mid-turn waits behind that turn and needs no slot.
@@ -164,13 +183,7 @@ export async function ensureReviewer(
       note: `Review not started (${res.status})`,
     }));
   }
-  return ctx.store.updateItem(item.id, (i) => ({
-    ...i,
-    reviewerSessionId: res.sessionId,
-    reviewerProvider: res.provider,
-    reviewerNote: res.note,
-    note: null,
-  }));
+  return ctx.store.updateItem(item.id, (i) => ({ ...withReviewer(i, res), note: null }));
 }
 
 /**
@@ -238,14 +251,11 @@ async function requestRecheck(
     }));
   }
   return ctx.store.updateItem(item.id, (i) => {
-    const { reviewer: _nudged, ...nudges } = i.nudges;
+    const next = withReviewer(i, res);
     return {
-      ...i,
-      reviewerSessionId: res.sessionId,
-      reviewerProvider: res.provider,
-      reviewerNote: res.note,
+      ...next,
       note: "Rebased after the review: a fresh reviewer re-checks the conflict resolution",
-      nudges: { ...nudges, ...sent },
+      nudges: { ...next.nudges, ...sent },
     };
   });
 }
@@ -254,7 +264,8 @@ async function requestRecheck(
  * While checks are pending: nudge a reviewer that ended its turn without a verdict (or without
  * its re-check), and fail the review once it ends again without one and stays idle past the
  * grace period. A reviewer session that died is replaced, up to `MAX_REVIEWER_RESTARTS` times;
- * a pending re-check stays a re-check for the replacement.
+ * a pending re-check stays a re-check for the replacement, and the replacement gets its own
+ * nudge (`withReviewer`).
  */
 export async function reviewerStalled(
   ctx: FactoryContext,
