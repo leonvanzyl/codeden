@@ -110,17 +110,17 @@ The runner hosts everything that has to sit next to the code: agent processes (t
 
 ### 4.3 Runner protocol
 
-A versioned, zod-typed message protocol over one WebSocket:
+A versioned, zod-typed message protocol over one connection (a WebSocket, or an exec link for a runner in a sandbox):
 
 - **Server → runner commands:** `workspace.prepare`, `session.start`, `session.send`, `session.steer`, `session.interrupt`, `session.respond` (approval or answer), `session.stop`, `pty.*`, `browser.*`, `git.*`, `mcp.test` (an MCP server connection test, §12.4).
 - **Runner → server events:** normalized agent events (§7.3), process status, terminal output, browser frames. Each event carries a monotonically increasing `seq`, which the server acknowledges. Provider lists (with each provider's models) are sent at the handshake and again whenever a list changes, for example once model discovery finishes.
 - **Handshake:** the protocol version, runner version and capabilities are exchanged on connect.
-- **Transports.** The protocol is JSON messages and doesn't depend on the carrier. The server reaches a runner through a `RunnerTransport`:
-  - `loopback`: the local runner's `127.0.0.1` WebSocket, found through its lock file, as today.
-  - `exec`: newline-delimited JSON on the stdin and stdout of `codeden runner-link`, run inside a sandbox (§4.2).
+- **Transports.** The protocol is JSON messages and doesn't depend on the carrier. The server reaches a runner through a `RunnerTransport` ([remote-runners.md](remote-runners.md) §6):
+  - `loopback`: the local runner's `127.0.0.1` WebSocket, found through its lock file.
+  - `exec`: newline-delimited JSON, one message per line and at most 16 MiB a line, on the stdin and stdout of `codeden runner-link`, run inside a sandbox (§4.2). The link writes nothing else to stdout. It exits with distinct codes when no runner is running (3) and when the runner refuses it (4).
   - A `dial-out` transport, where the runner connects to the server, is deferred to the §15.2 decision.
+- **`welcome` reports where the runner runs:** `platform`, `arch`, `home` and `backend`, all optional so older runners still connect.
 - **Additions for remote runners** (planned, [remote-runners.md](remote-runners.md) §18):
-  - `welcome` reports `platform`, `arch`, `home` and `backend`.
   - `workspace.prepare` gains a `clone` strategy whose path the runner chooses.
   - `fs.list/stat/read/write` and a chunked `transfer.*` stream, so the server never reads a remote worktree from its own disk.
   - `mcp.request`/`mcp.response` frames tunnel MCP (§4.4).

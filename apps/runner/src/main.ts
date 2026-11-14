@@ -1,9 +1,10 @@
 /**
  * Runner process entry. Started detached by the server:
  *   node main.js --home <dir> [--fake] [--no-builtin] [--replay <fixture.json>] [--mcp-upstream <url>]
- *     [--opencode <path to the opencode executable>]
+ *     [--opencode <path to the opencode executable>] [--backend <local|docker|upstash-box>]
  */
 import { parseArgs } from "node:util";
+import { RunnerBackendId } from "@codeden/contracts";
 import { startRunner } from "./runner";
 
 const { values } = parseArgs({
@@ -17,6 +18,8 @@ const { values } = parseArgs({
     "mcp-upstream": { type: "string" },
     /** Run OpenCode from this executable (an install outside PATH, or the fake in tests). */
     opencode: { type: "string" },
+    /** Where this runner runs (a sandbox backend starts it with its own id). Default `local`. */
+    backend: { type: "string" },
   },
   allowPositionals: false,
 });
@@ -26,12 +29,18 @@ if (!home) {
   console.error("codeden runner: --home or CODEDEN_HOME is required");
   process.exit(2);
 }
+const backend = RunnerBackendId.safeParse(values.backend ?? "local");
+if (!backend.success) {
+  console.error(`codeden runner: unknown --backend "${values.backend}"`);
+  process.exit(2);
+}
 
 const log = (m: string) => console.log(`[${new Date().toISOString()}] ${m}`);
 
 try {
   const runner = await startRunner({
     home,
+    backend: backend.data,
     enableFakeProvider: values.fake,
     builtinProviders: !values["no-builtin"],
     replayFixtures: values.replay,

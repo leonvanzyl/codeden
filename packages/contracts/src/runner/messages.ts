@@ -1,11 +1,13 @@
 import { z } from "zod";
 import { ErrorInfo, ProviderId, Timestamp } from "../common";
 import { ProviderInfo } from "../provider";
+import { RunnerBackendId } from "../runners";
 import { RunnerCommand, RunnerSessionInfo } from "./commands";
 import { RunnerEvent, RunnerStream } from "./events";
 
 /**
- * Server <-> runner protocol over one WebSocket (§4.3).
+ * Server <-> runner protocol (§4.3): JSON messages over one connection, a loopback WebSocket
+ * or an exec link (`./link.ts`).
  *
  * Handshake:
  *   1. server -> `hello`   (protocol + server version)
@@ -86,6 +88,17 @@ export const RunnerWelcome = z.object({
   journal: z.object({ lastSeq: z.int().nonnegative(), unacked: z.int().nonnegative() }),
   /** True when the runner is draining and will not accept new sessions. */
   draining: z.boolean(),
+  /**
+   * The runner machine's OS, as Node.js reports it (`process.platform`: `linux`, `darwin`,
+   * `win32`, ...), so the server never guesses path separators. Absent from older runners.
+   */
+  platform: z.string().min(1).max(40).optional(),
+  /** The runner machine's CPU architecture (`process.arch`: `x64`, `arm64`, ...). */
+  arch: z.string().min(1).max(40).optional(),
+  /** The runner's absolute data directory on its own machine (a sandbox path for a remote one). */
+  home: z.string().min(1).max(4096).optional(),
+  /** Where the runner runs (`docs/remote-runners.md` §5); `local` for the runner next to the server. */
+  backend: RunnerBackendId.optional(),
 });
 export type RunnerWelcome = z.infer<typeof RunnerWelcome>;
 
