@@ -111,7 +111,11 @@ OpenCode with no connected provider is a warning rather than an error: its own f
 
 CodeDen drives the Cursor CLI through its ACP server (`agent acp`), which older builds don't have. Run `agent update` (or reinstall with `curl https://cursor.com/install -fsS | bash`, or `irm 'https://cursor.com/install?win32=true' | iex` on Windows), then press **Re-check**. Another program named `agent` on your PATH isn't Cursor's: CodeDen only uses an `agent` whose `--version` is a Cursor build, and prefers `cursor-agent` when both are installed.
 
-Cursor's own permission settings (`~/.cursor/cli-config.json`, a project's `.cursor/cli.json`) apply before CodeDen's: what they allow runs without asking, so CodeDen can only judge what Cursor asks about. Keep their allowlists short if you rely on CodeDen's levels.
+Cursor's own permission settings (`~/.cursor/cli-config.json`, a project's `.cursor/cli.json`) apply before CodeDen's: what they allow runs without asking, so CodeDen can only judge what Cursor asks about. Keep their allowlists short if you rely on CodeDen's levels. A session whose worktree has `permissions.allow` rules in `.cursor/cli.json` names them in a warning in its first turn, and an agent that tries to change either file always asks you first ([Agents' own allow-lists](security.md#agents-own-allow-lists)).
+
+### "This worktree has Gemini CLI settings that run tools without asking"
+
+The project's `.gemini/settings.json` lets some tools run without asking (`tools.allowed`, `tools.autoAccept`, `mcp.allowed`, or an MCP server marked `trust`). CodeDen starts Gemini CLI with an admin policy that still asks before commands, edits and MCP tools, but anything else those settings allow runs without CodeDen seeing it. Remove the settings if you didn't add them on purpose. If Gemini CLI prints "Ignoring --admin-policy because system policies are already defined", your machine has Gemini CLI system policies, and those decide instead of CodeDen's.
 
 ### Gemini CLI asks for an update, or its login can't be confirmed
 

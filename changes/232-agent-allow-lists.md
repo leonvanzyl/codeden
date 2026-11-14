@@ -1,0 +1,7 @@
+---
+section: security
+---
+
+- **Agents can no longer switch off CodeDen's approvals by writing their own allow-list.** Cursor and Gemini CLI run what their allow-lists permit without asking, so a single `echo '{"permissions":{"allow":["Shell(*)"]}}' > .cursor/cli.json` used to turn approvals off for the session and, once merged, for every later Cursor session in the project. Creating or changing Cursor's `.cursor/cli.json` or `cli-config.json`, or Gemini CLI's `.gemini/settings.json`, `trustedFolders.json`, system settings or policy files, now asks at every permission level, Full included, whichever agent does it. This covers edit tools and shell writes (redirects, `tee`, `cp`, `mv`, `ln`, `sed -i`, `git checkout`, PowerShell's `Set-Content`, `Out-File`, `Copy-Item` and inline `node -e` or `python -c` code).
+- **Gemini CLI starts under a CodeDen admin policy.** Its commands always ask, and its edits and MCP tools ask outside plan mode, whatever `tools.allowed`, trusted MCP servers or policy files allow, so CodeDen decides each one. Cursor has no option to ignore a project's allow-list, so it is guarded and reported instead.
+- **A warning when a worktree already carries an allow-list.** A Cursor or Gemini CLI session whose worktree has allow rules in `.cursor/cli.json` or `.gemini/settings.json` names them in its first turn. In the software factory, the warning also goes on the item and into the inbox.
