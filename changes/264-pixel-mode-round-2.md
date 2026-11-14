@@ -1,0 +1,8 @@
+---
+section: changed
+---
+
+- **Pixel mode shows what every agent is doing.** The Factory view's pixel floor now runs left to right as the pipeline: intake, prep desks, workbenches, review desks, the merge conveyor with a CI lamp, the shipping door and a control room. Each agent sits at the station for its step, keeps its seat while it works there, and shows its issue number and a step glyph. Hover or focus it for a card with its role, item, step, provider and model, latest progress line, time in step and status (working, thinking, waiting for approval, blocked, done). Click it to open the item, or open its session from the card.
+- **Agents only move when the work does.** A builder carries its pull request crate to the review desk, a reviewer stamps it onto the conveyor, a merge ships it with a small celebration, and a failure leaves a puff of smoke. Nobody walks through anyone. Each role has its own look, and each agent's variant comes from its session.
+- **A small repair bay replaces the broken machines.** Stopped work waits in up to three crates by kind (needs a retry, stuck, yours to merge), each with a count. Hovering one says why each item stopped and offers Retry or Open PR, the same action as the item page.
+- **The PM chat is part of the floor.** In pixel mode it's a terminal docked beside the PM's control room (over the scene on narrower screens), and clicking the PM opens it.

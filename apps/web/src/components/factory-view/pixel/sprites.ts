@@ -1,12 +1,12 @@
 /**
- * The pixel mode's art: small palette-indexed sprites, drawn by hand for CodeDen (original art,
+ * The pixel mode's props: small palette-indexed sprites drawn by hand for CodeDen (original art,
  * no third-party assets). Each row is a string; each character is a palette key and `.` is
- * transparent. A sprite is painted once into a small offscreen canvas per colour variant, and
- * the scene then only copies it with `drawImage`.
+ * transparent. A sprite is painted once into a small offscreen canvas per colour set, and the
+ * scene then only copies it with `drawImage`. People are in `people.ts`.
  */
 
 /** The base palette: a muted 16-bit set. */
-const PALETTE: Record<string, string> = {
+export const PALETTE: Record<string, string> = {
   k: "#1a1c2c", // outline
   s: "#f4c39b", // skin
   L: "#333c57", // trousers
@@ -26,109 +26,83 @@ const PALETTE: Record<string, string> = {
   n: "#38b764",
   r: "#e43b44",
   o: "#ef7d57",
-  // Swapped per variant: hat or hair (H, h), clothes (B, b), and one tint (X).
-  H: "#ffcd75",
-  h: "#ef7d57",
-  B: "#3b5dc9",
-  b: "#29366f",
-  X: "#e43b44",
+  b: "#41a6f6",
+  X: "#e43b44", // swapped per variant
 };
 
-/** Colour swaps: worker roles and the tint of flags, lamps, bubbles and tickets. */
+export const INK = "#1a1c2c";
+
+/** Colour swaps for props: flags, lamps, tickets, crates. */
 const VARIANTS: Record<string, Record<string, string>> = {
   base: {},
-  // A yellow hard hat and blue overalls.
-  builder: {},
-  // Brown hair and a green vest.
-  reviewer: { H: "#6b3e26", h: "#4a2a1a", B: "#38b764", b: "#257179" },
-  // A tan cap and a rust coat.
-  scout: { H: "#c28a52", h: "#6e4527", B: "#b86f50", b: "#7a3f2c" },
-  // A purple beanie.
-  helper: { H: "#b55dd0", h: "#6d2f8a", B: "#7f6bd6", b: "#4f3f99" },
   red: { X: "#e43b44" },
-  redDim: { X: "#7a2232" },
   amber: { X: "#ffb000" },
-  amberDim: { X: "#8a5d12" },
+  green: { X: "#38b764" },
+  blue: { X: "#41a6f6" },
+  dim: { X: "#3d4660" },
   paper: { X: "#fff8e7" },
   bug: { X: "#e43b44" },
   feature: { X: "#41a6f6" },
   docs: { X: "#38b764" },
-  // Sealed with green tape.
-  shipped: { t: "#d9a066", u: "#b77b45", T: "#38b764" },
-  // The machine's screen shows red when it failed.
-  broken: { d: "#7a2232" },
+  // Stamped and sealed with green tape.
+  stamped: { t: "#d9a066", u: "#b77b45", T: "#38b764" },
 };
 
-export type SpriteVariant = keyof typeof VARIANTS;
+export type PropVariant = keyof typeof VARIANTS;
+
+const cache = new Map<string, HTMLCanvasElement>();
+
+/**
+ * Paints rows of palette keys once and reuses the canvas. `make` builds the rows and colours,
+ * and only runs the first time: a frame only looks sprites up.
+ */
+export function paint(
+  key: string,
+  make: () => { rows: readonly string[]; colours: Record<string, string> },
+): HTMLCanvasElement {
+  const hit = cache.get(key);
+  if (hit) return hit;
+  const { rows, colours } = make();
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, ...rows.map((r) => r.length));
+  canvas.height = Math.max(1, rows.length);
+  const ctx = canvas.getContext("2d");
+  if (ctx)
+    rows.forEach((row, y) => {
+      for (let x = 0; x < row.length; x++) {
+        const colour = colours[row[x] as string];
+        if (!colour) continue;
+        ctx.fillStyle = colour;
+        ctx.fillRect(x, y, 1, 1);
+      }
+    });
+  cache.set(key, canvas);
+  return canvas;
+}
+
+/** Paints into a cached canvas with a drawing function (labels, counters). */
+export function painted(
+  key: string,
+  w: number,
+  h: number,
+  draw: (ctx: CanvasRenderingContext2D) => void,
+): HTMLCanvasElement {
+  const hit = cache.get(key);
+  if (hit) return hit;
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, w);
+  canvas.height = Math.max(1, h);
+  const ctx = canvas.getContext("2d");
+  if (ctx) draw(ctx);
+  // Labels change with the data: keep the cache from growing without bound.
+  if (cache.size > 600) cache.clear();
+  cache.set(key, canvas);
+  return canvas;
+}
 
 const rep = (ch: string, n: number) => ch.repeat(n);
 
-// Workers are 10×14, facing the viewer.
-const HEAD = [
-  "...kkkk...",
-  "..kHHHHk..",
-  ".kHHHHHHk.",
-  ".khhhhhhk.",
-  "..kssssk..",
-  "..kksskk..",
-  "..kssssk..",
-  "...kkkk...",
-];
-const BODY = ["..kBBBBk..", ".kBBBBBBk.", ".ksBBBBsk.", "..kbbbbk.."];
-
-const SPRITES = {
-  stand: [...HEAD, ...BODY, "..kLkkLk..", "..kk..kk.."],
-  // The right arm up, ready to strike.
-  armUp: [
-    "...kkkk...",
-    "..kHHHHk..",
-    ".kHHHHHHk.",
-    ".khhhhhhkk",
-    "..kssssksk",
-    "..kksskkBk",
-    "..kssssBk.",
-    "...kkkkBk.",
-    "..kBBBBBk.",
-    ".kBBBBBk..",
-    ".ksBBBBk..",
-    "..kbbbbk..",
-    "..kLkkLk..",
-    "..kk..kk..",
-  ],
-  // The right arm down on the bench.
-  armDown: [
-    ...HEAD,
-    "..kBBBBk..",
-    ".kBBBBBBk.",
-    ".ksBBBBBBk",
-    "..kbbbbksk",
-    "..kLkkLk..",
-    "..kk..kk..",
-  ],
-  walkA: [...HEAD, ...BODY, "..kLkkLk..", ".kk....kk."],
-  walkB: [...HEAD, ...BODY, "...kLLk...", "...kkkk..."],
-  // Sitting on the floor with closed eyes: the loop is stopped.
-  sit: [
-    "..........",
-    "..........",
-    "...kkkk...",
-    "..kHHHHk..",
-    ".kHHHHHHk.",
-    ".khhhhhhk.",
-    "..kssssk..",
-    "..kkkkkk..",
-    "..kssssk..",
-    "...kkkk...",
-    "..kBBBBk..",
-    ".ksBBBBsk.",
-    ".kLLLLLLk.",
-    ".kkkkkkkk.",
-  ],
-  hammerUp: ["GgG", ".T.", ".T.", ".T."],
-  hammerDown: ["TTGG", "..GG"],
-  clipboard: [".kGk.", "kTTTk", "kwwwk", "kwPwk", "kwwwk", "kkkkk"],
-  magnifier: [".kk..", "kcwk.", "kcck.", ".kkT.", "...T."],
-  notepad: ["kkkk", "kyyk", "kPPk", "kyyk", "kkkk"],
+const PROPS = {
   ticket: ["kkkkkkk", "kXXXXXk", "kpPPPpk", "kpPPppk", "kkkkkkk"],
   crate: [
     rep("k", 12),
@@ -144,158 +118,132 @@ const SPRITES = {
     "kuTuuuuuuTuk",
     rep("k", 12),
   ],
-  // A workbench, 22×10: the top, the front, the legs.
-  bench: [
-    rep("k", 22),
-    `k${rep("t", 20)}k`,
-    `kt${rep("g", 3)}${rep("t", 12)}${rep("G", 2)}ttk`,
-    `k${rep("t", 20)}k`,
-    rep("k", 22),
-    `k${rep("u", 20)}k`,
-    `k${rep("T", 20)}k`,
-    rep("k", 22),
-    `.kTk${rep(".", 14)}kTk.`,
-    `.kkk${rep(".", 14)}kkk.`,
+  smallCrate: ["kkkkkkkk", "kttttttk", "kkkkkkkk", "kuTuuTuk", "kuuTTuuk", "kuTuuTuk", "kkkkkkkk"],
+  // A desk seen from the front, 24×14: the top at the sitter's waist, a panel, legs.
+  deskPrep: [
+    `....${rep("k", 8)}${rep(".", 12)}`,
+    `....kMMMMMMk..kkkkk.....`,
+    `....kMMMMMMk..kpPpk.....`,
+    rep("k", 24),
+    `k${rep("t", 22)}k`,
+    `k${rep("t", 22)}k`,
+    rep("k", 24),
+    `k${rep("u", 22)}k`,
+    `ku${rep("T", 8)}u${rep("u", 4)}u${rep("T", 6)}uk`,
+    `k${rep("u", 22)}k`,
+    rep("k", 24),
+    `.kTk${rep(".", 16)}kTk.`,
+    `.kTk${rep(".", 16)}kTk.`,
+    `.kkk${rep(".", 16)}kkk.`,
   ],
-  // A machine, 18×16: the top, a screen, vents, buttons.
-  machine: [
-    `..${rep("k", 14)}..`,
-    `..k${rep("m", 12)}k..`,
-    `..k${rep("m", 12)}k..`,
-    `..k${rep("m", 12)}k..`,
-    rep("k", 18),
-    `k${rep("M", 16)}k`,
-    "kMkkkkkkkMMMgggMMk",
-    "kMkdddddkMMMMMMMMk",
-    "kMkdddddkMMMgggMMk",
-    "kMkkkkkkkMMMMMMMMk",
-    "kMMMMMMMMMMMgggMMk",
-    "kMMoMMrMMMMMMMMMMk",
-    `k${rep("M", 16)}k`,
-    `k${rep("G", 16)}k`,
-    rep("k", 18),
-    `.kk${rep(".", 12)}kk.`,
+  deskBench: [
+    `..kk${rep(".", 14)}.kk...`,
+    `..kGk.kyk${rep(".", 9)}kGGk..`,
+    `..kGk.kyk${rep(".", 9)}kGGk..`,
+    rep("k", 24),
+    `k${rep("t", 22)}k`,
+    `kt${rep("g", 3)}${rep("t", 14)}${rep("G", 2)}ttk`,
+    rep("k", 24),
+    `k${rep("T", 22)}k`,
+    `k${rep("T", 22)}k`,
+    rep("k", 24),
+    `.kTk${rep(".", 16)}kTk.`,
+    `.kTk${rep(".", 16)}kTk.`,
+    `.kTk${rep(".", 16)}kTk.`,
+    `.kkk${rep(".", 16)}kkk.`,
+  ],
+  deskReview: [
+    `${rep(".", 17)}kkk....`,
+    `${rep(".", 16)}kyyyk...`,
+    `${rep(".", 17)}.k.....`.slice(0, 24),
+    rep("k", 24),
+    `k${rep("g", 22)}k`,
+    `k${rep("g", 22)}k`,
+    rep("k", 24),
+    `k${rep("G", 22)}k`,
+    `kG${rep("M", 20)}Gk`,
+    `k${rep("G", 22)}k`,
+    rep("k", 24),
+    `.kMk${rep(".", 16)}kMk.`,
+    `.kMk${rep(".", 16)}kMk.`,
+    `.kkk${rep(".", 16)}kkk.`,
+  ],
+  // The PM's console: two screens facing the room, a desk.
+  console: [
+    `.${rep("k", 9)}..${rep("k", 9)}...`.slice(0, 24),
+    `.kdddddddk..kdddddddk...`,
+    `.kdcdcddck..kdddcdcdk...`,
+    rep("k", 24),
+    `k${rep("M", 22)}k`,
+    `kM${rep("G", 4)}MyMnMrM${rep("G", 8)}MMMk`.slice(0, 24),
+    rep("k", 24),
+    `k${rep("M", 22)}k`,
+    `k${rep("M", 22)}k`,
+    rep("k", 24),
+    `.kMk${rep(".", 16)}kMk.`,
+    `.kMk${rep(".", 16)}kMk.`,
+    `.kMk${rep(".", 16)}kMk.`,
+    `.kkk${rep(".", 16)}kkk.`,
   ],
   lamp: [".kk.", "kXXk", "kXXk", "kkkk"],
-  // A pennant with a "!" on a pole, in two frames so it flutters.
-  flagA: [
-    "kkkkk...",
-    "kXXwXk..",
-    "kXXwXXk.",
-    "kXXXXk..",
-    "kkkkk...",
-    "k.......",
-    "k.......",
-    "k.......",
-    "kk......",
-  ],
-  flagB: [
-    "kkkk....",
-    "kXXwk...",
-    "kXXwXk..",
-    "kXXXXXk.",
-    "kkkkkk..",
-    "k.......",
-    "k.......",
-    "k.......",
-    "kk......",
-  ],
-  question: [
-    ".kkkkk.",
-    "kwkkkwk",
-    "kwwwkwk",
-    "kwwkkwk",
-    "kwwwwwk",
-    "kwwkwwk",
-    ".kkkkk.",
-    "..kk...",
-  ],
-  bang: [".kkkkk.", "kXXwXXk", "kXXwXXk", "kXXwXXk", "kXXXXXk", "kXXwXXk", ".kkkkk.", "..kk..."],
+  // Bubbles above a head.
+  thought: [".kkkkkk.", "kwwwwwwk", "kwkwkwwk", "kwwwwwwk", ".kkkkkk.", "..kk....", "...k...."],
+  bang: [".kkkkk.", "kyykyyk", "kyykyyk", "kyykyyk", "kyyyyyk", "kyykyyk", ".kkkkk.", "...k..."],
+  sweat: ["..b..", ".bbb.", "bbwbb", "bbbbb", ".bbb."],
+  sweatRed: ["..r..", ".rrr.", "rrwrr", "rrrrr", ".rrr."],
   check: ["....n", "...n.", "n.n..", ".n..."],
   smoke: [".GG..", "GggG.", "GgggG", ".GGG."],
+  poof: [".w.w.", "wwgww", ".www.", "wwgww", ".w.w."],
   sparkleA: ["..y..", "..y..", "yywyy", "..y..", "..y.."],
   sparkleB: [".....", "..y..", ".ywy.", "..y..", "....."],
+  stamp: [".kk.", ".kk.", "kXXk", "kkkk"],
+  // Held items, drawn over a person.
+  clipboard: [".kGk.", "kTTTk", "kwwwk", "kwPwk", "kwwwk", "kkkkk"],
+  magnifier: [".kk..", "kcwk.", "kcck.", ".kkT.", "...T."],
+  wrench: ["m.m", "mmm", ".m.", ".m.", ".m."],
+  notepad: ["kkkk", "kyyk", "kPPk", "kyyk", "kkkk"],
 } satisfies Record<string, string[]>;
 
-export type SpriteName = keyof typeof SPRITES;
+export type PropName = keyof typeof PROPS;
 
-const cache = new Map<string, HTMLCanvasElement>();
-
-/** A sprite painted in a variant's colours, made once and reused. */
-export function sprite(name: SpriteName, variant: SpriteVariant = "base"): HTMLCanvasElement {
-  const key = `${name}:${variant}`;
-  const hit = cache.get(key);
-  if (hit) return hit;
-  const rows = SPRITES[name];
-  const width = Math.max(...rows.map((r) => r.length));
-  const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = rows.length;
-  const ctx = canvas.getContext("2d");
-  if (ctx) {
-    const colours = { ...PALETTE, ...VARIANTS[variant] };
-    rows.forEach((row, y) => {
-      [...row].forEach((key, x) => {
-        const colour = colours[key];
-        if (!colour) return;
-        ctx.fillStyle = colour;
-        ctx.fillRect(x, y, 1, 1);
-      });
-    });
-  }
-  cache.set(key, canvas);
-  return canvas;
+export function prop(name: PropName, variant: PropVariant = "base"): HTMLCanvasElement {
+  return paint(`prop:${name}:${variant}`, () => ({
+    rows: PROPS[name],
+    colours: { ...PALETTE, ...VARIANTS[variant] },
+  }));
 }
 
 /**
- * A 5-pixel-high font for the counter board, the "+N" signs and the door signs. Glyphs are
- * 3 wide, except N (4), which can't read as an N in 3.
+ * 5×5 step glyphs for the agents' labels: what each step looks like at a glance (a bug under a
+ * lens, a light bulb, a hammer, two turning arrows, a check, a wrench, an arrow to the door, an
+ * eye on CI), plus the roles without an item.
  */
-const GLYPHS: Record<string, string> = {
-  "0": "111101101101111",
-  "1": "010110010010111",
-  "2": "111001111100111",
-  "3": "111001111001111",
-  "4": "101101111001001",
-  "5": "111100111001111",
-  "6": "111100111101111",
-  "7": "111001010010010",
-  "8": "111101111101111",
-  "9": "111101111001111",
-  "+": "000010111010000",
-  I: "111010010010111",
-  N: "10011101101110011001",
-  S: "111100111001111",
-  H: "101101111101101",
-  P: "111101111100100",
-};
+export const STEP_GLYPHS = {
+  reproducing: ["10101", "01110", "11111", "01110", "10101"],
+  analyzing: ["01110", "10001", "01110", "00100", "01110"],
+  implementing: ["11110", "11110", "00100", "00100", "00100"],
+  revising: ["01101", "10011", "10111", "10000", "01110"],
+  reviewing: ["00000", "00001", "00010", "10100", "01000"],
+  rebasing: ["01010", "01110", "00100", "00100", "00100"],
+  merging: ["00100", "01110", "10101", "00100", "00100"],
+  watching_ci: ["00000", "01110", "11011", "01110", "00000"],
+  pm: ["01110", "10001", "10001", "11011", "00010"],
+  scout: ["11000", "11100", "01110", "00111", "00011"],
+  area: ["01100", "10010", "10010", "01110", "00011"],
+} satisfies Record<string, string[]>;
 
-const glyphWidth = (ch: string) => (GLYPHS[ch]?.length ?? 15) / 5;
+export type GlyphName = keyof typeof STEP_GLYPHS;
 
-/** The width of text in the pixel font, a pixel between letters. */
-export function pixelTextWidth(text: string, scale = 1): number {
-  return ([...text].reduce((w, ch) => w + glyphWidth(ch) + 1, 0) - 1) * scale;
-}
-
-/** Draws text in the pixel font. Unknown characters leave a gap. */
-export function pixelText(
+/** Draws a 5×5 glyph at (x, y). */
+export function glyph(
   ctx: CanvasRenderingContext2D,
-  text: string,
+  name: GlyphName,
   x: number,
   y: number,
   colour: string,
-  scale = 1,
 ) {
   ctx.fillStyle = colour;
-  let cx = x;
-  for (const ch of text) {
-    const glyph = GLYPHS[ch];
-    const width = glyphWidth(ch);
-    if (glyph)
-      [...glyph].forEach((bit, i) => {
-        if (bit === "1")
-          ctx.fillRect(cx + (i % width) * scale, y + Math.floor(i / width) * scale, scale, scale);
-      });
-    cx += (width + 1) * scale;
-  }
+  STEP_GLYPHS[name].forEach((row, dy) => {
+    for (let dx = 0; dx < row.length; dx++) if (row[dx] === "1") ctx.fillRect(x + dx, y + dy, 1, 1);
+  });
 }

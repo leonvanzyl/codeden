@@ -165,6 +165,6 @@ describe("the Factory view's needs-you lane (#265)", () => {
     fireEvent.click(within(need("retry_or_dismiss")).getByRole("button", { name: "Dismiss #3" }));
     await waitFor(() => expect(dismiss).toHaveBeenCalledWith("p1", "no-pr"));
     fireEvent.click(within(need("retry")).getByRole("button", { name: "Retry #2" }));
-    await waitFor(() => expect(retry).toHaveBeenCalledWith("p1", "rounds"));
+    await waitFor(() => expect(retry).toHaveBeenCalledWith("p1", "rounds", {}));
   });
 });

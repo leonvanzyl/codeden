@@ -87,6 +87,13 @@ export interface SessionInfo {
   status: SessionStatus;
   /** The session's latest `report_progress` line. */
   progress: string | null;
+  /** When it reported that line. */
+  progressAt?: string | null;
+  /** The provider's display name ("Claude Code"), else its id. */
+  provider?: string;
+  model?: string | null;
+  /** What the session works on (`factory:review:59`, `factory:integrate:53`, `issue:142`). */
+  workKey?: string;
 }
 
 export interface ViewCard {

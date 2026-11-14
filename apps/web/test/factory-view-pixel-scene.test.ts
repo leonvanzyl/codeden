@@ -1,12 +1,6 @@
-import {
-  FactoryLimits,
-  type FactoryPrEntry,
-  FactoryStatus,
-  type FactoryWorkItem,
-  type ScoutStatus,
-} from "@codeden/contracts";
+import { FactoryLimits, type FactoryStatus } from "@codeden/contracts";
 import { describe, expect, it } from "vitest";
-import { sceneTargets } from "@/components/factory-view/pixel/layout";
+import { STATIONS } from "@/components/factory-view/pixel/floor";
 import {
   budgetGauge,
   type Scene,
@@ -14,231 +8,121 @@ import {
   sceneOf,
   sceneSummary,
 } from "@/components/factory-view/pixel/scene-model";
-import { type SessionInfo, viewPipeline } from "@/components/factory-view/stages";
+import { sameSeating } from "@/components/factory-view/pixel/seating";
+import type { SessionInfo } from "@/components/factory-view/stages";
+import { inputs, minutesAgo, prEntry, prRef, running, status, w } from "./pixel-fixtures";
 
 /**
- * Issue #209: pixel mode maps the factory's live state to a floor of workers, tickets, crates
- * and machines. Only the mapping is tested: which things exist, on which slot, in which pose.
+ * Issues #209 and #264: pixel mode maps the factory's live state to a floor of agents at their
+ * stations, tickets at intake, a repair bay and a shipped counter, and acts out real
+ * transitions once. Only the mapping is tested, never pixels.
  */
-
-const NOW = new Date(2026, 10, 13, 15, 0, 0).getTime();
-const minutesAgo = (m: number) => new Date(NOW - m * 60_000).toISOString();
-const prRef = (n: number, state: "open" | "merged" | "closed" = "open") => ({
-  number: n,
-  url: `https://github.com/acme/shop/pull/${n}`,
-  state,
-});
-
-function w(id: string, n: number, patch: Partial<FactoryWorkItem>): FactoryWorkItem {
-  return {
-    id,
-    title: `Item ${n}`,
-    workKey: `issue:${n}`,
-    issue: { number: n, url: `https://github.com/acme/shop/issues/${n}` },
-    pr: null,
-    score: null,
-    sessionId: null,
-    reviewerSessionId: null,
-    activeSessionId: null,
-    stage: "building",
-    step: "implement",
-    type: "feature",
-    trust: "trusted",
-    author: "octocat",
-    source: "issue",
-    attempts: 0,
-    reason: null,
-    note: null,
-    failureKind: null,
-    stepSince: minutesAgo(10),
-    mergedAt: null,
-    finishedAt: null,
-    checks: null,
-    ownedPr: null,
-    recovering: false,
-    updatedAt: minutesAgo(1),
-    ...patch,
-  };
-}
-
-const prEntry = (itemId: string, n: number, patch: Partial<FactoryPrEntry>): FactoryPrEntry => ({
-  itemId,
-  title: `PR ${n}`,
-  pr: prRef(n),
-  state: "checking",
-  queuePosition: null,
-  note: null,
-  ...patch,
-});
-
-const scoutStatus: ScoutStatus = {
-  phase: "reviewing",
-  sessionId: "scout",
-  lenses: [
-    { area: "ux", sessionId: "l1", reported: true, active: false },
-    { area: "performance", sessionId: "l2", reported: false, active: true },
-    { area: "security", sessionId: "l3", reported: false, active: false },
-  ],
-  findings: 3,
-  filed: 1,
-  lastRoundAt: null,
-  nextRoundAt: null,
-  rounds: 4,
-  runNowBlockedBy: null,
-};
-
-function status(patch: Partial<FactoryStatus> = {}): FactoryStatus {
-  return FactoryStatus.parse({
-    projectId: "p1",
-    mode: "dark_factory",
-    experimental: true,
-    loopState: "building",
-    pausedReason: null,
-    killSwitch: false,
-    globalKillSwitch: false,
-    limits: FactoryLimits.parse({ dailyBudget: { usd: 20 }, autoMerge: true }),
-    tuning: {},
-    spendToday: { usd: 12, tokens: 900_000 },
-    mergesToday: 2,
-    stats: { mergedToday: 7 },
-    consecutiveFailures: 0,
-    activeSessions: 2,
-    backlog: [],
-    inProgress: [],
-    mergeChecks: [],
-    recent: [],
-    visionExists: true,
-    lastDigest: null,
-    lastTickAt: null,
-    scout: scoutStatus,
-    ...patch,
-  });
-}
 
 const backlog = [
   w("new", 1, { stage: "candidate", step: "intake", type: null }),
   w("sorted-bug", 2, { stage: "backlog", step: "queued", type: "bug" }),
-  w("sorted-docs", 3, { stage: "backlog", step: "queued", type: "docs" }),
 ];
 const inProgress = [
-  w("hammering", 4, { stage: "building", step: "implement", activeSessionId: "s4" }),
-  w("asking", 5, { stage: "building", step: "analyze", activeSessionId: "s5" }),
-  w("idle", 6, { stage: "building", step: "implement" }),
-  w("review", 7, { stage: "verifying", step: "review", activeSessionId: "s7" }),
-  w("second", 8, { stage: "verifying", step: "merge", pr: prRef(18) }),
-  w("first", 9, { stage: "verifying", step: "merge", pr: prRef(19) }),
-  w("yours", 10, { stage: "verifying", step: "merge", pr: prRef(20) }),
-  w("watching", 11, { stage: "watching", step: "merge", mergedAt: minutesAgo(5) }),
+  w("build", 4, { stage: "building", step: "implement", sessionId: "s4", activeSessionId: "s4" }),
+  w("review", 7, {
+    stage: "verifying",
+    step: "review",
+    pr: prRef(17),
+    sessionId: "s4b",
+    reviewerSessionId: "r7",
+    activeSessionId: "r7",
+  }),
+  w("first", 9, { stage: "verifying", step: "merge", pr: prRef(19), reviewerSessionId: "r9" }),
 ];
 const recent = [
   w("merged", 12, { stage: "merged", step: "done", mergedAt: minutesAgo(30) }),
-  w("escalated", 13, { stage: "escalated", step: "merge", reason: "Touches payments" }),
-  w("failed", 14, { stage: "failed", step: "stopped", finishedAt: minutesAgo(60), reason: "x" }),
+  w("failed", 14, {
+    stage: "failed",
+    step: "stopped",
+    pr: prRef(24),
+    ownedPr: prRef(24),
+    attempts: 2,
+    finishedAt: minutesAgo(60),
+    reason: "Review requested changes twice",
+  }),
 ];
 const pullRequests = [
+  prEntry("review", 17, { state: "checking" }),
   prEntry("first", 19, { state: "queued", queuePosition: 1 }),
-  prEntry("second", 18, { state: "queued", queuePosition: 2 }),
-  prEntry("yours", 20, { state: "waiting_for_you" }),
+  prEntry("failed", 24, { state: "waiting_for_you" }),
 ];
 const sessions = new Map<string, SessionInfo>([
-  ["s4", { status: "running", progress: "Wiring the wishlist button" }],
-  ["s5", { status: "waiting", progress: null }],
-  ["s7", { status: "running", progress: null }],
+  ["s4", running("Wiring the button", 1)],
+  ["r7", running("Reading the diff", 1, { workKey: "factory:review:17" })],
 ]);
 
-function sceneFor(patch: Partial<FactoryStatus> = {}, live = sessions): Scene {
-  const f = status({ backlog, inProgress, recent, pullRequests, ...patch });
-  return sceneOf(f, viewPipeline(f, live, NOW));
+function sceneFor(patch: Partial<FactoryStatus> = {}, prev: Scene | null = null): Scene {
+  const f = status({
+    backlog,
+    inProgress,
+    recent,
+    pullRequests,
+    scout: null,
+    mode: "software_factory",
+    ...patch,
+  });
+  return sceneOf(inputs(f, sessions), prev?.seating ?? null);
 }
 
-const ids = (items: { card: { item: { id: string } } }[]) => items.map((x) => x.card.item.id);
-
-describe("pixel mode's scene (#209)", () => {
+describe("pixel mode's scene (#264)", () => {
   const scene = sceneFor();
 
-  it("piles new and sorted issues as tickets at the door, tinted once sorted", () => {
-    expect(ids(scene.tickets.items)).toEqual(["new", "sorted-bug", "sorted-docs"]);
-    expect(scene.tickets.items.map((t) => [t.slot, t.tint])).toEqual([
-      [0, "paper"],
-      [1, "bug"],
-      [2, "docs"],
+  it("piles new and sorted issues as tickets at intake, tinted once sorted", () => {
+    expect(scene.tickets.items.map((t) => [t.card.item.id, t.tint])).toEqual([
+      ["new", "paper"],
+      ["sorted-bug", "bug"],
     ]);
   });
 
-  it("puts one worker at a bench per build, posed by its session", () => {
-    // A builder that asks you something waits in Needs you, on a machine (#265).
-    expect(scene.builders.items.map((b) => [b.card.item.id, b.slot, b.pose])).toEqual([
-      ["hammering", 0, "work"],
-      ["idle", 1, "idle"],
-    ]);
-    // The builder's speech bubble is its session's progress line.
-    expect(scene.builders.items[0]?.card.activity).toBe("Wiring the wishlist button");
+  it("seats the builder at a bench, the reviewer at a desk, the merging PR at the conveyor", () => {
+    const seat = (key: string) => scene.seating.seats.get(key);
+    expect(seat("item:build:builder")).toMatchObject({
+      station: "bench",
+      tile: STATIONS.bench.seats[0],
+    });
+    expect(seat("item:review:reviewer")).toMatchObject({
+      station: "review",
+      tile: STATIONS.review.seats[0],
+    });
+    expect(seat("item:first:reviewer")).toMatchObject({
+      station: "merge",
+      tile: STATIONS.merge.seats[0],
+    });
+    expect(seat("pm")).toMatchObject({ station: "pm" });
   });
 
-  it("has a reviewer with a clipboard per review", () => {
-    expect(scene.reviewers.items.map((r) => [r.card.item.id, r.slot, r.pose])).toEqual([
-      ["review", 0, "work"],
-    ]);
+  it("keeps merged history off the floor: only the counter shows it", () => {
+    expect(scene.agents.some((a) => a.card?.item.id === "merged")).toBe(false);
+    expect(scene.merged).toEqual(["merged"]);
+    expect(scene.shipped).toBe(2);
+    expect(sceneFor({ limits: FactoryLimits.parse({ autoMerge: false }) }).shipped).toBe(7);
   });
 
-  it("lines up crates on the conveyor in merge order", () => {
-    // A pull request that is yours to merge waits in Needs you, on a machine (#265).
-    expect(scene.queue.items.map((c) => [c.card.item.id, c.slot, c.flag])).toEqual([
-      ["first", 0, null],
-      ["second", 1, null],
-    ]);
-  });
-
-  it("stacks today's merges on the dock, with a light while CI is watched", () => {
-    expect(scene.shipped.items.map((s) => [s.card.item.id, s.watching])).toEqual([
-      ["watching", true],
-      ["merged", false],
-    ]);
-  });
-
-  it("puts work that needs you on broken machines, smoking only when it failed", () => {
-    expect(scene.machines.items.map((m) => [m.card.item.id, m.slot, m.failed])).toEqual([
-      ["asking", 0, false],
-      ["yours", 1, false],
-      ["escalated", 2, false],
-      ["failed", 3, true],
-    ]);
-  });
-
-  it("caps each station and counts the rest", () => {
-    const many = Array.from({ length: 9 }, (_, i) =>
-      w(`b${i}`, 100 + i, { stage: "building", step: "implement", stepSince: minutesAgo(90 - i) }),
+  it("puts stopped work in the repair bay with its reason", () => {
+    expect(scene.bay.map((c) => [c.kind, c.entries.map((e) => [e.card.item.id, e.label])])).toEqual(
+      [["merge", [["failed", "Yours to merge"]]]],
     );
-    const crowded = sceneFor({ inProgress: many });
-    expect(crowded.builders.items.map((b) => b.slot)).toEqual([0, 1, 2, 3, 4, 5]);
-    expect(crowded.builders.more).toBe(3);
-    expect(crowded.builders.ids).toHaveLength(9);
   });
 
-  it("sends the scout walking with its area reviewers during a round, in a dark factory only", () => {
-    expect(scene.scout).toMatchObject({ walking: true, round: 4, findings: 3, filed: 1 });
-    expect(scene.scout?.helpers.map((h) => [h.label, h.state, h.slot])).toEqual([
-      ["UI & UX", "done", 0],
-      ["Performance", "writing", 1],
-      ["Security", "waiting", 2],
-    ]);
-    const idle = sceneFor({ scout: { ...scoutStatus, phase: "idle", lenses: [] } });
-    expect(idle.scout).toMatchObject({ walking: false, helpers: [] });
-    expect(sceneFor({ mode: "software_factory", scout: null }).scout).toBeNull();
+  it("gives the same seats when the same data comes again", () => {
+    const again = sceneFor({}, scene);
+    expect(sameSeating(scene.seating, again.seating)).toBe(true);
+    expect(sceneEvents(scene, again)).toEqual([]);
   });
 
-  it("dims the lights and sits everyone down when the loop is stopped", () => {
+  it("dims the lights when the loop is stopped", () => {
     expect(scene.stopped).toBe(false);
     for (const stop of [
       { killSwitch: true },
       { globalKillSwitch: true },
       { loopState: "stopped" as const },
-    ]) {
-      const stopped = sceneFor(stop);
-      expect(stopped.stopped).toBe(true);
-      const poses = [...stopped.builders.items, ...stopped.reviewers.items].map((x) => x.pose);
-      expect(new Set(poses)).toEqual(new Set(["sit"]));
-    }
+    ])
+      expect(sceneFor(stop).stopped).toBe(true);
   });
 
   it("reads the budget gauge in dollars, else tokens, and leaves it empty without a budget", () => {
@@ -248,73 +132,125 @@ describe("pixel mode's scene (#209)", () => {
     expect(budgetGauge(status({ limits: FactoryLimits.parse({}) }))).toBeNull();
     expect(budgetGauge(status({ spendToday: { usd: 50, tokens: 0 } }))).toBe(1);
   });
-
-  it("counts merges today as the figures do, with auto-merge on or off", () => {
-    expect(scene.mergesToday).toBe(2);
-    expect(sceneFor({ limits: FactoryLimits.parse({ autoMerge: false }) }).mergesToday).toBe(7);
-  });
-
-  it("gives every drawn work item a target that opens its card", () => {
-    const targets = sceneTargets(scene);
-    expect(targets.map((t) => t.key)).toEqual([
-      "ticket:new",
-      "ticket:sorted-bug",
-      "ticket:sorted-docs",
-      "builder:hammering",
-      "builder:idle",
-      "reviewer:review",
-      "crate:first",
-      "crate:second",
-      "shipped:watching",
-      "shipped:merged",
-      "machine:asking",
-      "machine:yours",
-      "machine:escalated",
-      "machine:failed",
-    ]);
-    expect(targets.find((t) => t.key === "machine:yours")?.card.item.title).toBe("Item 10");
-  });
 });
 
-describe("pixel mode's moments (#209)", () => {
+describe("pixel mode's moments (#264)", () => {
   const before = sceneFor();
+  const next = (patch: Partial<FactoryStatus>) => sceneFor(patch, before);
+  const without = (id: string) => inProgress.filter((x) => x.id !== id);
 
   it("plays nothing on the first scene", () => {
-    expect(sceneEvents(null, before)).toEqual({ buildStarted: [], shipped: [] });
-    expect(sceneEvents(before, before)).toEqual({ buildStarted: [], shipped: [] });
+    expect(sceneEvents(null, before)).toEqual([]);
   });
 
-  it("carries a ticket to a bench when its build starts", () => {
+  it("walks a builder in with its ticket when its build starts", () => {
     const started = w("sorted-bug", 2, { stage: "building", step: "reproduce", type: "bug" });
-    const after = sceneFor({
-      backlog: backlog.filter((x) => x.id !== "sorted-bug"),
-      inProgress: [...inProgress, started],
+    const after = next({ backlog: backlog.slice(0, 1), inProgress: [...inProgress, started] });
+    expect(sceneEvents(before, after)).toEqual([
+      { kind: "arrive", key: "item:sorted-bug:builder", to: STATIONS.prep.seats[0] },
+    ]);
+  });
+
+  it("has the builder carry its PR crate to the review desk when review starts", () => {
+    const reviewing = w("build", 4, {
+      stage: "verifying",
+      step: "review",
+      pr: prRef(30),
+      sessionId: "s4",
+      reviewerSessionId: "r4",
     });
-    expect(sceneEvents(before, after).buildStarted).toEqual(["sorted-bug"]);
+    const after = next({ inProgress: [reviewing, ...without("build")] });
+    const events = sceneEvents(before, after);
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      kind: "handoff",
+      agent: { key: "item:build:builder", role: "builder" },
+      from: STATIONS.bench.seats[0],
+      // In front of the second review desk (the first is taken).
+      to: { c: STATIONS.review.seats[1]?.c, r: (STATIONS.review.seats[1]?.r ?? 0) - 1 },
+    });
   });
 
-  it("doesn't carry a ticket when work goes back from review to a bench", () => {
-    const revise = inProgress.map((x) =>
-      x.id === "review" ? { ...x, stage: "building" as const, step: "implement" as const } : x,
-    );
-    expect(sceneEvents(before, sceneFor({ inProgress: revise })).buildStarted).toEqual([]);
+  it("has the reviewer stamp the crate and carry it to the conveyor when it passes", () => {
+    const passed = { ...(inProgress[1] as (typeof inProgress)[number]), step: "merge" as const };
+    const after = next({
+      inProgress: [inProgress[0], passed, inProgress[2]].filter((x) => x !== undefined),
+      pullRequests: [
+        prEntry("review", 17, { state: "queued", queuePosition: 2 }),
+        ...pullRequests.slice(1),
+      ],
+    });
+    expect(sceneEvents(before, after)).toEqual([
+      {
+        kind: "move",
+        key: "item:review:reviewer",
+        from: STATIONS.review.seats[0],
+        to: STATIONS.merge.seats[1],
+        carry: "crate",
+        stamp: true,
+        celebrate: false,
+      },
+    ]);
   });
 
-  it("ships a crate when a queued pull request merges", () => {
-    const merged = w("first", 9, { stage: "merged", step: "done", mergedAt: minutesAgo(0) });
-    const after = sceneFor({
-      inProgress: inProgress.filter((x) => x.id !== "first"),
+  it("ships the crate with a celebration when a queued pull request merges", () => {
+    const merged = w("first", 9, {
+      stage: "merged",
+      step: "done",
+      mergedAt: minutesAgo(0),
+      reviewerSessionId: "r9",
+    });
+    const after = next({
+      inProgress: without("first"),
       recent: [merged, ...recent],
       pullRequests: pullRequests.filter((p) => p.itemId !== "first"),
     });
-    expect(sceneEvents(before, after).shipped).toEqual(["first"]);
+    expect(sceneEvents(before, after).map((e) => e.kind)).toEqual(["celebrate", "ship"]);
+  });
+
+  it("walks the reviewer to the shipping door, celebrating, when CI is watched after a merge", () => {
+    const watching = w("first", 9, {
+      stage: "watching",
+      step: "merge",
+      pr: prRef(19),
+      mergedAt: minutesAgo(0),
+      reviewerSessionId: "r9",
+    });
+    const after = next({ inProgress: [...without("first"), watching] });
+    expect(sceneEvents(before, after)).toEqual([
+      expect.objectContaining({
+        kind: "move",
+        key: "item:first:reviewer",
+        to: STATIONS.ship.seats[0],
+        celebrate: true,
+      }),
+      { kind: "ship", row: STATIONS.merge.seats[0]?.r },
+    ]);
+  });
+
+  it("puffs smoke and slumps when work fails into the repair bay", () => {
+    const failed = w("build", 4, {
+      stage: "failed",
+      step: "stopped",
+      sessionId: "s4",
+      finishedAt: minutesAgo(0),
+      reason: "The build never reported",
+    });
+    const after = next({ inProgress: without("build"), recent: [...recent, failed] });
+    expect(sceneEvents(before, after)).toEqual([
+      expect.objectContaining({
+        kind: "fail",
+        agent: expect.objectContaining({ key: "item:build:builder" }),
+        stays: false,
+      }),
+    ]);
   });
 });
 
-describe("pixel mode's caption (#209)", () => {
-  it("says what the floor shows, in full counts", () => {
+describe("pixel mode's caption (#209, #264)", () => {
+  it("says what the floor shows, in full counts, with the repair bay", () => {
     expect(sceneSummary(sceneFor())).toBe(
-      "3 in intake, 2 building, 1 in review, 2 in the merge queue, 2 merged today, 4 need you. The scout is on round 4.",
+      "2 in intake, 1 building, 1 in review, 1 in the merge queue, 2 merged today, 1 in the repair bay.",
     );
   });
 
@@ -326,19 +262,7 @@ describe("pixel mode's caption (#209)", () => {
       pullRequests: [],
       mergesToday: 0,
       killSwitch: true,
-      scout: null,
     });
     expect(sceneSummary(quiet)).toBe("The factory floor is quiet. The loop is stopped.");
-    // The scout sits down with everyone else.
-    expect(sceneSummary(sceneFor({ killSwitch: true }))).toMatch(
-      /4 need you\. The loop is stopped\.$/,
-    );
-    const one = sceneFor({
-      inProgress: [],
-      recent: recent.slice(1, 2),
-      pullRequests: [],
-      backlog: [],
-    });
-    expect(sceneSummary(one)).toBe("2 merged today, 1 needs you. The scout is on round 4.");
   });
 });

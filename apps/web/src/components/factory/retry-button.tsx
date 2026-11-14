@@ -1,11 +1,8 @@
 import { type FactoryRetryMode, type StoppedItem, stoppedRetry } from "@codeden/contracts";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Hammer, RotateCcw } from "lucide-react";
 import type { ComponentProps } from "react";
-import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { useClient } from "@/lib/api";
-import { factoryKeys } from "@/lib/factory";
+import { useRetryItem } from "./use-retry-item";
 
 /**
  * Retry a stopped item (§10.1). Whether it shows, and what it does, come from the shared rule
@@ -29,21 +26,7 @@ export function RetryButton({
   variant?: ComponentProps<typeof Button>["variant"];
   className?: string;
 }) {
-  const client = useClient();
-  const queryClient = useQueryClient();
-  const retry = useMutation({
-    mutationFn: () => client.factory.retry(projectId, item.id, mode ? { mode } : {}),
-    onSuccess: (next) => {
-      toast.success(next.stage === "verifying" ? "Back in review" : "Queued again", {
-        description:
-          next.stage === "verifying" && next.pr
-            ? `#${next.pr.number} gets a fresh review; no new build.`
-            : "It starts over from the first step.",
-      });
-      void queryClient.invalidateQueries({ queryKey: factoryKeys.all });
-    },
-    onError: (e: Error) => toast.error("Couldn't retry", { description: e.message }),
-  });
+  const retry = useRetryItem(projectId, item.id, mode);
   const can = stoppedRetry(item);
   if (!can) return null;
   const pr = can.pr;
