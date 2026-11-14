@@ -25,7 +25,8 @@ export function NewSessionPage({ projectId }: { projectId: string }) {
     (s) => s.settings.autonomy.default,
     "auto",
   );
-  const agentProvider = useSnapshotData((s) => s.settings.providers.agent.provider, null);
+  // Settings → Providers → Agent sessions: provider, model and effort.
+  const agent = useSnapshotData((s) => s.settings.providers.agent, null);
   const draft = useNewSessionStore((s) => getNewSessionDraft(s, projectId));
   const { setChoice, setWorkKey } = useNewSessionStore.getState();
   const resolved = useMemo(
@@ -33,10 +34,10 @@ export function NewSessionPage({ projectId }: { projectId: string }) {
       resolveDraftChoice(draft.choice, {
         providers,
         project,
-        agentProvider,
+        agent,
         defaultAutonomy,
       }),
-    [draft.choice, providers, project, agentProvider, defaultAutonomy],
+    [draft.choice, providers, project, agent, defaultAutonomy],
   );
   const start = useStartDraft(projectId, resolved, draft.workKey);
 

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { AutonomyLevel, Id, ProviderId, Timestamp } from "../common";
+import { AutonomyLevel, Id, ProviderId, ReasoningEffort, Timestamp } from "../common";
 import { AutonomyMode, DEFAULT_VISION_PATH, FactoryLimits } from "../factory";
 
 /**
@@ -26,6 +26,16 @@ const projectBase = {
   defaultBranch: z.string().nullable(),
   /** Overrides the global default provider for new agent sessions. */
   defaultProvider: ProviderId.nullable(),
+  /**
+   * The model new sessions in this project start on when they run on `defaultProvider` (a
+   * provider's model id, custom ids included). Null: Settings > Providers > Agent sessions, else
+   * the provider's own default. Cleared when `defaultProvider` changes without a new model. Read by
+   * the New session draft; PM, factory and automation starts keep their own rules. Defaults to
+   * null so events written before it existed still parse.
+   */
+  defaultModel: z.string().nullable().default(null),
+  /** The reasoning effort that goes with `defaultModel`; null: the model's default. */
+  defaultEffort: ReasoningEffort.nullable().default(null),
   /** Overrides the global default per-session autonomy level (§11.2). */
   autonomy: AutonomyLevel.nullable(),
   /** Project autonomy mode (§10.1). */

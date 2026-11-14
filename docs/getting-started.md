@@ -88,7 +88,7 @@ Commit this file to tell CodeDen how to prepare a fresh worktree:
 
 - `setup` runs, in order, in every new worktree; the output streams into the session. Setup stops at the first command that fails, and the session starts anyway: the agent's first message then begins with the failed command, its exit code and the end of its output, so it can fix the problem instead of tripping over it.
 - `devServer` (a command string or `{ command, port, cwd }`) records how to start your app, so agents (and the UI review automation) know what to run and where to point the browser. Running dev servers are also discovered automatically.
-- `defaultProvider` (`claude`, `codex` or `opencode`) is the provider new sessions in this project use unless you pick one (a provider chosen in the project's settings wins).
+- `defaultProvider` (`claude`, `codex` or `opencode`) is the provider new sessions in this project use unless you pick one (a default agent chosen on the project's **Settings** tab wins).
 
 ## 5. Start your first session
 
@@ -126,6 +126,8 @@ Open **Settings** (**Ctrl/Cmd+,**):
 | Utility model | The small model for follow-ups, read-aloud summaries and session titles |
 | Notifications | Toasts, which inbox categories notify you (needs you, failures, factory activity, automations), the chime when an agent needs you (with a test button), browser notifications |
 | Keyboard shortcuts | The full list (also **Shift+?**) |
+
+A project can override these for its own new sessions: open the project and its **Settings** tab to choose a default agent (provider, model and effort, such as a cheaper model for a docs repository) and default permissions. A new session starts on what you pick there, else the project's defaults, else Settings; a model saved for one provider is never used on another.
 
 ## Stopping CodeDen
 

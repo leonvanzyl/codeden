@@ -165,6 +165,7 @@ describe("scopeFromKey", () => {
       { kind: "session" },
       { kind: "uncommitted" },
       { kind: "turn", turnId: "t-3" },
+      { kind: "compare", sessionId: "s-2" },
     ] as const) {
       expect(scopeFromKey(diffScopeKey(scope))).toEqual(scope);
     }

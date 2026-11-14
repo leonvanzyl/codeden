@@ -30,11 +30,8 @@ export function DraftOptions({
     <>
       <ModelPicker
         providers={providers}
-        value={{
-          provider: provider.id,
-          model: choice.provider === provider.id ? choice.model : null,
-          effort: choice.effort,
-        }}
+        // The resolved choice, defaults included: what the first send starts.
+        value={{ provider: provider.id, model: resolved.model, effort: resolved.effort }}
         shortcut
         onChange={(next) => onChange(pickModel(choice, next, providers))}
       />

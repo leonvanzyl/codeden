@@ -22,6 +22,8 @@ function project(
   const base = {
     defaultBranch: "main",
     defaultProvider: null,
+    defaultModel: null,
+    defaultEffort: null,
     autonomy: null,
     autonomyMode: "assisted" as const,
     visionPath: ".codeden/VISION.md",

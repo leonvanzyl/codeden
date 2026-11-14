@@ -1,4 +1,4 @@
-import type { ForkOrigin } from "@codeden/contracts";
+import type { ForkOrigin, Session } from "@codeden/contracts";
 
 /**
  * How a fork describes where it came from (§9): `upTo` finishes "the conversation and the code
@@ -42,3 +42,46 @@ export function forkOriginText(origin: ForkOrigin): {
 
 /** Whether a session was handed off from another (a new conversation), not forked. */
 export const isHandoff = (origin: ForkOrigin) => origin.kind === "handoff";
+
+/** How a session is related to the one whose diff is open. */
+export type ForkRelation = "source" | "fork" | "handoff" | "sibling";
+
+/** A session whose code the Diff panel can compare with, and how it is related. */
+export interface RelatedSession {
+  session: Session;
+  relation: ForkRelation;
+}
+
+const newestFirst = (a: Session, b: Session) => b.createdAt.localeCompare(a.createdAt);
+
+/**
+ * The sessions `session`'s code can be compared with (§12.3), in this order: the one it was
+ * forked or handed off from, the ones forked or handed off from it, and its siblings (other
+ * forks and handoffs of its source), each group newest first. Only the same project's.
+ */
+export function relatedSessions(session: Session, all: readonly Session[]): RelatedSession[] {
+  if (!session.projectId) return [];
+  const candidates = all.filter((s) => s.id !== session.id && s.projectId === session.projectId);
+  const sourceId = session.forkedFrom?.sessionId;
+  const source = candidates.find((s) => s.id === sourceId);
+  const children = candidates
+    .filter((s) => s.forkedFrom?.sessionId === session.id)
+    .sort(newestFirst)
+    .map(
+      (s): RelatedSession => ({
+        session: s,
+        relation: s.forkedFrom && isHandoff(s.forkedFrom) ? "handoff" : "fork",
+      }),
+    );
+  const siblings = sourceId
+    ? candidates
+        .filter((s) => s.forkedFrom?.sessionId === sourceId)
+        .sort(newestFirst)
+        .map((s): RelatedSession => ({ session: s, relation: "sibling" }))
+    : [];
+  return [
+    ...(source ? [{ session: source, relation: "source" as const }] : []),
+    ...children,
+    ...siblings,
+  ];
+}

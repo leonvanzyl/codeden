@@ -71,6 +71,8 @@ describe("issue triage (§10)", () => {
       path: h.repo,
       defaultBranch: "main",
       defaultProvider: "fake",
+      defaultModel: null,
+      defaultEffort: null,
       autonomy: null,
       autonomyMode: "assisted",
       visionPath: ".codeden/VISION.md",

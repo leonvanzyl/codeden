@@ -1,4 +1,4 @@
-import type { DiffFile, DiffScope, RestoreFilesRequest } from "@codeden/contracts";
+import type { DiffFile, DiffScope, RestoreFilesRequest, Session } from "@codeden/contracts";
 import type { SelectedLineRange } from "@pierre/diffs";
 import { PatchDiff } from "@pierre/diffs/react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -11,7 +11,7 @@ import {
   Rows2,
   WrapText,
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { EmptyState } from "@/components/common/bits";
 import { Button } from "@/components/ui/button";
@@ -32,11 +32,13 @@ import {
   type ReviewRange,
   scopeFromKey,
 } from "@/lib/diff-review";
+import { relatedSessions } from "@/lib/fork-origin";
 import { ageShort } from "@/lib/format";
-import { useSession } from "@/lib/queries";
+import { useSession, useSnapshotData } from "@/lib/queries";
 import { cn } from "@/lib/utils";
 import { type ReviewComment, sessionComments, useDiffReviewStore } from "@/stores/diff-review";
 import { useResolvedTheme } from "@/stores/theme";
+import { CompareLegend, CompareMenuItems, sessionName } from "./diff-compare";
 import { DiffLinePicker } from "./diff-line-picker";
 import {
   LineComments,
@@ -49,6 +51,8 @@ import { GitBar } from "./git-bar";
 
 const noFiles: DiffFile[] = [];
 const noComments: CommentAnchor[] = [];
+const noSessions: Session[] = [];
+const allChanges: DiffScope = { kind: "session" };
 /** A file card's buttons show on hover or focus, and always on touch screens. */
 const hoverReveal = "opacity-0 group-hover:opacity-100 focus-visible:opacity-100 touch:opacity-100";
 /**
@@ -58,26 +62,50 @@ const hoverReveal = "opacity-0 group-hover:opacity-100 focus-visible:opacity-100
  */
 const cardLabel = "hidden @lg/file:inline";
 
-function scopeLabel(scope: DiffScope, turns: { id: string; label: string }[]): string {
+function scopeLabel(
+  scope: DiffScope,
+  turns: { id: string; label: string }[],
+  compareWith: Session | undefined,
+): string {
   if (scope.kind === "session") return "All changes";
   if (scope.kind === "uncommitted") return "Uncommitted";
+  if (scope.kind === "compare") return `vs ${sessionName(compareWith)}`;
   return turns.find((t) => t.id === scope.turnId)?.label ?? "Turn";
 }
 
-/** Where "restore" puts files back to: the session baseline, or the state before a turn. */
+/**
+ * Where "restore" puts files back to: the session baseline, or the state before a turn. None
+ * for uncommitted work, nor for a comparison, whose `−` side is another session's code.
+ */
 function restoreTarget(scope: DiffScope): Omit<RestoreFilesRequest, "paths"> | null {
   if (scope.kind === "session") return { index: 0 };
   if (scope.kind === "turn") return { turnId: scope.turnId };
   return null;
 }
 
-/** Session and per-turn diffs from checkpoints, with file restore (§9, §12.3). */
+/**
+ * Session and per-turn diffs from checkpoints, with file restore, and comparisons with related
+ * sessions (§9, §12.3).
+ */
 export function DiffPanel({ sessionId }: { sessionId: string }) {
   const client = useClient();
   const queryClient = useQueryClient();
   const theme = useResolvedTheme();
   const session = useSession(sessionId);
-  const [scope, setScope] = useState<DiffScope>({ kind: "session" });
+  const sessions = useSnapshotData((s) => s.sessions, noSessions);
+  const related = useMemo(
+    () => (session ? relatedSessions(session, sessions) : []),
+    [session, sessions],
+  );
+  // The view picked for this session; another session's panel starts at all changes.
+  const [picked, setPicked] = useState<{ sessionId: string; scope: DiffScope } | null>(null);
+  const scope = picked?.sessionId === sessionId ? picked.scope : allChanges;
+  const setScope = useCallback(
+    (next: DiffScope) => setPicked({ sessionId, scope: next }),
+    [sessionId],
+  );
+  const comparing = scope.kind === "compare";
+  const compareWith = useSession(scope.kind === "compare" ? scope.sessionId : undefined);
   const [split, setSplit] = useState(false);
   const [wrap, setWrap] = useState(true);
   const { data, isLoading, isFetching, error, refetch } = useQuery({
@@ -103,7 +131,9 @@ export function DiffPanel({ sessionId }: { sessionId: string }) {
   const files = data?.files ?? noFiles;
   const add = files.reduce((n, f) => n + f.additions, 0);
   const del = files.reduce((n, f) => n + f.deletions, 0);
-  const noCheckpoints = error instanceof ApiRequestError && error.code === "no_checkpoints";
+  // A comparison says why it couldn't run (e.g. the other session has no checkpoints yet).
+  const noCheckpoints =
+    !comparing && error instanceof ApiRequestError && error.code === "no_checkpoints";
   const failed = error !== null && !noCheckpoints;
   const canRestore = restoreTarget(scope) !== null && files.length > 0;
   const scopeKey = diffScopeKey(scope);
@@ -113,10 +143,13 @@ export function DiffPanel({ sessionId }: { sessionId: string }) {
   const anchors = useReviewAnchors(sessionId, scopeKey, ready ? files : null);
   const body = useRef<HTMLDivElement>(null);
   const [reveal, setReveal] = useState<string | null>(null);
-  const show = useCallback((c: ReviewComment) => {
-    setScope(scopeFromKey(c.scopeKey));
-    setReveal(c.id);
-  }, []);
+  const show = useCallback(
+    (c: ReviewComment) => {
+      setScope(scopeFromKey(c.scopeKey));
+      setReveal(c.id);
+    },
+    [setScope],
+  );
   // After Show: scroll to the comment once its view has drawn it, and put the caret in it.
   useEffect(() => {
     if (!reveal) return;
@@ -142,18 +175,22 @@ export function DiffPanel({ sessionId }: { sessionId: string }) {
       <div className="flex h-10 shrink-0 items-center gap-1 overflow-x-auto border-b border-border px-2 whitespace-nowrap scroll-thin pointer-coarse:h-auto pointer-coarse:min-h-12">
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="sm" className="gap-1 text-xs">
-              {scopeLabel(scope, data?.turns ?? [])}
+            <Button variant="ghost" size="sm" className="max-w-64 gap-1 text-xs">
+              <span className="truncate">{scopeLabel(scope, data?.turns ?? [], compareWith)}</span>
               <ChevronDown className="size-3 opacity-60" />
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="w-56">
+          <DropdownMenuContent align="start" className="w-64">
             <DropdownMenuItem onSelect={() => setScope({ kind: "session" })}>
               All changes in this session
             </DropdownMenuItem>
             <DropdownMenuItem onSelect={() => setScope({ kind: "uncommitted" })}>
               Uncommitted
             </DropdownMenuItem>
+            <CompareMenuItems
+              related={related}
+              onPick={(id) => setScope({ kind: "compare", sessionId: id })}
+            />
             {(data?.turns.length ?? 0) > 0 && <DropdownMenuSeparator />}
             {(data?.turns.length ?? 0) > 0 && (
               <DropdownMenuLabel className="text-2xs">By turn</DropdownMenuLabel>
@@ -228,6 +265,9 @@ export function DiffPanel({ sessionId }: { sessionId: string }) {
           </Button>
         </div>
       </div>
+      {scope.kind === "compare" && (
+        <CompareLegend sessionId={scope.sessionId} other={compareWith} against={data?.against} />
+      )}
       {session && (
         <ReviewBar session={session} scopeKey={scopeKey} diffShown={ready} onShow={show} />
       )}
@@ -243,18 +283,24 @@ export function DiffPanel({ sessionId }: { sessionId: string }) {
             <Skeleton className="h-40 w-full" />
           </div>
         ) : failed ? (
-          <EmptyState icon={<FileDiff />} title="Couldn't load the diff" className="h-full">
+          <EmptyState
+            icon={<FileDiff />}
+            title={comparing ? "Couldn't compare" : "Couldn't load the diff"}
+            className="h-full"
+          >
             {error?.message}
           </EmptyState>
         ) : files.length === 0 ? (
           <EmptyState
             icon={<FileDiff />}
-            title="No changes yet"
+            title={comparing ? `Same code as ${sessionName(compareWith)}` : "No changes yet"}
             className={anchors.outdated.length > 0 ? undefined : "h-full"}
           >
-            {noCheckpoints
-              ? "Diffs appear once the session's first checkpoint is written."
-              : "Diffs appear here from the session's turn checkpoints."}
+            {comparing
+              ? "This session's files match its latest checkpoint."
+              : noCheckpoints
+                ? "Diffs appear once the session's first checkpoint is written."
+                : "Diffs appear here from the session's turn checkpoints."}
           </EmptyState>
         ) : (
           <div className="space-y-3 p-2">
@@ -267,6 +313,7 @@ export function DiffPanel({ sessionId }: { sessionId: string }) {
                 annotations={anchors.byPath.get(f.path) ?? noComments}
                 ranges={anchors.ranges}
                 options={{ theme, split, wrap }}
+                commentable={!comparing}
                 onRestore={canRestore ? () => restore.mutate([f.path]) : undefined}
               />
             ))}
@@ -284,6 +331,7 @@ function FilePatch({
   annotations,
   ranges,
   options,
+  commentable,
   onRestore,
 }: {
   sessionId: string;
@@ -294,6 +342,8 @@ function FilePatch({
   /** Where each placed comment's lines are now, by comment id. */
   ranges: ReadonlyMap<string, ReviewRange>;
   options: { theme: "dark" | "light"; split: boolean; wrap: boolean };
+  /** Whether lines can be picked and commented on (not in a comparison). */
+  commentable: boolean;
   onRestore?: () => void;
 }) {
   const card = useCommentButtonLabels();
@@ -317,10 +367,11 @@ function FilePatch({
     [sessionId, scopeKey, file.path, file.patch],
   );
   // In the file's header, laid out with its name and counts rather than over them.
+  const pickLines = commentable && !file.binary;
   const actions =
-    !file.binary || onRestore ? (
+    pickLines || onRestore ? (
       <div className="flex items-center gap-1">
-        {!file.binary && (
+        {pickLines && (
           <DiffLinePicker
             path={file.path}
             patch={file.patch}
@@ -371,10 +422,9 @@ function FilePatch({
             stickyHeader: true,
             // A "+" by the hovered line (or the picked lines) starts a comment; drag it for a range.
             // It needs a pointer: `DiffLinePicker` above is the keyboard way in.
-            enableGutterUtility: true,
-            enableLineSelection: true,
-            onGutterUtilityClick: onComment,
-            onLineSelected: setPicked,
+            enableGutterUtility: commentable,
+            enableLineSelection: commentable,
+            ...(commentable ? { onGutterUtilityClick: onComment, onLineSelected: setPicked } : {}),
           }}
           selectedLines={picked ?? editingRange ?? null}
           lineAnnotations={annotations}

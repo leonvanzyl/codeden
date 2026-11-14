@@ -17,6 +17,7 @@ import { FactoryPanel } from "@/components/factory/factory-panel";
 import { ProjectGithub } from "@/components/github/project-github";
 import { SessionsList } from "@/components/project/lists";
 import { NowNext } from "@/components/project/now-next";
+import { ProjectSettings } from "@/components/project/project-settings";
 import { ProjectTile } from "@/components/shell/sidebar/project-group";
 import { Button } from "@/components/ui/button";
 import { ProjectSpendCard } from "@/components/usage/project-spend-card";
@@ -26,7 +27,13 @@ import { type SessionView, sessionCounts, sessionsInView } from "@/lib/session-f
 import { cn } from "@/lib/utils";
 import { PageHeader } from "./page-header";
 
-export type ProjectTab = "overview" | "github";
+export type ProjectTab = "overview" | "github" | "settings";
+
+const TAB_LABELS: Record<ProjectTab, string> = {
+  overview: "Overview",
+  github: "GitHub",
+  settings: "Settings",
+};
 
 type ProjectSearch = { tab?: ProjectTab; archived?: boolean };
 
@@ -117,7 +124,7 @@ export function ProjectPage({
         className="flex h-10 shrink-0 items-end gap-4 border-b border-border px-6"
         role="tablist"
       >
-        {(["overview", "github"] as const).map((t) => (
+        {(["overview", "github", "settings"] as const).map((t) => (
           <button
             key={t}
             type="button"
@@ -129,7 +136,7 @@ export function ProjectPage({
               tab === t && "border-primary text-foreground",
             )}
           >
-            {t === "overview" ? "Overview" : "GitHub"}
+            {TAB_LABELS[t]}
           </button>
         ))}
       </div>
@@ -137,6 +144,10 @@ export function ProjectPage({
         <div className="mx-auto w-full max-w-6xl space-y-8 px-6 py-6">
           {tab === "github" ? (
             <ProjectGithub project={project} />
+          ) : tab === "settings" ? (
+            <div className="max-w-3xl">
+              <ProjectSettings project={project} />
+            </div>
           ) : (
             <>
               <NowNext work={work} projectId={projectId} titleOf={titleOf} />

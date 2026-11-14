@@ -21,14 +21,22 @@ export function labelCommentButtons(host: ParentNode): void {
   }
 }
 
-/** Which diff view a comment belongs to: the whole session, uncommitted work or one turn. */
+/**
+ * Which diff view a comment belongs to: the whole session, uncommitted work, one turn, or a
+ * comparison with another session (each its own key, though that view takes no comments).
+ */
 export function diffScopeKey(scope: DiffScope): string {
-  return scope.kind === "turn" ? `turn:${scope.turnId}` : scope.kind;
+  if (scope.kind === "turn") return `turn:${scope.turnId}`;
+  if (scope.kind === "compare") return `compare:${scope.sessionId}`;
+  return scope.kind;
 }
 
 /** The diff view a `diffScopeKey` names. */
 export function scopeFromKey(key: string): DiffScope {
   if (key.startsWith("turn:")) return { kind: "turn", turnId: key.slice("turn:".length) };
+  if (key.startsWith("compare:")) {
+    return { kind: "compare", sessionId: key.slice("compare:".length) };
+  }
   return key === "uncommitted" ? { kind: "uncommitted" } : { kind: "session" };
 }
 
