@@ -157,7 +157,11 @@ export class RunnerHub implements RunnerRouter {
       onReady: (runnerId) => this.opts.onReady?.(runnerId),
       log: log && ((message) => log(record.home ? message : `[${spec.id}] ${message}`)),
     });
-    this.entries.set(spec.id, { spec, client, port: runnerPort(() => client, describe) });
+    // Any runner but the home runner may be a sandbox's, on another disk (§10).
+    const remote = record.home
+      ? undefined
+      : () => ({ platform: client.hostInfo?.platform, backend: client.hostInfo?.backend });
+    this.entries.set(spec.id, { spec, client, port: runnerPort(() => client, describe, remote) });
     return client;
   }
 
@@ -250,6 +254,7 @@ function unavailablePort(record: RunnerRecord): RunnerPort {
   const name = describeRunner(record, true);
   return {
     describe: () => name,
+    remote: () => ({ backend: record.backend }),
     isConnected: () => false,
     runnerId: () => record.runnerId,
     providers: () => [],

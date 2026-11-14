@@ -1,9 +1,9 @@
-import { basename, dirname, join, resolve } from "node:path";
-import { CODEDEN_CREDENTIAL_FILES, INVALID_COPY_SUFFIX } from "@codeden/contracts";
-import { isSecretPath } from "@codeden/providers";
+import { basename } from "node:path";
+import { isCodedenCredentialFile, isSecretPath } from "@codeden/providers";
 import { forbidden } from "./errors";
-import { realPathOf } from "./files/path-guard";
 import { safeFileName } from "./github/evidence";
+
+export { isCodedenCredentialFile };
 
 /** A file on its way out of the machine, by every name it goes by. */
 export interface OutgoingFile {
@@ -16,28 +16,6 @@ export interface OutgoingFile {
    * it is attached by id): checked as given and as evidence publishes them.
    */
   names: ReadonlyArray<string | undefined>;
-}
-
-const caseInsensitive = process.platform === "win32" || process.platform === "darwin";
-const fold = (s: string) => (caseInsensitive ? s.toLowerCase() : s);
-const comparable = (p: string) => fold(resolve(p));
-/** Both sides resolve the same way: symlinks, junctions and short names (`LEON~1`). */
-const canonical = (p: string) => comparable(realPathOf(p) ?? p);
-
-/**
- * True when `file` is one of CodeDen's own credential files in `home` (§15), or a copy CodeDen
- * kept of one it found damaged (`<file>.invalid-<timestamp>` next to it, with the same secrets).
- */
-export function isCodedenCredentialFile(file: string, home: string): boolean {
-  const target = canonical(file);
-  return CODEDEN_CREDENTIAL_FILES.some((name) => {
-    const credential = join(home, name);
-    if (canonical(credential) === target) return true;
-    const copyPrefix = fold(`${basename(credential)}${INVALID_COPY_SUFFIX}`);
-    return (
-      dirname(target) === canonical(dirname(credential)) && basename(target).startsWith(copyPrefix)
-    );
-  });
 }
 
 /**

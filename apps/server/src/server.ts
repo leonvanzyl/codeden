@@ -139,6 +139,8 @@ export interface StartServerOptions {
   worktreeCleanup?: ServicesOptions["worktreeCleanup"];
   /** Automatic retry waits (tests). */
   autoRetry?: ServicesOptions["autoRetry"];
+  /** Clone URLs and brokered git credentials for sandbox runners (tests inject one). */
+  gitBroker?: ServicesOptions["gitBroker"];
   /** Network interfaces for the address list (tests). */
   networkInterfaces?: () => InterfaceMap;
   log?: (message: string) => void;
@@ -232,6 +234,7 @@ export async function startServer(opts: StartServerOptions): Promise<RunningServ
     updates: opts.updates,
     worktreeCleanup: opts.worktreeCleanup,
     autoRetry: opts.autoRetry,
+    gitBroker: opts.gitBroker,
     log,
   });
   // Find out early whether `generate_image` can be offered to agents.

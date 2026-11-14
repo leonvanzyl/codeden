@@ -9,6 +9,7 @@ import { git, gitOk, isWorkTree } from "../git/exec";
 import { currentBranch, defaultBranch } from "../git/ops";
 import type { ProcessSupervisor } from "../process/supervisor";
 import { endProcessesInside } from "../process/worktree-processes";
+import { prepareClone } from "./clone";
 import { readProjectConfig } from "./project-config";
 import { pruneWorktrees, removeWorkspace, worktreeState } from "./removal";
 import { runSetup, type SetupStep } from "./setup";
@@ -35,6 +36,12 @@ export function slugFromPath(repoPath: string): string {
     .replace(/^-+|-+$/g, "")
     .slice(0, 40);
   return slug || "project";
+}
+
+/** The project folder of a strategy that needs one (the schema requires it for all but `clone`). */
+function repoPathOf(cmd: RunnerCommandOf<"workspace.prepare">): string {
+  if (!cmd.repoPath) throw new CommandError("bad_request", "repoPath is required");
+  return cmd.repoPath;
 }
 
 function branchExists(cwd: string, branch: string): Promise<boolean> {
@@ -123,8 +130,9 @@ async function createWorktree(
   cmd: RunnerCommandOf<"workspace.prepare">,
   ctx: WorkspaceContext,
 ): Promise<{ cwd: string; branch: string | null; created: boolean; newBranch?: boolean }> {
-  const repo = await topLevel(cmd.repoPath).catch(() => {
-    throw new CommandError("not_a_repo", `${cmd.repoPath} is not a git repository`);
+  const repoPath = repoPathOf(cmd);
+  const repo = await topLevel(repoPath).catch(() => {
+    throw new CommandError("not_a_repo", `${repoPath} is not a git repository`);
   });
   const short = sessionShort(cmd.sessionId);
   const slug = cmd.projectSlug ?? slugFromPath(repo);
@@ -161,7 +169,7 @@ async function restoreForkStart(
   } catch (error) {
     const undo = {
       name: "workspace.remove" as const,
-      repoPath: cmd.repoPath,
+      repoPath: repoPathOf(cmd),
       path: target.cwd,
       force: true,
       ...(target.newBranch && target.branch ? { deleteBranch: target.branch } : {}),
@@ -173,9 +181,10 @@ async function restoreForkStart(
 
 /**
  * `workspace.prepare` (§9): resolve the session's working directory (repo root, an existing
- * worktree, or a new worktree under `<home>/wt/<slug>/<short>` on a new branch), restore a
+ * worktree, a new worktree under `<home>/wt/<slug>/<short>` on a new branch, or a clone under
+ * `<home>/ws/<short>` for a runner that doesn't share the server's disk), restore a
  * forked session's starting checkpoint into a new one, then run `.codeden/project.json` setup
- * (new worktrees only) and the explicit setup commands.
+ * (new worktrees and clones only) and the explicit setup commands.
  */
 export async function prepareWorkspace(
   cmd: RunnerCommandOf<"workspace.prepare">,
@@ -184,10 +193,10 @@ export async function prepareWorkspace(
   let target: { cwd: string; branch: string | null; created: boolean };
   switch (cmd.strategy) {
     case "repo_root": {
-      if (!existsSync(cmd.repoPath))
-        throw new CommandError("not_found", `${cmd.repoPath} not found`);
-      const isRepo = await isWorkTree(cmd.repoPath);
-      const cwd = isRepo ? await topLevel(cmd.repoPath) : resolve(cmd.repoPath);
+      const repoPath = repoPathOf(cmd);
+      if (!existsSync(repoPath)) throw new CommandError("not_found", `${repoPath} not found`);
+      const isRepo = await isWorkTree(repoPath);
+      const cwd = isRepo ? await topLevel(repoPath) : resolve(repoPath);
       target = { cwd, branch: isRepo ? await currentBranch(cwd) : null, created: false };
       break;
     }
@@ -209,6 +218,9 @@ export async function prepareWorkspace(
       target = made;
       break;
     }
+    case "clone":
+      target = await prepareClone(cmd, ctx.home, sessionShort(cmd.sessionId));
+      break;
   }
 
   const { config, error } = await readProjectConfig(target.cwd);
