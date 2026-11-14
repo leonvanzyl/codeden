@@ -6,12 +6,15 @@ import {
   CreateProjectResponse,
   GithubIssuesResponse,
   GithubPrDetails,
+  GithubPrDiff,
   GithubPrsResponse,
 } from "@codeden/contracts";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type RunningServer, startServer } from "../src";
 import { type Exec, runTool } from "../src/services/exec";
-import { FakeGithub } from "./support/fake-github";
+import { GithubFactoryPort } from "../src/services/factory/github-port";
+import { changeSize } from "../src/services/factory/size";
+import { FakeGithub, type FakePrFile } from "./support/fake-github";
 
 const TOKEN = "e".repeat(64);
 let home: string;
@@ -216,5 +219,65 @@ describe("github routes", () => {
       .map((t) => t.name);
     expect(pmGithub.filter((n) => n === "get_pr_status")).toHaveLength(1);
     expect(pmGithub).toEqual(expect.arrayContaining(["list_issues", "triage_issue"]));
+  });
+
+  it("reads every changed file of a large PR with its patch, once per head commit", async () => {
+    const files: FakePrFile[] = Array.from({ length: 150 }, (_, i) => ({
+      filename: `src/f${i}.ts`,
+      status: "modified",
+      additions: 1,
+      deletions: 1,
+      patch: `@@ -1 +1 @@\n-a${i}\n+b${i}`,
+    }));
+    // A pure rename: GitHub sends no patch.
+    files.push({
+      filename: "src/new.ts",
+      previous_filename: "src/old.ts",
+      status: "renamed",
+      additions: 0,
+      deletions: 0,
+    });
+    const pr = gh.addPr("codeden/big", { title: "Big change" }, { files });
+    const id = encodeURIComponent(`${projectId}:${pr.number}`);
+    const fileReads = () =>
+      gh.requests.filter((r) => r.path.endsWith(`/pulls/${pr.number}/files`)).length;
+
+    const details = GithubPrDetails.parse((await api("GET", `/prs/${id}`)).body);
+    expect(details.files).toHaveLength(151);
+    expect(details.changedFiles).toBe(151);
+    expect(details.files[150]).toEqual({
+      path: "src/new.ts",
+      previousPath: "src/old.ts",
+      status: "renamed",
+      additions: 0,
+      deletions: 0,
+    });
+    expect(details.files[0]).not.toHaveProperty("patch");
+    expect(fileReads()).toBe(2); // 100 + 51
+
+    // The factory's size check sees every file too.
+    const factoryPr = await new GithubFactoryPort(server.services.github).prDetails(
+      projectId,
+      pr.number,
+    );
+    expect(changeSize(factoryPr)).toMatchObject({ files: 151, lines: 300 });
+
+    const diff = GithubPrDiff.parse((await api("GET", `/prs/${id}/diff`)).body);
+    expect(diff.headSha).toBe("sha-codeden/big-1");
+    expect(diff.files).toHaveLength(151);
+    expect(diff.files[120]?.patch).toBe(
+      "diff --git a/src/f120.ts b/src/f120.ts\n--- a/src/f120.ts\n+++ b/src/f120.ts\n@@ -1 +1 @@\n-a120\n+b120\n",
+    );
+    expect(diff.files[150]?.patch).toBeNull();
+    expect(fileReads()).toBe(2); // same head commit: read from memory
+
+    gh.touch(pr.number, (i) => {
+      if (i.pr) i.pr.headSha = "sha-codeden/big-2";
+    });
+    const moved = GithubPrDiff.parse((await api("GET", `/prs/${id}/diff`)).body);
+    expect(moved.headSha).toBe("sha-codeden/big-2");
+    expect(fileReads()).toBe(4); // a new head commit is read again
+
+    expect((await api("GET", "/prs/not-an-id/diff")).status).toBe(400);
   });
 });

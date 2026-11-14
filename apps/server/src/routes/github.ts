@@ -68,10 +68,11 @@ export function projectGithubRoutes(s: AppServices) {
     );
 }
 
-/** `/api/prs/:id` (`<projectId>:<number>`): details and merge. */
+/** `/api/prs/:id` (`<projectId>:<number>`): details, the diff of every changed file, merge. */
 export function prRoutes(s: AppServices) {
   return new Hono()
     .get("/:id", async (c) => c.json(await s.github.getPrDetails(c.req.param("id"))))
+    .get("/:id/diff", async (c) => c.json(await s.github.getPrDiff(c.req.param("id"))))
     .post("/:id/merge", jsonBody(MergePrRequest), async (c) =>
       c.json(await s.github.mergePr(c.req.param("id"), c.req.valid("json"))),
     );
