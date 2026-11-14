@@ -107,6 +107,14 @@ A Claude login close to expiry shows as a warning; signing in again clears it.
 
 OpenCode with no connected provider is a warning rather than an error: its own free models work without an account. `opencode auth login` connects a provider (Anthropic, OpenAI, and many more); API keys in your environment and providers in `opencode.json` count too. CodeDen checks with `opencode auth list --standalone`, which runs a private OpenCode server for a few seconds and never starts or touches OpenCode's background service.
 
+### CodeDen's sessions show up in the Codex app
+
+The Codex apps (the ChatGPT desktop app's Codex, the Codex IDE extension) list every Codex conversation on your machine as yours, including the ones CodeDen starts for factory reviewers, builders, PMs and other sessions. CodeDen keeps its own out of that list: it archives a session's Codex conversation whenever no turn of it is running, and unarchives it just before the next turn, a resume or a fork. Your own conversations are never touched. A session that is running a turn shows in the Codex app until the turn ends, and one whose agent started Codex sub-agents stays until you stop or archive the session.
+
+Sessions from older CodeDen versions are still listed. To hide them, open **Settings → Providers → Provider apps** and choose **Review** next to **Hide CodeDen's sessions from the Codex app**. CodeDen lists the conversations it started that the Codex app still shows (found by its own record of them, never by their titles) and archives them once you confirm. They are archived, not deleted: they appear under the Codex app's archived conversations, and CodeDen can still resume and fork them.
+
+Claude Code, OpenCode and Gemini CLI don't add CodeDen's sessions to your own lists. Claude Code labels them as SDK sessions, which its `/resume` leaves out. OpenCode's are archived. Gemini CLI lists sessions per folder, and CodeDen's run in their own worktrees.
+
 ### The Cursor CLI asks for `agent update`
 
 CodeDen drives the Cursor CLI through its ACP server (`agent acp`), which older builds don't have. Run `agent update` (or reinstall with `curl https://cursor.com/install -fsS | bash`, or `irm 'https://cursor.com/install?win32=true' | iex` on Windows), then press **Re-check**. Another program named `agent` on your PATH isn't Cursor's: CodeDen only uses an `agent` whose `--version` is a Cursor build, and prefers `cursor-agent` when both are installed.
