@@ -1,6 +1,6 @@
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { AGENT_ALLOW_LIST_NOTICE, type ItemOf } from "@codeden/contracts";
 import { describe, expect, it } from "vitest";
 import { cursorAllowListNotice } from "../src/cursor/allow-list";
@@ -70,9 +70,30 @@ describe("Gemini CLI's allow settings", () => {
         '{\n  // project settings\n  "tools": { "allowed": ["run_shell_command"], },\n}',
     });
     expect(geminiAllowListNotice(dir)).toContain(
-      "`.gemini/settings.json`: tools.allowed (run_shell_command). CodeDen starts Gemini CLI so that commands, edits and MCP tools still ask",
+      "without asking: `.gemini/settings.json`: tools.allowed (run_shell_command). CodeDen starts Gemini CLI so that commands still ask",
     );
     expect(geminiAllowListNotice(worktree({ ".gemini/settings.json": "{}" }))).toBeUndefined();
+  });
+
+  it("names the project's policy files with allow rules", () => {
+    const allow = '[[rule]]\ntoolName = "run_shell_command"\ndecision = "allow"\npriority = 100\n';
+    const deny = '[[rule]]\ntoolName = "web_fetch"\ndecision = "deny"\npriority = 100\n';
+    const dir = worktree({
+      ".gemini/policies/b-allow.toml": allow,
+      ".gemini/policies/a-deny.toml": deny,
+      ".gemini/policies/notes.md": 'decision = "allow"',
+    });
+    expect(geminiAllowListNotice(dir)).toContain(
+      "without asking: allow rules in `.gemini/policies/b-allow.toml`. CodeDen starts",
+    );
+    expect(geminiAllowListNotice(worktree({ ".gemini/policies/a.toml": deny }))).toBeUndefined();
+    const both = worktree({
+      ".gemini/settings.json": '{ "mcp": { "allowed": ["linear"] } }',
+      ".gemini/policies/allow.toml": allow,
+    });
+    expect(geminiAllowListNotice(both)).toContain(
+      "`.gemini/settings.json`: mcp.allowed (linear); allow rules in `.gemini/policies/allow.toml`.",
+    );
   });
 });
 
@@ -86,6 +107,16 @@ describe("Gemini CLI's admin policy", () => {
     writeFileSync(file, "tampered");
     expect(readFileSync(writeGeminiAdminPolicy(home), "utf8")).toBe(GEMINI_ADMIN_POLICY);
     expect(geminiSessionArgs(["--acp"], file)).toEqual(["--acp", "--admin-policy", file]);
+  });
+
+  it("without CodeDen's home, goes to a private temp folder of its own, not a fixed name", () => {
+    const file = writeGeminiAdminPolicy();
+    expect(file).toBe(geminiAdminPolicyPath());
+    expect(dirname(file)).not.toBe(join(tmpdir(), "codeden-gemini"));
+    expect(basename(dirname(file))).toMatch(/^codeden-gemini-.+/);
+    expect(dirname(dirname(file))).toBe(tmpdir());
+    if (process.platform !== "win32") expect(statSync(dirname(file)).mode & 0o077).toBe(0);
+    expect(readFileSync(file, "utf8")).toBe(GEMINI_ADMIN_POLICY);
   });
 
   it("asks before commands everywhere, and before edits and MCP tools outside plan mode", () => {

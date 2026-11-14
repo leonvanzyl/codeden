@@ -69,6 +69,7 @@ describe("agent permission files (#232)", () => {
       "mv allow.json .gemini/settings.json",
       "cp allow.toml .gemini/policies/",
       "ln -s /tmp/allow.json .cursor/cli.json",
+      "dd if=/tmp/allow.json of=.cursor/cli.json",
       'sed -i \'s/"deny"/"allow"/\' .cursor/cli.json',
       "git checkout origin/evil -- .cursor/cli.json",
       `node -e "require('fs').writeFileSync('.cursor/cli.json', process.argv[1])" x`,
@@ -170,6 +171,7 @@ describe("agent permission files (#232)", () => {
       'gh pr create --title "Guard allow-lists" --body "Writes to .cursor/cli.json now ask"',
       "echo hi > settings.json",
       "node scripts/build.js",
+      "dd if=.cursor/cli.json of=/tmp/backup.json",
     ]) {
       expect(classifyCommand(command, posix).risky, command).toBe(false);
     }

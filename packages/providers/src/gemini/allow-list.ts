@@ -1,3 +1,4 @@
+import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { CHECK_RULES, field, listRules, readSettingsFile, stringList } from "../acp/allow-lists";
 
@@ -31,23 +32,66 @@ export function geminiAllowRules(settings: unknown): string[] {
   return rules;
 }
 
-/**
- * The warning for Gemini CLI settings in the worktree that run tools without asking, or
- * undefined when there are none. CodeDen starts Gemini CLI with an admin policy that still asks
- * before commands, edits and MCP tools (`./admin-policy`), so the warning is about the rest
- * (§11.2). A file that isn't JSON but mentions an allow setting is reported too.
- */
-export function geminiAllowListNotice(cwd: string): string | undefined {
+/** Gemini CLI's project policy folder, relative to the worktree. */
+export const GEMINI_PROJECT_POLICIES = ".gemini/policies";
+
+/** A policy rule that runs a tool without asking. */
+const ALLOW_DECISION = /^\s*decision\s*=\s*["']allow["']/im;
+const MAX_POLICY_BYTES = 1024 * 1024;
+
+/** The project's policy files with an `allow` rule, relative to the worktree, by name. */
+export function geminiAllowPolicies(cwd: string): string[] {
+  const dir = path.join(cwd, GEMINI_PROJECT_POLICIES);
+  let names: string[];
+  try {
+    names = readdirSync(dir)
+      .filter((n) => n.toLowerCase().endsWith(".toml"))
+      .sort();
+  } catch {
+    return [];
+  }
+  return names
+    .filter((name) => {
+      try {
+        const file = path.join(dir, name);
+        return (
+          statSync(file).size <= MAX_POLICY_BYTES && ALLOW_DECISION.test(readFileSync(file, "utf8"))
+        );
+      } catch {
+        return false;
+      }
+    })
+    .map((name) => `${GEMINI_PROJECT_POLICIES}/${name}`);
+}
+
+/** What the project's settings file allows, for the warning; undefined when nothing. */
+function settingsRules(cwd: string): string | undefined {
   const file = readSettingsFile(path.join(cwd, GEMINI_PROJECT_SETTINGS));
   if (!file.exists) return undefined;
-  let rules: string;
   if (file.data === undefined) {
-    if (!/allowed|autoAccept|allowMCPServers|"trust"/i.test(file.text)) return undefined;
-    rules = "CodeDen couldn't read them";
-  } else {
-    const found = geminiAllowRules(file.data);
-    if (!found.length) return undefined;
-    rules = listRules(found);
+    return /allowed|autoAccept|allowMCPServers|"trust"/i.test(file.text)
+      ? "CodeDen couldn't read them"
+      : undefined;
   }
-  return `This worktree has Gemini CLI settings that run tools without asking, \`${GEMINI_PROJECT_SETTINGS}\`: ${rules}. CodeDen starts Gemini CLI so that commands, edits and MCP tools still ask, but anything else these settings allow runs without CodeDen seeing it. ${CHECK_RULES}`;
+  const found = geminiAllowRules(file.data);
+  return found.length ? listRules(found) : undefined;
+}
+
+/**
+ * The warning for Gemini CLI settings in the worktree that run tools without asking (its
+ * `.gemini/settings.json`, and `allow` rules in its `.gemini/policies`), or undefined when there
+ * are none. CodeDen starts Gemini CLI with an admin policy that still asks before commands, and
+ * before edits and MCP tools outside plan mode (`./admin-policy`), so the warning is about the
+ * rest (§11.2). A settings file that isn't JSON but mentions an allow setting is reported too.
+ */
+export function geminiAllowListNotice(cwd: string): string | undefined {
+  const parts: string[] = [];
+  const settings = settingsRules(cwd);
+  if (settings) parts.push(`\`${GEMINI_PROJECT_SETTINGS}\`: ${settings}`);
+  const policies = geminiAllowPolicies(cwd);
+  if (policies.length) {
+    parts.push(`allow rules in ${listRules(policies.map((p) => `\`${p}\``))}`);
+  }
+  if (!parts.length) return undefined;
+  return `This worktree has Gemini CLI settings that run tools without asking: ${parts.join("; ")}. CodeDen starts Gemini CLI so that commands still ask, and edits and MCP tools outside plan mode, but anything else these settings allow runs without CodeDen seeing it. ${CHECK_RULES}`;
 }

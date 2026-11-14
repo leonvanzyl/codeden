@@ -153,8 +153,8 @@ function writesArguments(bin: string, args: readonly string[]): boolean {
  * One simple command's write of an agent's permissions: a redirect onto one, inline code that
  * names one (`node -e`, `python -c`, a PowerShell `[IO.File]::WriteAllText(…)`), or an argument
  * that is one, for any command that may write its arguments (`tee`, `cp`, `mv`, `sed -i`,
- * `Set-Content`, `Copy-Item`, `git checkout -- <file>`, ...). Reads, searches, listings and
- * deletions don't count.
+ * `dd of=<file>`, `Set-Content`, `Copy-Item`, `git checkout -- <file>`, ...). Reads, searches,
+ * listings and deletions don't count.
  */
 export function agentPermissionsCommand(
   cmd: SimpleCommand,
@@ -175,7 +175,8 @@ export function agentPermissionsCommand(
   for (const arg of args) {
     for (const word of wordPaths(cmd, arg)) {
       for (const alt of braceAlternatives(word)) {
-        const path = asPath(alt);
+        // `dd`'s operands are `name=value`: `of=` names the file it writes.
+        const path = bin === "dd" && /^of=./i.test(alt) ? alt.slice(3) : asPath(alt);
         const found = path === undefined ? undefined : agentPermissionsWrite(path, ctx);
         if (found) return found;
       }

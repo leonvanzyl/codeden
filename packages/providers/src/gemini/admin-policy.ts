@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -10,6 +10,10 @@ import path from "node:path";
  * and before every edit and MCP tool outside plan mode, and CodeDen's approval policy decides
  * each one. In plan mode Gemini CLI's own plan rules stay in charge of edits and MCP tools (they
  * allow its plan file); commands ask there too, and CodeDen lets read-only ones run.
+ *
+ * The trade-off: admin rules outrank the user's own deny rules for these tools as well (`deny`
+ * policies, `tools.exclude`, excluded MCP servers), so such a call asks instead and CodeDen's
+ * level decides it; at Full it runs unless CodeDen's own rules ask.
  *
  * Gemini CLI ignores `--admin-policy` when the machine has system policies of its own (a
  * `.toml` in its system policies folder): an administrator's policy wins.
@@ -37,11 +41,23 @@ priority = 999
 modes = ["default", "autoEdit", "yolo"]
 `;
 
-/** Where the policy goes: CodeDen's data directory, else a folder in the OS temp directory. */
+let privateDir: string | undefined;
+
+/**
+ * A folder of this process's own in the OS temp directory, made once with `mkdtemp` (owner-only
+ * on POSIX), so another user of a shared `/tmp` can't have made it first.
+ */
+function privateTempDir(): string {
+  privateDir ??= mkdtempSync(path.join(tmpdir(), "codeden-gemini-"));
+  return privateDir;
+}
+
+/**
+ * Where the policy goes: CodeDen's data directory (the server always sends it), else a private
+ * folder in the OS temp directory.
+ */
 export function geminiAdminPolicyPath(codedenHome?: string): string {
-  const dir = codedenHome
-    ? path.join(codedenHome, "gemini")
-    : path.join(tmpdir(), "codeden-gemini");
+  const dir = codedenHome ? path.join(codedenHome, "gemini") : privateTempDir();
   return path.join(dir, "admin-policy.toml");
 }
 
