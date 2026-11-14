@@ -1,6 +1,7 @@
-import type { ProviderInfo, Session } from "@codeden/contracts";
+import type { ProviderInfo, Session, SetupCheck } from "@codeden/contracts";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { providerAvailability } from "@/components/composer/model-picker/logic";
 import {
   HandoffDialog,
   handoffTargetProblem,
@@ -52,6 +53,25 @@ const finished = (() => {
 const idle: Session = { ...finished, status: "idle", rootThreadId: "t-root" };
 const provider = (id: string) => providers.find((p) => p.id === id) as ProviderInfo;
 
+/** A setup check for a provider; ready unless overridden. */
+const setupCheck = (id: string, over: Partial<SetupCheck> = {}): SetupCheck => ({
+  // Agent provider ids are setup check ids (matched by `providerAvailability`).
+  id: id as SetupCheck["id"],
+  label: id,
+  state: "ok",
+  installed: true,
+  version: null,
+  executablePath: null,
+  loggedIn: true,
+  authMethod: null,
+  account: null,
+  loginExpiresAt: null,
+  message: "",
+  fix: null,
+  durationMs: 1,
+  ...over,
+});
+
 describe("handing a session off", () => {
   it("is blocked while a turn runs, before it starts, without a branch or without work", () => {
     expect(handoffBlocked(idle, 2)).toBeNull();
@@ -87,6 +107,37 @@ describe("handing a session off", () => {
     expect(initialHandoffChoice(claude, providers, "gone").provider).not.toBe("gone");
   });
 
+  it("starts on another provider that can run, else the session's own (#255)", () => {
+    const claude = { ...idle, provider: "claude", model: "opus", effort: "high" as const };
+    const [first, second] = providers.filter((p) => p.id !== "claude");
+    if (!first || !second) throw new Error("need two other providers");
+    const signedOut = setupCheck(first.id, { state: "missing", loggedIn: false });
+    // The first other provider isn't signed in: the next one that can run is chosen.
+    expect(initialHandoffChoice(claude, providers, null, [signedOut]).provider).toBe(second.id);
+    // Asked for explicitly, it is kept (the dialog then says why it can't run).
+    expect(initialHandoffChoice(claude, providers, first.id, [signedOut]).provider).toBe(first.id);
+    // No other provider can run: the session's own, with its model and effort.
+    const none = providers
+      .filter((p) => p.id !== "claude")
+      .map((p) => setupCheck(p.id, { state: "missing", installed: false }));
+    expect(initialHandoffChoice(claude, providers, null, none)).toEqual({
+      provider: "claude",
+      model: "opus",
+      effort: "high",
+    });
+  });
+
+  it("refuses a provider that can't start, with the reason", () => {
+    const target = provider("codex");
+    const signedOut = providerAvailability("codex", [
+      setupCheck("codex", { state: "missing", loggedIn: false }),
+    ]);
+    expect(handoffTargetProblem(idle, target, signedOut)).toBe(
+      "Codex can't start sessions: not signed in.",
+    );
+    expect(handoffTargetProblem(idle, target, providerAvailability("codex", []))).toBeNull();
+  });
+
   it("refuses providers that can't keep the session's permissions", () => {
     const plain = {
       ...provider("claude"),
@@ -106,7 +157,10 @@ describe("handing a session off", () => {
   it("hands off through the client with the note, then opens the new session", async () => {
     const client = createMockClient();
     const handoff = vi.spyOn(client, "handoffSession");
-    const other = providers.find((p) => p.id !== finished.provider) as ProviderInfo;
+    // Another provider that is signed in (the mock's Codex isn't).
+    const other = providers.find(
+      (p) => p.id !== finished.provider && p.id !== "codex",
+    ) as ProviderInfo;
     renderWithClient(<HandoffDialog />, client, { withRouter: true });
     act(() => useUiStore.getState().setHandoff({ sessionId: finished.id, provider: other.id }));
 

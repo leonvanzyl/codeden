@@ -10,6 +10,7 @@ import {
   favoriteRows,
   modelName,
   providerAvailability,
+  providerOptionLabel,
   providerTabs,
   resolveModel,
   searchRows,
@@ -203,6 +204,33 @@ describe("availability", () => {
   it("treats providers without a check (or before detection) as ready", () => {
     expect(providerAvailability("fake", [check({ id: "claude" })]).ready).toBe(true);
     expect(providerAvailability("codex", undefined).ready).toBe(true);
+  });
+
+  it("names a provider in a plain list with why it can't run (#255)", () => {
+    const label = (c: SetupCheck | null) =>
+      providerOptionLabel("Codex", providerAvailability("codex", c ? [c] : undefined));
+    expect(label(null)).toBe("Codex");
+    expect(label(check({ id: "codex" }))).toBe("Codex");
+    expect(label(check({ id: "codex", state: "warning" }))).toBe("Codex");
+    expect(label(check({ id: "codex", state: "missing", loggedIn: false }))).toBe(
+      "Codex (not signed in)",
+    );
+    expect(label(check({ id: "codex", state: "missing", installed: false }))).toBe(
+      "Codex (not installed)",
+    );
+    expect(
+      label(
+        check({
+          id: "codex",
+          state: "missing",
+          installed: false,
+          broken: [{ path: "C:\\npm\\codex.cmd", reason: "points at a missing package" }],
+        }),
+      ),
+    ).toBe("Codex (installed but broken)");
+    expect(label(check({ id: "codex", state: "missing", loggedIn: null }))).toBe(
+      "Codex (not ready)",
+    );
   });
 });
 
