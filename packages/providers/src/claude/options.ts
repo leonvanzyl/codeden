@@ -68,13 +68,19 @@ export function executableOptions(
   );
 }
 
-/** Environment for the Claude process: the user's env (`agentEnv`) plus session extras. */
+/**
+ * Environment for the Claude process: the user's env (`agentEnv`) plus session extras. The
+ * entrypoint is always `sdk-ts`, which keeps CodeDen's sessions out of Claude Code's own
+ * `/resume` pickers. The SDK only sets it when unset, so a CodeDen started from a Claude Code
+ * terminal would otherwise pass on that terminal's `cli`.
+ */
 export function claudeEnv(
   extra: Record<string, string> | undefined,
 ): Record<string, string | undefined> {
   return {
     ...agentEnv(extra),
     CLAUDE_AGENT_SDK_CLIENT_APP: `codeden/${CODEDEN_VERSION}`,
+    CLAUDE_CODE_ENTRYPOINT: "sdk-ts",
   };
 }
 
