@@ -78,9 +78,10 @@ export async function snapshot(session: BrowserSession, tabId?: string): Promise
 
 /**
  * Run an action on the element behind a snapshot ref. Fails fast when the ref is not in the
- * latest snapshot instead of waiting for the action timeout.
+ * latest snapshot instead of waiting for the action timeout. A `CommandError` the action throws
+ * (its own checks) is passed on as it is.
  */
-async function withRef<T>(
+export async function withRef<T>(
   page: Page,
   ref: string,
   action: (locator: Locator) => Promise<T>,
@@ -91,6 +92,7 @@ async function withRef<T>(
     if ((await locator.count()) === 0) throw new Error("no such element");
     return await action(locator);
   } catch (error) {
+    if (error instanceof CommandError) throw error;
     const message = error instanceof Error ? error.message.split("\n")[0] : String(error);
     throw new CommandError(
       "action_failed",

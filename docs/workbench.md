@@ -142,6 +142,8 @@ The runner launches one Chromium (your installed **Edge** or **Chrome**; Edge fi
 | `browser_snapshot` | An accessibility snapshot with element refs |
 | `browser_click`, `browser_type`, `browser_press` | Act on a ref, or press a key or chord. Without a ref, `browser_type` types into whatever has focus |
 | `browser_mouse` | Click, hover, drag or scroll at a point, for canvases, maps, drag handles, sliders and hover menus that have no useful ref. Points are the page's CSS pixels from the top-left corner of the visible area: the pixels of a viewport `browser_screenshot`, not of a `fullPage` or element (`ref`) one. Points outside the visible area are refused |
+| `browser_select` | Choose options of a `<select>` menu by its label or value (several on a multiple select), with the page's usual change events. A native menu opens in a popup no click or screenshot can reach |
+| `browser_upload` | Upload files: set them on a file input, or click an upload button or drop zone and answer the file chooser it opens. Files must be in the session's working folder, the temp folder or its own artifacts (on a sandboxed runner, its working folder); secrets files (`.env`, keys, credentials) are refused |
 | `browser_dialog` | Answer the page's alert, confirm or prompt (OK or Cancel, and the prompt's text) |
 | `browser_screenshot` | Viewport, full page or one element; `share: true` posts it to the chat |
 | `browser_logs` | Console and network entries |

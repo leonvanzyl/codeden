@@ -9,13 +9,13 @@ import { dialogNote, withDialogNote } from "./browser-dialog";
  * session named in the input.
  */
 
-const tabId = z
+export const tabId = z
   .string()
   .min(1)
   .max(100)
   .optional()
   .describe("Tab id (t1, t2, ...); default: the active tab");
-const ref = z
+export const ref = z
   .string()
   .regex(/^(f\d+)?e\d+$/, "An element ref from browser_snapshot, e.g. e12")
   .describe("Element ref from the latest browser_snapshot, e.g. e12");
@@ -44,7 +44,7 @@ export const browserNavigate = defineTool({
 export const browserSnapshot = defineTool({
   name: "browser_snapshot",
   description:
-    "Accessibility snapshot of the page as YAML, with element refs (e12) to use in browser_click and browser_type. Take a new snapshot after the page changes.",
+    "Accessibility snapshot of the page as YAML, with element refs (e12) to use in browser_click, browser_type, browser_select and browser_upload. Take a new snapshot after the page changes.",
   roles: ["agent"],
   scope: "session",
   input: z.object({ tabId }),
@@ -65,7 +65,7 @@ export const browserSnapshot = defineTool({
 export const browserClick = defineTool({
   name: "browser_click",
   description:
-    "Click an element by its ref from browser_snapshot. For things without a useful ref (canvas, map, drag handle), click at screenshot coordinates with browser_mouse.",
+    "Click an element by its ref from browser_snapshot. For things without a useful ref (canvas, map, drag handle), click at screenshot coordinates with browser_mouse. To pick an option of a <select> menu (a combobox, or a listbox, in the snapshot) use browser_select, and to upload files (a file input, or a button or drop zone that opens a file chooser) use browser_upload: their popups can't be clicked.",
   roles: ["agent"],
   scope: "session",
   input: z.object({
@@ -86,7 +86,7 @@ export const browserClick = defineTool({
 
 export const browserType = defineTool({
   name: "browser_type",
-  description: `Fill an editable element (input, textarea, contenteditable) by ref, replacing its value. Without a ref, types the text as key presses into whatever has focus (at most ${MAX_FOCUS_TYPE_CHARS} characters), e.g. after clicking into a canvas editor with browser_mouse. \`submit: true\` presses Enter afterwards.`,
+  description: `Fill an editable element (input, textarea, contenteditable) by ref, replacing its value (for a <select> menu use browser_select, for a file input browser_upload). Without a ref, types the text as key presses into whatever has focus (at most ${MAX_FOCUS_TYPE_CHARS} characters), e.g. after clicking into a canvas editor with browser_mouse. \`submit: true\` presses Enter afterwards.`,
   roles: ["agent"],
   scope: "session",
   input: z

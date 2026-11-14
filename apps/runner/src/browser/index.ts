@@ -1,5 +1,6 @@
 /** The runner's browser engine (§12.2): one Chromium, a context per session, CDP screencast. */
 export * as browserAgent from "./agent";
+export * as browserForms from "./forms";
 export {
   type BrowserCommand,
   type BrowserCommandDeps,

@@ -649,6 +649,7 @@ node-pty sessions owned by the runner, so they survive server restarts, with bou
   - accessibility snapshot
   - click and type
   - pointer actions at page coordinates (click, hover, drag, scroll) and typing at whatever has focus: computer use, step 1, for what the snapshot can't reach (canvases, maps, charts, drag handles, custom sliders, games, hover menus)
+  - choosing options of `<select>` menus and uploading files (onto a file input, or through the file chooser a button or drop zone opens): computer use, step 2, for the popups the browser draws itself. Uploaded files follow the rule for every file that leaves CodeDen: only from the session's own folders, never a secrets file
   - screenshot
   - console and network logs
 - **Coordinates.** Viewport CSS pixels, origin top-left: the pixels of a viewport screenshot (agent screenshots are taken at `scale: "css"`) and the units of `getBoundingClientRect`. They are stateless, the same on either engine, and points outside the current viewport are refused.

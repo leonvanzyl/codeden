@@ -14,6 +14,8 @@ import {
 import { browserDialog } from "./browser-dialog";
 import { browserMouse } from "./browser-mouse";
 import { browserScreenshot } from "./browser-screenshot";
+import { browserSelect } from "./browser-select";
+import { browserUpload } from "./browser-upload";
 import { factoryTools } from "./factory";
 import { finish } from "./finish";
 import { generateImage } from "./generate-image";
@@ -38,6 +40,8 @@ export const allTools: AnyServerTool[] = [
   browserType,
   browserPress,
   browserMouse,
+  browserSelect,
+  browserUpload,
   browserDialog,
   browserScreenshot,
   browserLogs,

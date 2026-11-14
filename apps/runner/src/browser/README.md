@@ -22,8 +22,9 @@ through CDP, and `BrowserSession` doesn't care which engine is underneath.
 | `viewport.ts` | Viewport policy: clamps (`fitViewport`), frame pixel size (`framePixels`), `Emulation.setDeviceMetricsOverride` parameters |
 | `screencast.ts` | `Page.startScreencast` on the active tab, JPEG frames sized to the viewport's device pixels as `browser.frame` stream data with metadata, throttled by delaying `Page.screencastFrameAck`, paused when the last viewer leaves, follows tab switches, restarts on resize |
 | `input.ts` | Panel mouse/keyboard -> `Input.dispatchMouseEvent` / `dispatchKeyEvent` / `insertText`, coordinates mapped from the displayed frame onto the viewport the frame showed |
-| `agent.ts` | Agent primitives: aria snapshot with refs, click/type by ref (or type at the focused element), press, screenshot (viewport, full page, element) to a path, guarded evaluate, wait for selector/text/network idle |
+| `agent.ts` | Agent primitives: aria snapshot with refs, click/type by ref (or type at the focused element), press, screenshot (viewport, full page, element) to a path, guarded evaluate, wait for selector/text/network idle; `withRef`, which fails fast on a ref missing from the latest snapshot |
 | `pointer.ts` | Agent pointer actions at coordinates (`browser.mouse`): click, hover, drag, scroll on Playwright's mouse, with modifiers held, points checked against the current viewport, the button and keys always released, and scrolls waited on until the page settles |
+| `forms.ts` | Agent form controls the refs can't reach (`browser.select`, `browser.upload`, computer use step 2): options of a native `<select>` by label or value through `selectOption`, checked first so mistakes fail at once; files set on a file input with `setInputFiles`, or through the file chooser that clicking a button or drop zone opens (`filechooser`, waited on for 3 s) |
 | `logs.ts` | Bounded console and network logs per session (ring buffers, `since` paging) |
 | `handlers.ts` | `createBrowserCommandHandlers({ manager })`: one handler per `browser.*` runner command |
 
@@ -112,6 +113,40 @@ Playwright counts a button or key as held before its press is dispatched, so a f
 the original error. A scroll moves the pointer to the point first, so the wheel reaches the
 scroller under it, then waits until no `scroll` event came for 100 ms (at most about 1 s), so a
 screenshot right after shows the result.
+
+## Select menus and file uploads (computer use, step 2)
+
+A native `<select>` shows in the snapshot as a `combobox` (a multiple select as a `listbox`)
+with its options listed, but the menu opens in a popup the browser draws itself: no ref, no
+screencast pixels. A file input shows as a `button`; clicking it opens a file chooser that
+nothing answers (headless Chromium cancels it, a native view shows the desktop app's picker).
+
+- **`browser.select`** reads the element once (a `<label>` is followed to its control): its tag,
+  `multiple`, disabled state and options. Each value names an option by its label (what the
+  snapshot shows) or else its value, exactly. Not a `<select>`, no such option (the error lists
+  them), several values for a single select, or a disabled select or option fail at once,
+  instead of `selectOption` waiting out the action timeout; an option's ref is pointed to its
+  menu's ref. The matched options are selected by index, so the page gets the same `input` and
+  `change` events a person's choice fires, and the result names the selected options. They are
+  read back (a change handler may change them again), but the read never decides the outcome:
+  a sort-by or language menu whose change navigates the page, or a select the page re-renders,
+  is gone by then. When the ref no longer resolves (a navigated document has no refs) or the
+  read takes over 1 s, the result is the options that were chosen, with `detached: true`.
+- **`browser.upload`** takes absolute paths of files on this machine (the server has already
+  checked them against the session's folders and the secrets rule). On a file input (also a
+  hidden one, or a label for one) it calls `setInputFiles`. Anything else (a "Browse" button, a
+  drop zone) is clicked while waiting up to 3 s for the `filechooser` event, and the chooser gets
+  the files; no chooser fails with `no_file_chooser`. Several files go only where the input or
+  chooser takes multiple. Playwright intercepts file choosers only while a `filechooser` listener
+  exists, so interception is on just while an upload waits: a person clicking a file input in a
+  native view still gets the app's own picker. Choosers opened by `browser.click`,
+  `browser.mouse` or a key press are not caught.
+- Both run in `dialogs.race`, so an `alert` from a change handler comes back as `dialog`. Both are
+  plain Playwright on CDP (`DOM.setFileInputFiles`, `Page.setInterceptFileChooserDialog`), which
+  the desktop relay forwards like any page-level call, so they work on either engine. Over
+  `connectOverCDP` Playwright passes the paths to the browser as they are, so the browser must
+  share the runner's disk: the runner's Chromium does, and so do native views (the relay is on
+  127.0.0.1).
 
 ## Native engine: the desktop app's views (§17 Phase 2)
 

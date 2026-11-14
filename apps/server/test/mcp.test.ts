@@ -83,6 +83,8 @@ describe("CodeDen MCP endpoint", () => {
       "browser_type",
       "browser_press",
       "browser_mouse",
+      "browser_select",
+      "browser_upload",
       "browser_dialog",
       "browser_screenshot",
       "browser_logs",
@@ -218,6 +220,32 @@ describe("CodeDen MCP endpoint", () => {
     });
     expect(long.isError).toBe(true);
     expect(text(long)).toMatch(/at most 2000 characters/);
+    await client.close();
+  });
+
+  it("checks browser_upload files before anything reaches the browser; browser_select reaches it", async () => {
+    const cwd = h.server.services.sessionRepo.get(sessionId).cwd;
+    writeFileSync(join(cwd, ".env"), "SECRET=hunter2\n");
+    writeFileSync(join(cwd, "upload.csv"), "a,b\n");
+    const client = await connect(token);
+    const upload = (paths: string[]) =>
+      client.callTool({ name: "browser_upload", arguments: { ref: "e5", paths } });
+    for (const [paths, error] of [
+      [[".env"], /secrets file/],
+      [["upload.csv", "id_rsa"], /File not found: id_rsa/],
+      [[], /paths/],
+    ] as const) {
+      const result = await upload([...paths]);
+      expect(result.isError, JSON.stringify(paths)).toBe(true);
+      expect(text(result)).toMatch(error);
+    }
+    // Checked files reach the runner, which has no browser open for this session.
+    expect(text(await upload(["upload.csv"]))).toMatch(/No browser for session/);
+    const select = await client.callTool({
+      name: "browser_select",
+      arguments: { ref: "e3", values: ["Netherlands"] },
+    });
+    expect(text(select)).toMatch(/No browser for session/);
     await client.close();
   });
 
