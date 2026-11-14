@@ -8,3 +8,4 @@ CodeDen is the ultimate tool for Agentic Coding.
 - CodeDen does not waste space. Worktrees are automatically cleaned and removed once sessions are archived.
 - CodeDen supports advanced ADE features, like integrated browsers, computer use, dedicated agent computers and much more.
 - Your job is to stay informed and up to date with the tools and features available in modern ADEs.
+- Your job is to research the latest developments in software factories, dark factories and agentic coding tools to ensure CodeDen is on the cutting edge.
