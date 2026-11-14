@@ -1,10 +1,12 @@
 import { ProviderSessionError } from "../adapter";
-import { unarchiveThread } from "./history";
+import { isThreadNotFound, unarchiveThread } from "./history";
 import type {
   ThreadResumeParams,
   ThreadResumeResponse,
   ThreadStartParams,
   ThreadStartResponse,
+  TurnStartParams,
+  TurnStartResponse,
 } from "./protocol/v2";
 import type { CodexRpc } from "./rpc";
 
@@ -54,4 +56,24 @@ export async function openCodexThread(
     }
   }
   return rpc.request<ThreadStartResponse>("thread/start", settings);
+}
+
+/**
+ * `turn/start` on `rpc`. When Codex no longer has the thread loaded ("thread not found": an
+ * archive that answered after CodeDen stopped waiting still unloaded it), `reopen` opens the
+ * thread again (unarchive + resume) and the turn is tried once more, on the thread id `reopen`
+ * returns (a new thread when the resume failed).
+ */
+export async function startTurn(
+  rpc: CodexRpc,
+  params: TurnStartParams,
+  reopen: () => Promise<string>,
+): Promise<TurnStartResponse> {
+  try {
+    return await rpc.request<TurnStartResponse>("turn/start", params);
+  } catch (error) {
+    if (!isThreadNotFound(error) || rpc.isClosed) throw error;
+    const threadId = await reopen();
+    return rpc.request<TurnStartResponse>("turn/start", { ...params, threadId });
+  }
 }
