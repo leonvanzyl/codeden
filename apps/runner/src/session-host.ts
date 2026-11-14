@@ -185,7 +185,16 @@ export class SessionHost {
   }
 
   async respond(cmd: RunnerCommandOf<"session.respond">): Promise<void> {
-    await this.get(cmd.sessionId).session.respond(cmd.requestId, cmd.response);
+    try {
+      await this.get(cmd.sessionId).session.respond(cmd.requestId, cmd.response);
+    } catch (error) {
+      // An answer the asker can't take (a form's "five" for a number): the request stays open
+      // and the message says what fits.
+      if (error instanceof ProviderSessionError && error.code === "invalid_answer") {
+        throw new CommandError("invalid_answer", error.message);
+      }
+      throw error;
+    }
   }
 
   async stop(sessionId: string, reason: "stopped" | "runner_exit" = "stopped"): Promise<void> {
