@@ -50,18 +50,27 @@ export async function findOrStartRunner(opts: FindRunnerOptions): Promise<Runner
 
 /**
  * The `loopback` transport: the runner's WebSocket on `127.0.0.1`, authenticated with the
- * token from its lock file. Resolves once the socket is open; rejects if it fails before.
+ * token from its lock file. Resolves once the socket is open; rejects if it fails before, or
+ * when `signal` aborts first, which drops the socket at once, even while the runner has not
+ * answered the upgrade yet (the client's `stop()` never waits on a hung runner).
  */
 export function openLoopbackTransport(
   lock: RunnerLock,
   handlers: RunnerTransportHandlers,
+  signal?: AbortSignal,
 ): Promise<RunnerTransport> {
   return new Promise((resolve, reject) => {
+    if (signal?.aborted) return reject(new Error("Runner connection cancelled"));
     const ws = new WebSocket(`ws://127.0.0.1:${lock.port}/runner`, {
       headers: { authorization: `Bearer ${lock.token}` },
     });
     let opened = false;
     let lastError: Error | undefined;
+    const cancel = () => {
+      reject(new Error("Runner connection cancelled"));
+      ws.terminate();
+    };
+    signal?.addEventListener("abort", cancel, { once: true });
     const transport: RunnerTransport = {
       send: (message) => {
         if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(message));
@@ -76,6 +85,8 @@ export function openLoopbackTransport(
       },
     };
     ws.on("open", () => {
+      // Once open, the client's own abort handling closes it.
+      signal?.removeEventListener("abort", cancel);
       opened = true;
       resolve(transport);
     });
@@ -91,7 +102,9 @@ export function openLoopbackTransport(
     });
     ws.on("error", (error) => {
       lastError = error;
-      if (!opened) reject(error);
+      if (opened) return;
+      signal?.removeEventListener("abort", cancel);
+      reject(error);
     });
     ws.on("close", () => {
       if (opened) handlers.onClose(lastError?.message);

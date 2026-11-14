@@ -369,7 +369,7 @@ export class RunnerClient {
       },
     });
     this.runnerPid = lock.pid;
-    return openLoopbackTransport(lock, handlers);
+    return openLoopbackTransport(lock, handlers, signal);
   }
 
   /** A transport that completed its handshake (or was mid-handshake) ended. */

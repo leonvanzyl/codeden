@@ -1,12 +1,16 @@
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { Duplex } from "node:stream";
+import { CODEDEN_VERSION, RUNNER_PROTOCOL_VERSION, type RunnerLock } from "@codeden/contracts";
 import { type RunningRunner, startRunner } from "@codeden/runner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import WebSocket from "ws";
 import { type Database, openDatabase } from "../src/db/client";
 import { EventStore } from "../src/events/store";
-import type { RunnerClient } from "../src/runner/client";
+import { RunnerClient } from "../src/runner/client";
 import { RunnerHub } from "../src/runner/hub";
 import { removeTree } from "./support/remove-tree";
 
@@ -116,5 +120,67 @@ describe("RunnerHub while a runner connects", () => {
     expect(client.status.state).not.toBe("connected");
     expect(runnerEvents()).not.toContain("runner.connected");
     expect(await answers(client)).toBe(false);
+  });
+});
+
+describe("RunnerClient stopped while the runner's WebSocket upgrade hangs", () => {
+  it("drops the socket at once instead of waiting for the upgrade", async () => {
+    // Answers `/health` like a live runner, but never answers the WebSocket upgrade.
+    const token = "u".repeat(32);
+    const upgrades: Duplex[] = [];
+    let onUpgrade: () => void = () => undefined;
+    const upgrading = new Promise<void>((resolve) => {
+      onUpgrade = resolve;
+    });
+    const http = createServer((req, res) => {
+      res.writeHead(req.headers.authorization === `Bearer ${token}` ? 200 : 401).end();
+    });
+    http.on("upgrade", (_req, socket: Duplex) => {
+      socket.on("error", () => undefined);
+      upgrades.push(socket);
+      onUpgrade();
+    });
+    await new Promise<void>((resolve) => http.listen(0, "127.0.0.1", resolve));
+    try {
+      const lock: RunnerLock = {
+        pid: process.pid,
+        port: (http.address() as AddressInfo).port,
+        token,
+        version: CODEDEN_VERSION,
+        protocolVersion: RUNNER_PROTOCOL_VERSION,
+        runnerId: "r-hung",
+        startedAt: new Date().toISOString(),
+        providers: [],
+      };
+      const lockFile = join(dir, "hung-runner.json");
+      writeFileSync(lockFile, JSON.stringify(lock));
+      const client = new RunnerClient({
+        db: database.db,
+        store,
+        home: dir,
+        lockFile,
+        launch: null,
+      });
+      clients.push(client);
+      const started = client.start().then(
+        () => null,
+        (error: Error) => error,
+      );
+      await upgrading;
+      const socket = upgrades[0] as Duplex;
+      // The server keeps its side half-open: the client's end shows as `end`, not `close`.
+      const dropped = new Promise<void>((resolve) => socket.once("end", () => resolve()));
+      socket.resume();
+
+      // Without cancellation this would wait for an upgrade that never comes.
+      await client.stop();
+      await dropped;
+      expect((await started)?.message).toBe("Runner was stopped while connecting");
+      expect(client.status.state).not.toBe("connected");
+      expect(runnerEvents()).toEqual([]);
+    } finally {
+      for (const socket of upgrades) socket.destroy();
+      await new Promise<void>((resolve) => http.close(() => resolve()));
+    }
   });
 });
