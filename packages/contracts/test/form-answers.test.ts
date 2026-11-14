@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { answerFormatName, Notice, parseNumberAnswer, parseYesNo, UserQuestionItem } from "../src";
+import {
+  answerFormatName,
+  MAX_NUMBER_CHARS,
+  Notice,
+  parseNumberAnswer,
+  parseYesNo,
+  UserQuestionItem,
+} from "../src";
 
 describe("form answers", () => {
   it("reads numbers as people write them, and nothing else", () => {
@@ -17,6 +24,18 @@ describe("form answers", () => {
     }
     expect(parseNumberAnswer("2.5", "integer")).toBeUndefined();
     expect(parseNumberAnswer("9007199254740993", "integer")).toBeUndefined();
+    // Non-breaking spaces, as some keyboards and pasted text group thousands.
+    expect(parseNumberAnswer("1\u00a0000", "number")).toBe(1000);
+    expect(parseNumberAnswer("1\u202f000\u202f000", "integer")).toBe(1000000);
+  });
+
+  it("turns down text too long to be a typed number before any pattern runs", () => {
+    const longest = `0.${"5".repeat(MAX_NUMBER_CHARS - 2)}`;
+    expect(parseNumberAnswer(longest, "number")).toBe(0.5555555555555556);
+    expect(parseNumberAnswer(`${longest}5`, "number")).toBeUndefined();
+    // A long digit run with a stray character at the end: once slow to reject, now refused.
+    expect(parseNumberAnswer(`${"1".repeat(30_000)}x`, "number")).toBeUndefined();
+    expect(parseNumberAnswer(`${"1".repeat(MAX_NUMBER_CHARS - 1)}x`, "number")).toBeUndefined();
   });
 
   it("reads yes and no", () => {

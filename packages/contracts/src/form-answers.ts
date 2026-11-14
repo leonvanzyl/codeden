@@ -10,19 +10,27 @@ import { z } from "zod";
 export const AnswerFormat = z.enum(["number", "integer"]);
 export type AnswerFormat = z.infer<typeof AnswerFormat>;
 
+/** The longest answer read as a number (with separators, a sign and an exponent). */
+export const MAX_NUMBER_CHARS = 100;
+
 /** Thousands written with one separator between groups of three: "1,000", "1 000 000", "1_000". */
-const GROUPED = /^[+-]?\d{1,3}([,_   ])\d{3}(?:\1\d{3})*(?:\.\d+)?$/;
-/** A plain decimal number: "3", "-2.5", ".5", "1e3". No hex, no words, no units. */
-const PLAIN = /^[+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?$/i;
+const GROUPED = /^[+-]?\d{1,3}([,_ \u00a0\u202f])\d{3}(?:\1\d{3})*(?:\.\d+)?$/;
+/**
+ * A plain decimal number: "3", "-2.5", ".5", "1e3". No hex, no words, no units. Each digit run
+ * matches one way only, so a long run followed by a stray character fails in linear time.
+ */
+const PLAIN = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i;
 
 /**
  * The number a typed answer means, or undefined when it isn't one (or, for `integer`, isn't a
  * whole number). Thousands separators are understood ("1,000" is 1000); a comma that could be a
- * decimal point ("1,5") is not guessed at.
+ * decimal point ("1,5") is not guessed at. Text longer than {@link MAX_NUMBER_CHARS} is no number
+ * anyone types, and is turned down before any pattern runs.
  */
 export function parseNumberAnswer(text: string, format: AnswerFormat): number | undefined {
   const trimmed = text.trim();
-  const plain = GROUPED.test(trimmed) ? trimmed.replace(/[,_   ]/g, "") : trimmed;
+  if (trimmed.length > MAX_NUMBER_CHARS) return undefined;
+  const plain = GROUPED.test(trimmed) ? trimmed.replace(/[,_ \u00a0\u202f]/g, "") : trimmed;
   if (!PLAIN.test(plain)) return undefined;
   const n = Number(plain);
   if (!Number.isFinite(n)) return undefined;
