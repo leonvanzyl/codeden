@@ -37,7 +37,7 @@ Off by default. When you turn it on:
 
 ## The orchestrator and PMs can't write code
 
-They always run read-only, whatever their level: Claude gets no edit tools and a policy that denies writing commands (checks included), Codex runs in a read-only sandbox, and OpenCode's and Cursor's edits and writing commands are refused by CodeDen's policy (Cursor also runs in its read-only `ask` mode). They act only through CodeDen's tools.
+They always run read-only, whatever their level: Claude gets no edit tools and a policy that denies writing commands (checks included), Codex runs in a read-only sandbox, and OpenCode's, Cursor's and Gemini CLI's edits and writing commands are refused by CodeDen's policy (Cursor also runs in its read-only `ask` mode). They act only through CodeDen's tools.
 
 ## Permissions
 
@@ -56,19 +56,24 @@ OpenCode has no OS sandbox of its own. CodeDen gives its sessions permission rul
 
 Cursor's CLI asks before the tool calls its own rules gate, over its ACP server (`agent acp`), and CodeDen decides each request by level exactly as for OpenCode, with the same classifier. CodeDen never starts it with `--force`, and only ever answers "once": Cursor's "always" option would save the rule in your Cursor settings. Known gap: what Cursor's own allowlist (`~/.cursor/cli-config.json`, a project's `.cursor/cli.json`) allows runs without asking, so CodeDen only sees what Cursor asks about.
 
-Read-only is offered only on providers that report the `readOnly` capability (Claude Code, Codex, OpenCode and Cursor all do); the server refuses it elsewhere. Under Read-only:
+Gemini CLI works the same way over its ACP server (`gemini --acp`). CodeDen runs it in its `default` mode, which asks before every edit, command and MCP tool, switches a session that opens in your `yolo` or `autoEdit` default back to it, and never passes `--yolo` or `--approval-mode`. Gemini CLI names the MCP server of each tool it asks about, which is how CodeDen recognises its own tools; a command or an edit is judged as one whatever it is called. Known gap: what Gemini CLI's own rules allow (its policy files, `tools.allowed`, MCP servers marked `trust` in its settings) runs without asking, so CodeDen only sees what Gemini CLI asks about.
+
+Read-only is offered only on providers that report the `readOnly` capability (Claude Code, Codex, OpenCode, Cursor and Gemini CLI all do); the server refuses it elsewhere. Under Read-only:
 
 - **Claude** may run commands that only read (`ls`, `cat`, `rg`, `cd`, `sed` scripts that only print such as `sed -n 1,40p`, `git status`/`log`/`diff`/`show`/`stash list` including `git -C <dir> …`, `gh ... view`/`list`/`checks`, `gh search`, `gh api` GET requests, and their PowerShell equivalents) and the project's **checks**: `npm`/`pnpm`/`yarn`/`bun` `test`, `lint`, `typecheck` or `check`, `tsc`, `vitest`, `jest`, `eslint`, `biome check`, `ruff check`, `pytest`, `mypy`, `cargo test`/`check`/`clippy` and `go test`/`vet`. Fix, write, snapshot-update and watch flags (`--fix`, `--write`, `-u`, `--watch`, ...), output redirection and command substitution are refused, and so are the options that make a reading program write or run something (`sort -o`, Windows `sort /O[UTPUT]` and `/T[EMPORARY]`, `uniq` with an output file, `find -fprint`/`-exec`, also after `--`, `fd -x`, `rg --pre`, `less -o`, `tree -o`, `date -s`, `git diff --output`, `git grep -O`, `git ls-remote --upload-pack`), git's writing forms (creating a branch or tag by name, `git remote`/`worktree`/`reflog` changes, `git config` writes, abbreviations included), `gh` verbs other than view, list, status, diff and checks (and `gh` extensions), unquoted parentheses and braces (PowerShell runs code in them, even after an allowed cmdlet), background jobs (`&`), installs, builds, commits and pushes. Options are read from the words the shell actually passes (`-'o'` is `-o`); variable expansion, `$'…'` quoting and unquoted patterns that could expand to an option are refused, since what they pass can't be read from the command. Checks run the project's own scripts, so a test that writes files (coverage, caches) can still write them; the agent itself cannot.
 - **Codex** runs every command in its read-only sandbox, so checks run but any write fails.
 - **OpenCode** follows the same allowlist as Claude: commands that only read and the project's checks run; edits and every other command are refused with the reason, which the agent sees.
 - **Cursor** runs in its read-only `ask` mode, and CodeDen's policy refuses edits and commands outside the same allowlist.
+- **Gemini CLI** stays in its `default` mode, which asks before every edit and command, and CodeDen's policy refuses edits and commands outside the same allowlist.
 - **CodeDen's `create_pull_request`** is hidden from read-only sessions and refused if called. Commenting on issues and attaching screenshots as evidence still work, so the agent can report what it found.
 
-Changing the level while a session runs is saved on the session and sent to the running agent. Claude, OpenCode and Cursor follow it from their next tool call, into and out of Read-only too; Codex from its next turn (the composer tells you which). Approvals that are already waiting stay waiting.
+Changing the level while a session runs is saved on the session and sent to the running agent. Claude, OpenCode, Cursor and Gemini CLI follow it from their next tool call, into and out of Read-only too; Codex from its next turn (the composer tells you which). Approvals that are already waiting stay waiting.
 
 ### Plan mode
 
 **Plan** in the composer (in a new session too, before its first message) has the agent plan before it builds. While it plans, CodeDen refuses file edits and writing commands at **every** level, Full included, with the same command rules as Read-only: the agent can read, search and run the project's checks, and write only its own plan notes (Claude's plans folder), at Read-only too (under Supervised that write still asks). Claude Code's own plan mode would otherwise send edits to CodeDen's approval policy, which Auto and Full approve, so CodeDen enforces it itself. The plan ends in a **Plan ready** card: approving lets the agent implement at the session's permission level, and **Keep planning** sends your note back so it revises the plan. Turning Plan off without approving returns the session to its permission level straight away.
+
+Cursor and Gemini CLI plan in their own `plan` modes, with the same refusals from CodeDen. Gemini CLI's plan ends when it asks to leave plan mode (`exit_plan_mode`): CodeDen shows its plan file and the **Plan ready** card. Gemini CLI can't take a note with **Keep planning**, so send what to change as your next message. While planning, any other tool Gemini CLI asks about that CodeDen can't identify goes to you at every level.
 
 ## Automations
 
@@ -98,7 +103,7 @@ When you approve, you can approve once or for the rest of the session.
 
 ## Credentials
 
-- **Provider logins** (Claude Code, Codex, OpenCode, Cursor) stay with their CLIs. CodeDen runs your installed `claude`, `codex`, `opencode` and `agent`, which use their own logins and credentials; it never implements a login and never sees your password.
+- **Provider logins** (Claude Code, Codex, OpenCode, Cursor, Gemini CLI) stay with their CLIs. CodeDen runs your installed `claude`, `codex`, `opencode`, `agent` and `gemini`, which use their own logins and credentials; it never implements a login and never sees your password. For Gemini CLI, setup reads the login method from its settings, the Google account's email from `google_accounts.json`, whether its OAuth file exists (never its contents) and which login variables are set (never their values). CodeDen never calls Gemini CLI's `authenticate`, which would rewrite your chosen method and could clear a cached login.
 - **GitHub** is read from `gh auth token` at runtime and kept in memory only.
 - **Optional API keys** (ElevenLabs, OpenAI, Gemini, a fallback GitHub token) go into the **OS keychain** (Windows Credential Manager, macOS Keychain, Secret Service on Linux) through `@napi-rs/keyring`. They're never written to files or returned by the API, and cloud voice keys never reach the browser. If no keychain is usable, keys are kept in memory for the current run only.
 - `settings.json` and `usage-settings.json` hold no secrets.
