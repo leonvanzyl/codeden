@@ -407,6 +407,11 @@ export class SessionService {
     this.holds.releaseAll(which);
   }
 
+  /** A turn is on its way to the runner for this session (sent, the runner hasn't answered). */
+  isDelivering(id: string): boolean {
+    return this.delivering.has(id);
+  }
+
   /**
    * Re-open a session whose turn was cut off by a runner restart and tell the agent to carry
    * on (§4.2). Resumes through the provider's resume token. A message already on its way
