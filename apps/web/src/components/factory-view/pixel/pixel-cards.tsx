@@ -71,12 +71,15 @@ export function AgentCardView({
   onEnter,
   onLeave,
   onOpenItem,
+  recent,
 }: {
   agent: SceneAgent;
   card: AgentCardModel;
   anchor: Rect;
   onEnter: () => void;
   onLeave: () => void;
+  /** Its latest activities (the thought bubbles' history). */
+  recent?: ReactNode;
   /** Opens its item's sheet (the PM: its chat). */
   onOpenItem: (() => void) | null;
 }) {
@@ -124,6 +127,7 @@ export function AgentCardView({
         {card.progress && (
           <p className="border border-[#1a1c2c] bg-white px-1 italic">“{card.progress}”</p>
         )}
+        {recent}
         {(onOpenItem || agent.sessionId) && (
           <div className="flex flex-wrap gap-1.5 pt-0.5">
             {onOpenItem && (

@@ -6,6 +6,7 @@ import {
   type Item,
   type Session,
 } from "@codeden/contracts";
+import { startActivityDemo } from "./factory-demo-activity";
 import { Script, streamSteps, uid } from "./live";
 import type { MockWorld } from "./world";
 
@@ -305,8 +306,10 @@ export function startFactoryDemo(world: MockWorld): () => void {
     beat = (beat + 1) % beats.length;
     notify();
   }, BEAT_MS);
+  const stopActivity = startActivityDemo(world, onView);
   return () => {
     window.clearInterval(timer);
+    stopActivity();
     script?.cancel();
   };
 }

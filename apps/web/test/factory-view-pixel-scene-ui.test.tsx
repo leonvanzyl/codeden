@@ -1,7 +1,8 @@
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { PixelScene } from "@/components/factory-view/pixel/pixel-scene";
 import { type SessionInfo, viewPipeline } from "@/components/factory-view/stages";
+import type { TranscriptWatchMessage } from "@/lib/api/client";
 import { createMockClient } from "@/lib/api/mock";
 import { minutesAgo, NOW, prRef, running, status, w } from "./pixel-fixtures";
 import { renderWithClient } from "./utils";
@@ -48,6 +49,12 @@ function renderScene() {
   const setOpen = vi.fn();
   const client = createMockClient();
   const retry = vi.spyOn(client.factory, "retry").mockResolvedValue({} as never);
+  // The server's per-session watch: the test sends the rows a live session changes.
+  const watches = new Map<string, (msg: TranscriptWatchMessage) => void>();
+  vi.spyOn(client, "watchSession").mockImplementation((id, _seq, listener) => {
+    watches.set(id, listener);
+    return () => watches.delete(id);
+  });
   renderWithClient(
     <PixelScene
       f={f}
@@ -61,8 +68,18 @@ function renderScene() {
     client,
     { withRouter: true },
   );
-  return { onOpen, setOpen, retry };
+  return { onOpen, setOpen, retry, watches };
 }
+
+const row = (id: string, item: Record<string, unknown>) => ({
+  sessionId: "s1",
+  threadId: "t1",
+  turnId: "u1",
+  position: 0,
+  item: { id, status: "in_progress", ...item },
+  createdAt: new Date().toISOString(),
+  updatedAt: new Date().toISOString(),
+});
 
 describe("pixel mode's agents and repair bay (#264)", () => {
   it("names each agent's button with what it is doing, and shows its card on focus", async () => {
@@ -104,5 +121,38 @@ describe("pixel mode's agents and repair bay (#264)", () => {
     expect(screen.getByTestId("factory-view-pixel-summary").textContent).toContain(
       "1 in the repair bay",
     );
+  });
+});
+
+describe("pixel mode's thought bubbles (#264)", () => {
+  it("shows a live agent's latest tool call, without its arguments, and lists it on hover", async () => {
+    const { watches } = renderScene();
+    await waitFor(() => expect(watches.has("s1")).toBe(true));
+    // Only live sessions on screen are watched.
+    expect([...watches.keys()]).toEqual(["s1"]);
+    act(() =>
+      watches.get("s1")?.({
+        type: "transcript",
+        sessionId: "s1",
+        seq: 1,
+        threads: [],
+        turns: [],
+        items: [
+          row("c1", {
+            kind: "tool_call",
+            toolKind: "command",
+            toolName: "Bash",
+            command: "API_TOKEN=ghp_0123456789abcdefghij0123456789 pnpm test --filter web",
+          }),
+        ],
+      } as never),
+    );
+    const bubble = await screen.findByTestId("factory-view-pixel-bubble");
+    expect(bubble.textContent).toBe("Run pnpm test");
+    expect(bubble.dataset.kind).toBe("run");
+    fireEvent.focus(screen.getByRole("button", { name: /^Builder, #4/ }));
+    const recent = await screen.findByTestId("factory-view-pixel-card-activity");
+    expect(within(recent).getByText("Run pnpm test")).toBeTruthy();
+    expect(document.body.textContent).not.toContain("ghp_");
   });
 });

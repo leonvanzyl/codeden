@@ -11,6 +11,7 @@ import {
   type ViewCard,
   type ViewPipeline,
 } from "../stages";
+import { ActivityBubbles, RecentActivity } from "./activity-bubbles";
 import { agentCard, agentLabel } from "./agent-card";
 import type { SceneAgent } from "./agents";
 import { SCENE_H, SCENE_W } from "./floor";
@@ -19,6 +20,7 @@ import { PmTerminal } from "./pm-terminal";
 import { bayCount } from "./repair-bay";
 import { sceneSummary } from "./scene-model";
 import { pct, type SceneTarget, sceneTargets } from "./targets";
+import { useAgentActivity } from "./use-activity";
 import { useFloorScene, useSceneCanvas, useSceneSize } from "./use-floor";
 
 /** Where the PM chat goes in pixel mode: docked beside the scene (wide screens) or over it. */
@@ -29,6 +31,8 @@ export interface PixelChat {
 }
 
 const TERMINAL_W = 340;
+/** Session states whose agent can be doing something worth a bubble. */
+const LIVE = new Set(["starting", "running", "waiting"]);
 const TAB_W = 32;
 
 /** The hovered or focused target; a short delay before closing lets the pointer reach a card. */
@@ -103,6 +107,19 @@ export function PixelScene({
   const navigate = useNavigate();
   const hover = useHover();
   const targets = useMemo(() => sceneTargets(scene), [scene]);
+  // Thought bubbles: only the sessions on screen that are live.
+  const liveSessions = useMemo(
+    () =>
+      scene.agents.flatMap((a) =>
+        a.sessionId &&
+        scene.seating.seats.has(a.key) &&
+        LIVE.has(sessions.get(a.sessionId)?.status ?? "")
+          ? [a.sessionId]
+          : [],
+      ),
+    [scene, sessions],
+  );
+  const activity = useAgentActivity(liveSessions);
   const hovered = targets.find((t) => t.key === hover.key);
 
   const focusChat = () => {
@@ -159,6 +176,7 @@ export function PixelScene({
             ))}
             {hovered?.kind === "agent" && (
               <AgentCardView
+                recent={<RecentActivity store={activity} sessionId={hovered.agent.sessionId} />}
                 agent={hovered.agent}
                 card={agentCard(hovered.agent, now)}
                 anchor={hovered.rect}
@@ -184,6 +202,11 @@ export function PixelScene({
               />
             )}
             {hovered?.kind === "ticket" && <TicketTip card={hovered.card} anchor={hovered.rect} />}
+            <ActivityBubbles
+              store={activity}
+              targets={targets}
+              pinned={hovered?.kind === "agent" ? hovered.key : null}
+            />
             {!chat.docked && chat.open && (
               <PmTerminal
                 {...terminalProps}
