@@ -42,6 +42,7 @@ export * from "./runner/browser";
 export * from "./runner/commands";
 export * from "./runner/events";
 export * from "./runner/link";
+export * from "./runner/mcp-link";
 export * from "./runner/messages";
 export * from "./runner/workspace-fs";
 export * from "./runners";

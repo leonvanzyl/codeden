@@ -4,6 +4,7 @@ import { ProviderInfo } from "../provider";
 import { RunnerBackendId } from "../runners";
 import { RunnerCommand, RunnerSessionInfo } from "./commands";
 import { RunnerEvent, RunnerStream } from "./events";
+import { McpLinkAck, McpLinkCancel, McpLinkRequest, McpLinkResponse } from "./mcp-link";
 
 /**
  * Server <-> runner protocol (§4.3): JSON messages over one connection, a loopback WebSocket
@@ -18,7 +19,8 @@ import { RunnerEvent, RunnerStream } from "./events";
  * After the handshake the server sends `command`s (answered by `result` with the same `id`)
  * and cumulative `ack`s; the runner sends `event`s (durable, with `seq`), `stream`s
  * (ephemeral) and `providers` (the current provider list, whenever it changes). Either side
- * may `ping`.
+ * may `ping`. A runner whose MCP proxy goes over the link sends `mcp.request`s, answered by
+ * `mcp.response`s (`./mcp-link.ts`).
  */
 
 /** Request id correlating a `command` with its `result`. */
@@ -67,6 +69,7 @@ export const ServerToRunnerMessage = z.discriminatedUnion("type", [
   ServerResume,
   ServerCommand,
   ServerAck,
+  McpLinkResponse,
   Ping,
   Pong,
 ]);
@@ -147,6 +150,9 @@ export const RunnerToServerMessage = z.discriminatedUnion("type", [
   RunnerEventMessage,
   RunnerStreamMessage,
   RunnerProvidersMessage,
+  McpLinkRequest,
+  McpLinkCancel,
+  McpLinkAck,
   Ping,
   Pong,
 ]);
