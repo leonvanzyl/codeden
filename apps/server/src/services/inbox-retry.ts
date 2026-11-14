@@ -13,8 +13,11 @@ export interface InboxRetryDeps {
   inbox: InboxService;
   repo: SessionRepo;
   sessions: Pick<SessionService, "send">;
-  /** Whether new work can run on the provider now, and the fix when it can't (§10.1). */
-  runnable: (provider: string) => ProviderRunnable;
+  /**
+   * Whether the provider can run now, and the fix when it can't (§10.1). The server passes
+   * `FactoryService.providerRunnableNow`: detected afresh before it says no.
+   */
+  runnable: (provider: string) => ProviderRunnable | Promise<ProviderRunnable>;
 }
 
 /**
@@ -31,7 +34,7 @@ export async function retryRunFailed(deps: InboxRetryDeps, id: string): Promise<
   }
   if (item.status !== "open") return item;
   const session = deps.repo.get(item.sessionId);
-  const provider = deps.runnable(session.provider);
+  const provider = await deps.runnable(session.provider);
   if (!provider.runnable) {
     throw conflict(provider.message ?? "The session's provider can't run", "provider_unavailable");
   }

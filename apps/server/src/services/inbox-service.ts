@@ -1,12 +1,13 @@
-import type {
-  InboxCounts,
-  InboxItem,
-  InboxSettlement,
-  JsonValue,
-  ListInboxQuery,
-  ResolveInboxRequest,
-  RuntimeResponse,
-  Session,
+import {
+  type InboxCounts,
+  type InboxItem,
+  type InboxSettlement,
+  inboxAttempts,
+  type JsonValue,
+  type ListInboxQuery,
+  type ResolveInboxRequest,
+  type RuntimeResponse,
+  type Session,
 } from "@codeden/contracts";
 import { and, desc, eq, type SQL } from "drizzle-orm";
 import type { Db } from "../db/client";
@@ -129,16 +130,17 @@ export class InboxService {
   /**
    * Raise a `run_failed` item for a session that could not start or crashed. One item per run:
    * a session whose earlier failure is still open updates that item in place (attempts, latest
-   * error) instead of getting a second one.
+   * error) instead of getting a second one. An item of the same key that was closed opens again
+   * and counts on, so the new failure still gets its own notice (`deriveNotices`).
    */
   raiseRunFailed(session: Session, key: string, message: string): InboxItem {
     const now = new Date().toISOString();
     const open = openRunFailed(this.list({ sessionId: session.id }));
-    return this.put(
-      open
-        ? runFailedAgain(open, message, now)
-        : runFailedInbox(session, `inbox:${session.id}:${key}`, message, session.rootThreadId, now),
-    );
+    if (open) return this.put(runFailedAgain(open, message, now));
+    const id = `inbox:${session.id}:${key}`;
+    const fresh = runFailedInbox(session, id, message, session.rootThreadId, now);
+    const closed = this.find(id);
+    return this.put(closed ? { ...fresh, attempts: inboxAttempts(closed) + 1 } : fresh);
   }
 
   /**

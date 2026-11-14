@@ -470,6 +470,14 @@ export class FactoryService {
     return this.ctx.sessions.runnable(provider);
   }
 
+  /**
+   * `providerRunnable` for a person's Retry (§11.1): without the factory's back-off after its own
+   * sessions failed on the provider, and detected afresh before it says no.
+   */
+  providerRunnableNow(provider: string): Promise<ProviderRunnable> {
+    return this.ctx.sessions.runnableNow(provider);
+  }
+
   /** Whether a session is a factory builder (it may report a reproduction or analysis). */
   isBuilder(sessionId: string): boolean {
     const s = this.deps.repo.find(sessionId)?.session;

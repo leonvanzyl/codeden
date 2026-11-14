@@ -9,6 +9,7 @@ import {
 } from "@/components/composer/model-picker/logic";
 import { Button } from "@/components/ui/button";
 import { useClient } from "@/lib/api";
+import { ApiRequestError } from "@/lib/api/http";
 import { useSetupStatus, useSnapshotData } from "@/lib/queries";
 import { useUiStore } from "@/stores/ui";
 
@@ -52,9 +53,19 @@ export function RunFailedActions({
     name ?? "Its provider",
     session ? providerAvailability(session.provider, checks) : null,
   );
+  const handOff = () =>
+    session && useUiStore.getState().setHandoff({ sessionId: session.id, provider: null });
   const retry = useMutation({
     mutationFn: () => client.retryInbox(item.id),
-    onError: (e: Error) => toast.error("Retry failed", { description: e.message }),
+    // Refused because the provider can't run (e.g. its usage limit, which the setup checks don't
+    // know): the work can still continue elsewhere.
+    onError: (e: Error) =>
+      toast.error("Retry failed", {
+        description: e.message,
+        ...(e instanceof ApiRequestError && e.code === "provider_unavailable" && session
+          ? { action: { label: "Continue on another provider", onClick: handOff } }
+          : {}),
+      }),
     onSuccess: () => toast.success("Retrying"),
   });
   const attempts = inboxAttempts(item);
@@ -69,13 +80,7 @@ export function RunFailedActions({
         <RotateCcw /> {retry.isPending ? "Retrying…" : "Retry"}
       </Button>
       {blocked && session && (
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() =>
-            useUiStore.getState().setHandoff({ sessionId: session.id, provider: null })
-          }
-        >
+        <Button size="sm" variant="outline" onClick={handOff}>
           <ArrowRightLeft /> Continue on another provider
         </Button>
       )}

@@ -23,7 +23,7 @@ export function inboxRoutes(s: AppServices) {
           inbox: s.inbox,
           repo: s.sessionRepo,
           sessions: s.sessions,
-          runnable: (provider) => s.factory.providerRunnable(provider),
+          runnable: (provider) => s.factory.providerRunnableNow(provider),
         },
         c.req.param("id"),
       );

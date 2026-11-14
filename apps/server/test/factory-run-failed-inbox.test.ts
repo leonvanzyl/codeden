@@ -2,18 +2,21 @@ import {
   type AgentEvent,
   agentEventToNewEvent,
   type InboxItem,
+  type RawEventEnvelope,
   type RunnerEventMessage,
   type Session,
 } from "@codeden/contracts";
 import { afterEach, describe, expect, it } from "vitest";
 import { ingestRunnerEvent } from "../src/events/ingest";
+import { derivedEvents } from "../src/events/projection-db";
 import { RunnerCommandError } from "../src/runner/client";
-import type { ProviderRunnable } from "../src/services/factory/availability";
+import { ProviderAvailability, type ProviderRunnable } from "../src/services/factory/availability";
 import { buildDigest } from "../src/services/factory/digest";
 import { localDay } from "../src/services/factory/policy";
 import { RETRY_TEXT, retryRunFailed } from "../src/services/inbox-retry";
 import { RunFailedSettler } from "../src/services/inbox-settle";
-import { toServiceError } from "../src/services/runner-port";
+import { deriveNotices } from "../src/services/orchestration/notices";
+import { type RunnerPort, toServiceError } from "../src/services/runner-port";
 import { type LauncherDeps, SessionLauncher } from "../src/services/sessions/launcher";
 import { sampleSession } from "./helpers";
 import { createFactoryEnv, type FactoryEnv } from "./support/factory-env";
@@ -89,10 +92,10 @@ async function failedReviewer() {
 }
 
 /** A session a person started (not the factory) for `workKey`. */
-async function userSession(workKey = "issue:9"): Promise<Session> {
+async function userSession(workKey = "issue:9", purpose = "Fix the parser"): Promise<Session> {
   const res = await env.sessions.start({
     projectId: env.project.id,
-    purpose: "Fix the parser",
+    purpose,
     workKey,
     startedBy: { kind: "user" },
   } as Parameters<FactoryEnv["sessions"]["start"]>[0]);
@@ -262,6 +265,83 @@ describe("run_failed items settle when their work moves on (#275)", () => {
   });
 });
 
+describe("what doesn't settle (#275 review)", () => {
+  it("not a session of other work on the same issue (a reviewer, a triage)", async () => {
+    env = createFactoryEnv();
+    const s = await userSession("issue:40");
+    env.inbox.raiseRunFailed(s, "start", "Request failed: 401");
+    await moment();
+    const reviewer = await userSession("issue:40", "Review the parser fix");
+    turnCompletes(reviewer.id);
+    expect(settler().sweep()).toEqual([]);
+    expect(runFailed(s.id)).toHaveLength(1);
+  });
+
+  it("not the factory's own items, even one about a factory session", async () => {
+    env = createFactoryEnv();
+    enable("software_factory");
+    const created = backlogItem();
+    await tick();
+    const builder = env.repo.get(item(created.id).builderSessionId as string);
+    // A stuck item without a pull request: `run_failed`, needs you, about the builder.
+    const stuck = env.inbox.put({
+      ...env.inbox.raiseRunFailed(builder, "start", "x"),
+      id: `inbox:factory-stuck:${created.id}`,
+      status: "open",
+      notify: "needs_you",
+      title: "Stuck: Add a counter",
+      resolvedAt: null,
+      resolution: null,
+    });
+    // A failed run of a factory session someone flagged for a person, outside the factory's ids.
+    const flagged = env.inbox.put({ ...stuck, id: "inbox:flagged", title: "Flagged" });
+    // Neither is a failure the factory handles by itself: both still wait on the user.
+    expect(settler().sweep()).toEqual([]);
+    expect(env.inbox.get(flagged.id).status).toBe("open");
+    await moment();
+    turnCompletes(builder.id);
+    const settled = settler().sweep();
+    expect(settled.map((i) => i.id)).toEqual(["inbox:flagged"]);
+    expect(settled[0]?.resolution).toMatchObject({ by: "codeden", note: "The session ran again" });
+    expect(env.inbox.get(stuck.id).status).toBe("open");
+  });
+});
+
+describe("Retry's provider check (#275 review)", () => {
+  it("detects again before refusing, so a CLI just updated isn't refused", async () => {
+    env = createFactoryEnv({ providers: ["claude", "gemini"] });
+    env.detected.gemini = {
+      installed: true,
+      version: "0.36.0",
+      supported: false,
+      issues: [
+        {
+          code: "version_unsupported",
+          message: "Gemini CLI 0.36.0 is too old (needs 0.68.0+). Update it.",
+          fix: { kind: "upgrade", command: "npm install -g @google/gemini-cli@latest" },
+          minVersion: "0.68.0",
+        },
+      ],
+    };
+    enable("software_factory");
+    await tick();
+    await settle();
+    expect((await env.factory.providerRunnableNow("gemini")).runnable).toBe(false);
+    // The user updates Gemini CLI; the factory's cached detection is still the old one.
+    env.detected.gemini = {};
+    expect(env.factory.providerRunnable("gemini").runnable).toBe(false);
+    expect((await env.factory.providerRunnableNow("gemini")).runnable).toBe(true);
+  });
+
+  it("leaves out the factory's back-off after its own sessions failed there", () => {
+    const runner = { isConnected: () => false } as unknown as RunnerPort;
+    const availability = new ProviderAvailability({ runner, now: () => new Date() });
+    availability.markFailed("codex", "failing to run reviews", null);
+    expect(availability.runnable("codex").runnable).toBe(false);
+    expect(availability.runnable("codex", "Codex", { ignoreFailures: true }).runnable).toBe(true);
+  });
+});
+
 describe("Retry of a failed run (#275)", () => {
   const RUNNABLE: ProviderRunnable = {
     runnable: true,
@@ -366,6 +446,67 @@ describe("Retry of a failed run (#275)", () => {
     );
     expect(item).toMatchObject({ status: "resolved", resolution: { note: "retry" } });
     expect(env.messages).toEqual([{ sessionId: s.id, text: RETRY_TEXT }]);
+  });
+});
+
+describe("a session that fails again (#275)", () => {
+  // A PM-started session reporting to the orchestrator: every failure must reach the PM, the
+  // orchestrator and `session.failed` automations, though the inbox item is updated in place.
+  const reporting: Session = {
+    ...sampleSession,
+    status: "running",
+    projectId: "p1",
+    startedBy: { kind: "pm", id: "pm1", reportTo: "orchestrator" },
+  };
+
+  /** Apply the agent events, then derive notices from the events the reducer produced. */
+  function noticesOf(p: MemoryProjection, events: AgentEvent[]) {
+    let seq = 0;
+    const envelopes = events.flatMap((e) =>
+      derivedEvents(p.apply("s1", e)).map((n) => ({
+        seq: ++seq,
+        ts: "2026-11-14T12:00:00.000Z",
+        sessionId: n.sessionId,
+        type: n.type,
+        payload: n.payload,
+      })),
+    );
+    return deriveNotices(envelopes as RawEventEnvelope[], {
+      session: (id) => p.sessions.get(id)?.session,
+      finalMessage: () => null,
+    }).map((d) => [d.notice.id, d.notice.type, d.notice.target]);
+  }
+
+  const failedTurn = (turnId: string, message: string): AgentEvent[] => [
+    { type: "turn.started", threadId: "t1", turnId },
+    { type: "turn.failed", threadId: "t1", turnId, error: { message } },
+  ];
+
+  it("still tells the PM, the orchestrator and automations about every failure", () => {
+    const p = new MemoryProjection();
+    p.addSession(reporting);
+    p.apply("s1", { type: "thread.started", thread: { id: "t1" } });
+    expect(noticesOf(p, failedTurn("u1", "Request failed: 401"))).toEqual([
+      ["session.failed:inbox:s1:u1:failed", "session.failed", "pm"],
+      ["session.failed:orchestrator:inbox:s1:u1:failed", "session.failed", "orchestrator"],
+    ]);
+    // The PM tells the agent to try again; that turn fails too.
+    expect(noticesOf(p, failedTurn("u2", "Request failed: 401 again"))).toEqual([
+      ["session.failed:inbox:s1:u1:failed:2", "session.failed", "pm"],
+      ["session.failed:orchestrator:inbox:s1:u1:failed:2", "session.failed", "orchestrator"],
+    ]);
+    // Still one item, counting both.
+    const open = [...p.inbox.values()].filter((i) => i.status === "open");
+    expect(open).toEqual([expect.objectContaining({ attempts: 2 })]);
+  });
+
+  it("gets a notice when a closed item of the same key opens again", async () => {
+    env = createFactoryEnv();
+    const s = await userSession();
+    const first = env.inbox.raiseRunFailed(s, "start", "spawn opencode.exe ENOENT");
+    env.inbox.close(first, "dismissed", null);
+    const again = env.inbox.raiseRunFailed(s, "start", "spawn opencode.exe ENOENT");
+    expect(again).toMatchObject({ id: first.id, status: "open", attempts: 2 });
   });
 });
 

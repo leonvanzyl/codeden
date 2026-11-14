@@ -40,9 +40,15 @@ export interface RunFailedSettlerDeps {
 /** What is known around one open `run_failed` item. */
 export interface SettleView {
   session: Session | undefined;
+  /** The item records a factory session's failure (`notify: "factory"`), which the factory handles. */
+  factoryFailure: boolean;
   /** The session finished a turn after the failure. */
   ranAgain: boolean;
-  /** Another session of the same work that finished a turn since the failure. */
+  /**
+   * Another session doing the same work (same work key, role and purpose: a re-run, a hand-off,
+   * a fork) that finished a turn since the failure. A reviewer or triage session on the same
+   * issue doesn't count.
+   */
   succeededElsewhere: Session | undefined;
   /** A pull request of the work that merged, or the session's own that was closed. */
   prDone: GitHubPrRef | null;
@@ -73,11 +79,18 @@ export function settlement(v: SettleView): InboxSettlement | null {
   if (v.failedAgainLater) {
     return { by, note: "The same work failed again the same way later: see the newer item" };
   }
-  if (v.session && isFactorySession(v.session)) {
+  if (v.factoryFailure && v.session && isFactorySession(v.session)) {
     return { by: "factory", note: FACTORY_HANDLES_FAILURE };
   }
   return null;
 }
+
+/**
+ * The factory's own inbox items (stuck work, a paused loop, a regression, an escalation, the
+ * digest): the factory raises and resolves them, and some need a person, so they never settle
+ * here.
+ */
+const FACTORY_ITEM_PREFIX = "inbox:factory-";
 
 /** Events after which an open failed run may have settled. */
 const RELEVANT = new Set([
@@ -112,7 +125,11 @@ export class RunFailedSettler {
 
   /** Settle every open `run_failed` item whose work moved on; returns the settled items. */
   sweep(): InboxItem[] {
-    const open = this.deps.inbox.list().filter((i) => i.kind === "run_failed" && i.sessionId);
+    const open = this.deps.inbox
+      .list()
+      .filter(
+        (i) => i.kind === "run_failed" && i.sessionId && !i.id.startsWith(FACTORY_ITEM_PREFIX),
+      );
     if (open.length === 0) return [];
     const sessions = new Map<string, Session | undefined>();
     const sessionOf = (id: string) => {
@@ -136,6 +153,7 @@ export class RunFailedSettler {
       const work = workOf(session);
       const view: SettleView = {
         session,
+        factoryFailure: item.notify === "factory",
         ranAgain: session ? this.finishedTurnSince(session, item.updatedAt) : false,
         succeededElsewhere: undefined,
         prDone: null,
@@ -154,7 +172,12 @@ export class RunFailedSettler {
         const siblings = this.deps.repo
           .list({ projectId: session.projectId, workKey: session.workKey })
           .filter((s) => s.id !== session.id);
-        view.succeededElsewhere = siblings.find((s) => this.finishedTurnSince(s, item.createdAt));
+        view.succeededElsewhere = siblings.find(
+          (s) =>
+            s.role === session.role &&
+            s.purpose === session.purpose &&
+            this.finishedTurnSince(s, item.createdAt),
+        );
         view.prDone = prDone(item, session, siblings);
         view.factoryItem = factoryItemsOf(session.projectId).find(
           (f) => f.workKey === session.workKey,
