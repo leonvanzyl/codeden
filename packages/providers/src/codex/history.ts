@@ -71,7 +71,10 @@ export async function archiveThread(
 }
 
 /** A short-lived app-server for history work: no thread runs, so nothing should ask. */
-async function historyServer(exe: ResolvedCommand): Promise<CodexRpc> {
+async function historyServer(
+  exe: ResolvedCommand,
+  opts: { env?: Record<string, string>; cwd?: string } = {},
+): Promise<CodexRpc> {
   const { rpc } = await startAppServer(
     exe,
     {
@@ -79,9 +82,29 @@ async function historyServer(exe: ResolvedCommand): Promise<CodexRpc> {
       onRequest: async () => ({ decision: "decline" }),
       onExit: () => {},
     },
-    { cwd: tmpdir() },
+    { cwd: opts.cwd ?? tmpdir(), ...(opts.env ? { env: opts.env } : {}) },
   );
   return rpc;
+}
+
+/**
+ * Archive one thread through a short-lived app-server: for a thread whose own app-server died
+ * mid-turn, so the crash doesn't leave it listed. True when archived; never throws.
+ */
+export async function archiveThreadOnce(
+  exe: ResolvedCommand,
+  threadId: string,
+  opts: { env?: Record<string, string>; cwd?: string } = {},
+): Promise<boolean> {
+  let rpc: CodexRpc | undefined;
+  try {
+    rpc = await historyServer(exe, opts);
+    return await archiveThread(rpc, threadId);
+  } catch {
+    return false;
+  } finally {
+    await rpc?.close();
+  }
 }
 
 /**

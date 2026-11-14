@@ -20,7 +20,7 @@ import {
   codexSandboxPolicy,
   toCodexInput,
 } from "./config";
-import { archiveThread } from "./history";
+import { archiveThread, archiveThreadOnce } from "./history";
 import { CodexEventMapper } from "./mapper";
 import { startAppServer } from "./process";
 import type { ServerNotification } from "./protocol";
@@ -47,7 +47,8 @@ export { codexEffort };
  * thread is archived whenever no turn of it runs: when a turn ends and when the session closes
  * (`./history`). Archiving unloads it, so the next `send()` unarchives and resumes it first. A
  * session whose agent spawned Codex sub-agents is only archived when it closes: unloading the
- * thread could cut off agents a later turn still talks to.
+ * thread could cut off agents a later turn still talks to. A failed `turn/start` archives it
+ * too, and so does an app-server that dies with the thread open (through a short-lived one).
  */
 export class CodexSession implements ProviderSession {
   readonly events = new AsyncQueue<AgentEvent>();
@@ -67,6 +68,8 @@ export class CodexSession implements ProviderSession {
   private readonly filePaths = new Map<string, string[]>();
   /** The thread being archived (or archived) on `rpc` after its turn; true once archived. */
   private parked: { rpc: CodexRpc; archived: Promise<boolean> } | undefined;
+  /** The app-server that has the thread open, if any. */
+  private openedOn: CodexRpc | undefined;
 
   constructor(
     private readonly opts: SessionOptions,
@@ -142,6 +145,8 @@ export class CodexSession implements ProviderSession {
       this.mapper.beginTurn(res.turn.id);
     } catch (error) {
       this.turnPending = false;
+      // No turn started (a failed start): the thread may be open again, so archive it.
+      if (!this.mapper.currentTurnId) this.park();
       throw error;
     }
   }
@@ -277,6 +282,7 @@ export class CodexSession implements ProviderSession {
   }
 
   private async boot(): Promise<CodexRpc> {
+    let started: CodexRpc | undefined;
     const { rpc } = await startAppServer(
       this.config.executable,
       {
@@ -294,11 +300,14 @@ export class CodexSession implements ProviderSession {
             ctx: (threadId, turnId) => this.mapper.requestCtx(threadId, turnId),
             filePaths: (itemId) => this.filePaths.get(itemId),
           }),
-        onExit: (code, stderr) => this.onExit(code, stderr),
+        onExit: (code, stderr) => this.onExit(code, stderr, started),
       },
       { env: this.opts.env, cwd: this.opts.cwd },
     );
+    started = rpc;
     this.rpc = rpc;
+    // The thread may still be archived through a short-lived app-server after a crash.
+    await this.parked?.archived;
     await this.openThread(rpc, { report: true });
     if (this.config.onModels) {
       rpc.request<{ data: Model[] }>("model/list", {}).then(
@@ -331,6 +340,7 @@ export class CodexSession implements ProviderSession {
       },
       (message) => this.noticeOutsideTurn(message),
     );
+    this.openedOn = rpc;
     this.mapper.codexThreadId = res.thread.id;
     this.threadModel = res.model || undefined;
     if (report || res.thread.id !== resumeId) {
@@ -390,7 +400,7 @@ export class CodexSession implements ProviderSession {
     this.mapper.handle(n);
   }
 
-  private onExit(code: number | null, stderr: string): void {
+  private onExit(code: number | null, stderr: string, exited?: CodexRpc): void {
     if (this.closed) return;
     this.broker.cancelAll();
     // Sub-agents ran in the same process: their turns end with it.
@@ -403,5 +413,26 @@ export class CodexSession implements ProviderSession {
       ...(stderr ? { detail: stderr.slice(-2000) } : {}),
     });
     this.turnPending = false;
+    this.archiveAfterExit(exited);
+  }
+
+  /**
+   * The app-server that had the thread open died (mid-turn, or holding a thread kept loaded for
+   * its sub-agents): archive the thread through a short-lived one, so the crash doesn't leave it
+   * listed. Not for an app-server that never opened it (a resume refused because another process
+   * still writes to the thread). The next start waits for this archive (`boot`).
+   */
+  private archiveAfterExit(exited: CodexRpc | undefined): void {
+    const threadId = this.mapper.codexThreadId;
+    if (!exited || exited !== this.openedOn || !threadId) return;
+    this.openedOn = undefined;
+    const before = this.parked;
+    const archived = (async () =>
+      (await before?.archived) ||
+      archiveThreadOnce(this.config.executable, threadId, {
+        ...(this.opts.env ? { env: this.opts.env } : {}),
+        cwd: this.opts.cwd,
+      }))();
+    this.parked = { rpc: exited, archived };
   }
 }

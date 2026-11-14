@@ -60,6 +60,7 @@ afterEach(async () => {
     "FAKE_CODEX_ARCHIVE",
     "FAKE_CODEX_REQUESTS",
     "FAKE_CODEX_THREADS",
+    "FAKE_CODEX_TURN",
   ]) {
     delete process.env[key];
   }
@@ -169,6 +170,28 @@ describe("Codex threads stay out of the Codex app's history", () => {
     // The same thread throughout: no second `session.updated` with another resume token.
     const tokens = events.flatMap((e) => (e.type === "session.updated" ? [e.resumeToken] : []));
     expect(tokens).toEqual(["thread-1"]);
+  });
+
+  it("archives the thread after a turn that failed to start", async () => {
+    const { archive } = codexHome(["thread-1"]);
+    process.env.FAKE_CODEX_TURN = "fail";
+    const { session } = await openSession({ resumeToken: "thread-1" });
+    // Opening resumed (and so unarchived) the thread.
+    expect(archivedIds(archive)).toEqual([]);
+    await expect(session.send({ text: "Go", attachments: [] })).rejects.toThrow(/turn refused/);
+    await vi.waitFor(() => expect(archivedIds(archive)).toEqual(["thread-1"]), WAIT);
+  });
+
+  it("archives the thread when its app-server dies mid-turn", async () => {
+    const { log, archive } = codexHome();
+    process.env.FAKE_CODEX_TURN = "exit";
+    const { session, events } = await openSession();
+    await session.send({ text: "Go", attachments: [] });
+    await vi.waitFor(() => expect(ended(events)).toHaveLength(1), WAIT);
+    expect(ended(events)[0]).toMatchObject({ type: "turn.failed" });
+    // Through a short-lived app-server, since the session's own is gone.
+    await vi.waitFor(() => expect(archivedIds(archive)).toEqual(["thread-1"]), WAIT);
+    expect(requests(log).filter((r) => r.method === "initialize")).toHaveLength(2);
   });
 
   it("archives the thread when the session closes", async () => {

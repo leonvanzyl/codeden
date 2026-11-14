@@ -9,6 +9,8 @@
 // every turn, one after the other (`notify: true` ones as notifications); each answer is logged as `{ method: "answer:<method>", params }`
 // and the turn completes once all are answered.
 // FAKE_CODEX_TURN=hang starts turns that never complete and never answers `turn/interrupt`.
+// FAKE_CODEX_TURN=fail refuses `turn/start`; FAKE_CODEX_TURN=exit starts the turn, then the
+// process exits mid-turn (a crash).
 // FAKE_CODEX_TURN=open sends the scripted requests but keeps the turn open until
 // `turn/interrupt`, which ends it as interrupted; interrupts for other threads (sub-agents) are
 // answered but their turns never end. Scripted entries with `afterInterrupt: true` are held
@@ -204,10 +206,12 @@ createInterface({ input: process.stdin }).on("line", (line) => {
     case "turn/start": {
       // Archiving unloads a thread: a turn on it fails until it is unarchived and resumed.
       if (archived().has(msg.params?.threadId)) return fail(msg, `thread not found: ${msg.params.threadId}`);
+      if (turnMode === "fail") return fail(msg, "turn refused");
       const turn = { id: `turn-${++turns}`, status: "completed", items: [], error: null };
       send({ id: msg.id, result: { turn: { ...turn, status: "inProgress" } } });
       echoUserMessage(turn.id, msg.params);
       if (turnMode === "hang") return;
+      if (turnMode === "exit") return setTimeout(() => process.exit(3), 50);
       // Like the real server: the turn completes after the response has been handled.
       setTimeout(async () => {
         for (const [i, r] of scripted.entries()) {
