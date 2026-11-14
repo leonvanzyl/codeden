@@ -10,7 +10,7 @@ import {
   Role,
   Timestamp,
 } from "./common";
-import { InboxItemKind, InboxItemStatus } from "./entities/inbox";
+import { InboxItem, InboxItemKind, InboxItemStatus } from "./entities/inbox";
 import { GitHubRepo, Project } from "./entities/project";
 import { ItemRecord, Session, SessionStatus, Thread, Turn } from "./entities/session";
 import { UserInput } from "./input";
@@ -357,6 +357,29 @@ export const ResolveInboxRequest = z.object({
   note: z.string().max(2000).optional(),
 });
 export type ResolveInboxRequest = z.infer<typeof ResolveInboxRequest>;
+
+/**
+ * `POST /api/inbox/:id/retry`: run a `run_failed` item's session again on its provider. Refused
+ * (409 `provider_unavailable`, with what fixes it) while that provider can't run: not
+ * installed, too old, signed out, at its usage limit. A retry that fails again updates the same
+ * item (attempts, latest error) and answers with the error; one that starts resolves it.
+ */
+export const RetryInboxResponse = z.object({ item: InboxItem });
+export type RetryInboxResponse = z.infer<typeof RetryInboxResponse>;
+
+/**
+ * `POST /api/inbox/dismiss`: dismiss several items at once (the inbox's "Dismiss all" for
+ * failed runs). Approvals and questions are skipped: they need an answer. Ids that aren't open
+ * are ignored.
+ */
+export const DismissInboxRequest = z.object({
+  ids: z.array(Id).min(1).max(1000),
+  note: z.string().max(2000).optional(),
+});
+export type DismissInboxRequest = z.infer<typeof DismissInboxRequest>;
+
+export const DismissInboxResponse = z.object({ dismissed: z.int().nonnegative() });
+export type DismissInboxResponse = z.infer<typeof DismissInboxResponse>;
 
 /** `GET /api/inbox/counts`: the sidebar badge numbers. */
 export const InboxCounts = z.object({

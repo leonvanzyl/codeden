@@ -4,6 +4,7 @@ import {
   type AutomationRun,
   InboxItem,
   type ItemRecord,
+  inboxAttempts,
   Project,
   Session,
   type Thread,
@@ -84,7 +85,7 @@ export function rowToSession(r: SessionRow): Session {
 }
 
 export function inboxToRow(i: InboxItem): InboxRow {
-  return { ...i };
+  return { ...i, attempts: inboxAttempts(i) };
 }
 
 export function rowToInbox(r: InboxRow): InboxItem {

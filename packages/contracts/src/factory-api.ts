@@ -405,6 +405,14 @@ export const FactoryDigest = z.object({
       }),
     )
     .default([]),
+  /**
+   * Failures of its own sessions the factory handled during the day: a reviewer or builder that
+   * couldn't run on its provider (too old, signed out, not installed) or died, restarted
+   * elsewhere. Kept here and as settled inbox items; none of them waits on the user.
+   */
+  handled: z
+    .array(z.object({ title: z.string(), detail: z.string(), inboxItemId: Id }))
+    .default([]),
   text: z.string(),
   createdAt: Timestamp,
 });

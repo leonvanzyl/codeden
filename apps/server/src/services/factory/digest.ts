@@ -34,6 +34,7 @@ export async function writeDigest(
     items,
     needsYou: needsYouItems(ctx, project.id),
     inbox: inbox.list({ projectId: project.id }),
+    settled: inbox.list({ projectId: project.id, status: "resolved" }),
     spend: budgetSpend(ctx, project.id, day, project.factoryLimits),
     limits: project.factoryLimits,
     pausedReason: loop.state === "paused" ? loop.pausedReason : null,
@@ -103,7 +104,10 @@ export function buildDigest(opts: {
   items: FactoryItem[];
   /** Finished items still waiting on a person, whenever they happened (`needsYouItems`). */
   needsYou: DigestNeed[];
+  /** The project's open inbox items. */
   inbox: InboxItem[];
+  /** The project's resolved inbox items (failures the factory handled are among them). */
+  settled?: InboxItem[];
   spend: { usd: number; tokens: number };
   limits: FactoryLimits;
   pausedReason: string | null;
@@ -135,10 +139,16 @@ export function buildDigest(opts: {
           !listed.has(x.id) &&
           !x.id.startsWith("inbox:factory-digest:") &&
           // Decisions the factory made on its own are reported, not waiting (unless flagged).
-          !(x.id.startsWith(DECISION_INBOX_PREFIX) && x.priority !== "high"),
+          !(x.id.startsWith(DECISION_INBOX_PREFIX) && x.priority !== "high") &&
+          // Its own sessions' failures are the factory's to handle (reported under `handled`).
+          !isFactoryFailure(x),
       )
       .map((x) => ({ title: x.title, inboxItemId: x.id, itemId: null })),
   ];
+  const handled = (opts.settled ?? [])
+    .filter((x) => isFactoryFailure(x) && dayOf(x.resolvedAt ?? x.createdAt) === opts.day)
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+    .map((x) => ({ title: x.title, detail: x.body ?? "", inboxItemId: x.id }));
   const decisions = opts.inbox
     .filter((x) => x.id.startsWith(DECISION_INBOX_PREFIX) && dayOf(x.createdAt) === opts.day)
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
@@ -163,9 +173,15 @@ export function buildDigest(opts: {
     spend,
     waiting,
     decisions,
+    handled,
     createdAt: (opts.now ?? new Date()).toISOString(),
   };
   return { ...digest, text: renderDigest(opts.projectName, digest, opts.pausedReason) };
+}
+
+/** A failed run of a factory session: the factory handles it by itself (`runFailedInbox`). */
+function isFactoryFailure(x: InboxItem): boolean {
+  return x.kind === "run_failed" && x.notify === "factory";
 }
 
 function dayOf(iso: string): string {
@@ -204,6 +220,10 @@ export function renderDigest(
     for (const x of d.decisions) {
       lines.push(`- ${x.title}${x.decision ? ` → ${x.decision}` : ""}`);
     }
+  }
+  if (d.handled.length > 0) {
+    lines.push("", `Failures it handled on its own (${d.handled.length}):`);
+    for (const h of d.handled) lines.push(`- ${h.title}${h.detail ? `: ${h.detail}` : ""}`);
   }
   lines.push("", `Spend: ${budget}`, "", `Waiting on you (${d.waiting.length}):`);
   for (const w of d.waiting) lines.push(`- ${w.title}`);

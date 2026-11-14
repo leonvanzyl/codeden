@@ -1,4 +1,4 @@
-import type { InboxItem } from "@codeden/contracts";
+import { type InboxItem, InboxSettlement } from "@codeden/contracts";
 import { Link } from "@tanstack/react-router";
 import { ArrowUpRight, CircleDot, GitPullRequest } from "lucide-react";
 import { ProjectTile } from "@/components/shell/sidebar/project-group";
@@ -46,6 +46,12 @@ function MirroredRequest({ item }: { item: InboxItem }) {
       {item.body && <p className="mt-1 text-[13px] text-muted-foreground">{item.body}</p>}
     </div>
   );
+}
+
+/** Why CodeDen settled the item by itself ("PR #12 merged"), when it did. */
+function settledNote(item: InboxItem): string | null {
+  const parsed = InboxSettlement.safeParse(item.resolution);
+  return parsed.success ? parsed.data.note : null;
 }
 
 /** DOM id of an inbox entry (a conflict card too), for scrolling it into view. */
@@ -133,6 +139,7 @@ export function InboxEntry({ item, focused = false }: { item: InboxItem; focused
           {resolved && (
             <p className="mt-2 text-2xs text-status-done">
               Resolved {item.resolvedAt ? ago(item.resolvedAt) : ""}
+              {settledNote(item) && ` · ${settledNote(item)}`}
             </p>
           )}
         </div>

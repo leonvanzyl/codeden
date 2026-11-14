@@ -5,6 +5,7 @@ import {
   type ItemDelta,
   type ItemOf,
   type ItemRecord,
+  inboxAttempts,
   type JsonValue,
   type Session,
   STREAMED_OUTPUT_CHARS,
@@ -120,10 +121,16 @@ export function closeInbox(
   return { ...inbox, status, resolution, resolvedAt: ts, updatedAt: ts };
 }
 
+/** The note on a factory session's failure, which the factory handles by itself. */
+export const FACTORY_HANDLES_FAILURE =
+  "The factory handles this by itself: it starts the work again, on another provider when this one can't run";
+
 /**
  * Inbox item for a failed run (§11.1 "failed or stuck runs"). A factory session's failure is the
- * factory's to handle (it fails or retries the item and pauses the loop when too many fail), so
- * it notifies as factory activity; any other session's failure needs the user.
+ * factory's to handle: it restarts its reviewer or builder (on another provider when this one
+ * can't run), fails or retries the item, and raises its own item when it can't go on (a paused
+ * loop, stuck work, a protected area). So that failure is recorded already settled, as factory
+ * activity, and never waits on the user. Any other session's failure needs the user.
  */
 export function runFailedInbox(
   session: Session,
@@ -132,12 +139,13 @@ export function runFailedInbox(
   threadId: string | null,
   ts: string,
 ): InboxItem {
+  const factory = isFactorySession(session);
   return {
     id,
     kind: "run_failed",
-    status: "open",
+    status: factory ? "resolved" : "open",
     priority: "normal",
-    notify: isFactorySession(session) ? "factory" : "failure",
+    notify: factory ? "factory" : "failure",
     title: `Run failed: ${session.title ?? session.purpose}`,
     body: message,
     projectId: session.projectId,
@@ -148,11 +156,26 @@ export function runFailedInbox(
     issue: session.issue,
     pr: session.pr,
     automationRunId: session.automationRunId,
+    attempts: 1,
     createdAt: ts,
     updatedAt: ts,
-    resolvedAt: null,
-    resolution: null,
+    resolvedAt: factory ? ts : null,
+    resolution: factory ? { by: "factory", note: FACTORY_HANDLES_FAILURE } : null,
   };
+}
+
+/**
+ * The session's run failed again while its earlier `run_failed` item is still open (a failed
+ * Retry, another crash): one item per run, so that item is updated in place with the latest
+ * error and one more attempt, instead of a second item.
+ */
+export function runFailedAgain(open: InboxItem, message: string, ts: string): InboxItem {
+  return { ...open, body: message, attempts: inboxAttempts(open) + 1, updatedAt: ts };
+}
+
+/** The session's open `run_failed` item, if it has one. */
+export function openRunFailed(items: readonly InboxItem[]): InboxItem | undefined {
+  return items.find((i) => i.kind === "run_failed" && i.status === "open");
 }
 
 /** The follow-ups item of the latest turn among `records` (ordered by position), if any. */

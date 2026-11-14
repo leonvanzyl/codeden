@@ -166,6 +166,14 @@ export interface CodeDenClient {
 
   // Inbox (§11.1).
   resolveInbox(itemId: string, resolution: InboxResolution): Promise<InboxItem>;
+  /**
+   * Run a failed run's session again on its provider. Rejects with the reason (and fix) when
+   * the provider can't run, or with the new error when it fails again (the item then counts
+   * one more attempt); resolves with the resolved item when it starts.
+   */
+  retryInbox(itemId: string): Promise<InboxItem>;
+  /** Dismiss several items at once (approvals and questions are skipped); how many were. */
+  dismissInbox(itemIds: string[]): Promise<number>;
 
   // Projects, automations (§10), factory.
   createProject(input: CreateProjectRequest): Promise<CreateProjectResponse>;

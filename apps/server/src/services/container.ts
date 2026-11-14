@@ -23,6 +23,7 @@ import { GithubService, type GithubServiceDeps } from "./github/github-service";
 import { projectTrustedAuthors } from "./github/review-trust";
 import { ImageService } from "./images/image-service";
 import { InboxService } from "./inbox-service";
+import { RunFailedSettler } from "./inbox-settle";
 import { GithubServicePort } from "./orchestration/github-port";
 import {
   type OrchestrationOptions,
@@ -139,6 +140,8 @@ export interface AppServices {
   tools: ToolRegistry;
   workbench: WorkbenchService;
   inbox: InboxService;
+  /** Settles failed runs whose work moved on (§11.1), at startup and as work changes. */
+  inboxSettler: RunFailedSettler;
   artifacts: ArtifactService;
   /** Session browsers in the runner (§12.2), for the panel and the agent tools. */
   browser: BrowserService;
@@ -402,6 +405,13 @@ export function createServices(opts: ServicesOptions): AppServices {
       log: opts.log,
     }),
     inbox,
+    inboxSettler: new RunFailedSettler({
+      store: opts.store,
+      repo: sessionRepo,
+      inbox,
+      factoryItems: (projectId) => factory.data.items(projectId),
+      log: opts.log,
+    }),
     artifacts,
     browser: new BrowserService({
       runner: opts.runner,

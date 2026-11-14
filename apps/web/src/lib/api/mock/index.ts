@@ -4,12 +4,15 @@ import {
   type SettingsPatch,
   utf8ByteLength,
 } from "@codeden/contracts";
+import { providerAvailability } from "@/components/composer/model-picker/logic";
 import type { CodeDenClient } from "../client";
+import { ApiRequestError } from "../http";
 import { startAmbient } from "./ambient";
 import { mockAutomationsApi } from "./automations";
 import { mockFactoryApi } from "./factory";
 import { mockFeatureApis } from "./feature-apis";
 import { makeSession } from "./fixtures/helpers";
+import { setupChecks } from "./fixtures/ops";
 import { type Script, scriptedTurn, uid } from "./live";
 import { mockOrchestration } from "./orchestration";
 import { mockProjectApi } from "./projects";
@@ -327,6 +330,32 @@ export function createMockClient(opts: MockClientOptions = {}): CodeDenClient {
       };
       world.emitDomain({ type: "inbox.updated", sessionId: null, payload: { item: next } });
       return next;
+    },
+    async retryInbox(itemId) {
+      const item = world.snapshot.inbox.find((i) => i.id === itemId);
+      if (!item) throw new Error("Inbox item not found");
+      const session = world.snapshot.sessions.find((s) => s.id === item.sessionId);
+      // Like the server: a provider that can't run refuses the retry with what fixes it.
+      const availability = providerAvailability(session?.provider ?? "", setupChecks);
+      if (!availability.ready) {
+        throw new ApiRequestError(
+          409,
+          "provider_unavailable",
+          `${availability.detail ?? availability.reason}${availability.command ? `: run \`${availability.command}\`` : ""}`,
+        );
+      }
+      return client.resolveInbox(itemId, { status: "resolved", note: "retry" });
+    },
+    async dismissInbox(itemIds) {
+      let dismissed = 0;
+      for (const id of itemIds) {
+        const item = world.snapshot.inbox.find((i) => i.id === id);
+        if (item?.status !== "open" || item.kind === "approval" || item.kind === "question")
+          continue;
+        await client.resolveInbox(id, { status: "dismissed" });
+        dismissed++;
+      }
+      return dismissed;
     },
 
     ...mockProjectApi(world),

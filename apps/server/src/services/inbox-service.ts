@@ -1,6 +1,7 @@
 import type {
   InboxCounts,
   InboxItem,
+  InboxSettlement,
   JsonValue,
   ListInboxQuery,
   ResolveInboxRequest,
@@ -11,7 +12,7 @@ import { and, desc, eq, type SQL } from "drizzle-orm";
 import type { Db } from "../db/client";
 import { rowToInbox } from "../db/rows";
 import { inboxItems } from "../db/schema";
-import { runFailedInbox } from "../events/reducer/items";
+import { openRunFailed, runFailedAgain, runFailedInbox } from "../events/reducer/items";
 import type { EventStore } from "../events/store";
 import { badRequest, notFound } from "./errors";
 
@@ -125,24 +126,40 @@ export class InboxService {
     }
   }
 
-  /** Raise a `run_failed` item for a session that could not start or crashed. */
-  raiseRunFailed(session: Session, key: string, message: string): void {
-    const id = `inbox:${session.id}:${key}`;
-    const existing = this.db.select().from(inboxItems).where(eq(inboxItems.id, id)).get();
-    const item = runFailedInbox(
-      session,
-      id,
-      message,
-      session.rootThreadId,
-      new Date().toISOString(),
+  /**
+   * Raise a `run_failed` item for a session that could not start or crashed. One item per run:
+   * a session whose earlier failure is still open updates that item in place (attempts, latest
+   * error) instead of getting a second one.
+   */
+  raiseRunFailed(session: Session, key: string, message: string): InboxItem {
+    const now = new Date().toISOString();
+    const open = openRunFailed(this.list({ sessionId: session.id }));
+    return this.put(
+      open
+        ? runFailedAgain(open, message, now)
+        : runFailedInbox(session, `inbox:${session.id}:${key}`, message, session.rootThreadId, now),
     );
-    this.store.append([
-      {
-        type: existing ? "inbox.updated" : "inbox.created",
-        sessionId: session.id,
-        payload: { item },
-      },
-    ]);
+  }
+
+  /**
+   * Dismiss open items at once (the inbox's bulk clean-up). Approvals and questions are left:
+   * they need an answer. Returns how many were dismissed.
+   */
+  dismissMany(ids: readonly string[], note?: string): number {
+    let dismissed = 0;
+    for (const id of new Set(ids)) {
+      const item = this.find(id);
+      if (item?.status !== "open") continue;
+      if (item.kind === "approval" || item.kind === "question") continue;
+      this.close(item, "dismissed", note ? { note } : null);
+      dismissed++;
+    }
+    return dismissed;
+  }
+
+  /** Close an open item CodeDen settled by itself, with a short note on why (`InboxSettlement`). */
+  settle(item: InboxItem, settlement: InboxSettlement): InboxItem {
+    return this.close(item, "resolved", settlement);
   }
 }
 
