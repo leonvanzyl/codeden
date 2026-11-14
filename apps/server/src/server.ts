@@ -33,6 +33,7 @@ import {
 import { loopbackOrigins, securityMiddleware } from "./security";
 import { type AppServices, createServices, type ServicesOptions } from "./services/container";
 import type { Exec } from "./services/exec";
+import { FILE_RESET_NOTICES, reportFileReset } from "./services/file-reset-notice";
 import { SearchBackfill } from "./services/search/backfill";
 import { createSecretStore, MemorySecretStore, type SecretStore } from "./services/secrets";
 import { sessionWorkdir } from "./services/sessions/workdir";
@@ -173,6 +174,7 @@ export async function startServer(opts: StartServerOptions): Promise<RunningServ
   const database = openDatabase(paths.db, opts.migrationsDir);
   const store = new EventStore(database.db);
   const settings = new SettingsStore(paths.settings);
+  if (settings.reset) reportFileReset(settings.reset, FILE_RESET_NOTICES.settings, { store, log });
   const startedAt = Date.now();
   let port = opts.port;
   let runner: RunnerClient | undefined;
@@ -259,7 +261,9 @@ export async function startServer(opts: StartServerOptions): Promise<RunningServ
   const httpServer = createAdaptorServer({ fetch: app.fetch, websocket: { server: wss } });
   const listener = new HttpListener(httpServer as import("node:http").Server);
   const network = new NetworkAccess({
-    store: new RemoteAccessStore(paths.remoteAccess),
+    store: new RemoteAccessStore(paths.remoteAccess, Date.now, (reset) =>
+      reportFileReset(reset, FILE_RESET_NOTICES.remoteAccess, { store, log }),
+    ),
     listener,
     interfaces: opts.networkInterfaces,
     securityLogFile: paths.remoteAccessLog,

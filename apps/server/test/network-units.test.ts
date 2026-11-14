@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import type { NetworkInterfaceInfo } from "node:os";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -14,6 +14,7 @@ import { generatePassphrase, hashPassword, verifyPassword } from "../src/network
 import { SignInLimiter } from "../src/network/rate-limit";
 import { PasswordRuleError, RemoteAccessStore } from "../src/network/store";
 import { PASSPHRASE_WORDS } from "../src/network/words";
+import type { FileReset } from "../src/user-json-file";
 
 const FAST = { N: 1024, r: 8, p: 1 };
 const GOOD = "maple-river-quiet-orbit-candle";
@@ -263,5 +264,51 @@ describe("RemoteAccessStore", () => {
     const store = make();
     expect(store.enabled).toBe(false);
     expect(store.passwordSet).toBe(false);
+  });
+
+  // #170: a damaged file is kept (owner-only) before a save can write over it.
+  const HASH = "scrypt$1024$8$1$c2FsdA==$SECRET-HASH";
+  const copies = () => readdirSync(dir).filter((n) => n.startsWith("remote-access.json.invalid-"));
+  const resetsOf = () => {
+    const resets: FileReset[] = [];
+    const store = new RemoteAccessStore(
+      file,
+      () => now,
+      (r) => resets.push(r),
+    );
+    return { store, resets };
+  };
+
+  it.each([
+    ["not valid JSON", `{ "enabled": true, "password": { "hash": "${HASH}" }, }`],
+    ["invalid values", JSON.stringify({ enabled: true, password: { hash: 42, setAt: "x" } })],
+  ])("keeps a file with %s before the next save, and reports it without the hash", (_, text) => {
+    writeFileSync(file, text);
+    const { store, resets } = resetsOf();
+    expect(store.enabled).toBe(false);
+    expect(store.passwordSet).toBe(false);
+    store.setEnabled(false);
+
+    expect(copies()).toHaveLength(1);
+    expect(readFileSync(join(dir, copies()[0] as string), "utf8")).toBe(text);
+    expect(resets).toHaveLength(1);
+    expect(resets[0]?.copy).toBe(join(dir, copies()[0] as string));
+    expect(resets[0]?.reason).not.toMatch(/SECRET|42/);
+    expect(RemoteAccessFile.parse(JSON.parse(readFileSync(file, "utf8"))).enabled).toBe(false);
+  });
+
+  it.skipIf(process.platform === "win32")("keeps the copy owner-only, like the file", () => {
+    writeFileSync(file, "{ nope", { mode: 0o644 });
+    resetsOf();
+    expect(statSync(join(dir, copies()[0] as string)).mode & 0o777).toBe(0o600);
+    expect(statSync(file).mode & 0o777).toBe(0o600);
+  });
+
+  it("starts a missing file closed, with no copy and no reset", () => {
+    const { store, resets } = resetsOf();
+    expect(store.enabled).toBe(false);
+    store.setEnabled(false);
+    expect(resets).toEqual([]);
+    expect(copies()).toEqual([]);
   });
 });

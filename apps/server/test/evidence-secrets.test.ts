@@ -1,8 +1,18 @@
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
+import { CODEDEN_CREDENTIAL_FILES, INVALID_COPY_SUFFIX } from "@codeden/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { shareToChat } from "../src/mcp/tools/share-to-chat";
+import { RemoteAccessStore } from "../src/network/store";
 import type { AppServices } from "../src/services/container";
 import { EVIDENCE_BRANCH } from "../src/services/github/evidence";
 import { createGithubEnv, type GithubEnv } from "./support/github-env";
@@ -29,6 +39,11 @@ let env: GithubEnv;
 const P = "p-gh";
 const SECRET = "SECRET=hunter2\n";
 const refused = { status: 403, code: "secret_file" };
+/** Refused as a secret, or before that because its real file is outside the artifacts folder. */
+const refusedOrOutside = {
+  status: 403,
+  code: expect.stringMatching(/^(secret_file|path_outside_root)$/),
+};
 
 beforeEach(() => {
   env = createGithubEnv();
@@ -197,6 +212,115 @@ describe("attach_evidence refuses secrets", () => {
       files: [{ path: ".env.example" }, { path: "shot.png" }, { path: "-results (1).log" }],
     });
     expect(result.files.map((f) => f.name)).toEqual(["env.example", "shot.png", "results-1.log"]);
+  });
+});
+
+describe("copies CodeDen keeps of a damaged credential file", () => {
+  // #170: a malformed remote-access.json is kept as `remote-access.json.invalid-<timestamp>`,
+  // with the password and session-token hashes still in it.
+  function remoteAccessBackup(): string {
+    const file = join(env.dir, "remote-access.json");
+    writeFileSync(file, '{"enabled":true,"password":{"hash":"scrypt$secret-hash"');
+    let copy: string | undefined;
+    new RemoteAccessStore(
+      file,
+      () => 1_700_000_000_000,
+      (reset) => {
+        copy = reset.copy;
+      },
+    );
+    expect(copy).toBe(`${file}${INVALID_COPY_SUFFIX}1700000000000`);
+    expect(readFileSync(copy as string, "utf8")).toContain("secret-hash");
+    return copy as string;
+  }
+
+  function nothingStored(sessionId: string) {
+    expect(env.artifacts.list({ sessionId })).toEqual([]);
+    nothingPublished();
+  }
+
+  it("attach_evidence refuses the remote-access backup, under any published name", async () => {
+    const copy = remoteAccessBackup();
+    const session = issueSession();
+    for (const file of [{ path: copy }, { path: copy, name: "notes.txt" }]) {
+      await expect(env.service.attachEvidence(session.id, { files: [file] })).rejects.toMatchObject(
+        refused,
+      );
+    }
+    nothingStored(session.id);
+  });
+
+  it("share_to_chat refuses the remote-access backup, under any name", async () => {
+    const copy = remoteAccessBackup();
+    const session = issueSession();
+    for (const input of [{ path: copy }, { path: copy, name: "shot.png" }]) {
+      await expect(share(session.id, input)).rejects.toMatchObject(refused);
+    }
+    nothingStored(session.id);
+  });
+
+  for (const [kind, link] of LINKS) {
+    it(`refuses the backup through ${kind} with a harmless name`, async (ctx) => {
+      const copy = remoteAccessBackup();
+      link(copy, join(env.dir, "report.txt"), () => ctx.skip());
+      const session = issueSession();
+      await expect(
+        env.service.attachEvidence(session.id, { files: [{ path: "report.txt" }] }),
+      ).rejects.toMatchObject(refused);
+      await expect(share(session.id, { path: "report.txt" })).rejects.toMatchObject(refused);
+      nothingStored(session.id);
+    });
+
+    it(`refuses an artifact whose file is ${kind} to the backup, attached by id`, async (ctx) => {
+      const copy = remoteAccessBackup();
+      const session = issueSession();
+      const artifact = saveArtifact(session.id, "shot.png", Buffer.from([0x89, 0x50]));
+      const file = env.artifacts.filePath(artifact);
+      unlinkSync(file);
+      link(copy, file, () => ctx.skip());
+      // The backup sits next to remote-access.json, outside the artifacts folder, so a real link
+      // to it may be refused by the artifacts folder's own check first (`path_outside_root`). The
+      // stand-in passes that check, so it must be the secrets check that refuses it.
+      await expect(
+        env.service.attachEvidence(session.id, {
+          files: [{ artifactId: artifact.id, name: "shot.png" }],
+        }),
+      ).rejects.toMatchObject(link === fileSymlinkOrSkip ? refusedOrOutside : refused);
+      nothingPublished();
+    });
+  }
+
+  it("refuses the backup reached through a junction to the data folder", async () => {
+    const copy = remoteAccessBackup();
+    // A directory junction needs no privilege on Windows (a directory symlink elsewhere).
+    const temp = mkdtempSync(join(tmpdir(), "codeden-alias-"));
+    try {
+      const alias = join(temp, "data");
+      symlinkSync(env.dir, alias, "junction");
+      const aliased = join(alias, basename(copy));
+      const session = issueSession();
+      await expect(
+        env.service.attachEvidence(session.id, { files: [{ path: aliased, name: "notes.txt" }] }),
+      ).rejects.toMatchObject(refused);
+      await expect(share(session.id, { path: aliased, name: "notes.txt" })).rejects.toMatchObject(
+        refused,
+      );
+      nothingStored(session.id);
+    } finally {
+      rmSync(temp, { recursive: true, force: true });
+    }
+  });
+
+  it.each(CODEDEN_CREDENTIAL_FILES)("refuses a copy of %s", async (name) => {
+    const copy = join(env.dir, `${name}${INVALID_COPY_SUFFIX}42`);
+    mkdirSync(dirname(copy), { recursive: true });
+    writeFileSync(copy, SECRET);
+    const session = issueSession();
+    await expect(
+      env.service.attachEvidence(session.id, { files: [{ path: copy, name: "log.txt" }] }),
+    ).rejects.toMatchObject(refused);
+    await expect(share(session.id, { path: copy, name: "log.txt" })).rejects.toMatchObject(refused);
+    nothingStored(session.id);
   });
 });
 

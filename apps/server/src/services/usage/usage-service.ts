@@ -18,8 +18,10 @@ import type { Db } from "../../db/client";
 import { automations, githubPrs, inboxItems, projects, sessions } from "../../db/schema";
 import { rateLimitWindows, usageLedger } from "../../db/schema-usage";
 import type { EventStore } from "../../events/store";
-import { readJsonFile, writeJsonFile } from "../../json-file";
+import { writeJsonFile } from "../../json-file";
+import { loadUserJsonFile } from "../../user-json-file";
 import { badRequest } from "../errors";
+import { FILE_RESET_NOTICES, reportFileReset } from "../file-reset-notice";
 import {
   addDays,
   dayKey,
@@ -81,8 +83,11 @@ export class UsageService {
 
   settings(): UsageSettings {
     if (!this.cachedSettings) {
-      const parsed = UsageSettings.safeParse(readJsonFile(this.opts.settingsFile) ?? {});
-      this.cachedSettings = parsed.success ? parsed.data : UsageSettings.parse({});
+      // A broken file is kept as a copy before the next save can overwrite the user's budgets.
+      const { value, reset } = loadUserJsonFile(this.opts.settingsFile, UsageSettings);
+      const { store, log } = this.opts;
+      if (reset) reportFileReset(reset, FILE_RESET_NOTICES.usageSettings, { store, log });
+      this.cachedSettings = value;
     }
     return this.cachedSettings;
   }
@@ -96,6 +101,7 @@ export class UsageService {
     if (!parsed.success) throw badRequest(parsed.error.issues[0]?.message ?? "Invalid settings");
     const ids = parsed.data.budgets.map((b) => b.id);
     if (new Set(ids).size !== ids.length) throw badRequest("Budget ids must be unique");
+    this.settings(); // Load first: a broken file on disk is kept as a copy before this write.
     writeJsonFile(this.opts.settingsFile, parsed.data);
     this.cachedSettings = parsed.data;
     this.scheduleAlerts();
