@@ -362,3 +362,27 @@ export const FactorySetTypeRequest = z.object({
   reason: z.string().trim().max(500).optional(),
 });
 export type FactorySetTypeRequest = z.infer<typeof FactorySetTypeRequest>;
+
+/**
+ * How a stopped item runs again. `rereview`: its open pull request goes straight back to a fresh
+ * review of its current head (then a revise round, or the merge, as usual), with no new build and
+ * no second PR. `rebuild`: a fresh attempt from the pipeline's first step (reproduce or analyze);
+ * its open PR is closed with a link once the new one is open.
+ */
+export const FactoryRetryMode = z.enum(["rereview", "rebuild"]);
+export type FactoryRetryMode = z.infer<typeof FactoryRetryMode>;
+
+/**
+ * The body of `POST /api/projects/:id/factory/items/:itemId/retry`. Without a mode, an item whose
+ * pull request is still open is re-reviewed, and any other is rebuilt.
+ */
+export const FactoryRetryOptions = z.object({
+  mode: FactoryRetryMode.optional().describe(
+    "`rereview` (the default when its pull request is open): a fresh review of the open PR, no new build. `rebuild`: start over from the first step, replacing the PR.",
+  ),
+});
+export type FactoryRetryOptions = z.infer<typeof FactoryRetryOptions>;
+
+/** Run a stopped (failed or rejected) item again: the PM's `factory_retry_item`. */
+export const FactoryRetryRequest = FactoryRetryOptions.extend({ itemId: Id });
+export type FactoryRetryRequest = z.infer<typeof FactoryRetryRequest>;
