@@ -188,6 +188,17 @@ export function providerAvailability(
   return { ready: false, reason, detail: check.message, command: check.fix?.command ?? null };
 }
 
+/** "Not signed in" → "not signed in", to follow a colon or sit in brackets. */
+export const lowerFirst = (text: string) => text.charAt(0).toLowerCase() + text.slice(1);
+
+/**
+ * A provider's name for a plain list such as a `<select>`, with why it can't run when it can't:
+ * "Codex (not signed in)", "Gemini CLI (not installed)".
+ */
+export function providerOptionLabel(name: string, availability: Availability): string {
+  return availability.ready ? name : `${name} (${lowerFirst(availability.reason ?? "Not ready")})`;
+}
+
 // ---------------------------------------------------------------- tabs and search
 
 /** Id of the Favourites tab; provider ids can't clash with it (they never contain a colon). */
@@ -210,9 +221,6 @@ export type PickerTab =
       handoff?: "ready" | "blocked";
     };
 export type ProviderTab = Extract<PickerTab, { kind: "provider" }>;
-
-/** "Wait for the turn" → "wait for the turn", to follow a colon. */
-const lowerFirst = (text: string) => text.charAt(0).toLowerCase() + text.slice(1);
 
 /** Why a provider is locked in this session, and whether a handoff to it is offered. */
 function lockedTab(
