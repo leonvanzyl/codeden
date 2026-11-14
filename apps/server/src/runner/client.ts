@@ -21,9 +21,11 @@ import type { Db } from "../db/client";
 import { runnerState } from "../db/schema";
 import { ingestRunnerEvent } from "../events/ingest";
 import type { EventStore } from "../events/store";
+import type { McpHandler } from "../mcp/endpoint";
 import { journalIdRefusal } from "./identity";
 import type { RunnerLaunchConfig, RunnerStartTimeouts } from "./launcher";
 import { isProcessAlive } from "./lock";
+import { McpLinkServer } from "./mcp-link";
 import type { RunnerTransport, RunnerTransportHandlers } from "./transport";
 import { type ExecLinkConfig, openExecTransport } from "./transport-exec";
 import { findOrStartRunner, openLoopbackTransport } from "./transport-loopback";
@@ -75,6 +77,12 @@ export interface RunnerClientOptions {
    * every handshake so its local proxy (§4.4) forwards there.
    */
   mcpUpstreamUrl?: string;
+  /**
+   * Instead, tunnel the runner's MCP proxy over this connection (`docs/remote-runners.md`
+   * §11): the runner is configured with `mcpLink`, and its `mcp.request`s are answered here
+   * with this handler (the one `/mcp` uses). For runners that can't reach the server's loopback.
+   */
+  mcpLink?: McpHandler;
   /** How long a version-mismatch drain may wait for running turns. Default 5 minutes. */
   drainTimeoutMs?: number;
   /**
@@ -314,6 +322,8 @@ export class RunnerClient {
     };
     // Whether this connection's `welcome` was accepted: events count only after it.
     let welcomed = false;
+    // Agents' MCP requests over this connection, when the runner's proxy tunnels them (§11).
+    const mcp = this.opts.mcpLink && this.mcpLinkServer(this.opts.mcpLink, () => transport);
     const handlers: RunnerTransportHandlers = {
       onMessage: (raw) => {
         try {
@@ -330,12 +340,17 @@ export class RunnerClient {
           } else if ((msg.type === "event" || msg.type === "stream") && !welcomed) {
             return;
           }
+          if (msg.type === "mcp.request" || msg.type === "mcp.cancel" || msg.type === "mcp.ack") {
+            if (welcomed) mcp?.receive(msg);
+            return;
+          }
           this.handle(msg, settle);
         } catch (error) {
           this.opts.log?.(`runner: bad message: ${(error as Error).message}`);
         }
       },
       onClose: (detail) => {
+        mcp?.close();
         settle(new Error(detail ?? "Runner connection closed during handshake"));
         if (!abandoned) this.onClosed(transport, detail);
       },
@@ -510,13 +525,20 @@ export class RunnerClient {
   private afterHandshake(msg: RunnerWelcome): void {
     const log = this.opts.log;
     const mismatch = msg.runnerVersion !== CODEDEN_VERSION && this.opts.launch !== null;
-    const configured = this.opts.mcpUpstreamUrl
-      ? this.request({ name: "runner.configure", mcpUpstreamUrl: this.opts.mcpUpstreamUrl })
-          .then((r) => {
-            this.proxyUrl = r.mcpProxyUrl;
+    // The proxy tunnels over this connection, or forwards to the server's loopback `/mcp`.
+    const mcpUpstreamUrl = this.opts.mcpLink ? null : this.opts.mcpUpstreamUrl;
+    const configured =
+      mcpUpstreamUrl !== undefined
+        ? this.request({
+            name: "runner.configure",
+            mcpUpstreamUrl,
+            ...(this.opts.mcpLink ? { mcpLink: true } : {}),
           })
-          .catch((error: unknown) => log?.(`runner: configure failed: ${String(error)}`))
-      : Promise.resolve();
+            .then((r) => {
+              this.proxyUrl = r.mcpProxyUrl;
+            })
+            .catch((error: unknown) => log?.(`runner: configure failed: ${String(error)}`))
+        : Promise.resolve();
     if (!mismatch && !msg.draining) {
       void configured.then(() => {
         if (this.runnerId === msg.runnerId && this.current.state === "connected") {
@@ -561,6 +583,36 @@ export class RunnerClient {
       this.lastAckedSeq = msg.seq;
     }
     this.send({ type: "ack", seq: msg.seq });
+  }
+
+  /**
+   * Answers one connection's `mcp.request`s. An untrusted runner may only use tokens of
+   * sessions routed to it (as its events); any other is answered as an invalid token.
+   */
+  private mcpLinkServer(
+    handler: McpHandler,
+    transport: () => RunnerTransport | undefined,
+  ): McpLinkServer {
+    const { log } = this.opts;
+    const guard = this.guard;
+    return new McpLinkServer({
+      handler,
+      send: (frame) => {
+        try {
+          transport()?.send(frame);
+        } catch (error) {
+          log?.(`runner: ${(error as Error).message}`);
+        }
+      },
+      accept:
+        guard &&
+        ((claims) => {
+          if (guard.servesSession(claims.sessionId, this.runnerId)) return true;
+          log?.(`runner: refused an MCP token of session ${claims.sessionId}, not routed to it`);
+          return false;
+        }),
+      log,
+    });
   }
 
   /** Protocol housekeeping (hello, resume, acks, pongs): small, and dropped when closed. */
