@@ -156,7 +156,7 @@ export function factoryFor(
           { name: "review", state: "pass", detail: "Codex review: approved" },
           { name: "security", state: "pass" },
           { name: "ui_evidence", state: "pass", detail: "2 screenshots" },
-          { name: "size", state: "pass", detail: "+18 −9" },
+          { name: "size", state: "pass", detail: "+13 −8" },
         ],
       },
       {
@@ -168,7 +168,7 @@ export function factoryFor(
           { name: "review", state: "pending" },
           { name: "security", state: "pass" },
           { name: "ui_evidence", state: "fail", detail: "No screenshot of the price slider" },
-          { name: "size", state: "pass", detail: "+61 −3" },
+          { name: "size", state: "pass", detail: "+31 −2" },
         ],
       },
     ],

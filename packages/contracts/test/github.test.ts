@@ -5,6 +5,8 @@ import {
   GithubIssue,
   GithubListQuery,
   GithubPr,
+  GithubPrDetails,
+  GithubPrDiff,
   GithubReview,
   githubPrId,
   MergePrRequest,
@@ -95,6 +97,46 @@ describe("github contracts", () => {
     const { authorAssociation: _, ...stored } = review;
     expect(GithubReview.parse(stored).authorAssociation).toBeUndefined();
     expect(GithubReview.safeParse({ ...review, authorAssociation: "OWNER" }).success).toBe(false);
+  });
+
+  it("round-trips PR details and the PR diff", () => {
+    const details: GithubPrDetails = {
+      ...pr,
+      body: "Fixes #3",
+      additions: 4,
+      deletions: 1,
+      changedFiles: 3001,
+      files: [
+        { path: "src/a.ts", status: "modified", additions: 3, deletions: 1 },
+        {
+          path: "src/b.ts",
+          previousPath: "src/old-b.ts",
+          status: "renamed",
+          additions: 1,
+          deletions: 0,
+        },
+      ],
+    };
+    expect(GithubPrDetails.parse(JSON.parse(JSON.stringify(details)))).toEqual(details);
+    const diff: GithubPrDiff = {
+      headSha: "abc",
+      changedFiles: 2,
+      files: [
+        {
+          path: "src/a.ts",
+          status: "modified",
+          additions: 1,
+          deletions: 1,
+          patch:
+            "diff --git a/src/a.ts b/src/a.ts\n--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1 +1 @@\n-a\n+b\n",
+        },
+        { path: "logo.png", status: "added", additions: 0, deletions: 0, patch: null },
+      ],
+    };
+    expect(GithubPrDiff.parse(JSON.parse(JSON.stringify(diff)))).toEqual(diff);
+    expect(() =>
+      GithubPrDiff.parse({ ...diff, files: [{ path: "x", status: "added" }] }),
+    ).toThrow();
   });
 
   it("parses every GitHub domain event in the envelope union", () => {

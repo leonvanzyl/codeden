@@ -3,8 +3,8 @@ import { GitHubIssueRef, GitHubPrRef, Id, Timestamp } from "./common";
 
 /**
  * GitHub issue and pull request flow (§9): projections synced from GitHub, the events the
- * sync emits, and the HTTP shapes of `/api/projects/:id/github/*`, `/api/prs/:id` and
- * `/api/sessions/:id/github`. Local-only projects never have any of this.
+ * sync emits, and the HTTP shapes of `/api/projects/:id/github/*`, `/api/prs/:id` (and its
+ * `/diff`) and `/api/sessions/:id/github`. Local-only projects never have any of this.
  */
 
 // ---------------------------------------------------------------- connection
@@ -168,21 +168,50 @@ export const GithubPr = z.object({
 });
 export type GithubPr = z.infer<typeof GithubPr>;
 
+/** One changed file of a PR, as GitHub lists it. */
+export const GithubPrFile = z.object({
+  path: z.string(),
+  /** The path before a rename or copy. */
+  previousPath: z.string().optional(),
+  /** `added`, `removed`, `modified`, `renamed`, `copied`, `changed` or `unchanged`. */
+  status: z.string(),
+  additions: z.int().nonnegative(),
+  deletions: z.int().nonnegative(),
+});
+export type GithubPrFile = z.infer<typeof GithubPrFile>;
+
 /** `/api/prs/:id`: the projection plus live details. */
 export const GithubPrDetails = GithubPr.extend({
   body: z.string(),
   additions: z.int().nonnegative(),
   deletions: z.int().nonnegative(),
-  files: z.array(
-    z.object({
-      path: z.string(),
-      status: z.string(),
-      additions: z.int().nonnegative(),
-      deletions: z.int().nonnegative(),
-    }),
-  ),
+  /** How many files GitHub counts as changed: more than `files.length` past GitHub's 3000-file list. */
+  changedFiles: z.int().nonnegative(),
+  /** Every changed file GitHub lists (up to 3000), without patches (see `/api/prs/:id/diff`). */
+  files: z.array(GithubPrFile),
 });
 export type GithubPrDetails = z.infer<typeof GithubPrDetails>;
+
+/** One file of `/api/prs/:id/diff`: the changed file and its patch. */
+export const GithubPrDiffFile = GithubPrFile.extend({
+  /**
+   * Unified patch with `diff --git`, `---` and `+++` headers, ready for the diff renderer.
+   * Null when GitHub sends none: binary files, very large diffs, and renames or new files
+   * without content changes.
+   */
+  patch: z.string().nullable(),
+});
+export type GithubPrDiffFile = z.infer<typeof GithubPrDiffFile>;
+
+/** `/api/prs/:id/diff`: every changed file of a PR (up to GitHub's 3000) with its patch. */
+export const GithubPrDiff = z.object({
+  /** The head commit the diff was read at. */
+  headSha: z.string().nullable(),
+  /** How many files GitHub counts as changed (can exceed `files.length`, see above). */
+  changedFiles: z.int().nonnegative(),
+  files: z.array(GithubPrDiffFile),
+});
+export type GithubPrDiff = z.infer<typeof GithubPrDiff>;
 
 /** Build the `/api/prs/:id` id of a PR. */
 export function githubPrId(projectId: string, number: number): string {

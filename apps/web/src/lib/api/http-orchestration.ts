@@ -5,6 +5,7 @@ import {
   GithubIssueDetails,
   GithubIssuesResponse,
   GithubPrDetails,
+  GithubPrDiff,
   GithubPrsResponse,
   GithubSyncStatus,
   MergePrResponse,
@@ -61,6 +62,7 @@ export function httpGithubApi(http: Fetcher): GithubApi {
       get(`${project(id)}/issues/${number}`, (v) => GithubIssueDetails.parse(v)),
     sync: (id) => post(`${project(id)}/sync`, {}, (v) => GithubSyncStatus.parse(v)),
     pr: (prId) => get(`/prs/${enc(prId)}`, (v) => GithubPrDetails.parse(v)),
+    prDiff: (prId) => get(`/prs/${enc(prId)}/diff`, (v) => GithubPrDiff.parse(v)),
     merge: (prId, req = {}) =>
       post(`/prs/${enc(prId)}/merge`, req, (v) => MergePrResponse.parse(v)),
     session: (id) => get(`/sessions/${enc(id)}/github`, (v) => SessionGithubResponse.parse(v)),

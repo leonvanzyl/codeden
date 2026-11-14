@@ -29,8 +29,12 @@ Sync produces events that the rest of CodeDen reacts to: `issue.opened`, `issue.
 
 - **Project → GitHub tab:** open issues and pull requests with their checks and review state.
 - **Session header badges:** the linked issue and PR.
-- **Right panel → Issue / PR tab** (**Alt+5**): the session's PR with live status, checks, reviews, mergeability, description and changed files.
+- **Right panel → Issue / PR tab** (**Alt+5**): the session's PR with live status, checks, reviews, mergeability, description and changed files. The same view opens when you click a pull request in the project's GitHub tab.
 - **Inbox:** PRs ready for review.
+
+### Reading a pull request's changes
+
+**Files changed** lists every file the pull request changes, including PRs with hundreds of files (GitHub lists at most 3,000; past that, the view says so and links to the rest on GitHub). Click a file to read its diff, or use **Expand all** (offered up to 100 files) and **Collapse all**. The diff comes from GitHub, so you can review a PR whose session has been archived and its worktree removed, or one nobody opened from CodeDen. A file shows no diff when GitHub doesn't send one (binary, empty, or too large to show); **Open on GitHub** takes you to it there. When a commit is pushed to the PR, open files show the new diff.
 
 ![A session's pull request: checks, reviews, changed files and a squash-merge button](images/pr-details.png)
 

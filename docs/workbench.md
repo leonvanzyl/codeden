@@ -4,7 +4,7 @@ Everything an agent touches sits next to its chat. Open the right panel with **C
 
 | Tab | Shortcut | What's there |
 |---|---|---|
-| Diff | Alt+1 | Session, uncommitted and per-turn diffs, file restore, commit and push |
+| Diff | Alt+1 | Session, uncommitted and per-turn diffs, comparison with a fork or its source, file restore, commit and push |
 | Files | Alt+2 | The worktree's file tree and a file viewer |
 | Browser | Alt+3 | The session's browser, shared with the agent |
 | Terminal | Alt+4 | Terminals in the worktree |
@@ -44,8 +44,21 @@ At the end of every turn the runner snapshots the worktree into a hidden ref, `r
 - **Uncommitted:** what's not committed yet.
 - **Per turn:** exactly what one turn changed.
 - **Restore:** put files (one, or all of them) back to the session's starting point or to the state before a turn.
+- **Compare with:** how this session's code differs from a related session's (see below).
 
 The **git bar** at the top shows the branch, ahead/behind and the uncommitted count, with **Commit** and **Push**. In a GitHub project it also has **Open PR**, which asks the agent to open a pull request for the session's work (sent now, or queued behind a running turn). Once the session has an open PR, the button becomes **PR #N** and opens the Issue / PR tab. A successful push offers the same next step in its notification. **Open PR** is shown for sessions you started on their own branch; read-only and archived sessions don't get it, and sessions a PM, automation or the factory started open their own pull requests.
+
+### Compare with another session
+
+Forked a session, or handed it off, to try a second approach? Compare the two without leaving CodeDen. Open the Diff panel's view menu (the button that says **All changes**). Under **Compare with** it lists:
+
+- the session this one was forked or handed off from (**source**);
+- the sessions forked or handed off from this one (**fork**, **hand-off**);
+- the other forks and hand-offs of its source (**sibling**).
+
+Pick one. `−` lines are the other session's code as of its last turn, `+` lines this session's files as they are now, uncommitted changes included. A legend under the toolbar names both sides and links to the other session. "Same code as …" means nothing differs. The comparison is read-only: it has no **Restore** and no line comments. Pick **All changes** to go back.
+
+The other session's code comes from its latest turn checkpoint, so it still works after that session is archived. Only sessions of the same project that run on the same runner can be compared.
 
 ### Comment on lines
 
@@ -68,7 +81,7 @@ Want to try a second approach without losing the first? Open the session's **⋯
 - **Same agent.** It keeps the provider, model, effort, permissions and linked issue. Its pull request targets the same base branch. If the original is still planning, the fork keeps planning too, and implements once you approve its own plan.
 - **Original unchanged.** Nothing about the original session changes. Both can carry on side by side.
 
-The fork's header shows **Fork of …** with a link back, and **Details** shows where it was forked from. Fork is offered when the provider supports it (Claude and Codex do). It's available once the session has had a turn and while no turn is running; while a turn runs, the menu says why it's disabled.
+The fork's header shows **Fork of …** with a link back, and **Details** shows where it was forked from. To see how the two approaches differ, use **Compare with** in either session's Diff panel ([above](#compare-with-another-session)). Fork is offered when the provider supports it (Claude and Codex do). It's available once the session has had a turn and while no turn is running; while a turn runs, the menu says why it's disabled.
 
 ### Fork from an earlier turn
 
@@ -91,7 +104,7 @@ In the dialog, pick the provider, model and effort, and optionally say what the 
 - **Same work.** It keeps the permissions, plan mode, work key and linked issue. Its pull request is a new one that targets the same base branch.
 - **Original unchanged.** Nothing about the original session changes.
 
-The new session's header shows **Handed off from …** with a link back, and **Details** shows where it came from. Hand off works on every provider and needs no fork support. It's available once the session has done some work, and while no turn is running and nothing waits on you: a session that failed or was stopped (after a usage limit, say) can be handed off. CodeDen won't hand off to a provider that can't keep the session's permissions: read-only needs a provider that enforces it, and a session that's still planning needs one with plan mode.
+The new session's header shows **Handed off from …** with a link back, and **Details** shows where it came from. **Compare with** in the Diff panel shows how its code differs from the original's. Hand off works on every provider and needs no fork support. It's available once the session has done some work, and while no turn is running and nothing waits on you: a session that failed or was stopped (after a usage limit, say) can be handed off. CodeDen won't hand off to a provider that can't keep the session's permissions: read-only needs a provider that enforces it, and a session that's still planning needs one with plan mode.
 
 ## Files
 

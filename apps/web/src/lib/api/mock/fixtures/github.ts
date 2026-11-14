@@ -1,4 +1,5 @@
 import type { GithubChecksSummary, GithubIssue, GithubPrDetails } from "@codeden/contracts";
+import { mockPrFile } from "./github-pr-diffs";
 import { ago } from "./helpers";
 
 const SF = "https://github.com/hearth-co/storefront";
@@ -86,6 +87,7 @@ function pr(
   sessionId: string,
   extra: Partial<GithubPrDetails>,
 ): GithubPrDetails {
+  const files = extra.files ?? [];
   return {
     id: `p-storefront:${number}`,
     projectId: "p-storefront",
@@ -109,9 +111,10 @@ function pr(
     mergedAt: null,
     closedAt: null,
     body: "",
-    additions: 0,
-    deletions: 0,
-    files: [],
+    additions: files.reduce((n, f) => n + f.additions, 0),
+    deletions: files.reduce((n, f) => n + f.deletions, 0),
+    changedFiles: files.length,
+    files,
     ...extra,
   };
 }
@@ -137,20 +140,21 @@ export const mockPrs: GithubPrDetails[] = [
       },
     ],
     commits: [{ sha: "4b1c9e2", message: "fix(a11y): contrast, focus rings and alt text" }],
-    additions: 18,
-    deletions: 9,
     files: [
-      { path: "src/pages/product.tsx", status: "modified", additions: 12, deletions: 6 },
-      { path: "src/styles/tokens.css", status: "modified", additions: 6, deletions: 3 },
+      mockPrFile("src/pages/product.tsx", "modified"),
+      mockPrFile("src/theme/tokens.css", "modified"),
+      // Binary: GitHub sends no patch.
+      mockPrFile("public/images/hero.webp", "added"),
     ],
   }),
   pr(57, "Product search with filters", "draft", "s-search", {
     body: "Fixes #139.\n\n- Category chips and max-price filter\n- URL is the source of truth",
     checks: checks(searchPrChecks),
     linkedIssues: [139],
-    additions: 61,
-    deletions: 3,
-    files: [{ path: "src/search/filters.tsx", status: "added", additions: 61, deletions: 3 }],
+    files: [
+      mockPrFile("src/search/SearchFilters.tsx", "added"),
+      mockPrFile("src/search/index.ts", "modified"),
+    ],
   }),
   pr(55, "Serve webp through the image CDN", "open", "s-cdn", {
     body: "Fixes #131. Adds `image/webp` to the CDN's allowed types.",
@@ -163,8 +167,6 @@ export const mockPrs: GithubPrDetails[] = [
       ["security / audit", "neutral"],
     ]),
     linkedIssues: [131],
-    additions: 7,
-    deletions: 1,
-    files: [{ path: "infra/cdn.ts", status: "modified", additions: 7, deletions: 1 }],
+    files: [mockPrFile("infra/cdn.ts", "modified")],
   }),
 ];

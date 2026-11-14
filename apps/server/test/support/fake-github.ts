@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
 import { FakeGitData } from "./fake-github-git";
-import type { FakeIssue } from "./fake-github-types";
+import type { FakeIssue, FakePrFile } from "./fake-github-types";
 
-export type { FakeCheck, FakeIssue, FakeReview } from "./fake-github-types";
+export type { FakeCheck, FakeIssue, FakePrFile, FakeReview } from "./fake-github-types";
 
 /** In-memory GitHub plugged into Octokit as `fetch`: CodeDen's REST/GraphQL calls, ETags, 401s. */
 
@@ -130,7 +130,7 @@ export class FakeGithub {
     if (result.status === 200 && method === "GET") {
       const etag = `"${createHash("sha1").update(JSON.stringify(result.data)).digest("hex")}"`;
       if (record.ifNoneMatch === etag) return respond(304, null, { etag });
-      return respond(200, result.data, { etag });
+      return respond(200, result.data, { etag, ...result.headers });
     }
     return respond(result.status, result.data);
   };
@@ -141,7 +141,7 @@ export class FakeGithub {
     query: URLSearchParams,
     body: unknown,
     token: string,
-  ): { status: number; data: unknown } {
+  ): { status: number; data: unknown; headers?: Record<string, string> } {
     const ok = (data: unknown, status = 200) => ({ status, data });
     const notFound = { status: 404, data: { message: "Not Found" } };
     const b = (body ?? {}) as Record<string, unknown>;
@@ -260,11 +260,28 @@ export class FakeGithub {
         this.touch(issue.number, (i) =>
           Object.assign(i, { title: b.title ?? i.title, body: b.body ?? i.body }),
         );
-      return ok({ number: issue.number, body: issue.body, additions: 3, deletions: 1 });
+      return ok({
+        number: issue.number,
+        body: issue.body,
+        additions: 3,
+        deletions: 1,
+        changed_files: prFiles(issue).length,
+        head: { sha: issue.pr.headSha, ref: issue.pr.head },
+        base: { ref: issue.pr.base },
+      });
     }
     m = rest.match(/^\/pulls\/(\d+)\/files$/);
     if (m) {
-      return ok([{ filename: "src/app.ts", status: "modified", additions: 3, deletions: 1 }]);
+      const issue = this.issues.get(Number(m[1]));
+      if (!issue?.pr) return notFound;
+      // Paged like GitHub: `per_page` (max 100) from `page`, with a `Link` to the next page.
+      const files = prFiles(issue);
+      const perPage = Math.min(Number(query.get("per_page") ?? 30), 100);
+      const page = Number(query.get("page") ?? 1);
+      const slice = files.slice((page - 1) * perPage, page * perPage);
+      if (page * perPage >= files.length) return ok(slice);
+      const next = `${prefix}${rest}?per_page=${perPage}&page=${page + 1}`;
+      return { ...ok(slice), headers: { link: `<${next}>; rel="next"` } };
     }
     m = rest.match(/^\/pulls\/(\d+)\/merge$/);
     if (m && method === "PUT") {
@@ -373,4 +390,12 @@ export class FakeGithub {
       },
     };
   }
+}
+
+const DEFAULT_FILES: FakePrFile[] = [
+  { filename: "src/app.ts", status: "modified", additions: 3, deletions: 1 },
+];
+
+function prFiles(issue: FakeIssue): FakePrFile[] {
+  return issue.pr?.files ?? DEFAULT_FILES;
 }

@@ -1,7 +1,7 @@
 import type { GithubPrDetails } from "@codeden/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { ArrowUpRight, ExternalLink, FileCode2, GitMerge, MessageSquare } from "lucide-react";
+import { ArrowUpRight, ExternalLink, GitMerge, MessageSquare } from "lucide-react";
 import type { ReactNode } from "react";
 import { toast } from "sonner";
 import { Markdown } from "@/components/thread/markdown";
@@ -19,13 +19,25 @@ import {
   PrStateBadge,
   ReviewDecisionBadge,
 } from "./github-bits";
+import { PrFiles, PrFilesToggle, useOpenFiles } from "./pr-files";
 
-function Section({ title, children }: { title: ReactNode; children: ReactNode }) {
+function Section({
+  title,
+  action,
+  children,
+}: {
+  title: ReactNode;
+  action?: ReactNode;
+  children: ReactNode;
+}) {
   return (
     <section className="space-y-2">
-      <h3 className="text-2xs font-medium tracking-wider text-muted-foreground uppercase">
-        {title}
-      </h3>
+      <div className="flex min-h-5 items-center gap-2">
+        <h3 className="flex-1 text-2xs font-medium tracking-wider text-muted-foreground uppercase">
+          {title}
+        </h3>
+        {action}
+      </div>
       {children}
     </section>
   );
@@ -84,7 +96,10 @@ function LinkedSession({ sessionId }: { sessionId: string }) {
   );
 }
 
-/** Live PR details (§9): state, checks, reviews, files changed, linked session and merge. */
+/**
+ * Live PR details (§9): state, checks, reviews, files changed (each with its diff), linked
+ * session and merge.
+ */
 export function PrDetailsView({
   prId,
   showSession = true,
@@ -93,6 +108,7 @@ export function PrDetailsView({
   showSession?: boolean;
 }) {
   const client = useClient();
+  const files = useOpenFiles();
   const {
     data: pr,
     error,
@@ -201,23 +217,11 @@ export function PrDetailsView({
         )}
       </Section>
 
-      <Section title={`Files changed · ${pr.files.length}`}>
-        <div className="divide-y divide-border rounded-lg border border-border">
-          {pr.files.map((f) => (
-            <div key={f.path} className="flex items-center gap-2 px-3 py-1.5 text-[12px]">
-              <FileCode2 className="size-3.5 shrink-0 text-muted-foreground" />
-              <span className="min-w-0 flex-1 truncate font-mono" title={f.path}>
-                {f.path}
-              </span>
-              <span className="text-3xs text-muted-foreground">{f.status}</span>
-              <span className="text-3xs text-diff-add tabular-nums">+{f.additions}</span>
-              <span className="text-3xs text-diff-del tabular-nums">−{f.deletions}</span>
-            </div>
-          ))}
-          {pr.files.length === 0 && (
-            <p className="px-3 py-2 text-xs text-muted-foreground">No files changed.</p>
-          )}
-        </div>
+      <Section
+        title={`Files changed · ${pr.changedFiles}`}
+        action={<PrFilesToggle pr={pr} open={files.open} onChange={files.setOpen} />}
+      >
+        <PrFiles pr={pr} open={files.open} onToggle={files.toggle} />
       </Section>
 
       {pr.body.trim() && (

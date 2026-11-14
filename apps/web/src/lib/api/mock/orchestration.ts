@@ -10,6 +10,7 @@ import {
 } from "@codeden/contracts";
 import type { CodeDenClient } from "../client";
 import { checks, mockIssues, mockPrs, searchPrChecksLater } from "./fixtures/github";
+import { mockPrDiff } from "./fixtures/github-pr-diffs";
 import { makeSession } from "./fixtures/helpers";
 import { uid } from "./live";
 import type { MockWorld } from "./world";
@@ -115,7 +116,9 @@ export function mockOrchestration(world: MockWorld, deps: Deps): OrchestrationPa
     mockPrs
       .filter((p) => p.projectId === projectId)
       .map(live)
-      .map(({ body: _b, additions: _a, deletions: _d, files: _f, ...rest }) => rest);
+      .map(
+        ({ body: _b, additions: _a, deletions: _d, changedFiles: _c, files: _f, ...rest }) => rest,
+      );
   const prById = (id: string) => {
     const found = mockPrs.find((p) => p.id === id);
     if (!found) throw new Error(`No PR ${id}`);
@@ -199,6 +202,7 @@ export function mockOrchestration(world: MockWorld, deps: Deps): OrchestrationPa
           nextSyncAt: null,
         }),
       pr: (id) => delay(prById(id)),
+      prDiff: (id) => delay(mockPrDiff(prById(id)), 300),
       merge: () => delay({ merged: true, sha: "9f8e7d6" }),
       async session(sessionId) {
         const session = world.snapshot.sessions.find((s) => s.id === sessionId);
