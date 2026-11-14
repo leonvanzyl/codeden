@@ -104,9 +104,33 @@ describe("api schemas", () => {
     ).toBe("cursor");
   });
 
+  it("round-trips Gemini CLI's setup check and sign-in command", () => {
+    expect(SetupToolId.options).toContain("gemini");
+    const check = roundTrip(SetupCheck, {
+      id: "gemini",
+      label: "Gemini CLI",
+      state: "ok",
+      installed: true,
+      version: "0.68.0",
+      executablePath: "/usr/local/bin/gemini",
+      loggedIn: true,
+      authMethod: "oauth-personal",
+      account: "dev@example.com",
+      loginExpiresAt: null,
+      message: "Signed in",
+      fix: null,
+      durationMs: 120,
+    });
+    expect(check.authMethod).toBe("oauth-personal");
+    // Gemini CLI has no login command: run on its own, it asks how to sign in.
+    expect(
+      roundTrip(LoginCommandResponse, { tool: "gemini", command: "gemini", args: [] }),
+    ).toEqual({ tool: "gemini", command: "gemini", args: [] });
+  });
+
   it("round-trips OpenCode's setup check, sign-in command and provider info", () => {
     expect(SetupToolId.options).toContain("opencode");
-    expect(LoginToolId.options).toEqual(["claude", "codex", "opencode", "cursor", "gh"]);
+    expect(LoginToolId.options).toEqual(["claude", "codex", "opencode", "cursor", "gemini", "gh"]);
     const check = roundTrip(SetupCheck, {
       id: "opencode",
       label: "OpenCode",

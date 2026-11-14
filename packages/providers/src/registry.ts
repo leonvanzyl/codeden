@@ -3,6 +3,7 @@ import { type ProviderAdapter, providerInfo, type RefreshModelsOptions } from ".
 import { ClaudeAdapter } from "./claude/adapter";
 import { CodexAdapter } from "./codex/adapter";
 import { CursorAdapter } from "./cursor/adapter";
+import { GeminiAdapter } from "./gemini/adapter";
 import { OpenCodeAdapter } from "./opencode/adapter";
 
 /** The set of adapters a runner has loaded, keyed by id. */
@@ -60,9 +61,15 @@ export class ProviderRegistry {
   }
 }
 
-/** Fresh instances of the built-in real providers (Claude Code, Codex, OpenCode, Cursor). */
+/** Fresh instances of the built-in real providers (Claude Code, Codex, OpenCode, Cursor, Gemini CLI). */
 export function builtinProviders(): ProviderAdapter[] {
-  return [new ClaudeAdapter(), new CodexAdapter(), new OpenCodeAdapter(), new CursorAdapter()];
+  return [
+    new ClaudeAdapter(),
+    new CodexAdapter(),
+    new OpenCodeAdapter(),
+    new CursorAdapter(),
+    new GeminiAdapter(),
+  ];
 }
 
 let defaultRegistry: ProviderRegistry | undefined;

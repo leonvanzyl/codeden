@@ -11,14 +11,29 @@ import type {
 import { num, shorten, str, toJson, toolOutput } from "../util/text";
 import type { AcpContentBlock, AcpToolCall, AcpToolContent } from "./protocol";
 
+/**
+ * What an agent's vendor fields say about a tool call, beyond ACP itself (`AcpExtensions.toolCall`):
+ * the MCP server and tool it calls, and the folder a command runs in.
+ */
+export interface AcpToolFacts {
+  mcp?: { server: string; tool: string };
+  cwd?: string;
+}
+
 /** What is known about one tool call: the merged `tool_call` and `tool_call_update`s. */
-export interface AcpToolState extends AcpToolCall {
+export interface AcpToolState extends AcpToolCall, AcpToolFacts {
   /** The tool's name, when the agent reports one (later protocol drafts). */
   name?: string;
   startedAt?: number;
   endedAt?: number;
   /** Images the call created, reported by a vendor extension (e.g. Cursor's image generation). */
   generatedImages?: GeneratedImage[];
+}
+
+/** Add what the agent's vendor fields say (only the facts it names; earlier ones stay). */
+export function addFacts(state: AcpToolState, facts: AcpToolFacts | undefined): void {
+  if (facts?.mcp?.server && facts.mcp.tool) state.mcp = { ...facts.mcp };
+  if (facts?.cwd) state.cwd = facts.cwd;
 }
 
 /** Context for mapping: the worktree (relative paths resolve against it) and MCP server names. */
@@ -67,9 +82,12 @@ export function commandOf(state: Pick<AcpToolCall, "rawInput" | "title">): strin
   return cmd ?? (state.title ?? "").replace(/^`(.*)`$/s, "$1");
 }
 
-/** The folder an `execute` call runs in (its raw input's `cwd`), else the worktree. */
-export function workdirOf(state: Pick<AcpToolCall, "rawInput">, cwd: string): string {
-  const dir = str(state.rawInput, "cwd") ?? str(state.rawInput, "workdir");
+/**
+ * The folder an `execute` call runs in: what the agent's vendor fields say, else its raw input's
+ * `cwd`, else the worktree.
+ */
+export function workdirOf(state: Pick<AcpToolState, "rawInput" | "cwd">, cwd: string): string {
+  const dir = state.cwd ?? str(state.rawInput, "cwd") ?? str(state.rawInput, "workdir");
   return dir ? path.resolve(cwd, dir) : cwd;
 }
 
@@ -144,12 +162,17 @@ const BUILTIN_KINDS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * The MCP server and tool a call belongs to, when it names one of `servers`. Only calls of kind
- * `other` (or no kind, or a custom `_kind`) can be MCP calls: the agent writes the name and the
- * title, so a command titled `codeden-x; rm -rf ~` stays a command.
+ * The MCP server and tool a call belongs to: the identity the agent itself reports (its vendor
+ * fields, `AcpToolFacts.mcp`), else one of `servers` named in its input, name or title. Only
+ * calls of kind `other` (or no kind, or a custom `_kind`) can be MCP calls: the model writes the
+ * name and the title, so a command titled `codeden-x; rm -rf ~` stays a command.
  */
-export function mcpOf(state: AcpToolState, servers: readonly string[]) {
+export function mcpOf(
+  state: AcpToolState,
+  servers: readonly string[],
+): { server: string; tool: string } | undefined {
   if (typeof state.kind === "string" && BUILTIN_KINDS.has(state.kind)) return undefined;
+  if (state.mcp) return state.mcp;
   const server = str(state.rawInput, "server") ?? str(state.rawInput, "serverName");
   const tool = str(state.rawInput, "tool") ?? str(state.rawInput, "toolName");
   if (server && tool && servers.includes(server)) return { server, tool };

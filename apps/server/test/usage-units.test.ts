@@ -166,6 +166,10 @@ describe("ledger deltas", () => {
     // A Cursor login or key bills the Cursor plan.
     expect(billingFromAuthMethod("cursor")).toBe("subscription");
     expect(billingFromAuthMethod("cursor_key")).toBe("subscription");
+    // Gemini CLI: a Google login is a plan; an API key or Vertex AI pays per token.
+    expect(billingFromAuthMethod("oauth-personal")).toBe("subscription");
+    expect(billingFromAuthMethod("gemini-api-key")).toBe("api");
+    expect(billingFromAuthMethod("vertex-ai")).toBe("api");
     expect(billingFromAuthMethod("api_key")).toBe("api");
     expect(billingFromAuthMethod("an API key")).toBe("api");
     expect(billingFromAuthMethod(null)).toBe("unknown");

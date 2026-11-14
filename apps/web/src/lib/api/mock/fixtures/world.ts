@@ -459,6 +459,39 @@ export const providers: ProviderInfo[] = [
       { id: "gpt-6.1-sol-high", label: "GPT-6.1 Sol High", efforts: [] },
     ],
   },
+  {
+    id: "gemini",
+    displayName: "Gemini CLI",
+    capabilities: {
+      ...caps,
+      steer: false,
+      userQuestions: false,
+      subagents: false,
+      rollback: false,
+      fork: false,
+      reasoningEffort: false,
+      skills: false,
+      liveAutonomy: true,
+    },
+    // What a Gemini CLI session lists; before one has, Default and Gemini CLI's aliases.
+    models: [
+      {
+        id: "default",
+        label: "Default",
+        description: "The model selected in Gemini CLI (its own setting)",
+        efforts: [],
+        isDefault: true,
+      },
+      {
+        id: "auto",
+        label: "Auto",
+        description: "Gemini CLI picks a Pro or Flash model",
+        efforts: [],
+      },
+      { id: "gemini-3-pro-preview", label: "Gemini 3 Pro Preview", efforts: [] },
+      { id: "gemini-2.5-flash", label: "Gemini 2.5 Flash", efforts: [] },
+    ],
+  },
 ];
 
 export const runner: RunnerConnectionStatus = {

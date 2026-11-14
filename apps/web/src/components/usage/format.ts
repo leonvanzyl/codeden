@@ -131,4 +131,5 @@ export const PROVIDER_NAMES: Record<string, string> = {
   codex: "Codex",
   opencode: "OpenCode",
   cursor: "Cursor",
+  gemini: "Gemini CLI",
 };

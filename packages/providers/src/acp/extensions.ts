@@ -1,7 +1,14 @@
 import type { ApprovalBroker } from "../approvals";
 import type { ResolvedCommand } from "../util/exec";
+import type { AcpToolFacts, AcpToolState } from "./items";
 import type { AcpEventMapper, ThreadCtx } from "./mapper";
-import type { AcpInitializeResult, AcpSessionSetup } from "./protocol";
+import type {
+  AcpInitializeResult,
+  AcpPermissionRequest,
+  AcpPermissionResult,
+  AcpSessionSetup,
+  AcpToolCall,
+} from "./protocol";
 import type { AcpSubagents } from "./subagents";
 
 /** What a vendor extension can reach in its session. */
@@ -62,6 +69,22 @@ export interface AcpExtensions {
   /** Handle a vendor notification. */
   notification?(method: string, params: unknown, host: AcpExtensionHost): void;
   /**
+   * What the agent's vendor fields (`_meta`) or its own conventions say about a tool call: the
+   * MCP server and tool it calls, the folder a command runs in. Read for every `tool_call`,
+   * `tool_call_update` and permission request. An MCP identity counts only for calls of kind
+   * `other` (`mcpOf`): a command or an edit is judged as one whatever it reports.
+   */
+  toolCall?(call: AcpToolCall): AcpToolFacts | undefined;
+  /**
+   * Answer a permission request the agent's own way (a vendor's plan approval, say). Returns
+   * undefined to leave it to CodeDen's policy (§11.2).
+   */
+  permission?(
+    req: AcpPermissionRequest,
+    call: AcpToolState,
+    host: AcpExtensionHost,
+  ): Promise<AcpPermissionResult> | undefined;
+  /**
    * Extra `clientCapabilities` fields to advertise in `initialize` (vendor `_meta` flags), e.g.
    * the `subagents` opt-in that makes the agent run subagents as child sessions.
    */
@@ -74,6 +97,10 @@ export interface AcpAgentSpec {
   label: string;
   /** Arguments that start its ACP server, e.g. `["acp"]`. */
   args: readonly string[];
+  /**
+   * The login method `authenticate` runs after `initialize` (reusing the user's own login).
+   * Without one, CodeDen never authenticates: the agent uses the login it already has.
+   */
   authMethod?: string;
   /** Its mode ids: full tools, planning, and read-only (when it has them). */
   modes: { agent: string; plan?: string; readOnly?: string };

@@ -52,6 +52,10 @@ export function knownLocations(name: string, opts: KnownLocationOptions = {}): s
         p.join(home, ".opencode", "bin", exe("opencode")),
         ...(platform === "darwin" ? ["/opt/homebrew/bin/opencode", "/usr/local/bin/opencode"] : []),
       ];
+    case "gemini":
+      // Homebrew (`brew install gemini-cli`), for apps started from the macOS Finder; npm's
+      // global folder is on PATH.
+      return platform === "darwin" ? ["/opt/homebrew/bin/gemini", "/usr/local/bin/gemini"] : [];
     case "gh":
       if (win) {
         const programFiles = env.ProgramFiles || "C:\\Program Files";

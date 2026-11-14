@@ -130,6 +130,8 @@ export interface AcpToolCall {
   locations?: { path: string; line?: number | null }[] | null;
   rawInput?: unknown;
   rawOutput?: unknown;
+  /** Vendor fields (ACP's extension point), e.g. `{ "gemini-cli": { mcp: {...} } }`. */
+  _meta?: Record<string, unknown> | null;
 }
 
 /** One entry of an agent's `plan` update. */

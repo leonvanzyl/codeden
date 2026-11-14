@@ -225,7 +225,8 @@ describe("ModelPicker", () => {
     });
     const picker = await openPicker(trigger);
     expect(within(picker).getByRole("toolbar", { name: "Providers" })).toBeTruthy();
-    fireEvent.change(within(picker).getByRole("combobox"), { target: { value: "mini" } });
+    // "gpt mini", not "mini": Gemini's names contain "mini" too.
+    fireEvent.change(within(picker).getByRole("combobox"), { target: { value: "gpt mini" } });
     await waitFor(() =>
       expect(within(picker).queryByRole("toolbar", { name: "Providers" })).toBeNull(),
     );
