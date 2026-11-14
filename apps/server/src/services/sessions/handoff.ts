@@ -23,13 +23,14 @@ const SETTLE_TIMEOUT_MS = 120_000;
 /** Root-thread items the utility model's transcript is made from (the newest of them). */
 const TRANSCRIPT_ITEMS = 600;
 
-/** A new session that continues another one from a brief, ready to be created and launched. */
+/**
+ * A new session that continues another one from a brief, ready to be created and launched. Its
+ * first message, the brief from CodeDen, is `meta.handoffBrief`: the launcher sends it.
+ */
 export interface HandoffPlan {
   session: Session;
   meta: StoredStartMeta;
   start: ForkStart;
-  /** Its first message: the brief, from CodeDen. */
-  input: UserInput;
 }
 
 export interface HandoffDeps {
@@ -114,10 +115,14 @@ export async function planHandoff(
       throw toServiceError(error);
     });
   const checkpoint = checkpoints.at(-1)?.index ?? null;
-  const root = source.worktreePath ?? source.cwd;
+  const requests = repo
+    .rootItems(source, ["user_message"])
+    .flatMap((i) => (i.kind === "user_message" ? [i] : []));
   const transcript = handoffTranscript(
     repo.rootItems(source, ["user_message", "assistant_message", "tool_call"], TRANSCRIPT_ITEMS),
-    root,
+    source.worktreePath ?? source.cwd,
+    // The task leads the transcript even when the newest items no longer reach back to it.
+    requests[0],
   );
   const summary = (await deps.utility?.handoffSummary(transcript).catch(() => null)) ?? null;
 
@@ -134,9 +139,8 @@ export async function planHandoff(
     session: now,
     providerName: providerName(runner, now.provider),
     restored: checkpoint !== null,
-    requests: repo
-      .rootItems(now, ["user_message"])
-      .flatMap((i) => (i.kind === "user_message" ? [i] : [])),
+    // No turn ran since they were read (checked above), so the source's messages are the same.
+    requests,
     lastReply: lastReply(repo, now),
     todos: latestTodos(repo, now),
     lastTurn: lastRootTurn(repo, now),
@@ -207,17 +211,34 @@ export function handoffPlan(
         : { restoreCheckpoint: { sessionId: source.id, index: checkpoint } }),
     },
   };
+  const input: UserInput = { text: brief, attachments: [], from: "codeden" };
   return {
     session,
     start,
-    input: { text: brief, attachments: [], from: "codeden" },
     meta: {
       workspaceMode: "worktree",
       workspaceFallback: null,
       forced: null,
       queuedBehind: [],
       forkStart: start,
+      // Kept until a start delivers it, so a first start that fails doesn't lose it.
+      handoffBrief: input,
     },
+  };
+}
+
+/**
+ * The input that opens a handoff (§9) whose brief is still to be delivered: the brief alone,
+ * or with the message that starts the session after its first start failed (that message's
+ * attachments kept). The brief comes first, so the agent reads the context before the request.
+ */
+export function withHandoffBrief(brief: UserInput, input: UserInput | undefined): UserInput {
+  if (!input) return brief;
+  const from = input.from && input.from !== "user" ? ` (from ${input.from})` : "";
+  return {
+    ...input,
+    text: `${brief.text}\n\n## The latest message${from}\n\n${input.text}`,
+    from: "codeden",
   };
 }
 

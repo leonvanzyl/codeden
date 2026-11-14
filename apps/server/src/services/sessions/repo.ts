@@ -51,6 +51,11 @@ export type StoredStartMeta = SessionStartMeta & {
   turnFromUser?: boolean;
   /** A fork's workspace plan (§9): prepared before any start until the worktree exists. */
   forkStart?: ForkStart | null;
+  /**
+   * A handoff's brief (§9) until a start delivers it: a first start that fails keeps it, and
+   * the next start sends it first, with the message that starts it.
+   */
+  handoffBrief?: UserInput | null;
 };
 
 /**

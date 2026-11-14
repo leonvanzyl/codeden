@@ -229,13 +229,14 @@ export class SessionService {
   /**
    * Hand an agent session off (§9): a new session, on any provider, with its code as a fork has
    * it and a brief of its work as the first message, which starts a turn (`handoff.ts`). The
-   * worktree is made in the background.
+   * worktree is made in the background. The brief is kept with the start metadata, and the
+   * launcher sends it with whichever start opens the session, so a failed first start keeps it.
    */
   async handoff(id: string, req: HandoffSessionRequest): Promise<HandoffSessionResponse> {
     const { repo, projects, utility } = this.deps;
     const plan = await planHandoff({ repo, projects, runner: this.runnerOf(id), utility }, id, req);
     repo.create(plan.session, plan.meta);
-    this.launchInBackground(plan.session.id, plan.input, plan.start.workspace, plan.start.fork);
+    this.launchInBackground(plan.session.id, undefined, plan.start.workspace, plan.start.fork);
     return { sessionId: plan.session.id };
   }
 

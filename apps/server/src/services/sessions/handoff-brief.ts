@@ -173,13 +173,19 @@ function relativeTo(path: string, root: string | null): string {
 
 /**
  * The source's root thread as short lines for the utility model to summarise: messages, commands,
- * edits and other tool calls, newest kept within `TRANSCRIPT_MAX` (the task always first).
+ * edits and other tool calls, newest kept within `TRANSCRIPT_MAX`. The task (`task`, the first
+ * user message, read on its own because `items` may be only the newest ones) always leads.
  */
-export function handoffTranscript(items: Item[], root: string | null): string {
-  const at = items.findIndex((i) => i.kind === "user_message");
-  const first = items[at];
-  const head = first?.kind === "user_message" ? userLine(first.input) : null;
-  const lines = items.slice(at + 1).flatMap((item) => transcriptLine(item, root));
+export function handoffTranscript(
+  items: Item[],
+  root: string | null,
+  task?: ItemOf<"user_message">,
+): string {
+  const first = task ?? items.find((i): i is ItemOf<"user_message"> => i.kind === "user_message");
+  const head = first ? userLine(first.input) : null;
+  const lines = items
+    .filter((item) => item.id !== first?.id)
+    .flatMap((item) => transcriptLine(item, root));
   const kept: string[] = [];
   let size = head ? head.length + 1 : 0;
   for (let i = lines.length - 1; i >= 0; i--) {

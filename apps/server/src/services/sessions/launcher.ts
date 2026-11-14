@@ -22,6 +22,7 @@ import {
 } from "../runner-port";
 import { slugWords } from "./conflicts";
 import type { ForkStart } from "./fork";
+import { withHandoffBrief } from "./handoff";
 import { ownBranch } from "./own-branch";
 import type { SessionRepo } from "./repo";
 import { setupFailureNote, withSetupNote } from "./setup-failure";
@@ -128,6 +129,8 @@ export class SessionLauncher {
         workspaceFallback: fallback,
       }));
     }
+    const brief = this.pendingBrief(sessionId);
+    const input = brief ? withHandoffBrief(brief, opts.input) : opts.input;
     const result = await this.open(
       runner,
       {
@@ -137,13 +140,14 @@ export class SessionLauncher {
         branch: ws.branch,
         baseBranch: ws.baseBranch,
       },
-      withSetupNote(opts.input, ws.setupNote),
+      withSetupNote(input, ws.setupNote),
     );
+    if (brief) this.briefDelivered(sessionId);
     repo.update(sessionId, (s) => ({
       ...s,
       resumeToken: s.resumeToken ?? result.resumeToken,
       runnerId: runner.runnerId() ?? s.runnerId,
-      status: s.status === "starting" ? (opts.input ? "running" : "idle") : s.status,
+      status: s.status === "starting" ? (input ? "running" : "idle") : s.status,
     }));
   }
 
@@ -151,7 +155,8 @@ export class SessionLauncher {
    * Re-open a session the runner no longer hosts (runner restart, stopped session) through the
    * provider's resume token, optionally starting a turn. Throws on failure. A fork whose
    * worktree was never made (its first start failed) gets it made now, as at its first start:
-   * it never runs anywhere else.
+   * it never runs anywhere else. A handoff whose brief no start delivered yet (§9) sends it now,
+   * ahead of `input`.
    */
   async resume(session: Session, input?: UserInput): Promise<void> {
     const forkStart = this.pendingForkStart(session);
@@ -162,7 +167,10 @@ export class SessionLauncher {
     const runner = runnerForSession(this.deps, session.id);
     await this.requireRunner(runner);
     const { session: current, setupNote } = await this.restoreWorktree(session);
-    const result = await this.open(runner, current, withSetupNote(input, setupNote));
+    const brief = this.pendingBrief(session.id);
+    const first = brief ? withHandoffBrief(brief, input) : input;
+    const result = await this.open(runner, current, withSetupNote(first, setupNote));
+    if (brief) this.briefDelivered(session.id);
     this.deps.repo.update(session.id, (s) => ({
       ...s,
       resumeToken: result.resumeToken ?? s.resumeToken,
@@ -299,6 +307,27 @@ export class SessionLauncher {
   private pendingForkStart(session: Session): ForkStart | null {
     if (session.worktreePath) return null;
     return this.deps.repo.find(session.id)?.startMeta?.forkStart ?? null;
+  }
+
+  /**
+   * A handoff's brief that no start has delivered yet (§9). A session that has had a turn got
+   * it already (a start that timed out after the runner took it), so it is dropped then.
+   */
+  private pendingBrief(sessionId: string): UserInput | null {
+    const brief = this.deps.repo.find(sessionId)?.startMeta?.handoffBrief ?? null;
+    if (brief && this.deps.repo.turnCount(sessionId) > 0) {
+      this.briefDelivered(sessionId);
+      return null;
+    }
+    return brief;
+  }
+
+  /** The brief reached the provider: later starts are plain resumes. */
+  private briefDelivered(sessionId: string): void {
+    this.deps.repo.setStartMeta(sessionId, (m) => ({
+      ...(m ?? defaultMeta({ mode: "worktree" })),
+      handoffBrief: null,
+    }));
   }
 
   /** The session's project for its system prompt; null without one (or once it is gone). */

@@ -87,6 +87,7 @@ In the dialog, pick the provider, model and effort, and optionally say what the 
 
 - **Same code.** Like a fork: its own worktree on a new branch from the original's branch, with the original's files at the end of its last turn copied in, uncommitted changes included.
 - **A brief instead of the conversation.** The conversation can't move between providers, so the new session's first message is a brief CodeDen writes from the original's transcript. It holds the task, the requests you made along the way, where the work got to, the result the agent recorded, its open todos, why its last turn stopped if it failed, the files it edited and your note. "Where the work got to" is a short summary by the utility model; with no utility model (or **Handoff summaries** off in **Settings > Utility model**), it quotes the agent's last reply. The brief shows in the transcript as a message from CodeDen, and the agent starts on it straight away.
+- **Nothing lost if it can't start.** If the new session fails to start (its worktree can't be made, or the provider won't start, say because its sign-in lapsed), fix the cause and send it a message. The brief still goes first, with your message after it.
 - **Same work.** It keeps the permissions, plan mode, work key and linked issue. Its pull request is a new one that targets the same base branch.
 - **Original unchanged.** Nothing about the original session changes.
 

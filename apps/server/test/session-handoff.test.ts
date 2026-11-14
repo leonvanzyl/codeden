@@ -10,6 +10,7 @@ import {
 } from "@codeden/contracts";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { McpTokenStore } from "../src/mcp/tokens";
+import { RunnerCommandError } from "../src/runner/client";
 import type { ProjectService } from "../src/services/projects/project-service";
 import type { RunnerPort } from "../src/services/runner-port";
 import { handoffTitle } from "../src/services/sessions/handoff";
@@ -60,6 +61,11 @@ let checkpoints: Record<string, number[]>;
 let duringSummary: (() => void) | undefined;
 let summary: string | null;
 let transcripts: string[];
+/** Fail this many `workspace.prepare` / `session.start` calls (a lost checkpoint, a lapsed login). */
+let failPrepares: number;
+let failStarts: number;
+/** Sessions the runner hosts: `session.send` to any other answers `unknown_session`. */
+let hosted: Set<string>;
 
 beforeEach(() => {
   env = createGithubEnv();
@@ -68,6 +74,9 @@ beforeEach(() => {
   duringSummary = undefined;
   summary = "- Built the login form\n- The redirect test still fails";
   transcripts = [];
+  failPrepares = 0;
+  failStarts = 0;
+  hosted = new Set();
 });
 
 afterEach(() => env.close());
@@ -91,9 +100,23 @@ const runner = {
           })),
         };
       case "workspace.prepare":
+        if (failPrepares > 0) {
+          failPrepares -= 1;
+          throw new RunnerCommandError("unknown_checkpoint", "Checkpoint 1 not found");
+        }
         return { cwd: command.path ?? env.dir, branch: command.branch ?? null, created: true };
       case "session.start":
+        if (failStarts > 0) {
+          failStarts -= 1;
+          throw new RunnerCommandError("open_failed", "Not signed in to Codex");
+        }
+        hosted.add(command.sessionId);
         return { resumeToken: `${command.providerId}-new` };
+      case "session.send":
+        if (!hosted.has(command.sessionId)) {
+          throw new RunnerCommandError("unknown_session", `${command.sessionId} is not running`);
+        }
+        return {};
       default:
         return {};
     }
@@ -271,6 +294,8 @@ describe("handing a session off", () => {
     expect(brief).toContain("- Built the login form\n- The redirect test still fails");
     expect(brief).toContain("## Files it edited\n\n- src/login.tsx");
     expect(brief).toContain("## What to do next (from the user)\n\nFix the redirect test first.");
+    // Delivered: later starts of the session are plain resumes.
+    expect(env.repo.find(sessionId)?.startMeta?.handoffBrief).toBeNull();
 
     // The summary was written from the source's transcript.
     expect(transcripts).toEqual([
@@ -410,5 +435,98 @@ describe("handing a session off", () => {
     expect(handoffTitle({ ...long, title: null, purpose: "Fix it" }, "Codex")).toBe(
       "Fix it (to Codex)",
     );
+  });
+});
+
+describe("a handoff whose first start fails", () => {
+  const carryOn = { input: { text: "try again", attachments: [] }, whenBusy: "queue" as const };
+
+  async function failedHandoff() {
+    const { sessions } = services();
+    const src = source();
+    checkpoints[src.id] = [0, 1];
+    const { sessionId } = await sessions.handoff(src.id, {
+      provider: "codex",
+      note: "Fix the redirect test first.",
+    });
+    await settle(sessions);
+    return { src, id: sessionId };
+  }
+
+  /** The brief went out with the start that finally opened the session, and only then. */
+  function expectBriefWith(text: string) {
+    const starts = all("session.start");
+    const input = starts.at(-1)?.input;
+    expect(input?.from).toBe("codeden");
+    expect(input?.text).toMatch(/^You are taking over a coding task/);
+    expect(input?.text).toContain(
+      "## What to do next (from the user)\n\nFix the redirect test first.",
+    );
+    expect(input?.text?.endsWith(`## The latest message\n\n${text}`)).toBe(true);
+  }
+
+  it("keeps the brief when the worktree can't be made, and sends it with the next message", async () => {
+    failPrepares = 1;
+    const { id } = await failedHandoff();
+    expect(env.repo.get(id)).toMatchObject({ status: "failed", worktreePath: null });
+    expect(all("session.start")).toEqual([]);
+    expect(env.repo.find(id)?.startMeta?.handoffBrief?.text).toMatch(/^You are taking over/);
+
+    // A new server (no memory of the first launch) gets the user's next message.
+    const { sessions } = services();
+    calls = [];
+    await sessions.send(id, carryOn);
+    expect(calls.map((c) => c.name)).toEqual([
+      "session.send",
+      "workspace.prepare",
+      "session.start",
+    ]);
+    expectBriefWith("try again");
+    expect(env.repo.find(id)?.startMeta?.handoffBrief).toBeNull();
+  });
+
+  it("keeps the brief when the provider won't start, and sends it with the next message", async () => {
+    failStarts = 1;
+    const { id } = await failedHandoff();
+    // The worktree exists; the provider refused (a lapsed sign-in).
+    expect(env.repo.get(id)).toMatchObject({ status: "failed", resumeToken: null });
+    expect(env.repo.get(id).worktreePath).toBeTruthy();
+    expect(env.repo.find(id)?.startMeta?.handoffBrief).toBeTruthy();
+
+    const { sessions } = services();
+    calls = [];
+    await sessions.send(id, carryOn);
+    expect(calls.map((c) => c.name)).toEqual(["session.send", "session.start"]);
+    expectBriefWith("try again");
+    expect(call("session.start").options.resumeToken).toBeUndefined();
+
+    // Delivered once: the next message is just the message.
+    hosted.clear();
+    calls = [];
+    env.repo.update(id, (s) => ({ ...s, status: "idle" }));
+    await sessions.send(id, { ...carryOn, input: { text: "and now?", attachments: [] } });
+    expect(call("session.start").input?.text).toBe("and now?");
+  });
+
+  it("drops a brief the provider already got, once the session has had a turn", async () => {
+    failStarts = 1;
+    const { id } = await failedHandoff();
+    // The runner took the brief and started a turn, but the answer never came back.
+    env.store.append([
+      agentEventToNewEvent(id, { type: "thread.started", thread: { id: "t-new" } }),
+      agentEventToNewEvent(id, { type: "turn.started", threadId: "t-new", turnId: "n1" }),
+      agentEventToNewEvent(id, {
+        type: "turn.failed",
+        threadId: "t-new",
+        turnId: "n1",
+        error: { message: "x" },
+      }),
+    ]);
+    env.repo.update(id, (s) => ({ ...s, status: "failed" }));
+    const { sessions } = services();
+    calls = [];
+    await sessions.send(id, carryOn);
+    expect(call("session.start").input?.text).toBe("try again");
+    expect(env.repo.find(id)?.startMeta?.handoffBrief).toBeNull();
   });
 });

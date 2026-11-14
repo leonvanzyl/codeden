@@ -270,4 +270,21 @@ describe("the transcript the summary is written from", () => {
     expect(text.endsWith(`199 ${"z".repeat(1_000)}`)).toBe(true);
     expect(text).not.toContain("Agent: 0 ");
   });
+
+  it("leads with the task even when the newest items no longer reach back to it", () => {
+    const task = user("Add a login page");
+    // Only the newest items were read: they start with a wake-up from CodeDen.
+    const window: Item[] = [
+      user("Previous turn stopped; continue where you left off.", "codeden"),
+      reply("Picking up the redirect."),
+      command("pnpm test"),
+    ];
+    expect(handoffTranscript(window, WT, task)).toBe(
+      ["User: Add a login page", "Agent: Picking up the redirect.", "$ pnpm test"].join("\n"),
+    );
+    // And it isn't repeated when the window does reach it.
+    expect(handoffTranscript([task, reply("On it.")], WT, task)).toBe(
+      "User: Add a login page\nAgent: On it.",
+    );
+  });
 });
