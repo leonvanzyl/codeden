@@ -125,9 +125,13 @@ nothing answers (headless Chromium cancels it, a native view shows the desktop a
   `multiple`, disabled state and options. Each value names an option by its label (what the
   snapshot shows) or else its value, exactly. Not a `<select>`, no such option (the error lists
   them), several values for a single select, or a disabled select or option fail at once,
-  instead of `selectOption` waiting out the action timeout. The matched options are selected by
-  index, so the page gets the same `input` and `change` events a person's choice fires, and the
-  result names the selected options.
+  instead of `selectOption` waiting out the action timeout; an option's ref is pointed to its
+  menu's ref. The matched options are selected by index, so the page gets the same `input` and
+  `change` events a person's choice fires, and the result names the selected options. They are
+  read back (a change handler may change them again), but the read never decides the outcome:
+  a sort-by or language menu whose change navigates the page, or a select the page re-renders,
+  is gone by then. When the ref no longer resolves (a navigated document has no refs) or the
+  read takes over 1 s, the result is the options that were chosen, with `detached: true`.
 - **`browser.upload`** takes absolute paths of files on this machine (the server has already
   checked them against the session's folders and the secrets rule). On a file input (also a
   hidden one, or a label for one) it calls `setInputFiles`. Anything else (a "Browse" button, a

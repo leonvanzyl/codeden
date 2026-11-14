@@ -37,16 +37,18 @@ export const browserSelect = defineTool({
     tabId,
   }),
   handler: async (input, { services, sessionId }) => {
-    const { dialog, selected } = await services.browser.agentCommand({
+    const { dialog, selected, detached } = await services.browser.agentCommand({
       name: "browser.select",
       sessionId,
       ...input,
     });
     const text = !selected
       ? `Selected ${input.values.map((v) => JSON.stringify(v)).join(", ")} in ${input.ref}.`
-      : selected.length
-        ? `Selected ${describeSelected(selected)} in ${input.ref}.`
-        : `${input.ref} has no option selected now.`;
+      : detached
+        ? `Selected ${describeSelected(selected)} in ${input.ref}. The menu then left the page (its change navigated or re-rendered the page), so take a new browser_snapshot.`
+        : selected.length
+          ? `Selected ${describeSelected(selected)} in ${input.ref}.`
+          : `${input.ref} has no option selected now.`;
     return withDialogNote(text, dialog);
   },
 });

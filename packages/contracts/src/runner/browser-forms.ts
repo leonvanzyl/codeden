@@ -59,9 +59,14 @@ export const BrowserFormCommands = [
 
 /** Result schemas for `browser.select` and `browser.upload`, spread into `RunnerCommandResults`. */
 export const BrowserFormCommandResults = {
-  /** `selected`: the options now selected (absent when the change opened a page dialog). */
+  /**
+   * `selected`: the options now selected (absent when the change opened a page dialog).
+   * `detached`: the select left the page right after the choice (its change handler navigated,
+   * or the page re-rendered it), so `selected` is what was chosen rather than read back.
+   */
   "browser.select": BrowserActionResult.extend({
     selected: z.array(BrowserSelectedOption).optional(),
+    detached: z.boolean().optional(),
   }),
   /** `via`: how the files were set (absent when a page dialog interrupted the action). */
   "browser.upload": BrowserActionResult.extend({ via: BrowserUploadVia.optional() }),

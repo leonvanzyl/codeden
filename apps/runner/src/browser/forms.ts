@@ -17,6 +17,9 @@ import type { BrowserSession } from "./session";
 /** How long `upload` waits for the file chooser that clicking a button or drop zone opens. */
 export const FILE_CHOOSER_WAIT_MS = 3_000;
 
+/** Longest wait to read a selection back; the choice itself is already made by then. */
+const SELECT_READ_BACK_TIMEOUT_MS = 1_000;
+
 /** Options named in a "no such option" error; a long list ends with how many more there are. */
 const LISTED_OPTIONS = 30;
 
@@ -100,6 +103,12 @@ function describeOption(option: SelectOptionInfo): string {
  * single select, or the select or a named option is disabled.
  */
 export function pickOptions(ref: string, info: SelectInfo, values: readonly string[]): number[] {
+  if (info.tag === "option" || info.tag === "optgroup") {
+    throw new CommandError(
+      "not_a_select",
+      `${ref} is an <${info.tag}> of a <select> menu. Pass the ref of the menu itself (the combobox or listbox it is listed under) and the option's label as the value.`,
+    );
+  }
   if (info.tag !== "select") {
     throw new CommandError(
       "not_a_select",
@@ -137,25 +146,53 @@ export function pickOptions(ref: string, info: SelectInfo, values: readonly stri
 }
 
 /**
+ * The options `selectOption` leaves selected when it picks `indexes`: exactly those (it deselects
+ * the rest of a multiple select), in the order of the menu.
+ */
+export function chosenOptions(
+  info: SelectInfo,
+  indexes: readonly number[],
+): BrowserSelectedOption[] {
+  return info.options
+    .filter((o) => indexes.includes(o.index))
+    .map(({ value, label }) => ({ value, label }));
+}
+
+/**
  * `browser.select`: choose options of the `<select>` behind `ref`. The page gets the same
  * `input` and `change` events a person's choice would fire. Checks fail at once, so a typo never
  * waits out the action timeout.
+ *
+ * The selection is read back afterwards (a change handler may change it again), but the read
+ * never decides the outcome: a sort-by or language menu whose change navigates the page, or a
+ * select the page re-renders, is gone by then. The choice stands, and the result says so
+ * (`detached`) instead of waiting out the timeout for an element that will not come back.
  */
 export async function select(
   session: BrowserSession,
   ref: string,
   values: readonly string[],
   tabId?: string,
-): Promise<ActionResult & { selected?: BrowserSelectedOption[] }> {
+): Promise<ActionResult & { selected?: BrowserSelectedOption[]; detached?: boolean }> {
   const tab = target(session, tabId);
   return withRef(tab.page, ref, async (locator) => {
-    const indexes = pickOptions(ref, await locator.evaluate(readSelect), values);
+    const info = await locator.evaluate(readSelect);
+    const indexes = pickOptions(ref, info, values);
     const result = await session.dialogs.race(tab.tabId, () =>
       locator.selectOption(indexes.map((index) => ({ index }))),
     );
     // A change handler opened a dialog: the page is paused until it is answered.
     if (result.dialog) return result;
-    return { selected: await locator.evaluate(readSelected) };
+    const chosen = { selected: chosenOptions(info, indexes), detached: true };
+    // A navigated document has no refs: the ref resolves to nothing at once.
+    if ((await locator.count().catch(() => 0)) === 0) return chosen;
+    try {
+      const timeout = SELECT_READ_BACK_TIMEOUT_MS;
+      return { selected: await locator.evaluate(readSelected, undefined, { timeout }) };
+    } catch {
+      // The document went away while it was read (a navigation committing just then).
+      return chosen;
+    }
   });
 }
 

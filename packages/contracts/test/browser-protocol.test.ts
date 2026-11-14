@@ -124,6 +124,10 @@ describe("browser protocol", () => {
       selected: [{ value: "nl", label: "Netherlands" }],
     });
     roundTrip(RunnerCommandResults["browser.select"], { selected: [] });
+    roundTrip(RunnerCommandResults["browser.select"], {
+      selected: [{ value: "price", label: "Price" }],
+      detached: true,
+    });
     roundTrip(RunnerCommandResults["browser.select"], { dialog });
 
     const upload = { name: "browser.upload", sessionId: "s1", ref: "e5" };

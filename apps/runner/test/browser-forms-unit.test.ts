@@ -2,7 +2,14 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { checkUploadPaths, pickOptions, type SelectInfo } from "../src/browser/forms";
+import {
+  checkUploadPaths,
+  chosenOptions,
+  pickOptions,
+  type SelectInfo,
+  select,
+} from "../src/browser/forms";
+import type { BrowserSession } from "../src/browser/session";
 import { CommandError } from "../src/errors";
 
 const country: SelectInfo = {
@@ -86,6 +93,93 @@ describe("pickOptions", () => {
     expect(failure(() => pickOptions("e3", long, ["99"])).message).toMatch(/"29" and 5 more\.$/);
     const empty = { ...country, options: [] };
     expect(failure(() => pickOptions("e3", empty, ["a"])).message).toMatch(/It has no options\.$/);
+  });
+});
+
+describe("an option's ref", () => {
+  it("points to the menu's own ref", () => {
+    expect(failure(() => pickOptions("e6", { ...country, tag: "option" }, ["x"]))).toMatchObject({
+      code: "not_a_select",
+      message: expect.stringMatching(
+        /e6 is an <option> of a <select> menu\. Pass the ref of the menu itself/,
+      ),
+    });
+  });
+});
+
+describe("chosenOptions", () => {
+  it("is exactly the picked options, in menu order", () => {
+    expect(chosenOptions(country, [2, 1])).toEqual([
+      { value: "za", label: "South Africa" },
+      { value: "nl", label: "Netherlands" },
+    ]);
+    expect(chosenOptions(country, [])).toEqual([]);
+  });
+});
+
+/**
+ * A page holding one `<select>`: `selectOption` records the choice and then, as its change
+ * handler may, navigates (the ref resolves to nothing) or leaves the select in place.
+ */
+function fakeSession(after: "navigates" | "stays" | "reads-fail") {
+  let chose: unknown;
+  let changed = false;
+  const reads: string[] = [];
+  const locator = {
+    count: async () => (changed && after === "navigates" ? 0 : 1),
+    evaluate: async (fn: { name?: string }, _arg?: unknown, opts?: { timeout?: number }) => {
+      reads.push(fn.name ?? "");
+      if (!changed) return country;
+      if (after === "reads-fail") throw new Error(`Timeout ${opts?.timeout}ms exceeded`);
+      // The change handler picked another option itself.
+      return [{ value: "", label: "Pick one" }];
+    },
+    selectOption: async (options: unknown) => {
+      chose = options;
+      changed = true;
+      return [];
+    },
+  };
+  const session = {
+    tabId: () => "t1",
+    page: () => ({ getByRef: () => locator }),
+    dialogs: {
+      assertNone: () => undefined,
+      race: async (_tabId: string, action: () => Promise<unknown>) => {
+        await action();
+        return {};
+      },
+    },
+  } as unknown as BrowserSession;
+  return { session, reads, chose: () => chose };
+}
+
+describe("select", () => {
+  it("returns the choice at once when the change navigated the page", async () => {
+    const page = fakeSession("navigates");
+    await expect(select(page.session, "e3", ["Netherlands"])).resolves.toEqual({
+      selected: [{ value: "nl", label: "Netherlands" }],
+      detached: true,
+    });
+    expect(page.chose()).toEqual([{ index: 2 }]);
+    // Only the read before the choice: nothing waits on the element that went away.
+    expect(page.reads).toEqual(["readSelect"]);
+  });
+
+  it("returns the choice when the select goes away while it is read back", async () => {
+    const page = fakeSession("reads-fail");
+    await expect(select(page.session, "e3", ["za"])).resolves.toEqual({
+      selected: [{ value: "za", label: "South Africa" }],
+      detached: true,
+    });
+  });
+
+  it("reads the selection back when the select stays", async () => {
+    const page = fakeSession("stays");
+    await expect(select(page.session, "e3", ["za"])).resolves.toEqual({
+      selected: [{ value: "", label: "Pick one" }],
+    });
+    expect(page.reads).toEqual(["readSelect", "readSelected"]);
   });
 });
 
