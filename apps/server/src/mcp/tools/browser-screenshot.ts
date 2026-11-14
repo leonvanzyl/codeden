@@ -2,7 +2,8 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
-import { defineTool, ToolOutput } from "../define";
+import { isRemoteRunner, runnerForSession } from "../../services/runner-port";
+import { defineTool, ToolError, ToolOutput } from "../define";
 import { postSharedArtifact } from "../transcript";
 
 /** Largest screenshot also returned to the agent as an image (bigger ones: path only). */
@@ -36,19 +37,22 @@ export const browserScreenshot = defineTool({
   }),
   handler: async (input, { services, sessionId }) => {
     const session = services.sessionRepo.get(sessionId);
+    // A runner that doesn't share this disk sends the PNG back instead of writing a path here.
+    const remote = isRemoteRunner(runnerForSession(services, sessionId));
     const incoming = join(services.paths.artifacts, ".incoming");
-    mkdirSync(incoming, { recursive: true });
+    if (!remote) mkdirSync(incoming, { recursive: true });
     const tmp = join(incoming, `${randomUUID()}.png`);
     try {
       const shot = await services.browser.agentCommand({
         name: "browser.screenshot",
         sessionId,
-        path: tmp,
+        ...(remote ? {} : { path: tmp }),
         fullPage: input.fullPage,
         ref: input.ref,
         tabId: input.tabId,
       });
-      const bytes = readFileSync(tmp);
+      const bytes = remote ? Buffer.from(shot.data ?? "", "base64") : readFileSync(tmp);
+      if (bytes.length === 0) throw new ToolError("The runner returned no screenshot");
       const artifact = services.artifacts.save({
         bytes,
         name: `screenshot-${new Date().toISOString().replace(/[:.]/g, "-")}.png`,
@@ -62,7 +66,8 @@ export const browserScreenshot = defineTool({
       const viewport = !input.fullPage && !input.ref;
       const text = [
         `Screenshot ${shot.width}x${shot.height} saved as artifact ${artifact.id}${input.share ? " and shared in the chat" : ""}.`,
-        `File: ${file}`,
+        // The stored file is on this machine: a sandboxed agent can't open it, only its id.
+        ...(remote ? [] : [`File: ${file}`]),
         ...(viewport
           ? [
               `Viewport ${shot.width}x${shot.height} CSS pixels: use these image coordinates with browser_mouse.`,
@@ -75,7 +80,7 @@ export const browserScreenshot = defineTool({
         inline ? [{ data: bytes.toString("base64"), mediaType: "image/png" }] : [],
       );
     } finally {
-      rmSync(tmp, { force: true });
+      if (!remote) rmSync(tmp, { force: true });
     }
   },
 });

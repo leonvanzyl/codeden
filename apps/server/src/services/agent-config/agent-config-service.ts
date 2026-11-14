@@ -57,6 +57,12 @@ export interface AgentConfigServiceDeps {
   runner: Pick<RunnerPort, "request">;
   /** The newest `/` command list a session's provider reported, or null (event log). */
   reportedCommands: (sessionId: string) => ProviderCommand[] | null;
+  /**
+   * True when the session's runner isn't the home runner (`docs/remote-runners.md` §10): its
+   * working folder is on that runner's disk, so discovery reads the project folder here instead
+   * of a path the runner reported.
+   */
+  isRemote?: (sessionId: string) => boolean;
 }
 
 /** Extra time the server waits for the runner beyond the test's own timeout. */
@@ -167,8 +173,7 @@ export class AgentConfigService {
   // ------------------------------------------------------------------- what's loaded
 
   loaded(sessionId: string): LoadedAgentConfig {
-    const { session, project, gitRoot, files } = this.discover(sessionId);
-    const cwd = session.cwd;
+    const { session, project, cwd, gitRoot, files } = this.discover(sessionId);
     const home = this.deps.home;
     const mcpServers: McpServerEntry[] = [];
     const proxy = this.deps.mcpProxyUrl(sessionId);
@@ -205,9 +210,9 @@ export class AgentConfigService {
    * project, only user-level entries.
    */
   slashCommands(sessionId: string): SlashCommand[] {
-    const { session, gitRoot, files } = this.discover(sessionId);
+    const { session, cwd, gitRoot, files } = this.discover(sessionId);
     return mergeSlashCommands(
-      this.discoveredCommands(session.provider, session.cwd, gitRoot, files.skills),
+      this.discoveredCommands(session.provider, cwd, gitRoot, files.skills),
       this.deps.reportedCommands(sessionId),
       session.provider,
     );
@@ -247,7 +252,10 @@ export class AgentConfigService {
   private discover(sessionId: string) {
     const session = this.deps.repo.get(sessionId);
     const project = session.projectId ? this.project(session.projectId) : null;
-    return { session, project, ...this.discoverIn(session.provider, session.cwd, project) };
+    // A remote session's cwd is a path on its runner's machine, never read on this one.
+    const remote = this.deps.isRemote?.(sessionId) ?? false;
+    const cwd = remote ? (project?.path ?? this.deps.home) : session.cwd;
+    return { session, project, cwd, ...this.discoverIn(session.provider, cwd, project) };
   }
 
   /** The native files `provider` loads in `cwd` (skills with their switch state), and the git root. */

@@ -34,7 +34,7 @@ export function platformPath(platform: string = process.platform): path.Platform
 }
 
 /** True when `child` is `root` or inside it (no `..` escape, no other drive). */
-export function isInsidePath(root: string, child: string, platform = process.platform): boolean {
+export function isInsidePath(root: string, child: string, platform: string = process.platform) {
   const p = platformPath(platform);
   const fold = (s: string) => (caseInsensitive(platform) ? s.toLowerCase() : s);
   const rel = p.relative(fold(root), fold(child));
@@ -46,7 +46,11 @@ export function isInsidePath(root: string, child: string, platform = process.pla
  * the path rules of the machine the workspace is on. The server runs this before it asks a
  * runner for anything, so a path that escapes never leaves the server.
  */
-export function lexicalTarget(root: string, requested: string, platform = process.platform) {
+export function lexicalTarget(
+  root: string,
+  requested: string,
+  platform: string = process.platform,
+) {
   if (requested.includes("\0") || root.includes("\0")) {
     throw new WorkspaceFsError("path_outside_root", "Invalid path");
   }

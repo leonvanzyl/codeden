@@ -1,6 +1,7 @@
 import type {
   ProviderInfo,
   RefreshModelsResponse,
+  RunnerBackendId,
   RunnerCommandName,
   RunnerCommandOf,
   RunnerCommandResult,
@@ -29,6 +30,35 @@ export interface RunnerPort {
    * errors keep saying "the runner".
    */
   describe?(): string;
+  /**
+   * Set on every runner but the home runner (`docs/remote-runners.md` §8, §10): where it runs,
+   * from its `welcome` (empty until it connected). Such a runner is untrusted and may not share
+   * the server's disk, so its sessions' files are read through `fs.*`, never `node:fs`. Absent
+   * for the home runner, whose sessions' folders are on the server's own disk.
+   */
+  remote?(): RunnerPlacement;
+}
+
+/** Where a runner other than the home runner runs, as it reported in `welcome`. */
+export interface RunnerPlacement {
+  /** `process.platform` on the runner's machine, for its path rules. */
+  platform?: string;
+  /** Its backend; one that isn't `local` gets cloned workspaces at paths it chooses (§9.1). */
+  backend?: RunnerBackendId;
+}
+
+/**
+ * True when the runner may not share the server's disk (any runner but the home runner). No
+ * runner at all (services built without one, in tests) is the home runner's case.
+ */
+export function isRemoteRunner(runner: RunnerPort | undefined): boolean {
+  return typeof runner?.remote === "function";
+}
+
+/** True when sessions on this runner work in a clone at a path it chooses (§9.1). */
+export function clonesWorkspaces(runner: RunnerPort): boolean {
+  const backend = runner.remote?.().backend;
+  return backend !== undefined && backend !== "local";
 }
 
 /**
@@ -148,9 +178,11 @@ export async function refreshProviderModels(
 export function runnerPort(
   get: () => RunnerClient | undefined,
   describe?: () => string,
+  remote?: () => RunnerPlacement,
 ): RunnerPort {
   return {
     ...(describe ? { describe } : {}),
+    ...(remote ? { remote } : {}),
     isConnected: () => get()?.status.state === "connected",
     runnerId: () => get()?.status.runnerId ?? null,
     providers: () => get()?.status.providers ?? [],

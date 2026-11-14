@@ -1,6 +1,6 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { messageFrom } from "@codeden/contracts";
+import { messageFrom, type Session } from "@codeden/contracts";
 import { createImageEngineRegistry, type ImageEngineRegistry } from "@codeden/providers";
 import type { Db } from "../db/client";
 import type { EventStore } from "../events/store";
@@ -19,6 +19,7 @@ import { type FactoryOptions, FactoryService } from "./factory/factory-service";
 import { type FactoryGithub, GithubFactoryPort } from "./factory/github-port";
 import { FILE_RESET_NOTICES, reportFileReset } from "./file-reset-notice";
 import { ConfigFiles } from "./files/config-files";
+import { createGitBroker, type GitBroker } from "./git-broker";
 import { GithubService, type GithubServiceDeps } from "./github/github-service";
 import { projectTrustedAuthors } from "./github/review-trust";
 import { ImageService } from "./images/image-service";
@@ -32,7 +33,13 @@ import type { AutomationPort, GithubPort } from "./orchestration/ports";
 import { ProjectService } from "./projects/project-service";
 import { ProjectRedetector } from "./projects/redetector";
 import { ProviderHistoryService } from "./providers/history";
-import { type RunnerPort, type RunnerRouter, redetectProviders, singleRunner } from "./runner-port";
+import {
+  isRemoteRunner,
+  type RunnerPort,
+  type RunnerRouter,
+  redetectProviders,
+  singleRunner,
+} from "./runner-port";
 import type { SecretStore } from "./secrets";
 import { AutoRetry, type AutoRetryDeps } from "./sessions/auto-retry";
 import { GeneratedImages } from "./sessions/generated-images";
@@ -59,6 +66,7 @@ import { ProviderUtilityService, runnerOneShot, type UtilityService } from "./ut
 import { LocalSttService, type LocalSttServiceDeps } from "./voice/local/local-stt-service";
 import { VoiceService } from "./voice/voice-service";
 import { WorkbenchService } from "./workbench/workbench-service";
+import { remoteWorkspaceFs, type WorkspaceFs, workspaceFsFor } from "./workspace-fs/workspace-fs";
 
 export interface ServicesOptions {
   db: Db;
@@ -69,6 +77,8 @@ export interface ServicesOptions {
   runner: RunnerPort;
   /** Routes each session to its own runner (`docs/remote-runners.md` §8); default: `runner`. */
   runners?: RunnerRouter;
+  /** Clone URLs and brokered git credentials for sandbox runners (§9); tests inject one. */
+  gitBroker?: GitBroker;
   secrets: SecretStore;
   exec?: Exec;
   /** Finds claude, codex and gh for the setup checks (tests fake it with `exec`). */
@@ -179,6 +189,8 @@ export interface AppServices {
   /** Hides CodeDen's conversations from providers' own apps (Settings → Providers). */
   providerHistory: ProviderHistoryService;
   userHome: string;
+  /** A session's files, on the server's disk or its runner's (`docs/remote-runners.md` §10). */
+  workspaceFs(session: Session): WorkspaceFs;
 }
 
 export function createServices(opts: ServicesOptions): AppServices {
@@ -215,6 +227,11 @@ export function createServices(opts: ServicesOptions): AppServices {
     if (!sessions) throw new Error("Session service not ready");
     return sessions.respond(sessionId, { requestId, response });
   });
+  // Runners that don't share this disk clone the project and get git credentials per operation
+  // (§9.2). The token is read when an operation needs it, from the GitHub connection below.
+  const gitBroker =
+    opts.gitBroker ??
+    createGitBroker({ exec, token: async () => (await github.auth.token())?.value ?? null });
   const launcher = new SessionLauncher({
     repo: sessionRepo,
     projects,
@@ -225,6 +242,7 @@ export function createServices(opts: ServicesOptions): AppServices {
     worktreesDir: opts.paths.worktrees,
     orchestratorDir: opts.paths.orchestrator,
     tokens: mcpTokens,
+    git: gitBroker,
     log: opts.log,
   });
   sessions = new SessionService({
@@ -270,6 +288,7 @@ export function createServices(opts: ServicesOptions): AppServices {
     exec,
     secrets: opts.secrets,
     home: opts.paths.home,
+    git: gitBroker,
     ...opts.github,
     log: opts.log,
   });
@@ -420,6 +439,7 @@ export function createServices(opts: ServicesOptions): AppServices {
       onUsageReset: (reset) =>
         reportFileReset(reset, FILE_RESET_NOTICES.imageUsage, { store: opts.store, log: opts.log }),
       generatedDir: join(opts.paths.home, "generated"),
+      remoteWorkspace: (session) => remoteWorkspaceFs({ runner: opts.runner, runners }, session),
       log: opts.log,
     }),
     voice: new VoiceService({
@@ -440,6 +460,8 @@ export function createServices(opts: ServicesOptions): AppServices {
       store: opts.store,
       repo: sessionRepo,
       artifacts,
+      runner: opts.runner,
+      runners,
       log: opts.log,
     }),
     prFeedback: new PrFeedbackService({
@@ -476,6 +498,7 @@ export function createServices(opts: ServicesOptions): AppServices {
       mcpProxyUrl: (sessionId) => runners.forSession(sessionId).mcpProxyUrl(),
       runner: opts.runner,
       reportedCommands: (sessionId) => reportedCommands(opts.db, sessionId),
+      isRemote: (sessionId) => isRemoteRunner(runners.forSession(sessionId)),
     }),
     github,
     orchestration,
@@ -488,8 +511,12 @@ export function createServices(opts: ServicesOptions): AppServices {
       repo: sessionRepo,
       runner: opts.runner,
       runners,
+      projects,
+      git: gitBroker,
     }),
     tools: undefined as unknown as ToolRegistry,
+    workspaceFs: (session) =>
+      workspaceFsFor({ runner: opts.runner, runners, home: opts.paths.home }, session),
   };
   services.tools = new ToolRegistry(allTools, services, opts.log);
   return services;

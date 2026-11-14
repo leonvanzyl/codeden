@@ -15,6 +15,8 @@ import { asc, eq } from "drizzle-orm";
 import type { Db } from "../../db/client";
 import { checkpoints } from "../../db/schema";
 import { badRequest, conflict, notFound } from "../errors";
+import type { GitBroker } from "../git-broker";
+import type { ProjectService } from "../projects/project-service";
 import { type RunnerDeps, type RunnerPort, runnerForSession, toServiceError } from "../runner-port";
 import type { SessionRepo } from "../sessions/repo";
 import { sessionWorkdir } from "../sessions/workdir";
@@ -32,7 +34,15 @@ function rethrow(error: unknown): never {
  * checkpoints; the session diff compares the baseline with the live working tree.
  */
 export class WorkbenchService {
-  constructor(private readonly deps: RunnerDeps & { db: Db; repo: SessionRepo }) {}
+  constructor(
+    private readonly deps: RunnerDeps & {
+      db: Db;
+      repo: SessionRepo;
+      /** With `git`: the push credential for a runner that doesn't share this disk (§9.2). */
+      projects?: Pick<ProjectService, "get">;
+      git?: GitBroker;
+    },
+  ) {}
 
   /** The runner that hosts the session's worktree. */
   private runner(sessionId: string): RunnerPort {
@@ -136,13 +146,20 @@ export class WorkbenchService {
 
   async push(sessionId: string, req: GitPushRequest): Promise<GitPushResponse> {
     const session = this.deps.repo.get(sessionId);
-    return this.runner(sessionId)
+    const runner = this.runner(sessionId);
+    // The token goes with a push to the session's own `origin` only, never to another remote.
+    const toOrigin = (req.remote ?? "origin") === "origin";
+    const project =
+      toOrigin && session.projectId ? (this.deps.projects?.get(session.projectId) ?? null) : null;
+    const credential = await this.deps.git?.credentialForProject(runner, project);
+    return runner
       .request(
         {
           name: "git.push",
           cwd: workdir(session),
           remote: req.remote,
           forceWithLease: req.forceWithLease,
+          ...(credential ? { credential } : {}),
         },
         GIT_TIMEOUT_MS,
       )

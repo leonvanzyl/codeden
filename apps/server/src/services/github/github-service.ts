@@ -24,11 +24,13 @@ import type { EventStore } from "../../events/store";
 import type { ArtifactService } from "../artifacts";
 import { badRequest, conflict, errorMessage, ServiceError } from "../errors";
 import type { Exec } from "../exec";
+import type { GitBroker } from "../git-broker";
 import type { InboxService } from "../inbox-service";
 import type { ProjectService } from "../projects/project-service";
 import type { RunnerDeps } from "../runner-port";
 import type { SecretStore } from "../secrets";
 import type { SessionRepo } from "../sessions/repo";
+import { remoteWorkspaceFs } from "../workspace-fs/workspace-fs";
 import { type AttachEvidenceInput, type AttachEvidenceResult, attachEvidence } from "./attach";
 import { GithubAuth } from "./auth";
 import { GithubClient } from "./client";
@@ -55,6 +57,8 @@ export interface GithubServiceDeps extends RunnerDeps {
   secrets: SecretStore;
   /** CodeDen's data directory: its credential files are never attached as evidence (§15). */
   home?: string;
+  /** Brokers push credentials for runners that don't share this disk (§9.2). */
+  git?: GitBroker;
   /** `fetch` for Octokit and the API base URL (tests point them at a fake GitHub). */
   fetch?: typeof fetch;
   baseUrl?: string;
@@ -323,6 +327,7 @@ export class GithubService {
       this.githubRepo(session.projectId),
       input,
       this.deps.home,
+      remoteWorkspaceFs(this.deps, session),
     );
   }
 
@@ -419,8 +424,8 @@ export class GithubService {
   }
 
   private prDeps() {
-    const { runner, runners, repo } = this.deps;
-    return { ...this.issueDeps(), runner, runners, repo };
+    const { runner, runners, repo, git } = this.deps;
+    return { ...this.issueDeps(), runner, runners, repo, git };
   }
 }
 

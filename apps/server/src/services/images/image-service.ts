@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, extname, isAbsolute, join, relative, resolve } from "node:path";
@@ -8,9 +9,11 @@ import type {
   ImageTestRequest,
   ImageTestResponse,
   Role,
+  Session,
 } from "@codeden/contracts";
 import {
   type ImageAspectRatio,
+  type ImageEngine,
   type ImageEngineRegistry,
   ImageGenerationError,
   type ImageQuality,
@@ -18,10 +21,12 @@ import {
 } from "@codeden/providers";
 import type { SettingsStore } from "../../settings-store";
 import type { FileReset } from "../../user-json-file";
-import type { ArtifactService } from "../artifacts";
+import { type ArtifactService, MAX_ATTACHMENT_BYTES } from "../artifacts";
 import { badRequest, errorMessage, ServiceError } from "../errors";
 import type { SessionRepo } from "../sessions/repo";
 import { sessionWorkdir } from "../sessions/workdir";
+import type { WorkspaceFs } from "../workspace-fs/workspace-fs";
+import { deliverImage, stageReferences } from "./remote-workspace";
 import { ImageUsageStore } from "./usage";
 
 const MEDIA_TYPES: Record<string, string> = {
@@ -46,6 +51,11 @@ export interface ImageServiceDeps {
   onUsageReset?: (reset: FileReset) => void;
   /** `<home>/generated`: output for roles without a worktree and for the test button. */
   generatedDir: string;
+  /**
+   * An agent's workspace when it is on another runner's disk (§10): images are staged here and
+   * written there through the runner. Undefined for the home runner's sessions.
+   */
+  remoteWorkspace?: (session: Session) => WorkspaceFs | undefined;
   log?: (message: string) => void;
 }
 
@@ -167,10 +177,33 @@ export class ImageService {
     const eff = this.effective(session.projectId);
     const pick = await this.pick(eff.engine);
     if (!pick.engine) throw new ServiceError(409, "no_image_engine", pick.reason);
-    const cwd = realpathSync(sessionWorkdir(session));
+    // An agent on another runner: made in a staging folder here, then written into its workspace.
+    const remote = req.role === "agent" ? this.deps.remoteWorkspace?.(session) : undefined;
+    const staging = remote
+      ? this.ensureDir(join(this.deps.generatedDir, session.id, `remote-${randomUUID()}`))
+      : null;
+    try {
+      return await this.generateIn(req, session, pick.engine, eff, remote, staging);
+    } finally {
+      if (staging) rmSync(staging, { recursive: true, force: true });
+    }
+  }
+
+  private async generateIn(
+    req: GenerateImagesRequest,
+    session: Session,
+    engine: ImageEngine,
+    eff: ReturnType<ImageService["effective"]>,
+    remote: WorkspaceFs | undefined,
+    staging: string | null,
+  ): Promise<GenerateImagesResult> {
+    const cwd = remote ? null : realpathSync(sessionWorkdir(session));
     // Agents write into their worktree; PMs and the orchestrator never write project files.
     const root =
-      req.role === "agent" ? cwd : this.ensureDir(join(this.deps.generatedDir, session.id));
+      staging ??
+      (req.role === "agent"
+        ? (cwd as string)
+        : this.ensureDir(join(this.deps.generatedDir, session.id)));
     let target: { outputDir: string; fileStem: string };
     try {
       target = resolveImageOutput(root, req.outputPath);
@@ -178,16 +211,19 @@ export class ImageService {
       throw badRequest(errorMessage(error), "invalid_output_path");
     }
     this.assertNoEscape(root, target.outputDir);
-    const references = (req.referenceImages ?? []).map((p) => this.referencePath(cwd, p));
-    if (references.length > 0 && !pick.engine.capabilities.referenceImages) {
-      throw badRequest(`${pick.engine.label} does not accept reference images`);
+    const references =
+      remote && staging
+        ? await stageReferences(remote, staging, req.referenceImages ?? [], MAX_ATTACHMENT_BYTES)
+        : (req.referenceImages ?? []).map((p) => this.referencePath(cwd as string, p));
+    if (references.length > 0 && !engine.capabilities.referenceImages) {
+      throw badRequest(`${engine.label} does not accept reference images`);
     }
     const count = req.count ?? 1;
     const caps = { global: eff.globalCap, project: eff.projectCap };
     this.usage.reserve(count, caps, session.projectId);
     let produced = 0;
     try {
-      const result = await pick.engine.generate({
+      const result = await engine.generate({
         prompt: req.prompt,
         aspectRatio: req.aspectRatio,
         size: req.size ?? (req.aspectRatio ? undefined : eff.defaultSize),
@@ -199,11 +235,18 @@ export class ImageService {
         signal: req.signal,
       });
       produced = result.files.length;
-      const images = result.files.map((file) => ({
-        path: file,
-        relativePath: isInside(cwd, file) ? relative(cwd, file).split("\\").join("/") : null,
-        artifact: this.saveArtifact(file, session.projectId, session.id),
-      }));
+      const images = [];
+      for (const file of result.files) {
+        const where =
+          remote && staging
+            ? await deliverImage(remote, staging, file)
+            : {
+                path: file,
+                relativePath:
+                  cwd && isInside(cwd, file) ? relative(cwd, file).split("\\").join("/") : null,
+              };
+        images.push({ ...where, artifact: this.saveArtifact(file, session.projectId, session.id) });
+      }
       return {
         images,
         engine: result.engine,
