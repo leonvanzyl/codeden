@@ -1,0 +1,151 @@
+=== Reproduction against base sources (before) ===
+
+ RUN  v5.1.0 ~/.codeden/wt/codeden/7c64758f
+
+ ❯ |@codeden/providers| test/risk-agent-permissions.test.ts (6 tests | 5 failed) 11ms
+   ❯ agent permission files (#232) (6)
+     × asks before an edit of a project allow-list 5ms
+     × asks before a shell write of a project allow-list 2ms
+     × finds the write behind an earlier ordinary risk, which Full would allow 1ms
+     × asks before a write of the user's own allow-lists 1ms
+     × asks at every level, Full included, for every provider 1ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 5 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |@codeden/providers| test/risk-agent-permissions.test.ts > agent permission files (#232) > asks before an edit of a project allow-list
+AssertionError: .cursor/cli.json: expected { risky: false } to match object { risky: true, always: true }
+
+- Expected
++ Received
+
+  {
+-   "always": true,
+-   "risky": true,
++   "risky": false,
+  }
+
+ ❯ test/risk-agent-permissions.test.ts:48:48
+     46|   it("asks before an edit of a project allow-list", () => {
+     47|     for (const file of PROJECT_FILES) {
+     48|       expect(classifyWrite(file, posix), file).toMatchObject({ risky: …
+       |                                                ^
+     49|       expect(classifyWrite(`/work/repo/${file}`, posix), file).toMatch…
+     50|       expect(classifyWrite(file.replace(/\//g, "\\"), win), file).toMa…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/5]⎯
+
+ FAIL  |@codeden/providers| test/risk-agent-permissions.test.ts > agent permission files (#232) > asks before a shell write of a project allow-list
+AssertionError: echo '{"permissions":{"allow":["Shell(*)"]}}' > .cursor/cli.json: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ test/risk-agent-permissions.test.ts:79:38
+     77|       `bash -c "echo x > .cursor/cli.json"`,
+     78|     ]) {
+     79|       expect(asks(command), command).toBe(true);
+       |                                      ^
+     80|     }
+     81|     for (const command of [
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/5]⎯
+
+ FAIL  |@codeden/providers| test/risk-agent-permissions.test.ts > agent permission files (#232) > finds the write behind an earlier ordinary risk, which Full would allow
+AssertionError: expected { risky: true, …(2) } to match object { always: true }
+(3 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "always": true,
++   "action": "git_destructive",
++   "reason": "Force-pushes, which can overwrite remote history",
++   "risky": true,
+  }
+
+ ❯ test/risk-agent-permissions.test.ts:96:45
+     94|   it("finds the write behind an earlier ordinary risk, which Full woul…
+     95|     const command = "git push --force origin main; echo x > .cursor/cl…
+     96|     expect(classifyCommand(command, posix)).toMatchObject({ always: tr…
+       |                                             ^
+     97|   });
+     98|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/5]⎯
+
+ FAIL  |@codeden/providers| test/risk-agent-permissions.test.ts > agent permission files (#232) > asks before a write of the user's own allow-lists
+AssertionError: ~/.cursor/cli-config.json: expected { risky: true, …(2) } to match object { risky: true, always: true }
+(2 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "always": true,
+    "risky": true,
+  }
+
+ ❯ test/risk-agent-permissions.test.ts:109:48
+    107|       "/etc/gemini-cli/policies/admin.toml",
+    108|     ]) {
+    109|       expect(classifyWrite(file, posix), file).toMatchObject({ risky: …
+       |                                                ^
+    110|     }
+    111|     expect(asks(`echo ${ALLOW_ALL} > ~/.cursor/cli-config.json`)).toBe…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/5]⎯
+
+ FAIL  |@codeden/providers| test/risk-agent-permissions.test.ts > agent permission files (#232) > asks at every level, Full included, for every provider
+AssertionError: auto: expected 'allow' to be 'ask' // Object.is equality
+
+Expected: "ask"
+Received: "allow"
+
+ ❯ test/risk-agent-permissions.test.ts:130:75
+    128|     for (const level of ["auto", "full"] as const) {
+    129|       const acp = new AcpPolicy(level, posix);
+    130|       expect(acp.decide(edit("/work/repo/.cursor/cli.json")).kind, lev…
+       |                                                                           ^
+    131|       expect(acp.decide(edit("/work/repo/.gemini/settings.json")).kind…
+    132|       expect(acp.decide(run(`echo ${ALLOW_ALL} > .cursor/cli.json`)).k…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/5]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  5 failed | 1 passed (6)
+   Start at  03:10:40
+   Duration  465ms (import 54%, transform 41%, tests 3%, worker 1%)
+
+
+=== After the fix ===
+
+ RUN  v5.1.0 ~/.codeden/wt/codeden/7c64758f
+
+
+ Test Files  3 passed (3)
+      Tests  15 passed (15)
+   Start at  03:10:45
+   Duration  545ms (import 58%, transform 32%, tests 8%, worker 1%)
+
+
+=== pnpm test (full) ===
+ Test Files  349 passed | 12 skipped (361)
+      Tests  2704 passed | 51 skipped (2755)
+   Start at  03:07:20
+   Duration  128.82s (tests 47%, import 27%, environment 12%, transform 11%, setup 4%)
+
+    Isolate  361 workers spawned · ~849ms startup each (spawn + environment, per file)
+             at least ~9.04s faster with isolate: false — reuses workers across files instead of one per file
+
+=== Gemini CLI policy engine probe (installed 0.36, no model calls) ===
+policy file: ~\AppData\Local\Temp\codeden-probe-232\home\gemini\admin-policy.toml
+default admin=no   shell rm=ask_user  shell curl|sh=allow  write_file=allow  replace=allow  read_file=allow  mcp trusted github=allow  mcp allowed linear=allow  write_todos=ask_user
+default admin=yes  shell rm=ask_user  shell curl|sh=ask_user  write_file=ask_user  replace=ask_user  read_file=allow  mcp trusted github=ask_user  mcp allowed linear=ask_user  write_todos=ask_user
+plan    admin=no   shell rm=ask_user  shell curl|sh=allow  write_file=allow  replace=allow  read_file=allow  mcp trusted github=allow  mcp allowed linear=allow  write_todos=deny
+plan    admin=yes  shell rm=ask_user  shell curl|sh=ask_user  write_file=allow  replace=allow  read_file=allow  mcp trusted github=allow  mcp allowed linear=allow  write_todos=deny
+
