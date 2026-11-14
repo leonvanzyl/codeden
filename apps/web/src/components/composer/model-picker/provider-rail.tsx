@@ -13,13 +13,21 @@ function tabLabel(tab: PickerTab): string {
   return `${provider.displayName}: ${availability.reason}${availability.detail ? `. ${availability.detail}` : ""}`;
 }
 
-/** Up and Down move between open tabs and select them; Right goes to the search box. */
+/** A locked provider's tile that opens the handoff dialog instead of a tab (§9). */
+const offersHandoff = (tab: PickerTab, onHandoff: unknown) =>
+  Boolean(onHandoff) && tab.kind === "provider" && tab.handoff === "ready";
+
+/**
+ * Up and Down move between open tabs and select them, and stop on tiles that offer a handoff
+ * without selecting them (Enter or Space opens it); Right goes to the search box.
+ */
 function onRailKeyDown(
   e: KeyboardEvent<HTMLDivElement>,
   tabs: PickerTab[],
   selectedId: string,
   onSelect: (id: string) => void,
   onFocusSearch: () => void,
+  onHandoff: ((providerId: string) => void) | undefined,
 ) {
   if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
   if (e.key === "ArrowRight") {
@@ -29,12 +37,17 @@ function onRailKeyDown(
   }
   if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
   e.preventDefault();
-  const open = tabs.filter((t) => !t.lockedReason);
-  const index = open.findIndex((t) => t.id === selectedId);
+  const reachable = tabs.filter((t) => !t.lockedReason || offersHandoff(t, onHandoff));
+  // From the tile that has focus (a handoff tile is focused, never selected), else the selection.
+  const focused = (e.target as HTMLElement).closest?.<HTMLElement>("[data-picker-tab]");
+  const from = focused?.dataset.pickerTab ?? selectedId;
+  const index = reachable.findIndex((t) => t.id === from);
   const next =
-    open[Math.min(open.length - 1, Math.max(0, index + (e.key === "ArrowDown" ? 1 : -1)))];
+    reachable[
+      Math.min(reachable.length - 1, Math.max(0, index + (e.key === "ArrowDown" ? 1 : -1)))
+    ];
   if (!next) return;
-  onSelect(next.id);
+  if (!next.lockedReason) onSelect(next.id);
   const tiles = e.currentTarget.querySelectorAll<HTMLElement>("[data-picker-tab]");
   Array.from(tiles)
     .find((tile) => tile.dataset.pickerTab === next.id)
@@ -71,11 +84,11 @@ export function ProviderRail({
       aria-orientation="vertical"
       data-picker-rail
       className="flex w-11 shrink-0 flex-col gap-1 overflow-y-auto border-r border-border bg-muted/20 p-1 no-scrollbar"
-      onKeyDown={(e) => onRailKeyDown(e, tabs, selectedId, onSelect, onFocusSearch)}
+      onKeyDown={(e) => onRailKeyDown(e, tabs, selectedId, onSelect, onFocusSearch, onHandoff)}
     >
       {tabs.map((tab) => {
         const selected = tab.id === selectedId;
-        const handoff = tab.kind === "provider" && tab.handoff === "ready" && onHandoff;
+        const handoff = offersHandoff(tab, onHandoff) ? onHandoff : undefined;
         const locked = Boolean(tab.lockedReason) && !handoff;
         const label = tabLabel(tab);
         return (

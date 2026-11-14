@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { AUTONOMY, supportsReadOnly } from "@/components/thread/autonomy";
 import { useClient } from "@/lib/api";
 import { snapshotKey, useSnapshotData } from "@/lib/queries";
-import { handoffBlocked } from "@/lib/session-actions";
+import { useHandoffBlocked } from "@/lib/session-actions";
 import { useUiStore } from "@/stores/ui";
 import { ModelPicker } from "./model-picker/model-picker";
 import { AutonomyPicker, PlanToggle } from "./pickers";
@@ -48,6 +48,7 @@ export function SessionOptions({ session, running }: { session: Session; running
   const providerInfo = providers.find((p) => p.id === session.provider);
   const liveAutonomy = providerInfo?.capabilities.liveAutonomy ?? false;
   const setHandoff = useUiStore((s) => s.setHandoff);
+  const handoffBlocked = useHandoffBlocked(session);
   const update = useMutation({
     mutationFn: (patch: UpdateSessionRequest) => client.updateSession(session.id, patch),
     onSuccess: (updated, patch) => {
@@ -75,7 +76,7 @@ export function SessionOptions({ session, running }: { session: Session; running
         handoff={
           session.role === "agent"
             ? {
-                blocked: handoffBlocked(session),
+                blocked: handoffBlocked,
                 onHandoff: (provider) => setHandoff({ sessionId: session.id, provider }),
               }
             : undefined

@@ -7,6 +7,7 @@ import type {
 import { useMutation } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
+import { useTranscriptsStore } from "@/stores/transcripts";
 import { useUiStore } from "@/stores/ui";
 import { useClient } from "./api";
 import { copyWithFeedback } from "./copy";
@@ -40,15 +41,34 @@ export function forkBlocked(session: Session): string | null {
 
 /**
  * Why an agent session can't be handed off right now, or null when it can (the server checks
- * the same, §9). Unlike a fork it needs no provider capability and no resume token.
+ * the same, §9). Unlike a fork it needs no provider capability and no resume token, but it
+ * needs work: `turns` is how many turns the session has had, as the server counts them
+ * (subagents' included); undefined when not known here, and then the server decides.
  */
-export function handoffBlocked(session: Session): string | null {
+export function handoffBlocked(session: Session, turns: number | undefined): string | null {
   if (session.status === "waiting") return "Answer what it's waiting on first";
   if (canStop(session)) return "Wait for the running turn to finish";
   if (NOT_STARTED.has(session.status)) return "The session hasn't started yet";
   if (!session.branch) return "Only sessions on a git branch can be handed off";
-  if (!session.rootThreadId) return "Nothing to hand off yet";
+  if (turns === 0) return "Nothing to hand off yet";
   return null;
+}
+
+/**
+ * How many turns a session has had, from its loaded transcript (the session on screen: a
+ * transcript is only kept once its snapshot, every turn included, has loaded); undefined when
+ * it isn't loaded.
+ */
+export function useTurnCount(sessionId: string): number | undefined {
+  return useTranscriptsStore((s) => {
+    const transcript = s.byId[sessionId];
+    return transcript ? Object.keys(transcript.turns).length : undefined;
+  });
+}
+
+/** `handoffBlocked` for a session, with its turn count from the loaded transcript. */
+export function useHandoffBlocked(session: Session): string | null {
+  return handoffBlocked(session, useTurnCount(session.id));
 }
 
 /**
@@ -201,6 +221,7 @@ export function useSessionActions(session: Session) {
   });
   const fork = useForkSession(session);
   const setHandoff = useUiStore((s) => s.setHandoff);
+  const blocked = useHandoffBlocked(session);
 
   return {
     open: () => void navigate({ to: "/sessions/$sessionId", params: { sessionId: session.id } }),
@@ -235,7 +256,7 @@ export function useSessionActions(session: Session) {
     /** Agent sessions can be handed off to any provider: show the Hand off action. */
     canHandoff: session.role === "agent",
     /** Why Hand off is disabled right now (null when it can run). */
-    handoffBlocked: session.role === "agent" ? handoffBlocked(session) : null,
+    handoffBlocked: session.role === "agent" ? blocked : null,
     /** Open the handoff dialog, with `provider` chosen when given. */
     handoff: (provider?: string) =>
       setHandoff({ sessionId: session.id, provider: provider ?? null }),

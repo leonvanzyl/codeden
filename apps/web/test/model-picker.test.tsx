@@ -163,6 +163,33 @@ describe("ModelPicker", () => {
     await waitFor(() => expect(screen.queryByTestId("model-picker")).toBeNull());
   });
 
+  it("reaches a handoff tile from the keyboard without selecting it", async () => {
+    const onHandoff = vi.fn();
+    const { trigger } = await setup({
+      initial: { provider: "codex", model: "gpt-6-nova", effort: null },
+      lockedProvider: "codex",
+      handoff: { blocked: null, onHandoff },
+    });
+    const picker = await openPicker(trigger);
+    const rail = within(picker).getByRole("toolbar", { name: "Providers" });
+    const codex = within(rail).getByRole("button", { name: /^Codex/ });
+    codex.focus();
+    // Claude Code is above Codex in the rail: Up stops on its handoff tile.
+    fireEvent.keyDown(codex, { key: "ArrowUp" });
+    const claude = within(rail).getByRole("button", {
+      name: "Continue in a new Claude Code session",
+    });
+    expect(document.activeElement).toBe(claude);
+    // Still on Codex's models: the tile offers the handoff, it isn't a tab.
+    expect(option("gpt-6-nova")).toBeTruthy();
+    // Down from it goes back to Codex.
+    fireEvent.keyDown(claude, { key: "ArrowDown" });
+    expect(document.activeElement).toBe(codex);
+    // Enter or Space on a focused button clicks it.
+    fireEvent.click(claude);
+    expect(onHandoff).toHaveBeenCalledWith("claude");
+  });
+
   it("says why a handoff can't run yet, and keeps the tile disabled", async () => {
     const onHandoff = vi.fn();
     const { trigger } = await setup({

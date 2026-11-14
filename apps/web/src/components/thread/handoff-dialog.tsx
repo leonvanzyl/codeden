@@ -15,7 +15,7 @@ import {
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useSession, useSnapshotData } from "@/lib/queries";
-import { handoffBlocked, useHandoffSession } from "@/lib/session-actions";
+import { useHandoffBlocked, useHandoffSession } from "@/lib/session-actions";
 import { useUiStore } from "@/stores/ui";
 
 /**
@@ -90,9 +90,10 @@ function HandoffForm({
   const [choice, setChoice] = useState(() => initialHandoffChoice(session, providers, asked));
   const [note, setNote] = useState("");
   const handoff = useHandoffSession(session);
+  const blocked = useHandoffBlocked(session);
   const target = providers.find((p) => p.id === choice.provider);
   const name = target?.displayName ?? choice.provider;
-  const problem = handoffBlocked(session) ?? handoffTargetProblem(session, target);
+  const problem = blocked ?? handoffTargetProblem(session, target);
   const submit = () => {
     if (problem || handoff.isPending) return;
     handoff.mutate(

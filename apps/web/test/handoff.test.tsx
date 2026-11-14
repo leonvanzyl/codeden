@@ -9,9 +9,24 @@ import {
 import { createMockClient } from "@/lib/api/mock";
 import { sessions as fixtureSessions } from "@/lib/api/mock/fixtures/sessions";
 import { providers } from "@/lib/api/mock/fixtures/world";
-import { handoffBlocked } from "@/lib/session-actions";
+import { handoffBlocked, useHandoffBlocked } from "@/lib/session-actions";
+import { useTranscriptsStore } from "@/stores/transcripts";
 import { useUiStore } from "@/stores/ui";
 import { renderWithClient } from "./utils";
+
+const now = () => new Date().toISOString();
+
+/** Renders `useHandoffBlocked` and reports what it says. */
+function BlockedProbe({
+  session,
+  onBlocked,
+}: {
+  session: Session;
+  onBlocked: (blocked: string | null) => void;
+}) {
+  onBlocked(useHandoffBlocked(session));
+  return <span>probe</span>;
+}
 
 const toast = vi.hoisted(() =>
   Object.assign(vi.fn(), {
@@ -39,17 +54,20 @@ const provider = (id: string) => providers.find((p) => p.id === id) as ProviderI
 
 describe("handing a session off", () => {
   it("is blocked while a turn runs, before it starts, without a branch or without work", () => {
-    expect(handoffBlocked(idle)).toBeNull();
+    expect(handoffBlocked(idle, 2)).toBeNull();
     for (const status of ["failed", "stopped", "interrupted", "completed"] as const) {
-      expect(handoffBlocked({ ...idle, status })).toBeNull();
+      expect(handoffBlocked({ ...idle, status }, 2)).toBeNull();
     }
-    expect(handoffBlocked({ ...idle, status: "running" })).toMatch(/running turn/);
-    expect(handoffBlocked({ ...idle, status: "waiting" })).toMatch(/waiting on/);
-    expect(handoffBlocked({ ...idle, status: "starting" })).toMatch(/hasn't started/);
-    expect(handoffBlocked({ ...idle, branch: null })).toMatch(/git branch/);
-    expect(handoffBlocked({ ...idle, rootThreadId: null })).toMatch(/Nothing to hand off/);
+    expect(handoffBlocked({ ...idle, status: "running" }, 2)).toMatch(/running turn/);
+    expect(handoffBlocked({ ...idle, status: "waiting" }, 2)).toMatch(/waiting on/);
+    expect(handoffBlocked({ ...idle, status: "starting" }, 0)).toMatch(/hasn't started/);
+    expect(handoffBlocked({ ...idle, branch: null }, 2)).toMatch(/git branch/);
+    // Like the server: no turns yet, even with a thread the provider opened.
+    expect(handoffBlocked(idle, 0)).toMatch(/Nothing to hand off/);
+    // Without the transcript the turns aren't known here, and the server decides.
+    expect(handoffBlocked({ ...idle, rootThreadId: null }, undefined)).toBeNull();
     // Unlike Fork, no conversation of the provider's own is needed.
-    expect(handoffBlocked({ ...idle, resumeToken: null })).toBeNull();
+    expect(handoffBlocked({ ...idle, resumeToken: null }, 2)).toBeNull();
   });
 
   it("starts on the provider asked for, else another one; the same keeps the model", () => {
@@ -122,6 +140,53 @@ describe("handing a session off", () => {
     expect(
       created.sessions.find((s) => s.forkedFrom?.sessionId === finished.id)?.forkedFrom,
     ).toEqual({ sessionId: finished.id, checkpoint: null, kind: "handoff" });
+  });
+
+  it("counts the turns of the loaded transcript, as the server does", async () => {
+    const client = createMockClient();
+    const handoff = vi.spyOn(client, "handoffSession");
+    // A fork that was just made: its provider opened a thread, but no turn has run.
+    const fresh: Session = { ...idle, id: "s-fresh-fork", rootThreadId: "t-fresh" };
+    act(() =>
+      useTranscriptsStore.getState().load({
+        seq: 1,
+        session: fresh,
+        threads: [
+          {
+            id: "t-fresh",
+            sessionId: fresh.id,
+            parentThreadId: null,
+            parentItemId: null,
+            title: null,
+            agentType: null,
+            createdAt: fresh.createdAt,
+          },
+        ],
+        turns: [],
+        items: [],
+      }),
+    );
+    let blocked: string | null | undefined;
+    renderWithClient(
+      <BlockedProbe
+        session={fresh}
+        onBlocked={(b) => {
+          blocked = b;
+        }}
+      />,
+      client,
+    );
+    await screen.findByText("probe");
+    expect(blocked).toBe("Nothing to hand off yet");
+
+    // Once a turn starts, it counts.
+    act(() =>
+      useTranscriptsStore
+        .getState()
+        .apply(fresh.id, { type: "turn.started", threadId: "t-fresh", turnId: "u1" }, 2, now()),
+    );
+    expect(blocked).toBeNull();
+    expect(handoff).not.toHaveBeenCalled();
   });
 
   it("says why it can't hand off a running session, and doesn't try", async () => {
