@@ -336,6 +336,15 @@ export const setupChecks: SetupCheck[] = [
     message: "Signed in",
   }),
   check({
+    id: "gemini",
+    label: "Gemini CLI",
+    version: "0.68.0",
+    loggedIn: true,
+    authMethod: "oauth-personal",
+    account: "leon@example.com",
+    message: "Signed in",
+  }),
+  check({
     id: "gh",
     label: "GitHub CLI",
     loggedIn: true,

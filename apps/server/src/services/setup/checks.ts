@@ -3,6 +3,7 @@ import { isElectronRuntime } from "@codeden/providers";
 import { detectBrowser } from "./browsers";
 import { base, type CheckEnv, type CheckResult, installFix, MIN_NODE_MAJOR } from "./check-base";
 import { checkCursor } from "./check-cursor";
+import { checkGemini } from "./check-gemini";
 import {
   expiresWithin,
   parseClaudeAuth,
@@ -330,6 +331,7 @@ export const CHECKS: Record<SetupToolId, (env: CheckEnv) => Promise<CheckResult>
   codex: checkCodex,
   opencode: checkOpenCode,
   cursor: checkCursor,
+  gemini: checkGemini,
   gh: checkGh,
   git: checkGit,
   browser: checkBrowser,

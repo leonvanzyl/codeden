@@ -5,9 +5,9 @@
  * Claude: the Claude mark from simple-icons 16.37.0 (`icons/claude.svg`, brand colour
  * #D97757), CC0 1.0. https://github.com/simple-icons/simple-icons
  *
- * Codex, OpenCode and Cursor: the Codex, OpenCode and Cursor marks from
+ * Codex, OpenCode, Cursor and Gemini CLI: the Codex, OpenCode, Cursor and Gemini CLI marks from
  * @lobehub/icons-static-svg 1.102.0 (`icons/codex.svg`, `icons/opencode.svg`,
- * `icons/cursor.svg`). https://github.com/lobehub/lobe-icons
+ * `icons/cursor.svg`, `icons/geminicli.svg`). https://github.com/lobehub/lobe-icons
  *
  * @license MIT
  * Copyright (c) 2023 LobeHub
@@ -42,6 +42,12 @@ const openCodePath = "M16 6H8v12h8V6zm4 16H4V2h16v20z";
 
 const cursorPath =
   "M22.106 5.68L12.5.135a.998.998 0 00-.998 0L1.893 5.68a.84.84 0 00-.419.726v11.186c0 .3.16.577.42.727l9.607 5.547a.999.999 0 00.998 0l9.608-5.547a.84.84 0 00.42-.727V6.407a.84.84 0 00-.42-.726zm-.603 1.176L12.228 22.92c-.063.108-.228.064-.228-.061V12.34a.59.59 0 00-.295-.51l-9.11-5.26c-.107-.062-.063-.228.062-.228h18.55c.264 0 .428.286.296.514z";
+
+const geminiChevronPath =
+  "M16.793 10.358v3.867L7.236 18.82v-2.8l7.751-3.728-7.75-3.728V5.763l9.556 4.595z";
+
+const geminiFramePath =
+  "M19.608 0A4.392 4.392 0 0124 4.392v15.216A4.392 4.392 0 0119.608 24H4.392A4.392 4.392 0 010 19.608V4.392A4.392 4.392 0 014.392 0h15.216zM4.26 1.444A2.816 2.816 0 001.444 4.26v15.48a2.816 2.816 0 002.816 2.816h15.48a2.816 2.816 0 002.816-2.816V4.26a2.816 2.816 0 00-2.816-2.816H4.26z";
 
 /** The Claude mark in its brand orange, which reads on both light and dark surfaces. */
 export function ClaudeLogo({ className }: LogoProps) {
@@ -107,11 +113,29 @@ export function CursorLogo({ className }: LogoProps) {
   );
 }
 
+/** The Gemini CLI mark. Monochrome, like Codex's: it follows the theme's text colour. */
+export function GeminiLogo({ className }: LogoProps) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      xmlns="http://www.w3.org/2000/svg"
+      className={className}
+      data-provider-logo="gemini"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path d={geminiChevronPath} fill="currentColor" />
+      <path d={geminiFramePath} fill="currentColor" fillRule="evenodd" clipRule="evenodd" />
+    </svg>
+  );
+}
+
 const providerLogos: Readonly<Record<string, ComponentType<LogoProps>>> = {
   claude: ClaudeLogo,
   codex: CodexLogo,
   opencode: OpenCodeLogo,
   cursor: CursorLogo,
+  gemini: GeminiLogo,
 };
 
 /**

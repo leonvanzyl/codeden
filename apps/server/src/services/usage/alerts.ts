@@ -111,6 +111,7 @@ const PROVIDER_NAMES: Record<string, string> = {
   codex: "Codex",
   opencode: "OpenCode",
   cursor: "Cursor",
+  gemini: "Gemini CLI",
 };
 
 /** Alerts for current windows at or above `warnPercent` (or flagged by the provider). */

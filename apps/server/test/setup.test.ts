@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import type { ExecutableLookup } from "@codeden/providers";
@@ -299,6 +299,66 @@ describe("SetupService", () => {
     const other = await run({ "agent --version": { stdout: "agent 1.2.3" } });
     expect(other.check).toMatchObject({ state: "missing", installed: false });
     expect(other.check?.fix?.command).toBe("curl https://cursor.com/install -fsS | bash");
+  });
+
+  it("checks Gemini CLI: its version and the login in its own settings, never the credentials", async () => {
+    const home = mkdtempSync(join(tmpdir(), "codeden-gemini-home-"));
+    mkdirSync(join(home, ".gemini"));
+    const settings = (selectedType: string) =>
+      writeFileSync(
+        join(home, ".gemini", "settings.json"),
+        JSON.stringify({ security: { auth: { selectedType } } }),
+      );
+    const run = async (version: string | null, env: NodeJS.ProcessEnv = {}) => {
+      const table: Record<string, Partial<ExecResult>> = version
+        ? { "gemini --version": { stdout: version } }
+        : {};
+      const status = await service(table, { userHome: home, env }).status();
+      return { status, check: status.checks.find((c) => c.id === "gemini") };
+    };
+
+    settings("oauth-personal");
+    writeFileSync(
+      join(home, ".gemini", "google_accounts.json"),
+      JSON.stringify({ active: "dev@example.com" }),
+    );
+    writeFileSync(join(home, ".gemini", "oauth_creds.json"), '{"refresh_token":"secret"}');
+    const signedIn = await run("0.68.0");
+    expect(signedIn.check).toMatchObject({
+      label: "Gemini CLI",
+      state: "ok",
+      version: "0.68.0",
+      loggedIn: true,
+      authMethod: "oauth-personal",
+      account: "dev@example.com",
+    });
+    expect(JSON.stringify(signedIn.check)).not.toContain("secret");
+    expect(signedIn.status.ready).toBe(true);
+
+    // An API key login without the key in CodeDen's environment can't be confirmed.
+    settings("gemini-api-key");
+    const unknown = await run("0.68.0");
+    expect(unknown.check).toMatchObject({ state: "warning", loggedIn: null });
+    expect(unknown.check?.fix).toEqual({ kind: "login", command: "/bin/gemini" });
+    expect((await run("0.68.0", { GEMINI_API_KEY: "k" })).check).toMatchObject({
+      state: "ok",
+      authMethod: "gemini-api-key",
+    });
+
+    rmSync(join(home, ".gemini"), { recursive: true });
+    const signedOut = await run("0.69.0-preview.1");
+    expect(signedOut.check).toMatchObject({ state: "missing", installed: true, loggedIn: false });
+
+    const old = await run("0.67.0");
+    expect(old.check).toMatchObject({ state: "missing", installed: true, version: "0.67.0" });
+    expect(old.check?.fix).toEqual({
+      kind: "upgrade",
+      command: "npm install -g @google/gemini-cli@latest",
+    });
+
+    const missing = await run(null);
+    expect(missing.check).toMatchObject({ state: "missing", installed: false });
+    expect(missing.check?.fix?.command).toBe("npm install -g @google/gemini-cli");
   });
 
   it("persists completion in settings and hands out login commands", () => {
