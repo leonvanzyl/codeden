@@ -1,5 +1,6 @@
 import {
   FactoryAdmitRequest,
+  FactoryDismissRequest,
   type FactoryItemResponse,
   FactoryRetryOptions,
   FactorySetTypeRequest,
@@ -56,6 +57,11 @@ export function projectFactoryRoutes(s: AppServices) {
     .post("/:id/factory/items/:itemId/retry", jsonBody(FactoryRetryOptions), (c) =>
       c.json<FactoryItemResponse>({
         item: f.retry(c.req.param("id"), c.req.param("itemId"), c.req.valid("json").mode),
+      }),
+    )
+    .post("/:id/factory/items/:itemId/dismiss", jsonBody(FactoryDismissRequest), (c) =>
+      c.json<FactoryItemResponse>({
+        item: f.dismiss(c.req.param("id"), c.req.param("itemId"), c.req.valid("json"), "user"),
       }),
     );
 }

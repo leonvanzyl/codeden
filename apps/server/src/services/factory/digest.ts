@@ -1,15 +1,21 @@
 import { randomUUID } from "node:crypto";
-import type {
-  FactoryDigest,
-  FactoryItem,
-  FactoryLimits,
-  FactoryLoop,
-  InboxItem,
-  Project,
+import {
+  type FactoryDigest,
+  type FactoryItem,
+  type FactoryLimits,
+  type FactoryLoop,
+  factoryNeed,
+  factoryNeedLabel,
+  type InboxItem,
+  type Project,
 } from "@codeden/contracts";
 import type { InboxService } from "../inbox-service";
 import { budgetSpend, type FactoryContext, factoryNotice, raiseInbox } from "./context";
+import { prInboxIds } from "./merge";
 import { localDay } from "./policy";
+import { ownedPr } from "./pr-status";
+import { recoverable } from "./recover";
+import { OWNED_STAGES } from "./store";
 import { DECISION_INBOX_PREFIX } from "./unattended";
 
 /** Build, store and announce a day's digest: an inbox item and a notice to the orchestrator. */
@@ -26,7 +32,7 @@ export async function writeDigest(
     projectName: project.name,
     day,
     items,
-    escalated: ctx.store.items(project.id, ["escalated"]),
+    needsYou: needsYouItems(ctx, project.id),
     inbox: inbox.list({ projectId: project.id }),
     spend: budgetSpend(ctx, project.id, day, project.factoryLimits),
     limits: project.factoryLimits,
@@ -56,6 +62,35 @@ export async function writeDigest(
 }
 
 /**
+ * Finished work that waits on a person, whenever it happened, by the definition the Factory
+ * view's "Needs you" uses (`factoryNeed`): escalations, and failures with an open PR or from the
+ * last day that the factory doesn't recover by itself.
+ */
+export function needsYouItems(ctx: FactoryContext, projectId: string): DigestNeed[] {
+  const now = ctx.now().getTime();
+  return ctx.store.items(projectId, OWNED_STAGES).flatMap((item) => {
+    const open = ownedPr(ctx, item);
+    const kind = factoryNeed(item, {
+      now,
+      ownsOpenPr: open !== null,
+      recovering: recoverable(item),
+    });
+    if (!kind) return [];
+    const need = factoryNeedLabel(kind, {
+      attempts: item.attempts,
+      prNumber: open?.number ?? null,
+    });
+    return [{ item, need }];
+  });
+}
+
+/** An item that waits on a person, and what it needs. */
+export interface DigestNeed {
+  item: FactoryItem;
+  need: string;
+}
+
+/**
  * The daily digest (§10.1 step 7): what shipped, what was rejected and why, spend against the
  * budget, and what is waiting on the user. Pure; the service stores it, raises the inbox item
  * and notifies the orchestrator.
@@ -66,8 +101,8 @@ export function buildDigest(opts: {
   day: string;
   /** Items that changed during the day. */
   items: FactoryItem[];
-  /** Escalated items still waiting, whenever they happened. */
-  escalated: FactoryItem[];
+  /** Finished items still waiting on a person, whenever they happened (`needsYouItems`). */
+  needsYou: DigestNeed[];
   inbox: InboxItem[];
   spend: { usd: number; tokens: number };
   limits: FactoryLimits;
@@ -85,16 +120,19 @@ export function buildDigest(opts: {
       stage: i.stage,
       reason: i.reason ?? (i.stage === "rejected" ? "Rejected by the PM" : "Merge checks failed"),
     }));
+  // The inbox items about those items (ready, protected area, stuck) are listed with them.
+  const listed = new Set(opts.needsYou.flatMap(({ item }) => prInboxIds(item.id)));
   const waiting = [
-    ...opts.escalated.map((i) => ({
-      title: `${i.title}: ${i.reason ?? "needs a human"}`,
+    ...opts.needsYou.map(({ item, need }) => ({
+      title: `${item.title}: ${need}${item.reason ? ` (${item.reason})` : ""}`,
       inboxItemId: null,
-      itemId: i.id,
+      itemId: item.id,
     })),
     ...opts.inbox
       .filter(
         (x) =>
           x.status === "open" &&
+          !listed.has(x.id) &&
           !x.id.startsWith("inbox:factory-digest:") &&
           // Decisions the factory made on its own are reported, not waiting (unless flagged).
           !(x.id.startsWith(DECISION_INBOX_PREFIX) && x.priority !== "high"),

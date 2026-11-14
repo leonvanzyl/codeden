@@ -57,6 +57,7 @@ function w(id: string, n: number, patch: Partial<FactoryWorkItem>): FactoryWorkI
     finishedAt: null,
     checks: null,
     ownedPr: null,
+    recovering: false,
     updatedAt: minutesAgo(1),
     ...patch,
   };
@@ -148,9 +149,11 @@ describe("the Factory view's pipeline (#181)", () => {
     expect(ids(p.stages.type)).toEqual(["queued"]);
     // Longest in its step first.
     expect(ids(p.stages.building)).toEqual(["implement", "analyze"]);
-    expect(ids(p.stages.reviewing)).toEqual(["review"]);
+    // The review whose reviewer asks you something waits in Needs you, with the PR that is
+    // yours to merge (#265).
+    expect(ids(p.stages.reviewing)).toEqual([]);
     expect(ids(p.stages.merged)).toEqual(["watching", "merged"]);
-    expect(ids(p.needsYou)).toEqual(["escalated", "failed", "old-fail-pr"]);
+    expect(ids(p.needsYou)).toEqual(["review", "yours", "escalated", "failed", "old-fail-pr"]);
     const all = [...Object.values(p.stages).flat(), ...p.needsYou].map((c) => c.item.id);
     expect(new Set(all).size).toBe(all.length);
     // Yesterday's merge, an old failure without a PR, rejected and reverted work stay off.
@@ -158,13 +161,9 @@ describe("the Factory view's pipeline (#181)", () => {
       expect(all).not.toContain(gone);
   });
 
-  it("orders the merge queue as it merges, then the PRs that aren't queued", () => {
-    expect(ids(p.stages.merge)).toEqual(["first", "second", "yours"]);
-    expect(p.stages.merge.map((c) => c.pr?.state)).toEqual([
-      "updating",
-      "queued",
-      "waiting_for_you",
-    ]);
+  it("orders the merge queue as it merges", () => {
+    expect(ids(p.stages.merge)).toEqual(["first", "second"]);
+    expect(p.stages.merge.map((c) => c.pr?.state)).toEqual(["updating", "queued"]);
   });
 
   it("marks what runs, waits, needs a person or failed, and counts them", () => {
@@ -180,7 +179,9 @@ describe("the Factory view's pipeline (#181)", () => {
     expect(state("watching")).toBe("running");
     // Merged and done: nobody has to act, nothing runs.
     expect(state("merged")).toBe("waiting");
-    expect(p.needsPerson).toBe(3);
+    // The header counts what Needs you lists (#265).
+    expect(p.needsPerson).toBe(p.needsYou.length);
+    expect(p.needsPerson).toBe(5);
     expect(p.failed).toBe(2);
   });
 
@@ -338,7 +339,7 @@ describe("the factory's pull requests on the view (#181)", () => {
     ).toBe("rebuilding");
   });
 
-  it("keeps a stuck PR in the merge queue as waiting on a person, and counts it", () => {
+  it("puts a stuck PR in Needs you to retry, and counts it (#265)", () => {
     // How the server shows one: the item failed for good (`stuck`), its PR still open.
     const stuck = w("stuck", 30, {
       stage: "failed",
@@ -356,8 +357,10 @@ describe("the factory's pull requests on the view (#181)", () => {
       new Map(),
       NOW,
     );
-    expect(p.needsYou).toEqual([]);
-    expect(p.stages.merge.map((c) => [c.item.id, c.state])).toEqual([["stuck", "person"]]);
+    expect(p.stages.merge).toEqual([]);
+    expect(p.needsYou.map((c) => [c.item.id, c.state, c.need?.label])).toEqual([
+      ["stuck", "person", "Retry: stopped with PR #30 open"],
+    ]);
     expect(p.needsPerson).toBe(1);
     // It still failed: the header counts it there too.
     expect(p.failed).toBe(1);
@@ -405,7 +408,7 @@ describe("finished work beyond the recent list (#181)", () => {
     );
     expect(p.needsYou.map((c) => c.item.id)).toEqual(["escalated", "open-fail"]);
     expect(p.stages.merged.map((c) => c.item.id)).toEqual(["merged"]);
-    expect(p.needsPerson).toBe(1);
+    expect(p.needsPerson).toBe(2);
     expect(p.failed).toBe(1);
   });
 
@@ -491,7 +494,7 @@ describe("work the capped PR list leaves out (#181)", () => {
     expect(fromRecent.needsYou.map((c) => c.item.id)).toEqual(["open-fail"]);
   });
 
-  it("treats a failed rebuild that owns its original PR as stuck in the merge queue", () => {
+  it("treats a failed rebuild that owns its original PR as stuck, to retry (#265)", () => {
     // The rebuild failed before opening a PR: no PR of its own, the original still the factory's.
     const rebuild = w("rebuild", 61, {
       stage: "failed",
@@ -502,7 +505,9 @@ describe("work the capped PR list leaves out (#181)", () => {
       finishedAt: minutesAgo(60 * 24 * 2),
     });
     const p = viewPipeline(status({ viewRecent: [rebuild] }), new Map(), NOW);
-    expect(p.stages.merge.map((c) => [c.item.id, c.state])).toEqual([["rebuild", "person"]]);
+    expect(p.needsYou.map((c) => [c.item.id, c.state, c.need?.label])).toEqual([
+      ["rebuild", "person", "Retry: stopped with PR #52 open"],
+    ]);
     expect(p.needsPerson).toBe(1);
     expect(p.failed).toBe(1);
     // With its PR-list entry, that entry decides.
@@ -511,7 +516,7 @@ describe("work the capped PR list leaves out (#181)", () => {
       new Map(),
       NOW,
     );
-    expect(listed.stages.merge[0]?.pr?.pr.number).toBe(52);
+    expect(listed.needsYou[0]?.pr?.pr.number).toBe(52);
   });
 
   it("leaves out an old failure that owns nothing and that the server no longer lists", () => {

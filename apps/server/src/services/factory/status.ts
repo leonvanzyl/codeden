@@ -10,6 +10,7 @@ import {
 import { budgetSpend, type FactoryContext, visionOf } from "./context";
 import { localDay, queueOrder } from "./policy";
 import { ownedPr, pullRequests } from "./pr-status";
+import { recoverable } from "./recover";
 import { scoutStatus } from "./scout";
 import { factoryStats, viewRecentItems, viewWindow } from "./stats";
 import { ACTIVE_STAGES, DONE_STAGES, WAITING_STAGES } from "./store";
@@ -46,6 +47,7 @@ export function workItem(i: FactoryItem, owned: GitHubPrRef | null = null): Fact
     mergedAt: i.mergedAt,
     finishedAt: i.finishedAt,
     ownedPr: owned,
+    recovering: recoverable(i),
     checks:
       i.checks.length === 0
         ? null

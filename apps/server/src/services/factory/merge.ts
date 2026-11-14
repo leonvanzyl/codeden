@@ -17,7 +17,7 @@ export const readyInboxId = (itemId: string) => `inbox:factory-ready:${itemId}`;
 export const escalatedInboxId = (itemId: string) => `inbox:factory-escalated:${itemId}`;
 
 /** The inbox items about an item's PR: ready to merge, protected area, stuck (and its dark-factory decision). */
-function prInboxIds(itemId: string): string[] {
+export function prInboxIds(itemId: string): string[] {
   return [
     readyInboxId(itemId),
     escalatedInboxId(itemId),

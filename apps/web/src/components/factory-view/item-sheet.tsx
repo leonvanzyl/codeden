@@ -17,6 +17,7 @@ import { useFactoryItem } from "@/lib/factory";
 import { ago } from "@/lib/format";
 import { platform } from "@/lib/platform";
 import { cn } from "@/lib/utils";
+import { NeedActions } from "./need-actions";
 import { cardNumber, cardStateLabel, type ViewCard } from "./stages";
 import { stepTrail } from "./step-trail";
 import { StateMarker, TypeBadge } from "./view-card";
@@ -102,6 +103,13 @@ function Body({ projectId, card }: { projectId: string; card: ViewCard }) {
         >
           {card.activity}
         </p>
+      )}
+      {card.need && (
+        <NeedActions
+          card={card}
+          projectId={projectId}
+          className="rounded-lg border border-status-waiting/30 bg-status-waiting/[0.06] px-3 py-2"
+        />
       )}
       <section>
         <SectionLabel className="mb-1.5">Steps</SectionLabel>

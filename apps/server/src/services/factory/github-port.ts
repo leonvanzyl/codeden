@@ -75,6 +75,11 @@ export interface FactoryGithub {
   issue(projectId: string, number: number): GithubIssue | null;
   /** A PR as last synced (projection, no API call); null when unknown. */
   prRef(projectId: string, number: number): GitHubPrRef | null;
+  /**
+   * A merged PR that closes the issue (it links it with "Fixes #n"), from the projection; null
+   * when none is known.
+   */
+  mergedPrClosing(projectId: string, issueNumber: number): GitHubPrRef | null;
   /** The PR a session opened (or whose head is its branch), if known. */
   prForSession(projectId: string, sessionId: string, branch: string | null): GitHubPrRef | null;
   prDetails(projectId: string, number: number): Promise<FactoryPr>;
@@ -186,6 +191,13 @@ export class GithubFactoryPort implements FactoryGithub {
 
   prRef(projectId: string, number: number): GitHubPrRef | null {
     const pr = this.github.data.pr(projectId, number);
+    return pr ? { number: pr.number, url: pr.url, state: pr.state, title: pr.title } : null;
+  }
+
+  mergedPrClosing(projectId: string, issueNumber: number): GitHubPrRef | null {
+    const pr = this.github.data
+      .prs(projectId, "closed", 200)
+      .find((p) => p.state === "merged" && p.linkedIssues.includes(issueNumber));
     return pr ? { number: pr.number, url: pr.url, state: pr.state, title: pr.title } : null;
   }
 

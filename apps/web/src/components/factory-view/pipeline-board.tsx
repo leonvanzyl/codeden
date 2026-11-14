@@ -4,6 +4,7 @@ import { type ReactNode, useEffect, useId, useRef, useState } from "react";
 import { InfoHint } from "@/components/common/info-hint";
 import { cn } from "@/lib/utils";
 import { useWide } from "./hooks";
+import { NeedsYouCard } from "./need-actions";
 import { ScoutCard } from "./scout-card";
 import {
   describeMoves,
@@ -144,23 +145,28 @@ function Stage({
   );
 }
 
-/** The lane of work waiting on a person: escalated, failed, and anything stuck. */
+/**
+ * The lane of work waiting on a person (`factoryNeed`): PRs to merge, stopped work to retry or
+ * dismiss, agents' questions. Each card says what it needs and offers the action.
+ */
 function NeedsYou({
   cards,
   now,
   onOpen,
   wide,
+  projectId,
 }: {
   cards: ViewCard[];
   now: number;
   onOpen: (card: ViewCard) => void;
   wide: boolean;
+  projectId: string;
 }) {
   const headingId = useId();
   if (cards.length === 0)
     return (
       <p className="flex items-center gap-1.5 px-1 text-2xs text-muted-foreground">
-        <UserRound className="size-3" aria-hidden /> Nothing failed or waits on you.
+        <UserRound className="size-3" aria-hidden /> Nothing waits on you.
       </p>
     );
   return (
@@ -184,7 +190,7 @@ function NeedsYou({
           {cards.length}
         </span>
         <span className="hidden truncate font-normal text-muted-foreground sm:inline">
-          Failed or escalated work that waits for a person
+          Work only a person can move on: merge, retry or dismiss, or answer
         </span>
       </h2>
       <ul
@@ -196,7 +202,7 @@ function NeedsYou({
       >
         {cards.map((c) => (
           <li key={c.item.id}>
-            <ViewCardButton card={c} now={now} onOpen={onOpen} />
+            <NeedsYouCard card={c} now={now} onOpen={onOpen} projectId={projectId} />
           </li>
         ))}
       </ul>
@@ -231,7 +237,13 @@ export function PipelineBoard({
       >
         {announcement}
       </div>
-      <NeedsYou cards={pipeline.needsYou} now={now} onOpen={onOpen} wide={wide} />
+      <NeedsYou
+        cards={pipeline.needsYou}
+        now={now}
+        onOpen={onOpen}
+        wide={wide}
+        projectId={f.projectId}
+      />
       <div
         // Six columns that never squeeze a card below a readable width: past that the pipeline
         // scrolls sideways instead.

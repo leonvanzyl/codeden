@@ -55,6 +55,7 @@ function w(id: string, n: number, patch: Partial<FactoryWorkItem>): FactoryWorkI
     finishedAt: null,
     checks: null,
     ownedPr: null,
+    recovering: false,
     updatedAt: minutesAgo(1),
     ...patch,
   };
@@ -165,10 +166,10 @@ describe("pixel mode's scene (#209)", () => {
   });
 
   it("puts one worker at a bench per build, posed by its session", () => {
+    // A builder that asks you something waits in Needs you, on a machine (#265).
     expect(scene.builders.items.map((b) => [b.card.item.id, b.slot, b.pose])).toEqual([
       ["hammering", 0, "work"],
-      ["asking", 1, "ask"],
-      ["idle", 2, "idle"],
+      ["idle", 1, "idle"],
     ]);
     // The builder's speech bubble is its session's progress line.
     expect(scene.builders.items[0]?.card.activity).toBe("Wiring the wishlist button");
@@ -180,11 +181,11 @@ describe("pixel mode's scene (#209)", () => {
     ]);
   });
 
-  it("lines up crates on the conveyor in merge order, flagging the ones waiting on you", () => {
+  it("lines up crates on the conveyor in merge order", () => {
+    // A pull request that is yours to merge waits in Needs you, on a machine (#265).
     expect(scene.queue.items.map((c) => [c.card.item.id, c.slot, c.flag])).toEqual([
       ["first", 0, null],
       ["second", 1, null],
-      ["yours", 2, "person"],
     ]);
   });
 
@@ -195,10 +196,12 @@ describe("pixel mode's scene (#209)", () => {
     ]);
   });
 
-  it("puts failed and escalated work on broken machines, smoking only when it failed", () => {
+  it("puts work that needs you on broken machines, smoking only when it failed", () => {
     expect(scene.machines.items.map((m) => [m.card.item.id, m.slot, m.failed])).toEqual([
-      ["escalated", 0, false],
-      ["failed", 1, true],
+      ["asking", 0, false],
+      ["yours", 1, false],
+      ["escalated", 2, false],
+      ["failed", 3, true],
     ]);
   });
 
@@ -258,18 +261,18 @@ describe("pixel mode's scene (#209)", () => {
       "ticket:sorted-bug",
       "ticket:sorted-docs",
       "builder:hammering",
-      "builder:asking",
       "builder:idle",
       "reviewer:review",
       "crate:first",
       "crate:second",
-      "crate:yours",
       "shipped:watching",
       "shipped:merged",
+      "machine:asking",
+      "machine:yours",
       "machine:escalated",
       "machine:failed",
     ]);
-    expect(targets.find((t) => t.key === "crate:yours")?.card.item.title).toBe("Item 10");
+    expect(targets.find((t) => t.key === "machine:yours")?.card.item.title).toBe("Item 10");
   });
 });
 
@@ -311,7 +314,7 @@ describe("pixel mode's moments (#209)", () => {
 describe("pixel mode's caption (#209)", () => {
   it("says what the floor shows, in full counts", () => {
     expect(sceneSummary(sceneFor())).toBe(
-      "3 in intake, 3 building, 1 in review, 3 in the merge queue, 2 merged today, 2 need you. The scout is on round 4.",
+      "3 in intake, 2 building, 1 in review, 2 in the merge queue, 2 merged today, 4 need you. The scout is on round 4.",
     );
   });
 
@@ -328,7 +331,7 @@ describe("pixel mode's caption (#209)", () => {
     expect(sceneSummary(quiet)).toBe("The factory floor is quiet. The loop is stopped.");
     // The scout sits down with everyone else.
     expect(sceneSummary(sceneFor({ killSwitch: true }))).toMatch(
-      /2 need you\. The loop is stopped\.$/,
+      /4 need you\. The loop is stopped\.$/,
     );
     const one = sceneFor({
       inProgress: [],

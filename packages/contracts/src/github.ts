@@ -37,6 +37,13 @@ export type GithubSyncStatus = z.infer<typeof GithubSyncStatus>;
 
 // ---------------------------------------------------------------- entities
 
+/**
+ * Why a closed issue was closed, as GitHub says (`state_reason`): done, not planned, or a
+ * duplicate of another issue.
+ */
+export const GithubIssueStateReason = z.enum(["completed", "not_planned", "duplicate"]);
+export type GithubIssueStateReason = z.infer<typeof GithubIssueStateReason>;
+
 /** One issue (pull requests excluded), as projected into `github_issues`. */
 export const GithubIssue = z.object({
   projectId: Id,
@@ -51,6 +58,11 @@ export const GithubIssue = z.object({
   createdAt: Timestamp.nullable(),
   updatedAt: Timestamp,
   closedAt: Timestamp.nullable(),
+  /**
+   * Why it was closed; null while open, when GitHub doesn't say, and on issues synced before
+   * this was tracked.
+   */
+  stateReason: GithubIssueStateReason.nullable().optional(),
   /** CodeDen sessions working on this issue (from each session's `issue`). */
   sessionIds: z.array(Id).default([]),
 });

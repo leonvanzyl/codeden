@@ -60,6 +60,7 @@ function work(w: FixtureWorkItem): FactoryWorkItem {
     // Owned while open, in the stages the factory keeps its PRs.
     ownedPr:
       OWNING.includes(w.stage) && (w.pr?.state === "open" || w.pr?.state === "draft") ? w.pr : null,
+    recovering: w.stage === "failed" && w.failureKind === "infrastructure",
     checks: w.checks ?? null,
     stepSince: since,
     mergedAt: w.stage === "merged" || w.stage === "watching" ? since : null,
@@ -300,5 +301,10 @@ export function mockFactoryApi(world: MockWorld): FactoryApi {
         ? { ...it, stage: "verifying", review: null, attempts: 0 }
         : { ...it, stage: "backlog", pr: null };
     },
+    dismiss: async (id, itemId, req) => ({
+      ...item(id, itemId),
+      stage: "rejected",
+      reason: req?.reason ? `Dismissed by you: ${req.reason}` : "Dismissed by you",
+    }),
   };
 }
