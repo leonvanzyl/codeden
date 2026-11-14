@@ -1,5 +1,5 @@
 import type { AutonomyLevel } from "@codeden/contracts";
-import { mostSevere } from "../policy/assessment";
+import { asksAtEveryLevel, mostSevere } from "../policy/assessment";
 import {
   classifyCommand,
   classifyRead,
@@ -19,13 +19,13 @@ import type { RequestPermissionProfile } from "./protocol/v2";
 
 /**
  * True when the permission level allows an action the classifier assessed as `risk`. CodeDen's
- * own credential files are never allowed by policy. Commands Codex runs inside its sandbox
- * without asking (reads included) never reach this policy.
+ * own credential files and agents' own allow-lists are never allowed by policy. Commands Codex
+ * runs inside its sandbox without asking (reads included) never reach this policy.
  */
 export function levelAllows(autonomy: AutonomyLevel, risk: RiskAssessment): boolean {
   if (autonomy === "auto") return !risk.risky;
   if (autonomy === "full") {
-    return !risk.risky || (risk.action !== "outside_worktree" && !risk.codeden);
+    return !risk.risky || (risk.action !== "outside_worktree" && !asksAtEveryLevel(risk));
   }
   return false;
 }

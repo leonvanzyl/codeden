@@ -14,7 +14,7 @@ import type { WordPaths } from "./shell";
  * variable in braces (`${HOME}/.env`) is a path, and so is an option's value: `--file=x`, or
  * PowerShell's colon-bound `-Path:x` and `-LiteralPath:x`.
  */
-function asPath(arg: string): string | undefined {
+export function asPath(arg: string): string | undefined {
   const value = arg.replace(/^-+[a-z-]*=/i, "").replace(/^-[a-z][a-z-]*:(?=.)/i, "");
   if (!value || /[\n\r{}()<>|;=`]/.test(value.replace(/\$\{\w+\}/g, ""))) return undefined;
   return value;
@@ -23,7 +23,7 @@ function asPath(arg: string): string | undefined {
 /** Commands whose words are data or only checked for existence (`echo .env >> .gitignore`). */
 export const DATA = new Set(["echo", "printf", "write-output", "write-host", "test", "[", "[["]);
 /** Commands that list or describe files without reading them (`ls certs/*.pem`). */
-const LISTS = new Set([
+export const LISTS = new Set([
   "ls",
   "dir",
   "get-childitem",
@@ -35,6 +35,14 @@ const LISTS = new Set([
   "du",
   "test-path",
 ]);
+
+/** `find -exec cat {}` and `fd -x cat`: a listing that runs a command on what it finds. */
+export function runsOnFound(bin: string, args: readonly string[]): boolean {
+  return (
+    (bin === "find" || bin === "fd") &&
+    args.some((a) => /^-(exec|execdir|ok|okdir|x|X|-exec|-exec-batch)$/.test(a))
+  );
+}
 
 /**
  * The first argument that reads a credentials file, if any. `written` are the paths the command
@@ -51,11 +59,7 @@ export function secretArgument(
   paths: WordPaths = (word, from) => [word.slice(from)],
 ): string | undefined {
   if (DATA.has(bin)) return undefined;
-  // `find -exec cat {}` and `fd -x cat` read what they find.
-  const runs =
-    (bin === "find" || bin === "fd") &&
-    args.some((a) => /^-(exec|execdir|ok|okdir|x|X|-exec|-exec-batch)$/.test(a));
-  if (LISTS.has(bin) && !runs) return undefined;
+  if (LISTS.has(bin) && !runsOnFound(bin, args)) return undefined;
   const words: Pick<SearchWord, "text" | "arg" | "from" | "pattern">[] = SEARCHES.has(bin)
     ? parseSearch(bin, args)
     : args.map((text, arg) => ({ text, arg, from: 0, pattern: false }));

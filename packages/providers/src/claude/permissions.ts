@@ -1,6 +1,6 @@
 import type { PermissionMode } from "@anthropic-ai/claude-agent-sdk";
 import type { ApprovalAction, AutonomyLevel } from "@codeden/contracts";
-import { touchesCodeden } from "../policy/assessment";
+import { asksAtEveryLevel, touchesCodeden } from "../policy/assessment";
 import { isInNotes } from "../policy/paths";
 import { readOnlyCommandDenial } from "../policy/read-only";
 import type { RiskContext } from "../policy/risk";
@@ -164,7 +164,7 @@ export class ClaudePolicy {
       return { ask: false };
     }
     if (!risk.risky) return { ask: false };
-    if (this.autonomy === "full" && risk.action !== "outside_worktree" && !risk.codeden) {
+    if (this.autonomy === "full" && risk.action !== "outside_worktree" && !asksAtEveryLevel(risk)) {
       return { ask: false };
     }
     return { ask: true, action: risk.action, reason: risk.reason };

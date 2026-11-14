@@ -1,5 +1,5 @@
 import type { ApprovalAction, AutonomyLevel } from "@codeden/contracts";
-import { mostSevere, touchesCodeden } from "../policy/assessment";
+import { asksAtEveryLevel, mostSevere, touchesCodeden } from "../policy/assessment";
 import { resolveAgainst } from "../policy/paths";
 import { readOnlyCommandDenial } from "../policy/read-only";
 import {
@@ -166,7 +166,7 @@ export class OpenCodePolicy {
       return ALLOW;
     }
     if (!risk.risky) return ALLOW;
-    const always = alwaysRisky || codeden;
+    const always = alwaysRisky || asksAtEveryLevel(risk);
     if (this.autonomy === "full" && risk.action !== "outside_worktree" && !always) return ALLOW;
     return { kind: "ask", action: risk.action, reason: risk.reason };
   }

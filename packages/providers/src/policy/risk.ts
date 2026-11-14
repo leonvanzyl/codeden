@@ -1,4 +1,5 @@
 import { currentGitBranch } from "../util/git-head";
+import { agentPermissionsCommand, agentPermissionsWrite } from "./agent-permissions";
 import { type RiskAssessment, risky, SAFE } from "./assessment";
 import { credentialsRisk, touchesCodedenCredentials } from "./codeden-home";
 import { reachesThroughFolder } from "./codeden-search";
@@ -56,8 +57,12 @@ const MAX_DEPTH = 4;
  */
 export function classifyCommand(command: string, ctx: RiskContext): RiskAssessment {
   const list = parseShell(command, ctx.shell ?? "auto");
-  const credentials = credentialAccess(list, ctx, 0);
-  if (credentials) return credentials;
+  // What every level asks about, looked for across the whole command first: CodeDen's own
+  // credentials, then a write of an agent's own allow-list.
+  const always =
+    firstInList(list, ctx, 0, credentialCommand) ??
+    firstInList(list, ctx, 0, (cmd, here) => agentPermissionsCommand(cmd, here));
+  if (always) return always;
   if (
     /\b(iex|invoke-expression)\b[^|]*\b(irm|iwr|invoke-restmethod|invoke-webrequest|downloadstring)\b/i.test(
       command,
@@ -75,24 +80,41 @@ export function classifyCommand(command: string, ctx: RiskContext): RiskAssessme
 }
 
 /**
- * The first access to CodeDen's own credential files anywhere in `list`: substitutions,
- * subshells and inline scripts (`bash -c "…"`) included, following `cd` like `classifyList`.
- * `feeds`: the list's output is used by another command (it sits in a substitution or a pipe).
+ * One simple command's verdict for `firstInList`. `feeds`: its output is used by another
+ * command (it sits in a substitution or a pipe).
  */
-function credentialAccess(
+type CommandCheck = (
+  cmd: SimpleCommand,
+  ctx: RiskContext,
+  feeds: boolean,
+) => RiskAssessment | undefined;
+
+/**
+ * The first verdict `check` gives anywhere in `list`: substitutions, subshells and inline
+ * scripts (`bash -c "…"`) included, following `cd` like `classifyList`.
+ */
+function firstInList(
   list: SimpleCommand[],
   ctx: RiskContext,
   depth: number,
+  check: CommandCheck,
   feeds = false,
 ): RiskAssessment | undefined {
   let here = ctx;
   for (const [i, cmd] of list.entries()) {
     for (const nested of cmd.nested) {
-      const found = credentialAccess(nested, here, depth, true);
+      const found = firstInList(nested, here, depth, check, true);
       if (found) return found;
     }
     const piped = list[i + 1]?.piped === true;
-    const found = credentialCommand(cmd, here, depth, feeds || piped);
+    const { tokens } = unwrap(cmd.words);
+    const script = inlineScript(binName(tokens[0]), tokens.slice(1));
+    if (script && depth < MAX_DEPTH) {
+      const inner = parseShell(script.text, script.dialect);
+      const found = firstInList(inner, here, depth + 1, check, feeds || piped);
+      if (found) return found;
+    }
+    const found = check(cmd, here, feeds || piped);
     if (found) return found;
     here = afterCd(cmd, here);
   }
@@ -114,17 +136,11 @@ const pathsOf =
 function credentialCommand(
   cmd: SimpleCommand,
   ctx: RiskContext,
-  depth: number,
   feeds: boolean,
 ): RiskAssessment | undefined {
   const { tokens } = unwrap(cmd.words);
   const bin = binName(tokens[0]);
   const args = tokens.slice(1);
-  const script = inlineScript(bin, args);
-  if (script && depth < MAX_DEPTH) {
-    const inner = credentialAccess(parseShell(script.text, script.dialect), ctx, depth + 1, feeds);
-    if (inner) return inner;
-  }
   for (const target of cmd.writes) {
     if (!DISCARD.test(target) && touchesCodedenCredentials(target, ctx)) {
       return credentialsRisk(`Writes CodeDen's own credentials: ${target}`);
@@ -317,12 +333,15 @@ function copyTargets(bin: string, args: string[], dest: string, ctx: RiskContext
  * Classify a file write/edit. The worktree, extra roots and OS temp are fine, secrets files in
  * the worktree included: writing one (`cp .env.example .env`) reads nothing. A secrets file in
  * temp counts as outside the worktree, so Full autonomy (which only asks for writes outside the
- * worktree) still asks for it. CodeDen's own credential files ask at every level.
+ * worktree) still asks for it. CodeDen's own credential files and agents' own allow-lists
+ * (`./agent-permissions`) ask at every level.
  */
 export function classifyWrite(target: string, ctx: RiskContext): RiskAssessment {
   if (touchesCodedenCredentials(target, ctx)) {
     return credentialsRisk(`Writes CodeDen's own credentials: ${target}`);
   }
+  const permissions = agentPermissionsWrite(target, ctx);
+  if (permissions) return permissions;
   if (!isWritable(target, ctx))
     return risky("outside_worktree", `Writes ${target}, outside the worktree`);
   if (isSecretPath(target) && !isInWorkspace(target, ctx)) {
