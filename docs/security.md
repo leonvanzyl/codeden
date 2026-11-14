@@ -35,6 +35,14 @@ Off by default. When you turn it on:
 - **Agent environments** inherit your environment minus CodeDen's own variables: no `CODEDEN_*` variable (CodeDen's data folder, its installer, its secrets) reaches agents, terminals or setup scripts, so an agent can't find CodeDen's home through its environment and a CodeDen checkout's tests run against their own stubs. (Your other environment variables are passed through, as they would be in your own terminal.) Agent sessions also get **`CI=true`**, so no command waits on a prompt nobody can answer; your tools then behave as in CI. You can turn it off per project; see [Troubleshooting](troubleshooting.md#tests-installs-or-builds-behave-differently-in-agent-sessions).
 - Tokens are never logged or written into transcripts.
 
+## Runners
+
+- The **home runner** runs next to the server on your machine and is trusted like the server. It is the only runner CodeDen connects today.
+- **Sandbox runners** (runners in a container or a remote sandbox, coming with remote runners) share their sandbox with an agent that has a shell, so CodeDen treats everything they send as untrusted input. The server checks:
+  - **Events against routing.** An event that names a session (agent output, turns, usage, approvals, provider crashes, checkpoints, setup output) is stored only when that session is routed to the runner that sent it. Anything else is dropped, logged and acknowledged, so a sandbox runner can't write into your other sessions.
+  - **Journal ids.** Each runner reports a journal id when it connects; it keys that runner's event stream and which sessions are sent to it. A runner reporting an id another runner already has is refused, so it can't stall or take over that runner's stream or its sessions, and a sandbox runner must keep the id it first connected with.
+  - **Not checked yet:** terminal output, browser frames and terminal exits a sandbox runner streams. They are display-only, and get the same check before sandbox runners ship.
+
 ## The orchestrator and PMs can't write code
 
 They always run read-only, whatever their level: Claude gets no edit tools and a policy that denies writing commands (checks included), Codex runs in a read-only sandbox, and OpenCode's, Cursor's and Gemini CLI's edits and writing commands are refused by CodeDen's policy (Cursor also runs in its read-only `ask` mode). They act only through CodeDen's tools.

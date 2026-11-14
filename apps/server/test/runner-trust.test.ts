@@ -16,6 +16,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type WebSocket from "ws";
 import { WebSocketServer } from "ws";
 import { type Database, openDatabase } from "../src/db/client";
+import { lastAckedSeq } from "../src/events/ingest";
+import { findRunnerRecord } from "../src/events/runner-projection";
 import { EventStore } from "../src/events/store";
 import { RunnerHub } from "../src/runner/hub";
 import { sampleSession } from "./helpers";
@@ -59,6 +61,10 @@ interface FakeRunner {
   open: () => boolean;
   /** Send a durable event; resolves once the server acked it or dropped the connection. */
   send: (seq: number, event: RunnerEvent) => Promise<void>;
+  /** Report this journal id in later welcomes. */
+  claim: (runnerId: string) => void;
+  /** Drop the server's connection (it reconnects). */
+  drop: () => void;
   close: () => Promise<void>;
 }
 
@@ -66,6 +72,7 @@ interface FakeRunner {
 async function fakeRunner(runnerId: string): Promise<FakeRunner> {
   const token = "t".repeat(32);
   const acked: number[] = [];
+  let claimed = runnerId;
   let socket: WebSocket | undefined;
   const wss = new WebSocketServer({ noServer: true });
   const http = createServer((req, res) => {
@@ -77,7 +84,7 @@ async function fakeRunner(runnerId: string): Promise<FakeRunner> {
       socket = ws;
       ws.on("message", (data) => {
         const msg = JSON.parse(data.toString()) as { type: string; seq?: number };
-        if (msg.type === "hello") ws.send(JSON.stringify(welcome(runnerId)));
+        if (msg.type === "hello") ws.send(JSON.stringify(welcome(claimed)));
         if (msg.type === "ack" && msg.seq !== undefined) acked.push(msg.seq);
       });
     });
@@ -107,6 +114,10 @@ async function fakeRunner(runnerId: string): Promise<FakeRunner> {
       socket?.send(JSON.stringify({ type: "event", seq, ts, event }));
       await waitUntil(() => acked.includes(seq) || !open(), 15_000);
     },
+    claim: (id) => {
+      claimed = id;
+    },
+    drop: () => socket?.terminate(),
     close: async () => {
       for (const client of wss.clients) client.terminate();
       wss.close();
@@ -143,8 +154,8 @@ const createSession = (id: string, runnerId: string | null) =>
     },
   ]);
 
-/** The home runner (journal `r-home`) and a sandbox runner `rn-1`, both connected. */
-async function connectHomeAndSandbox(sandboxClaims: string) {
+/** The home runner (journal `r-home`, connected) and a sandbox runner `rn-1` (not started). */
+async function homeAndSandbox(sandboxClaims: string) {
   const home = await fakeRunner("r-home");
   const sandbox = await fakeRunner(sandboxClaims);
   hub = new RunnerHub({ db: database.db, store });
@@ -178,11 +189,11 @@ const eventsFor = (sessionId: string, after: number) =>
   store.listAfter(after, 10_000).filter((e) => e.sessionId === sessionId);
 
 describe("events from a sandbox runner", () => {
-  it("are stored only for sessions routed to that runner", async () => {
+  it("are stored for sessions routed to it; others are dropped and acked", async () => {
     createSession("home-s", "r-home");
     createSession("unplaced-s", null);
     createSession("sbx-s", "r-1");
-    const { sandbox, sandboxClient } = await connectHomeAndSandbox("r-1");
+    const { sandbox, sandboxClient } = await homeAndSandbox("r-1");
     await sandboxClient.start();
     const before = store.headSeq();
 
@@ -190,9 +201,10 @@ describe("events from a sandbox runner", () => {
     await sandbox.send(1, thread("sbx-s", "t-sbx"));
     expect(eventsFor("sbx-s", before).map((e) => e.type)).toContain("agent.thread.started");
 
-    // Sessions on the home runner: a compromised sandbox runner names them anyway.
+    // Sessions on the home runner, and one that doesn't exist: a compromised sandbox runner
+    // names them anyway.
     let seq = 1;
-    for (const target of ["home-s", "unplaced-s"]) {
+    for (const target of ["home-s", "unplaced-s", "no-such-session"]) {
       await sandbox.send(++seq, thread(target, "t-evil"));
       await sandbox.send(++seq, {
         kind: "session.process",
@@ -215,23 +227,29 @@ describe("events from a sandbox runner", () => {
       });
     }
 
-    expect(eventsFor("home-s", before).map((e) => e.type)).toEqual([]);
-    expect(eventsFor("unplaced-s", before).map((e) => e.type)).toEqual([]);
+    for (const target of ["home-s", "unplaced-s", "no-such-session"]) {
+      expect(eventsFor(target, before).map((e) => e.type)).toEqual([]);
+    }
+    // Dropped, but acknowledged and recorded as acked, so the runner never redelivers them.
+    expect(sandbox.acked).toEqual(Array.from({ length: seq }, (_, i) => i + 1));
+    expect(lastAckedSeq(database.db, "r-1")).toBe(seq);
+    expect(sandbox.open()).toBe(true);
+    expect(sandboxClient.status.state).toBe("connected");
   });
 });
 
-describe("a runner that reports another runner's journal id", () => {
-  it("cannot take over the home runner's ack position or routing", async () => {
+describe("a runner's journal id", () => {
+  it("is refused when another runner carries it, and the home runner's events keep flowing", async () => {
     createSession("home-s", "r-home");
     // The sandbox runner claims the home runner's journal id in its welcome.
-    const { home, sandbox, sandboxClient } = await connectHomeAndSandbox("r-home");
+    const { home, sandbox, sandboxClient } = await homeAndSandbox("r-home");
     await home.send(1, thread("home-s", "t-1"));
     const before = store.headSeq();
 
     void sandboxClient.start().catch(() => undefined);
-    await waitUntil(
-      () => sandboxClient.status.state === "connected" || sandboxClient.status.lastError !== null,
-      15_000,
+    await waitUntil(() => sandboxClient.status.lastError?.includes("refused"), 15_000);
+    expect(sandboxClient.status.lastError).toBe(
+      "Runner rn-1 (docker) was refused: journal id r-home belongs to runner home",
     );
     // Far ahead of the home runner's journal: if it shared the home's ack position, every
     // later home event would look like a replay and be dropped.
@@ -244,7 +262,32 @@ describe("a runner that reports another runner's journal id", () => {
     });
     expect(home.acked).toContain(2);
     expect(eventsFor("home-s", before).map((e) => e.type)).toContain("agent.turn.started");
+    expect(sandbox.acked).toEqual([]);
+    expect(lastAckedSeq(database.db, "r-home")).toBe(2);
     expect(hub?.forSession("home-s")).toBe(hub?.home());
     expect(sandboxClient.status.state).not.toBe("connected");
+    expect(findRunnerRecord(database.db, "rn-1")?.runnerId).toBeNull();
+  });
+
+  it("stays what a sandbox runner first connected with", async () => {
+    createSession("sbx-s", "r-1");
+    const { sandbox, sandboxClient } = await homeAndSandbox("r-1");
+    await sandboxClient.start();
+    const port = hub?.forSession("sbx-s");
+    expect(port).not.toBe(hub?.home());
+
+    // Under a new journal id its sessions would match no record and fall back to the home runner.
+    sandbox.claim("r-2");
+    sandbox.drop();
+    await waitUntil(() => sandboxClient.status.lastError?.includes("refused"), 15_000);
+    expect(sandboxClient.status.lastError).toBe(
+      "Runner rn-1 (docker, runner r-1) was refused: journal id r-2 is not its own (r-1)",
+    );
+    expect(findRunnerRecord(database.db, "rn-1")?.runnerId).toBe("r-1");
+    expect(hub?.forSession("sbx-s")).toBe(port);
+
+    // Back under its own id, it connects again.
+    sandbox.claim("r-1");
+    await waitUntil(() => sandboxClient.status.state === "connected", 15_000);
   });
 });

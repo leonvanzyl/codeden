@@ -2,6 +2,7 @@ import {
   agentEventToNewEvent,
   type NewEvent,
   type RawEventEnvelope,
+  type RunnerEvent,
   type RunnerEventMessage,
 } from "@codeden/contracts";
 import { eq } from "drizzle-orm";
@@ -82,12 +83,59 @@ export function runnerEventToNewEvents(
   }
 }
 
+/** The session a runner event is about; `null` for runner-level events. */
+export function runnerEventSessionId(event: RunnerEvent): string | null {
+  switch (event.kind) {
+    case "agent":
+    case "session.process":
+    case "workspace.setup":
+    case "checkpoint.created":
+      return event.sessionId;
+    case "pty.exited":
+    case "runner.draining":
+      return null;
+  }
+}
+
+/**
+ * Why a runner that isn't trusted (any but the home runner: a sandbox runner shares its sandbox
+ * with an agent that has a shell) may not write this event, or `null` when it may. An event
+ * that names a session must name one routed to that runner: one whose `sessions.runnerId` is
+ * its journal id `runnerId`. The server checks at `welcome` that no other runner record carries
+ * that id (`runner/identity.ts`), so that is exactly the sessions it sends to this runner.
+ */
+export function foreignSessionRefusal(
+  reader: ProjectionReader,
+  event: RunnerEvent,
+  runnerId: string,
+): string | null {
+  const sessionId = runnerEventSessionId(event);
+  if (sessionId === null) return null;
+  const session = reader.getSession(sessionId)?.session;
+  if (!session) return `session ${sessionId} does not exist`;
+  if (session.runnerId !== runnerId) return `session ${sessionId} is not routed to this runner`;
+  return null;
+}
+
+/** Who sent a runner event, beyond its journal id. */
+export interface RunnerEventSource {
+  /** The runner's `runners` record, stamped on its `runner.*` events (omitted: the home runner). */
+  recordId?: string;
+  /**
+   * The runner's messages are untrusted input (every runner but the home runner): events for
+   * sessions not routed to it are dropped (`foreignSessionRefusal`).
+   */
+  untrusted?: boolean;
+}
+
 export interface IngestResult {
-  /** False when the event was already stored (replayed after a reconnect). */
+  /** False when the event was already stored (replayed after a reconnect) or refused. */
   stored: boolean;
   events: RawEventEnvelope[];
   /** Seq to acknowledge to the runner. */
   ackSeq: number;
+  /** Why an untrusted runner's event was dropped (acknowledged, never stored). */
+  refused?: string;
 }
 
 /** Highest runner seq durably stored for `runnerId`. */
@@ -100,21 +148,28 @@ export function lastAckedSeq(db: Db, runnerId: string): number {
 /**
  * The event pipeline (§4.2, §6): store one runner event and its projections, and advance the
  * runner's acked seq in the same transaction. Idempotent by runner seq: replays at or below
- * the stored position are acknowledged without storing anything again.
+ * the stored position are acknowledged without storing anything again. An untrusted runner's
+ * event for a session not routed to it advances the acked seq too (so it is not redelivered),
+ * but stores nothing.
  */
 export function ingestRunnerEvent(
   db: Db,
   store: EventStore,
   runnerId: string,
   msg: RunnerEventMessage,
-  recordId?: string,
+  source: RunnerEventSource = {},
 ): IngestResult {
   if (msg.seq <= lastAckedSeq(db, runnerId)) {
     return { stored: false, events: [], ackSeq: msg.seq };
   }
   const now = new Date().toISOString();
+  // Set inside the transaction; `as` keeps TypeScript from narrowing it to `null` here.
+  let refused = null as string | null;
   const events = store.appendFrom(
-    (reader) => runnerEventToNewEvents(reader, msg, runnerId, recordId),
+    (reader) => {
+      refused = source.untrusted ? foreignSessionRefusal(reader, msg.event, runnerId) : null;
+      return refused ? [] : runnerEventToNewEvents(reader, msg, runnerId, source.recordId);
+    },
     (tx) => {
       tx.insert(runnerState)
         .values({ runnerId, lastAckedSeq: msg.seq, updatedAt: now })
@@ -125,5 +180,6 @@ export function ingestRunnerEvent(
         .run();
     },
   );
+  if (refused) return { stored: false, events: [], ackSeq: msg.seq, refused };
   return { stored: true, events, ackSeq: msg.seq };
 }

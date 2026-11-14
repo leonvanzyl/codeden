@@ -134,6 +134,8 @@ export class RunnerHub implements RunnerRouter {
     const client: RunnerClient = new RunnerClient({
       recordId: spec.id,
       describe,
+      // Only the home runner, next to the server, is trusted; any other may be a sandbox's.
+      untrusted: !record.home,
       home: spec.dir,
       lockFile: spec.lockFile,
       db: this.opts.db,
