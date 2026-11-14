@@ -39,6 +39,11 @@ let env: GithubEnv;
 const P = "p-gh";
 const SECRET = "SECRET=hunter2\n";
 const refused = { status: 403, code: "secret_file" };
+/** Refused as a secret, or before that because its real file is outside the artifacts folder. */
+const refusedOrOutside = {
+  status: 403,
+  code: expect.stringMatching(/^(secret_file|path_outside_root)$/),
+};
 
 beforeEach(() => {
   env = createGithubEnv();
@@ -273,11 +278,14 @@ describe("copies CodeDen keeps of a damaged credential file", () => {
       const file = env.artifacts.filePath(artifact);
       unlinkSync(file);
       link(copy, file, () => ctx.skip());
+      // The backup sits next to remote-access.json, outside the artifacts folder, so a real link
+      // to it may be refused by the artifacts folder's own check first (`path_outside_root`). The
+      // stand-in passes that check, so it must be the secrets check that refuses it.
       await expect(
         env.service.attachEvidence(session.id, {
           files: [{ artifactId: artifact.id, name: "shot.png" }],
         }),
-      ).rejects.toMatchObject(refused);
+      ).rejects.toMatchObject(link === fileSymlinkOrSkip ? refusedOrOutside : refused);
       nothingPublished();
     });
   }
