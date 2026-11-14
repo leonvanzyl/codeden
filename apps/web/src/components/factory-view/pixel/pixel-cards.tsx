@@ -18,6 +18,7 @@ import type { BayCrate } from "./repair-bay";
  */
 
 function PixelCard({
+  id,
   anchor,
   children,
   onEnter,
@@ -25,6 +26,7 @@ function PixelCard({
   testId,
   label,
 }: {
+  id?: string;
   anchor: Rect;
   children: ReactNode;
   onEnter: () => void;
@@ -40,6 +42,7 @@ function PixelCard({
   const shiftX = align === "left" ? "0" : align === "right" ? "-100%" : "-50%";
   return (
     <section
+      id={id}
       aria-label={label}
       className="absolute z-20 w-72 max-w-[80%] border-2 border-[#1a1c2c] bg-[#fff8e7] font-mono text-[11px] leading-snug text-[#1a1c2c] shadow-[3px_3px_0_#1a1c2c]"
       style={{
@@ -65,6 +68,7 @@ const action =
 
 /** The agent's card: role, item, step, provider and model, progress, time in step, status. */
 export function AgentCardView({
+  id,
   agent,
   card,
   anchor,
@@ -73,6 +77,7 @@ export function AgentCardView({
   onOpenItem,
   recent,
 }: {
+  id?: string;
   agent: SceneAgent;
   card: AgentCardModel;
   anchor: Rect;
@@ -85,6 +90,7 @@ export function AgentCardView({
 }) {
   return (
     <PixelCard
+      id={id}
       anchor={anchor}
       onEnter={onEnter}
       onLeave={onLeave}
@@ -169,6 +175,7 @@ function RetryAction({ projectId, item }: { projectId: string; item: FactoryWork
 
 /** A repair bay crate: each item in it, why it stopped and what to do. */
 export function BayCardView({
+  id,
   crate,
   anchor,
   projectId,
@@ -176,6 +183,7 @@ export function BayCardView({
   onLeave,
   onOpen,
 }: {
+  id?: string;
   crate: BayCrate;
   anchor: Rect;
   projectId: string;
@@ -185,6 +193,7 @@ export function BayCardView({
 }) {
   return (
     <PixelCard
+      id={id}
       anchor={anchor}
       onEnter={onEnter}
       onLeave={onLeave}

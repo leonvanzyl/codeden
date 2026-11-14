@@ -1,7 +1,7 @@
 import { Brain, FileText, Globe, type LucideIcon, Pencil, Search, Terminal } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { type ActivityKind, bubbleOf } from "./activity";
-import { SCENE_H, SCENE_W } from "./floor";
+import { SCENE_H, SCENE_W, TILE } from "./floor";
 import type { SceneTarget } from "./targets";
 import { type ActivityStore, useActivityVersion } from "./use-activity";
 
@@ -20,6 +20,9 @@ export const ACTIVITY_ICON: Record<ActivityKind, LucideIcon> = {
   web: Globe,
   think: Brain,
 };
+
+/** Whether an agent's bubble sits one bubble higher: on every other tile column. */
+const lifted = (r: { x: number; w: number }) => Math.floor((r.x + r.w / 2) / TILE) % 2 === 1;
 
 export function ActivityBubbles({
   store,
@@ -49,7 +52,10 @@ export function ActivityBubbles({
         style={{
           left: `${((t.rect.x + t.rect.w / 2) / SCENE_W) * 100}%`,
           top: `${(t.rect.y / SCENE_H) * 100}%`,
-          transform: "translate(-50%, calc(-100% - 3px))",
+          // Neighbours in a row take turns: every other column's bubble sits one higher.
+          transform: lifted(t.rect)
+            ? "translate(-50%, calc(-200% - 5px))"
+            : "translate(-50%, calc(-100% - 3px))",
         }}
         data-testid="factory-view-pixel-bubble"
         data-kind={bubble.activity.kind}

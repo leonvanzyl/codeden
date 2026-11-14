@@ -5,7 +5,7 @@ import {
   stoppedKind,
   stoppedLabel,
 } from "@/components/factory/stopped-items";
-import type { ViewCard, ViewPipeline } from "../stages";
+import { cardNumber, type ViewCard, type ViewPipeline } from "../stages";
 
 /**
  * The repair bay (#264): the small corner of the floor for work that stopped and waits on a
@@ -72,4 +72,14 @@ export function repairBay(pipeline: ViewPipeline): BayCrate[] {
 /** Every item in the bay. */
 export function bayCount(bay: readonly BayCrate[]): number {
   return bay.reduce((n, c) => n + c.entries.length, 0);
+}
+
+/**
+ * What a crate holds, in words, for its button's accessible description: each item and why it
+ * stopped ("#143 Show delivery estimates: Stopped after 2 revise rounds; needs a re-review.").
+ */
+export function bayDescription(crate: BayCrate): string {
+  return crate.entries
+    .map((e) => `${cardNumber(e.card.item)} ${e.card.item.title}: ${e.label}.`)
+    .join(" ");
 }

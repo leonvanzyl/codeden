@@ -1,6 +1,6 @@
 import type { FactoryStatus } from "@codeden/contracts";
 import { useNavigate } from "@tanstack/react-router";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useRoleSession } from "@/components/orchestration/role-chat";
 import { usePrefersReducedMotion } from "@/lib/motion";
 import { cn } from "@/lib/utils";
@@ -17,7 +17,7 @@ import type { SceneAgent } from "./agents";
 import { SCENE_H, SCENE_W } from "./floor";
 import { AgentCardView, BayCardView, TicketTip } from "./pixel-cards";
 import { PmTerminal } from "./pm-terminal";
-import { bayCount } from "./repair-bay";
+import { bayCount, bayDescription } from "./repair-bay";
 import { sceneSummary } from "./scene-model";
 import { pct, type SceneTarget, sceneTargets } from "./targets";
 import { useAgentActivity } from "./use-activity";
@@ -106,6 +106,7 @@ export function PixelScene({
   const terminal = useRef<HTMLElement>(null);
   const navigate = useNavigate();
   const hover = useHover();
+  const ids = useId().replace(/:/g, "");
   const targets = useMemo(() => sceneTargets(scene), [scene]);
   // Thought bubbles: only the sessions on screen that are live.
   const liveSessions = useMemo(
@@ -158,50 +159,67 @@ export function PixelScene({
               className="block size-full"
               style={{ imageRendering: "pixelated", willChange: "transform" }}
             />
-            {targets.map((t) => (
-              <button
-                key={t.key}
-                type="button"
-                className="absolute cursor-pointer rounded-[2px] outline-none hover:ring-1 hover:ring-white/70 focus-visible:ring-2 focus-visible:ring-[#ffcd75]"
-                style={pct(t.rect)}
-                onClick={() => activate(t)}
-                onMouseEnter={() => hover.enter(t.key)}
-                onMouseLeave={hover.leave}
-                onFocus={() => hover.enter(t.key)}
-                onBlur={hover.leave}
-                aria-label={targetLabel(t, now)}
-                data-testid="factory-view-pixel-target"
-                data-kind={t.kind}
-              />
-            ))}
-            {hovered?.kind === "agent" && (
-              <AgentCardView
-                recent={<RecentActivity store={activity} sessionId={hovered.agent.sessionId} />}
-                agent={hovered.agent}
-                card={agentCard(hovered.agent, now)}
-                anchor={hovered.rect}
-                onEnter={keep}
-                onLeave={hover.leave}
-                onOpenItem={
-                  hovered.agent.card
-                    ? () => onOpen(hovered.agent.card as ViewCard)
-                    : hovered.agent.role === "pm"
-                      ? focusChat
-                      : null
-                }
-              />
-            )}
-            {hovered?.kind === "bay" && (
-              <BayCardView
-                crate={hovered.crate}
-                anchor={hovered.rect}
-                projectId={projectId}
-                onEnter={keep}
-                onLeave={hover.leave}
-                onOpen={onOpen}
-              />
-            )}
-            {hovered?.kind === "ticket" && <TicketTip card={hovered.card} anchor={hovered.rect} />}
+            {targets.map((t) => {
+              // The open card follows its own button, so Tab goes from a crate or an agent
+              // into its card (Retry, Open session) before the next thing on the floor.
+              const open = hover.key === t.key;
+              const cardId = `${ids}-${t.key.replace(/[^\w-]/g, "_")}`;
+              return (
+                <Fragment key={t.key}>
+                  <button
+                    type="button"
+                    className="absolute cursor-pointer rounded-[2px] outline-none hover:ring-1 hover:ring-white/70 focus-visible:ring-2 focus-visible:ring-[#ffcd75]"
+                    style={pct(t.rect)}
+                    onClick={() => activate(t)}
+                    onMouseEnter={() => hover.enter(t.key)}
+                    onMouseLeave={hover.leave}
+                    onFocus={() => hover.enter(t.key)}
+                    onBlur={hover.leave}
+                    aria-label={targetLabel(t, now)}
+                    aria-describedby={t.kind === "bay" ? `${cardId}-about` : undefined}
+                    aria-expanded={t.kind === "ticket" ? undefined : open}
+                    aria-controls={open && t.kind !== "ticket" ? cardId : undefined}
+                    data-testid="factory-view-pixel-target"
+                    data-kind={t.kind}
+                  />
+                  {t.kind === "bay" && (
+                    <span id={`${cardId}-about`} className="sr-only">
+                      {bayDescription(t.crate)}
+                    </span>
+                  )}
+                  {open && t.kind === "agent" && (
+                    <AgentCardView
+                      id={cardId}
+                      recent={<RecentActivity store={activity} sessionId={t.agent.sessionId} />}
+                      agent={t.agent}
+                      card={agentCard(t.agent, now)}
+                      anchor={t.rect}
+                      onEnter={keep}
+                      onLeave={hover.leave}
+                      onOpenItem={
+                        t.agent.card
+                          ? () => onOpen(t.agent.card as ViewCard)
+                          : t.agent.role === "pm"
+                            ? focusChat
+                            : null
+                      }
+                    />
+                  )}
+                  {open && t.kind === "bay" && (
+                    <BayCardView
+                      id={cardId}
+                      crate={t.crate}
+                      anchor={t.rect}
+                      projectId={projectId}
+                      onEnter={keep}
+                      onLeave={hover.leave}
+                      onOpen={onOpen}
+                    />
+                  )}
+                  {open && t.kind === "ticket" && <TicketTip card={t.card} anchor={t.rect} />}
+                </Fragment>
+              );
+            })}
             <ActivityBubbles
               store={activity}
               targets={targets}

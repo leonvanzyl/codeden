@@ -40,8 +40,22 @@ const f = status({
       failureKind: "checks",
       finishedAt: minutesAgo(20),
     }),
+    // A second crate after it: keyboard users must still reach the first crate's Retry.
+    w("protected", 10, {
+      stage: "escalated",
+      step: "merge",
+      pr: prRef(30),
+      reason: "Touches a protected area (src/payments): yours to merge",
+      finishedAt: minutesAgo(30),
+    }),
   ],
 });
+
+/** The element the Tab key reaches after `el`, in document order. */
+function nextFocusable(el: Element): Element | undefined {
+  const all = [...document.querySelectorAll("button:not([disabled]), a[href], input, textarea")];
+  return all[all.indexOf(el) + 1];
+}
 const sessions = new Map<string, SessionInfo>([["s1", running("Wiring the wishlist button", 2)]]);
 
 function renderScene() {
@@ -119,8 +133,46 @@ describe("pixel mode's agents and repair bay (#264)", () => {
     fireEvent.click(within(card).getByRole("button", { name: "Retry #9" }));
     await waitFor(() => expect(retry).toHaveBeenCalledWith("p1", "stopped", {}));
     expect(screen.getByTestId("factory-view-pixel-summary").textContent).toContain(
-      "1 in the repair bay",
+      "2 in the repair bay",
     );
+  });
+});
+
+describe("pixel mode from the keyboard (#264)", () => {
+  it("tabs from a crate into its own card, so every crate's Retry can be reached", async () => {
+    const { retry } = renderScene();
+    const first = await screen.findByRole("button", { name: "Repair bay, Needs a retry: 1 item" });
+    expect(screen.getByRole("button", { name: "Repair bay, Yours to merge: 1 item" })).toBeTruthy();
+    // Screen readers hear what the crate holds and why.
+    expect(first.getAttribute("aria-describedby")).toBeTruthy();
+    const about = document.getElementById(first.getAttribute("aria-describedby") ?? "");
+    expect(about?.textContent).toBe("#9 Item 9: Stopped after 2 revise rounds; needs a re-review.");
+    fireEvent.focus(first);
+    const card = await screen.findByTestId("factory-view-pixel-bay-card");
+    expect(first.getAttribute("aria-expanded")).toBe("true");
+    expect(first.getAttribute("aria-controls")).toBe(card.id);
+    // The next stop after the crate is in its card (the item's link, then Retry), not the
+    // next crate.
+    const link = nextFocusable(first);
+    expect(card.contains(link ?? null)).toBe(true);
+    const retryButton = within(card).getByRole("button", { name: "Retry #9" });
+    expect(nextFocusable(link as Element)).toBe(retryButton);
+    // Moving focus into the card keeps it open.
+    fireEvent.blur(first);
+    fireEvent.focus(retryButton);
+    fireEvent.click(retryButton);
+    await waitFor(() => expect(retry).toHaveBeenCalledWith("p1", "stopped", {}));
+    expect(screen.getByTestId("factory-view-pixel-bay-card")).toBe(card);
+  });
+
+  it("tabs from an agent into its card's Open item and Open session", async () => {
+    renderScene();
+    const builder = await screen.findByRole("button", { name: /^Builder, #4/ });
+    fireEvent.focus(builder);
+    const card = await screen.findByTestId("factory-view-pixel-card");
+    expect(nextFocusable(builder)).toBe(within(card).getByRole("button", { name: "Open item" }));
+    const open = within(card).getByRole("button", { name: "Open item" });
+    expect(nextFocusable(open)).toBe(within(card).getByTestId("factory-view-pixel-card-session"));
   });
 });
 

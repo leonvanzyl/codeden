@@ -109,9 +109,10 @@ export class FloorMotion {
     this.movers = this.movers.filter((x) => x.walker.key !== key);
     const blocked = this.occupied(scene);
     blocked.delete(tileId(to));
+    const walker = startWalker(key, from, to, blocked);
     this.movers.push({
-      walker: startWalker(key, from, to, blocked),
-      prev: from,
+      walker,
+      prev: walker.path[0] ?? from,
       ghost: false,
       carry: null,
       delay: 0,

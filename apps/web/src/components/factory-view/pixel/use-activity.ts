@@ -76,6 +76,9 @@ export class ActivityStore {
   }
 }
 
+/** Rows changed this long before the watch began still count (the event that led to it). */
+const REPLAY_MARGIN_MS = 5000;
+
 /**
  * Watches the given sessions' new transcript items, from now on: the server's per-session watch
  * sends only the rows that change after the current event, so no transcript is loaded (the mock
@@ -91,8 +94,13 @@ export function useAgentActivity(sessionIds: readonly string[]): ActivityStore {
     const ids = key ? key.split(",") : [];
     if (ids.length === 0) return;
     const watched = new Set(ids);
-    const since = Date.now() - 5000;
+    const startedAt = Date.now();
+    // The server's clock less this browser's, from the live events' timestamps: rows are
+    // judged by the server's time, so a browser clock running ahead doesn't drop them.
+    let skew = 0;
     const offLive = onLiveEvent((env) => {
+      const ts = Date.parse(env.ts);
+      if (!Number.isNaN(ts)) skew = ts - Date.now();
       if (!isAgentEnvelope(env) || !watched.has(env.sessionId)) return;
       const e = env.payload;
       if (e.type === "item.started" || e.type === "item.updated" || e.type === "item.completed")
@@ -102,6 +110,7 @@ export function useAgentActivity(sessionIds: readonly string[]): ActivityStore {
     const offs = ids.map((id) =>
       client.watchSession(id, seq, (msg) => {
         if (msg.type !== "transcript") return;
+        const since = startedAt + skew - REPLAY_MARGIN_MS;
         for (const row of msg.items)
           if (Date.parse(row.updatedAt) >= since) store.note(id, row.item);
       }),

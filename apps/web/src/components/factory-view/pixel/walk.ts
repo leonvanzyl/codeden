@@ -83,8 +83,12 @@ export const walkerTile = (w: Walker): Tile => w.path[w.at] as Tile;
 export const walkerGoal = (w: Walker): Tile => w.path[w.path.length - 1] as Tile;
 export const arrived = (w: Walker): boolean => w.at >= w.path.length - 1;
 
+/**
+ * A walker from `from` to `to`. With no way through (everything around is taken), it doesn't
+ * slide across the floor: it is simply at its goal.
+ */
 export function startWalker(key: string, from: Tile, to: Tile, blocked: ReadonlySet<number>) {
-  const path = findPath(from, to, blocked) ?? [from, to];
+  const path = findPath(from, to, blocked) ?? [to];
   return { key, path, at: 0, waited: 0 } satisfies Walker;
 }
 
