@@ -89,6 +89,13 @@ export type CreateProjectResponse = z.infer<typeof CreateProjectResponse>;
 export const UpdateProjectRequest = z.object({
   name: z.string().trim().min(1).max(100).optional(),
   defaultProvider: ProviderId.nullable().optional(),
+  /**
+   * The project's default model on `defaultProvider` (`Project.defaultModel`); needs a default
+   * provider. Changing `defaultProvider` without one clears the model and effort.
+   */
+  defaultModel: z.string().trim().min(1).max(200).nullable().optional(),
+  /** The effort that goes with the default model (`Project.defaultEffort`). */
+  defaultEffort: ReasoningEffort.nullable().optional(),
   autonomy: AutonomyLevel.nullable().optional(),
   timezone: z.string().nullable().optional(),
   defaultBranch: z.string().nullable().optional(),

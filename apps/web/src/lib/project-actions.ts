@@ -8,10 +8,15 @@ import { snapshotKey } from "./queries";
 
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
+/** A project's own defaults for new sessions (#261); see `setSessionDefaults`. */
+export type ProjectSessionDefaults =
+  | Pick<Project, "defaultProvider" | "defaultModel" | "defaultEffort">
+  | Pick<Project, "autonomy">;
+
 /**
- * Pin, unpin and reorder projects (§13), and turn `CI=true` in their agent sessions on or off
- * (§4.2). Changes apply to the snapshot at once and are rolled back with a toast if the server
- * rejects them; the server's event then confirms them.
+ * Pin, unpin and reorder projects (§13), set their defaults for new sessions, and turn
+ * `CI=true` in their agent sessions on or off (§4.2). Changes apply to the snapshot at once and
+ * are rolled back with a toast if the server rejects them; the server's event then confirms them.
  */
 export function useProjectActions() {
   const client = useClient();
@@ -55,6 +60,29 @@ export function useProjectActions() {
           () => client.updateProject(project.id, { pinned }),
           pinned ? `Couldn't pin ${project.name}` : `Couldn't unpin ${project.name}`,
         ),
+      /**
+       * The project's defaults for new sessions: provider, model and effort (set together, since
+       * a model id belongs to its provider) and permissions. Null falls back to Settings.
+       */
+      setSessionDefaults: async (project: Project, patch: ProjectSessionDefaults) => {
+        const set = (
+          value: Partial<
+            Pick<Project, "defaultProvider" | "defaultModel" | "defaultEffort" | "autonomy">
+          >,
+        ) => setProjects((list) => list.map((p) => (p.id === project.id ? { ...p, ...value } : p)));
+        set(patch);
+        try {
+          await client.updateProject(project.id, patch);
+          return true;
+        } catch (error) {
+          const { defaultProvider, defaultModel, defaultEffort, autonomy } = project;
+          set({ defaultProvider, defaultModel, defaultEffort, autonomy });
+          toast.error(`Couldn't change ${project.name}'s session defaults`, {
+            description: message(error),
+          });
+          return false;
+        }
+      },
       setAgentCiEnv: async (project: Project, agentCiEnv: boolean) => {
         const set = (value: boolean) =>
           setProjects((list) =>

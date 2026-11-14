@@ -58,6 +58,9 @@ export const projects = sqliteTable(
     path: text("path").notNull(),
     defaultBranch: text("default_branch"),
     defaultProvider: text("default_provider"),
+    /** Default model and effort on `default_provider` for new sessions (#261). */
+    defaultModel: text("default_model"),
+    defaultEffort: text("default_effort"),
     autonomy: text("autonomy"),
     autonomyMode: text("autonomy_mode").notNull().default("assisted"),
     visionPath: text("vision_path").notNull().default(".codeden/VISION.md"),

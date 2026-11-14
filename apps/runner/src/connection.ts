@@ -1,5 +1,6 @@
 import { resolve } from "node:path";
 import {
+  RequestId,
   RUNNER_PROTOCOL_VERSION,
   type RunnerToServerMessage,
   type ServerToRunnerMessage,
@@ -44,7 +45,10 @@ export class ServerConnection {
 
   async handle(raw: unknown): Promise<void> {
     const parsed = ServerToRunnerSchema.safeParse(raw);
-    if (!parsed.success) return;
+    if (!parsed.success) {
+      this.refuse(raw, parsed.error.issues);
+      return;
+    }
     const msg: ServerToRunnerMessage = parsed.data;
     switch (msg.type) {
       case "hello":
@@ -109,6 +113,28 @@ export class ServerConnection {
       case "pong":
         return;
     }
+  }
+
+  /**
+   * Answer a command that fails its schema, when it has an id to answer, instead of dropping it
+   * and leaving the server waiting for its timeout: `too_large` when something in it is over its
+   * cap (a file chunk past `FS_CHUNK_MAX_BYTES` or `TRANSFER_CHUNK_BYTES`, which keep `fs.*` and
+   * `transfer.*` frames within `WORKSPACE_FS_MAX_FRAME_BYTES`), else `bad_request`.
+   */
+  private refuse(raw: unknown, issues: ReadonlyArray<{ code: string }>): void {
+    if (!raw || typeof raw !== "object") return;
+    const { type, id } = raw as { type?: unknown; id?: unknown };
+    const requestId = RequestId.safeParse(id);
+    if (type !== "command" || !requestId.success) return;
+    const tooLarge = issues.some((issue) => issue.code === "too_big");
+    this.send({
+      type: "result",
+      id: requestId.data,
+      ok: false,
+      error: tooLarge
+        ? { code: "too_large", message: "The command carries more than it may" }
+        : { code: "bad_request", message: "The runner does not accept this command" },
+    });
   }
 
   private send(msg: RunnerToServerMessage): void {
