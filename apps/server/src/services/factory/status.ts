@@ -8,6 +8,7 @@ import {
   pipelineStep,
 } from "@codeden/contracts";
 import { budgetSpend, type FactoryContext, visionOf } from "./context";
+import { drainStatus } from "./drain";
 import { localDay, queueOrder } from "./policy";
 import { ownedPr, pullRequests } from "./pr-status";
 import { recoverable } from "./recover";
@@ -102,6 +103,7 @@ export async function buildStatus(ctx: FactoryContext, projectId: string): Promi
     pausedReason: loop.pausedReason,
     killSwitch: project.killSwitch,
     globalKillSwitch: globalKill,
+    drain: drainStatus(ctx, projectId, loop),
     limits: project.factoryLimits,
     tuning: loop.tuning,
     spendToday: { usd: Math.round(spend.usd * 10_000) / 10_000, tokens: spend.tokens },

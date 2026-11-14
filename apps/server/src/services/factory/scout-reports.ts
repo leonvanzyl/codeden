@@ -1,13 +1,14 @@
-import type {
-  DiscoveryArea,
-  FactoryFileIssueRequest,
-  FactoryFinding,
-  FactoryItem,
-  FactoryLoop,
-  FactoryPlanRoundRequest,
-  ScoutFinding,
-  ScoutLensRun,
-  Session,
+import {
+  type DiscoveryArea,
+  FACTORY_DRAINING,
+  type FactoryFileIssueRequest,
+  type FactoryFinding,
+  type FactoryItem,
+  type FactoryLoop,
+  type FactoryPlanRoundRequest,
+  type ScoutFinding,
+  type ScoutLensRun,
+  type Session,
 } from "@codeden/contracts";
 import { badRequest, conflict, errorMessage } from "../errors";
 import { TYPE_LABEL } from "./classify";
@@ -15,7 +16,7 @@ import { type FactoryContext, visionOf } from "./context";
 import { FACTORY_LABEL } from "./intake";
 import { slugify } from "./policy";
 import { lensPrompt } from "./prompts-scout";
-import { defaultBranch, knownTitles, SCOUT_SLOT } from "./scout";
+import { DRAINING_TEXT, defaultBranch, knownTitles, SCOUT_SLOT } from "./scout";
 import { busySlots, slotsFor } from "./slots";
 import { ACTIVE_STAGES, WAITING_STAGES } from "./store";
 import { wipOf, wipText } from "./wip";
@@ -37,6 +38,8 @@ function scoutRound(
   if (loop.scout.sessionId !== session.id) {
     throw badRequest("Only the project's factory scout can do this", "not_the_scout");
   }
+  // A drain takes on no new work: no review areas, no findings, no issues; end your turn.
+  if (loop.drain) throw conflict(`${DRAINING_TEXT} End your turn.`, FACTORY_DRAINING);
   if (!loop.scout.round) {
     throw conflict("No scout round is running; wait for the next one", "no_round");
   }

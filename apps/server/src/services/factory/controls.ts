@@ -1,4 +1,4 @@
-import type { FactoryLimits, Project } from "@codeden/contracts";
+import type { FactoryLimits, FactoryLoop, Project } from "@codeden/contracts";
 import { badRequest, conflict } from "../errors";
 import type { FactoryContext } from "./context";
 import { hasBudget } from "./policy";
@@ -30,10 +30,10 @@ export function assertCanEnter(
 }
 
 /**
- * The kill switch: stop every factory session of the project, put work that hadn't opened a
- * PR back in the queue, close the scout's round and stop the loop. Returns the stopped ids.
+ * Stop now: stop every factory session of the project and put work that hadn't opened a PR back
+ * in the queue. The loop record is the caller's to save (`stoppedLoop`). Returns the stopped ids.
  */
-export async function haltProject(ctx: FactoryContext, projectId: string): Promise<string[]> {
+export async function stopWork(ctx: FactoryContext, projectId: string): Promise<string[]> {
   const stopped = await ctx.sessions.stopAll(projectId);
   for (const item of ctx.store.items(projectId, ["building", "verifying"])) {
     ctx.store.updateItem(item.id, (i) =>
@@ -46,7 +46,21 @@ export async function haltProject(ctx: FactoryContext, projectId: string): Promi
           },
     );
   }
-  const loop = ctx.store.loopOrNew(projectId, ctx.now());
-  ctx.store.saveLoop({ ...loop, state: "stopped", scout: { ...loop.scout, round: null } });
+  return stopped;
+}
+
+/** A stopped loop: the scout's round closed and any drain over. */
+export function stoppedLoop(loop: FactoryLoop): FactoryLoop {
+  return { ...loop, state: "stopped", drain: null, scout: { ...loop.scout, round: null } };
+}
+
+/**
+ * The kill switch's Stop now: stop every factory session of the project, put work that hadn't
+ * opened a PR back in the queue, close the scout's round, end a drain and stop the loop. Returns
+ * the stopped ids.
+ */
+export async function haltProject(ctx: FactoryContext, projectId: string): Promise<string[]> {
+  const stopped = await stopWork(ctx, projectId);
+  ctx.store.saveLoop(stoppedLoop(ctx.store.loopOrNew(projectId, ctx.now())));
   return stopped;
 }

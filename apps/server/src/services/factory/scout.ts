@@ -48,6 +48,10 @@ import { wipOf, wipText } from "./wip";
 /** The scout's claim on an agent slot (`slots.ts`): its rounds and their area reviewers. */
 export const SCOUT_SLOT = "scout";
 
+/** Why the scout does nothing while the factory drains (`drain.ts`). */
+export const DRAINING_TEXT =
+  "The factory is draining: it finishes the work in flight, then stops, and takes on nothing new.";
+
 /** A round that runs longer than this is closed (a stuck scout or lens). */
 export const ROUND_TIMEOUT_MS = 3 * 3_600_000;
 
@@ -114,13 +118,14 @@ export interface ScoutNowFacts {
  */
 export function scoutNowBlocker(
   project: Pick<Project, "autonomyMode" | "archivedAt" | "killSwitch" | "factoryLimits">,
-  loop: Pick<FactoryLoop, "state" | "pausedReason" | "scout">,
+  loop: Pick<FactoryLoop, "state" | "pausedReason" | "scout"> & Partial<Pick<FactoryLoop, "drain">>,
   facts: ScoutNowFacts,
 ): string | null {
   if (project.autonomyMode !== "dark_factory") return "Only a dark factory has a scout.";
   if (project.archivedAt) return "The project is archived.";
   if (facts.globalKillSwitch) return "The global kill switch is on.";
   if (project.killSwitch) return "The kill switch is on.";
+  if (loop.drain) return DRAINING_TEXT;
   if (loop.state === "paused")
     return `The loop is paused${loop.pausedReason ? `: ${loop.pausedReason}` : ""}.`;
   if (facts.overBudget)

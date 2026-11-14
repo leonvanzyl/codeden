@@ -11,6 +11,7 @@ import {
 } from "@codeden/contracts";
 import type { InboxService } from "../inbox-service";
 import { budgetSpend, type FactoryContext, factoryNotice, raiseInbox } from "./context";
+import { drainLine } from "./drain";
 import { prInboxIds } from "./merge";
 import { localDay } from "./policy";
 import { ownedPr } from "./pr-status";
@@ -37,6 +38,7 @@ export async function writeDigest(
     spend: budgetSpend(ctx, project.id, day, project.factoryLimits),
     limits: project.factoryLimits,
     pausedReason: loop.state === "paused" ? loop.pausedReason : null,
+    draining: drainLine(ctx, project.id, loop),
     now: ctx.now(),
   });
   ctx.store.saveDigest(digest);
@@ -107,6 +109,8 @@ export function buildDigest(opts: {
   spend: { usd: number; tokens: number };
   limits: FactoryLimits;
   pausedReason: string | null;
+  /** "Draining: 2 items in flight" while the kill switch's drain runs. */
+  draining?: string | null;
   now?: Date;
 }): FactoryDigest {
   const shipped = opts.items
@@ -165,7 +169,10 @@ export function buildDigest(opts: {
     decisions,
     createdAt: (opts.now ?? new Date()).toISOString(),
   };
-  return { ...digest, text: renderDigest(opts.projectName, digest, opts.pausedReason) };
+  return {
+    ...digest,
+    text: renderDigest(opts.projectName, digest, opts.pausedReason, opts.draining ?? null),
+  };
 }
 
 function dayOf(iso: string): string {
@@ -178,6 +185,7 @@ export function renderDigest(
   projectName: string,
   d: Omit<FactoryDigest, "text">,
   pausedReason: string | null,
+  draining: string | null = null,
 ): string {
   const budget = [
     d.spend.budgetUsd !== null
@@ -189,6 +197,9 @@ export function renderDigest(
   ].join(", ");
   const lines = [`Factory digest for ${projectName}, ${d.day}`, ""];
   if (pausedReason) lines.push(`The loop is paused: ${pausedReason}.`, "");
+  if (draining) {
+    lines.push(`${draining}: the factory takes on no new work and stops once they finish.`, "");
+  }
   lines.push(`Shipped (${d.shipped.length}):`);
   for (const s of d.shipped) {
     lines.push(

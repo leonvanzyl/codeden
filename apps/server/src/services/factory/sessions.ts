@@ -296,10 +296,25 @@ export class FactorySessions {
   }
 
   /** Stop every live factory session of a project (kill switch). Returns the stopped ids. */
-  async stopAll(projectId: string): Promise<string[]> {
+  stopAll(projectId: string): Promise<string[]> {
+    return this.stopWhere(projectId, () => true);
+  }
+
+  /**
+   * Stop the scout and its area reviewers (a drain begins: they only find new work). Returns
+   * the stopped ids.
+   */
+  stopScouts(projectId: string): Promise<string[]> {
+    return this.stopWhere(
+      projectId,
+      (s) => s.workKey === SCOUT_WORK_KEY || s.workKey.startsWith(LENS_WORK_KEY_PREFIX),
+    );
+  }
+
+  private async stopWhere(projectId: string, which: (s: Session) => boolean): Promise<string[]> {
     const stopped: string[] = [];
     for (const s of this.list(projectId)) {
-      if (!LIVE_STATUSES.has(s.status)) continue;
+      if (!LIVE_STATUSES.has(s.status) || !which(s)) continue;
       try {
         await this.deps.sessions.stop(s.id);
         stopped.push(s.id);

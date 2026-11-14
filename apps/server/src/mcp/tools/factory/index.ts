@@ -18,7 +18,7 @@ import { asTool, forSession, inFactoryProject } from "./shared";
 export const factoryStatus = defineTool({
   name: "factory_status",
   description:
-    "The factory loop of this project: state, limits (auto-merge, trusted authors), spend against the daily budget, each work item's pipeline (bug, feature, docs) and step, issues ignored because their author isn't trusted, the merge checks of open pull requests, recent merges, failures and reverts, and the dark factory's scout.",
+    "The factory loop of this project: state (draining: the user chose to finish the work in flight, then stop; `drain.inFlight` says how many items are left), limits (auto-merge, trusted authors), spend against the daily budget, each work item's pipeline (bug, feature, docs) and step, issues ignored because their author isn't trusted, the merge checks of open pull requests, recent merges, failures and reverts, and the dark factory's scout.",
   roles: ["pm"],
   scope: "project",
   alwaysLoad: true,
@@ -42,6 +42,8 @@ export const factoryStatus = defineTool({
       mode: s.mode,
       loopState: s.loopState,
       pausedReason: s.pausedReason,
+      // "Finish current work, then stop": the items still in flight before the loop stops.
+      drain: s.drain,
       autoMerge: s.limits.autoMerge,
       trustedAuthors: s.limits.trustedAuthors,
       githubLogin: s.githubLogin,

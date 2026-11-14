@@ -10,6 +10,7 @@ import { earliestUntil, untilText } from "./availability";
 import { archiveFinished } from "./cleanup";
 import { settleClosedIssues } from "./closed-issues";
 import { budgetSpend, type FactoryContext, visionOf } from "./context";
+import { advanceDrain } from "./drain";
 import { classifyPending, intakeFailedChecks, intakeIssues } from "./intake";
 import { openPrFiles, scheduleOrder } from "./overlap";
 import { advanceOwned } from "./owned";
@@ -56,9 +57,9 @@ export async function runTick(
   const killed = project.killSwitch || ctx.settings.get().factory.killSwitch;
   if (!isFactoryMode(project.autonomyMode) || project.archivedAt) {
     if (loop.state !== "idle" && loop.state !== "stopped") loop = { ...loop, state: "idle" };
-    return save(ctx, loop, now);
+    return save(ctx, { ...loop, drain: null }, now);
   }
-  if (killed) return save(ctx, { ...loop, state: "stopped" }, now);
+  if (killed) return save(ctx, { ...loop, state: "stopped", drain: null }, now);
   if (loop.state === "stopped") loop = { ...loop, state: "idle" };
 
   // Day rollover: digest for the day that ended, fresh counters; a budget pause ends.
@@ -82,9 +83,11 @@ export async function runTick(
   // first, so none of them is put back or waits on a person.
   settleClosedIssues(ctx, project);
   // Items that failed for a reason outside their code go back by themselves (builders that
-  // must carry on wait until after the reviews, fixes and rebases, below).
+  // must carry on wait until after the reviews, fixes and rebases, below). While the factory
+  // drains (`drain.ts`), only the drain's own work does.
   const failedAtStart = new Set(ctx.store.items(projectId, ["failed"]).map((i) => i.id));
-  loop = await recoverInfraFailures(ctx, project, loop, { resume: false });
+  const drainedAtStart = loop.drain ? new Set(loop.drain.itemIds) : undefined;
+  loop = await recoverInfraFailures(ctx, project, loop, { resume: false, only: drainedAtStart });
   // Items already in flight move on even while paused (merges stay blocked, reverts excepted).
   // Watch merges first, then builds, then verification, so a PR found while building is
   // verified in the same step and a fresh merge is watched from the next one. Then the merge
@@ -107,6 +110,11 @@ export async function runTick(
   );
   // Finished work gives back its sessions and worktrees, also while paused.
   archiveFinished(ctx, projectId);
+  // A drain whose work is all done stops the loop here (also while paused).
+  if (loop.drain) {
+    loop = await advanceDrain(ctx, project, loop);
+    if (loop.state === "stopped") return save(ctx, loop, now);
+  }
 
   if (loop.state !== "paused") {
     const spend = budgetSpend(ctx, projectId, today, project.factoryLimits);
@@ -115,15 +123,27 @@ export async function runTick(
   }
   if (loop.state === "paused") return save(ctx, loop, now);
 
-  loop = await intakeIssues(ctx, project, loop);
-  loop = await intakeFailedChecks(ctx, project, loop);
-  await classifyPending(ctx, project);
+  // While draining nothing new is taken on: no intake, no classification, no scout, and only
+  // the drain's own items may claim an agent (a fresh builder after its builder was lost, or a
+  // rebuild). The slot order (`slots.ts`) is the same; nothing else is in it.
+  const drained = loop.drain ? new Set(loop.drain.itemIds) : undefined;
+  if (!drained) {
+    loop = await intakeIssues(ctx, project, loop);
+    loop = await intakeFailedChecks(ctx, project, loop);
+    await classifyPending(ctx, project);
+  }
   // Builders of work that failed for a reason outside its code, or whose builder was marked
   // failed by a message racing its turn, carry on: ahead of new work for the free agents.
-  loop = await recoverInfraFailures(ctx, project, loop, { resume: true, only: failedAtStart });
-  await recoverTurnRaceFailures(ctx, project, loop);
-  await assignAgents(ctx, project, loop);
-  if (project.autonomyMode === "dark_factory") loop = await advanceScout(ctx, project, loop);
+  const resumable = drained ? new Set([...failedAtStart].filter((id) => drained.has(id))) : null;
+  loop = await recoverInfraFailures(ctx, project, loop, {
+    resume: true,
+    only: resumable ?? failedAtStart,
+  });
+  await recoverTurnRaceFailures(ctx, project, loop, drained);
+  await assignAgents(ctx, project, loop, drained);
+  if (project.autonomyMode === "dark_factory" && !drained) {
+    loop = await advanceScout(ctx, project, loop);
+  }
   return save(ctx, { ...loop, state: deriveState(ctx, projectId, loop) }, now);
 }
 
@@ -148,8 +168,9 @@ function save(ctx: FactoryContext, loop: FactoryLoop, now: Date): FactoryLoop {
   return ctx.store.saveTick(loop, now.toISOString());
 }
 
-/** The loop state the panel shows: the most advanced stage with work in it. */
+/** The loop state the panel shows: draining, else the most advanced stage with work in it. */
 function deriveState(ctx: FactoryContext, projectId: string, loop: FactoryLoop): FactoryLoopState {
+  if (loop.drain) return "draining";
   const active = ctx.store.items(projectId, ["building", "verifying", "watching"]);
   if (active.some((i) => i.stage === "verifying" || i.stage === "watching")) return "verifying";
   if (active.some((i) => i.stage === "building")) return "building";
@@ -192,15 +213,19 @@ function underMergeCap(
  * (`wip.ts`) and, while auto-merge is on, the daily merge cap. Items that clearly overlap an open
  * PR wait behind those that don't (`overlap.ts`). An item whose issue was closed meanwhile stops.
  * Every build that will open a PR takes room under the work-in-progress limit, those started
- * earlier and those this tick starts, so the limit is never overshot.
+ * earlier and those this tick starts, so the limit is never overshot. While draining, `only` the
+ * drain's items are considered; the rest of the queue is left as it is.
  */
-async function assignAgents(ctx: FactoryContext, project: Project, loop: FactoryLoop) {
+async function assignAgents(
+  ctx: FactoryContext,
+  project: Project,
+  loop: FactoryLoop,
+  only?: ReadonlySet<string>,
+) {
   const wip = wipOf(ctx, project, loop);
   let building = unopenedBuilds(ctx, project.id);
-  const queue = scheduleOrder(
-    ctx.store.items(project.id, ["backlog"]).sort(queueOrder),
-    openPrFiles(ctx, project),
-  );
+  const queued = ctx.store.items(project.id, ["backlog"]).filter((i) => !only || only.has(i.id));
+  const queue = scheduleOrder(queued.sort(queueOrder), openPrFiles(ctx, project));
   const vision = visionOf(project).text;
   let full = false;
   for (const { item, overlap } of queue) {

@@ -20,6 +20,7 @@ const status: ProjectStatus = {
   scheduled: [],
   inbox: { open: 0, items: [] },
   recent: [],
+  factory: null,
 };
 
 describe("local time for the PM and the orchestrator (#207)", () => {

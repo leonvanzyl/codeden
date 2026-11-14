@@ -27,6 +27,8 @@ export interface ProjectStatusInput {
   inbox: InboxItem[];
   /** `session.finished` / `session.failed` notices of the last day, newest first. */
   outcomes: Notice[];
+  /** The factory loop of a project in a factory mode (`FactoryService.loopSummary`). */
+  factory?: ProjectStatus["factory"];
 }
 
 export function buildProjectStatus(input: ProjectStatusInput): ProjectStatus {
@@ -77,7 +79,22 @@ export function buildProjectStatus(input: ProjectStatusInput): ProjectStatus {
       })),
     },
     recent: recent.slice(0, 5),
+    factory: input.factory ?? null,
   };
+}
+
+/** The factory line: only when it says more than the mode does (draining, stopped, paused). */
+function factoryLine(f: ProjectStatus["factory"]): string | null {
+  if (!f) return null;
+  if (f.drainInFlight !== null && f.loopState !== "stopped") {
+    const n = f.drainInFlight;
+    const state = f.loopState === "paused" ? "paused while draining" : "draining";
+    return `Factory: ${state}, ${n} item${n === 1 ? "" : "s"} in flight (the user chose to finish the work in flight, then stop; nothing new starts)`;
+  }
+  if (f.loopState === "stopped")
+    return "Factory: stopped (a kill switch is on; the user resumes it)";
+  if (f.loopState === "paused") return "Factory: paused (see factory_status for the reason)";
+  return null;
 }
 
 /** Work keys running in more than one project at once (cross-project view). */
@@ -144,6 +161,8 @@ function workLine(w: WorkSummary, now: number): string {
 function projectLines(s: ProjectStatus, now: number, indent = ""): string[] {
   const lines: string[] = [];
   const push = (line: string) => lines.push(`${indent}${line}`);
+  const factory = factoryLine(s.factory);
+  if (factory) push(factory);
   push(s.running.length ? `Running (${s.running.length}):` : "Running: none");
   for (const w of s.running) push(workLine(w, now));
   if (s.queued.length) {
