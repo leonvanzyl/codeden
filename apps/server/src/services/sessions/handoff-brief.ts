@@ -1,4 +1,14 @@
-import type { Item, ItemOf, Session, Turn, UserInput } from "@codeden/contracts";
+import {
+  type Item,
+  type ItemOf,
+  type MessageSender,
+  type Session,
+  splitSender,
+  type Turn,
+  type UserInput,
+} from "@codeden/contracts";
+import { UNTRUSTED_INPUT } from "../factory/prompts";
+import { workStarter } from "./origin";
 import type { FileEditCall } from "./repo";
 
 /** The whole brief stays within this many characters (§9). */
@@ -14,6 +24,25 @@ const ERROR_MAX = 500;
 const FILES_SHOWN = 50;
 /** The compact transcript the utility model summarises (§7.4). */
 export const TRANSCRIPT_MAX = 24_000;
+
+/** Who sent a message, as the brief names them before quoting it. */
+const SENDERS: Readonly<Record<Exclude<MessageSender, "user">, string>> = {
+  factory: "the software factory",
+  automation: "an automation",
+  pm: "the project manager",
+  orchestrator: "the orchestrator",
+  codeden: "CodeDen",
+};
+
+/** Who sent a message, as a transcript line names them. */
+const SPEAKERS: Readonly<Record<MessageSender, string>> = {
+  user: "User",
+  factory: "Factory",
+  automation: "Automation",
+  pm: "PM",
+  orchestrator: "Orchestrator",
+  codeden: "CodeDen",
+};
 
 /** What a handoff's brief is written from: the source session and its transcript. */
 export interface HandoffSource {
@@ -44,6 +73,11 @@ export interface HandoffSource {
  * task, later requests, where the work got to, the files edited, and what to do next. The
  * intro and the closing are always whole; the sections between are shortened when the brief
  * would pass `BRIEF_MAX`.
+ *
+ * The brief is CodeDen's message, so it never relays anyone else's words as its own (#248): a
+ * message from the factory, an automation, a PM or the orchestrator is quoted under who sent
+ * it, and work on an issue or started by someone other than the user keeps the untrusted-input
+ * rule in the intro, where no clipping reaches it.
  */
 export function buildHandoffBrief(src: HandoffSource): string {
   const head = intro(src);
@@ -74,8 +108,23 @@ function intro(src: HandoffSource): string {
       ? `Issue: #${s.issue.number}${s.issue.title ? ` ${oneLine(s.issue.title)}` : ""} (${s.issue.url})`
       : "",
     s.pr ? `Its pull request: #${s.pr.number} (${s.pr.url}). Yours will be a new one.` : "",
+    quotesUntrustedInput(src) ? UNTRUSTED_INPUT : "",
   ];
   return lines.filter(Boolean).join("\n");
+}
+
+/**
+ * Whether the work may carry text from people outside the project: it is on an issue, someone
+ * other than the user started it (the factory, triage, an automation or a PM), or the factory
+ * or an automation wrote to it. Their briefs quote issue text, and on a public repository
+ * anyone writes issues.
+ */
+function quotesUntrustedInput(src: HandoffSource): boolean {
+  return (
+    src.session.issue !== null ||
+    workStarter(src.session).kind !== "user" ||
+    src.requests.some((m) => m.input.from === "factory" || m.input.from === "automation")
+  );
 }
 
 function task(src: HandoffSource): string {
@@ -197,7 +246,11 @@ export function handoffTranscript(
   return (head ? [head, ...kept] : kept).join("\n");
 }
 
-const userLine = (input: UserInput) => `User: ${clip(oneLine(input.text), 1_500)}`;
+/** A message as a transcript line, under who sent it, so the summary doesn't credit the user. */
+function userLine(input: UserInput): string {
+  const { from, text } = splitSender(input.text, input.from);
+  return `${SPEAKERS[from]}: ${clip(oneLine(text), 1_500)}`;
+}
 
 function transcriptLine(item: Item, root: string | null): string[] {
   switch (item.kind) {
@@ -216,11 +269,17 @@ function transcriptLine(item: Item, root: string | null): string[] {
   }
 }
 
-/** A message's text, clipped, noting attachments that aren't carried over. */
+/**
+ * A message's text, clipped, noting attachments that aren't carried over: the user's as they
+ * wrote it, anyone else's quoted under who sent it (without the sender line `messageFrom` adds),
+ * so it never reads as CodeDen's own words.
+ */
 function message(input: UserInput, max: number): string {
-  const text = clip(input.text.trim(), max) || "(no text)";
+  const { from, text } = splitSender(input.text, input.from);
+  const body = clip(text.trim(), max) || "(no text)";
   const n = input.attachments.length;
-  return n > 0 ? `${text}\n(${n} attachment${n === 1 ? "" : "s"} not included here)` : text;
+  const note = n > 0 ? `\n(${n} attachment${n === 1 ? "" : "s"} not included here)` : "";
+  return from === "user" ? `${body}${note}` : `From ${SENDERS[from]}:\n${quote(body)}${note}`;
 }
 
 function clip(text: string, max: number): string {

@@ -14,6 +14,7 @@ import {
   PR_COMMENTS_ARE_INPUT,
   type TrustedAuthors,
 } from "../github/review-trust";
+import { workStarter } from "./origin";
 import type { SessionRepo, StoredStartMeta } from "./repo";
 
 /** What happened on a pull request that its session should hear about. */
@@ -56,14 +57,15 @@ function failingChecks(pr: GithubPr) {
 }
 
 /**
- * Whether PR feedback goes to this session: an agent session the user started themselves
- * (the PM follows up on work it, the orchestrator or an automation started), not archived and
- * able to take a message.
+ * Whether PR feedback goes to this session: an agent session on work the user started
+ * themselves (the PM follows up on work it, the orchestrator or an automation started, and a
+ * fork or handoff of that work is trusted no more than its source: `workStarter`), not archived
+ * and able to take a message.
  */
 export function receivesPrFeedback(session: Session): boolean {
   return (
     session.role === "agent" &&
-    session.startedBy.kind === "user" &&
+    workStarter(session).kind === "user" &&
     session.parentSessionId === null &&
     !session.archivedAt &&
     OPEN.has(session.status)

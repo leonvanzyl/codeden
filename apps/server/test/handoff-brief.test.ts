@@ -146,8 +146,9 @@ describe("the handoff brief", () => {
         ],
       }),
     );
-    // The first message is the task whoever sent it; CodeDen's wake-ups are not requests.
-    expect(brief).toContain("## The task\n\nThe task");
+    // The first message is the task whoever sent it, quoted under them when it isn't the
+    // user's; CodeDen's wake-ups are not requests.
+    expect(brief).toContain("## The task\n\nFrom the software factory:\n> The task");
     expect(brief).not.toContain("Previous turn stopped");
     expect(brief).not.toContain("Checks failed");
     expect(brief).toContain("## Later requests (2 earlier left out)");
@@ -164,7 +165,9 @@ describe("the handoff brief", () => {
     );
     expect(brief).toContain(`${"t".repeat(3_999)}…\n(2 attachments not included here)`);
     expect(brief).not.toContain("t".repeat(4_001));
-    expect(brief).toContain(`- x${"y".repeat(598)}…\n  (1 attachment not included here)`);
+    expect(brief).toContain(
+      `- From the project manager:\n  > x${"y".repeat(598)}…\n  (1 attachment not included here)`,
+    );
   });
 
   it("adds the recorded result, open todos and a failed last turn", () => {

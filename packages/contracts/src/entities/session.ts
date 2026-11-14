@@ -11,7 +11,7 @@ import {
   Timestamp,
 } from "../common";
 import { Item } from "../items";
-import { workFields } from "../work";
+import { StartedBy, workFields } from "../work";
 import { SessionResult } from "../workbench";
 
 /**
@@ -68,6 +68,14 @@ export const ForkOrigin = z.object({
    * number), so this is what to show as "turn N". Absent when unknown.
    */
   turnNumber: z.int().positive().nullable().optional(),
+  /**
+   * Who started the work the session continues, when it wasn't the user: the source's
+   * `startedBy`, or the one the source recorded here when it was itself forked or handed off.
+   * The new session is the user's, but the work and any issue text in it are still the
+   * factory's, an automation's or a PM's, so PR feedback goes by this and trusts it no more than
+   * the source. Absent: the user's (and on sessions recorded before it existed).
+   */
+  startedBy: StartedBy.optional(),
 });
 export type ForkOrigin = z.infer<typeof ForkOrigin>;
 
