@@ -1,4 +1,10 @@
-import type { DiscoveryArea, FactoryStatus, ScoutStatus, WorkType } from "@codeden/contracts";
+import {
+  type DiscoveryArea,
+  drainText,
+  type FactoryStatus,
+  type ScoutStatus,
+  type WorkType,
+} from "@codeden/contracts";
 import { AREA_LABEL } from "@/components/factory/meta";
 import type { CardState, ViewCard, ViewPipeline } from "../stages";
 
@@ -85,6 +91,11 @@ export interface SceneScout {
 export interface Scene {
   /** Kill switch on or loop stopped: the lights dim and everyone sits down. */
   stopped: boolean;
+  /**
+   * Finishing current work, then stopping (`FactoryStatus.drain`): the items still in flight, and
+   * a "CLOSED" sign on the IN door; null when not draining.
+   */
+  draining: number | null;
   tickets: Station<SceneTicket>;
   builders: Station<SceneWorker>;
   reviewers: Station<SceneWorker>;
@@ -154,6 +165,7 @@ export function sceneOf(f: FactoryStatus, pipeline: ViewPipeline): Scene {
   });
   return {
     stopped,
+    draining: f.drain && !stopped ? f.drain.inFlight : null,
     tickets: station([...stages.intake, ...stages.type], SCENE_CAPS.tickets, (card, slot) => ({
       card,
       slot,
@@ -229,6 +241,9 @@ export function sceneSummary(scene: Scene): string {
   const lines = [parts.length > 0 ? `${parts.join(", ")}.` : "The factory floor is quiet."];
   if (scene.scout?.walking && !scene.stopped)
     lines.push(`The scout is on round ${scene.scout.round}.`);
+  if (scene.draining !== null) {
+    lines.push(`${drainText(scene.draining)}; the IN door is closed until the factory resumes.`);
+  }
   if (scene.stopped) lines.push("The loop is stopped.");
   return lines.join(" ");
 }

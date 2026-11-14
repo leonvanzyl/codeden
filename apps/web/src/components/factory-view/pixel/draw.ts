@@ -339,6 +339,18 @@ function effects(ctx: Ctx, list: readonly SceneEffect[], tick: number) {
   }
 }
 
+/** A "CLOSED" board hung across the IN door while the factory drains. */
+function closedSign(ctx: Ctx) {
+  const r = IN_DOOR;
+  const text = "CLOSED";
+  const w = pixelTextWidth(text) + 6;
+  const x = r.x + Math.floor((r.w - w) / 2);
+  const y = r.y + Math.floor(r.h / 2) - 2;
+  rect(ctx, { x: x - 1, y: y - 1, w: w + 2, h: 11 }, INK);
+  rect(ctx, { x, y, w, h: 9 }, "#e43b44");
+  pixelText(ctx, text, x + 3, y + 2, "#f4f4f4");
+}
+
 /** Paint the whole scene for frame `tick`. */
 export function drawScene(
   ctx: Ctx,
@@ -363,6 +375,8 @@ export function drawScene(
   scout(ctx, scene, moving ? t : 0);
   machines(ctx, scene, t);
   if (moving) effects(ctx, list, t);
+  // Draining: the IN door is closed; the work on the floor carries on.
+  if (scene.draining !== null && !scene.stopped) closedSign(ctx);
   if (scene.stopped) {
     // The lights go down.
     ctx.fillStyle = "rgba(10,12,28,0.55)";

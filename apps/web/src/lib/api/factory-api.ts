@@ -8,6 +8,8 @@ import {
   type FactoryRetryOptions,
   type FactorySetTypeRequest,
   FactoryStatus,
+  type KillSwitchMode,
+  type KillSwitchRequestInit,
   KillSwitchResponse,
   type SetAutonomyModeRequestInit,
   SetAutonomyModeResponse,
@@ -32,9 +34,17 @@ export interface FactoryApi {
   /** The vision; the template with `exists: false` when the file is missing. */
   vision(projectId: string): Promise<VisionResponse>;
   saveVision(projectId: string, contents: string): Promise<VisionResponse>;
-  /** The project's kill switch, or every project's with `"global"`. */
-  killSwitch(scope: { projectId: string } | "global", on: boolean): Promise<KillSwitchResponse>;
-  /** Clear a pause and the failure count. */
+  /**
+   * The project's kill switch, or every project's with `"global"`. On stops now by default;
+   * `mode: "drain"` (a project's only) finishes the work in flight, then stops, optionally within
+   * `drainLimitMin`. Off releases the switch and cancels a drain.
+   */
+  killSwitch(
+    scope: { projectId: string } | "global",
+    on: boolean,
+    opts?: { mode?: KillSwitchMode; drainLimitMin?: number | null },
+  ): Promise<KillSwitchResponse>;
+  /** Clear a pause and the failure count, and cancel a drain. */
   resume(projectId: string): Promise<FactoryLoop>;
   /** Run one loop step now ("Check now"); returns the fresh status. */
   tick(projectId: string): Promise<FactoryStatus>;
@@ -77,10 +87,10 @@ export function httpFactoryApi(http: Fetcher): FactoryApi {
     vision: (id) => get(`${p(id)}/vision`, (v) => VisionResponse.parse(v)),
     saveVision: (id, contents) =>
       call("PUT", `${p(id)}/vision`, { contents }, (v) => VisionResponse.parse(v)),
-    killSwitch: (scope, on) =>
+    killSwitch: (scope, on, opts = {}) =>
       post(
         scope === "global" ? "/factory/kill-switch" : `${p(scope.projectId)}/kill-switch`,
-        { on },
+        { on, ...opts } satisfies KillSwitchRequestInit,
         (v) => KillSwitchResponse.parse(v),
       ),
     resume: (id) => post(`${p(id)}/factory/resume`, {}, (v) => FactoryLoop.parse(v)),

@@ -103,6 +103,7 @@ export function mockOrchestration(world: MockWorld, deps: Deps): OrchestrationPa
         })),
       },
       recent: [],
+      factory: null,
     };
   };
   // PR 57's checks move on 20 s after the mock starts, so the next refetch shows a check finish.

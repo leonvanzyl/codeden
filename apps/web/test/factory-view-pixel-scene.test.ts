@@ -241,6 +241,19 @@ describe("pixel mode's scene (#209)", () => {
     }
   });
 
+  it("keeps working behind a closed IN door while draining (#286)", () => {
+    expect(scene.draining).toBeNull();
+    const drain = { since: minutesAgo(5), inFlight: 2, total: 3, deadline: null };
+    const draining = sceneFor({ loopState: "draining", drain });
+    expect(draining).toMatchObject({ stopped: false, draining: 2 });
+    expect(draining.builders.items.map((x) => x.pose)).toContain("work");
+    expect(sceneSummary(draining)).toContain(
+      "Draining: 2 items in flight; the IN door is closed until the factory resumes.",
+    );
+    // Once stopped, only the stop shows.
+    expect(sceneFor({ killSwitch: true, drain }).draining).toBeNull();
+  });
+
   it("reads the budget gauge in dollars, else tokens, and leaves it empty without a budget", () => {
     expect(scene.gauge).toBeCloseTo(0.6);
     const tokens = status({ limits: FactoryLimits.parse({ dailyBudget: { tokens: 1_800_000 } }) });
