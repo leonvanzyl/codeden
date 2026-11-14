@@ -1,4 +1,4 @@
-import type { ProviderCapabilities, ProviderInfo } from "@codeden/contracts";
+import type { ProviderCapabilities, ProviderInfo, ReasoningEffort } from "@codeden/contracts";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   buildStartRequest,
@@ -45,10 +45,31 @@ const plain: ProviderInfo = {
   models: [{ id: "only", label: "Only", efforts: [] }],
 };
 
+type ProjectDefaults = NonNullable<DraftDefaults["project"]>;
+const noProjectDefaults: ProjectDefaults = {
+  defaultProvider: null,
+  defaultModel: null,
+  defaultEffort: null,
+  autonomy: null,
+};
+const projectWith = (over: Partial<ProjectDefaults>): ProjectDefaults => ({
+  ...noProjectDefaults,
+  ...over,
+});
+const agentOn = (
+  provider: string,
+  model: string | null = null,
+  effort: ReasoningEffort | null = null,
+) => ({
+  provider,
+  model,
+  effort,
+});
+
 const defaults = (over: Partial<DraftDefaults> = {}): DraftDefaults => ({
   providers: [planner, plain],
-  project: { defaultProvider: null, autonomy: null },
-  agentProvider: "auto",
+  project: noProjectDefaults,
+  agent: agentOn("auto"),
   defaultAutonomy: "auto",
   ...over,
 });
@@ -58,21 +79,23 @@ describe("resolveDraftChoice (the New session draft's defaults)", () => {
   it("picks the provider: chosen, then project default, then agent default, then the first", () => {
     const id = (c: DraftChoice, d: DraftDefaults) => resolveDraftChoice(c, d).provider?.id;
     expect(id(choice(), defaults())).toBe("planner");
-    expect(id(choice(), defaults({ agentProvider: "plain" }))).toBe("plain");
-    const projectPlain = { defaultProvider: "plain", autonomy: null };
-    expect(id(choice(), defaults({ project: projectPlain, agentProvider: "planner" }))).toBe(
+    expect(id(choice(), defaults({ agent: agentOn("plain") }))).toBe("plain");
+    const projectPlain = projectWith({ defaultProvider: "plain" });
+    expect(id(choice(), defaults({ project: projectPlain, agent: agentOn("planner") }))).toBe(
       "plain",
     );
     expect(
       id(
         choice({ provider: "planner" }),
-        defaults({ project: projectPlain, agentProvider: "plain" }),
+        defaults({ project: projectPlain, agent: agentOn("plain") }),
       ),
     ).toBe("planner");
     // A provider the runner doesn't list (gone, or a stale saved choice) is skipped.
-    const gone = { defaultProvider: "gone", autonomy: null };
+    const gone = projectWith({ defaultProvider: "gone" });
     expect(id(choice({ provider: "gone" }), defaults({ project: gone }))).toBe("planner");
     expect(resolveDraftChoice(choice(), defaults({ providers: [] })).provider).toBeUndefined();
+    // Settings or the project not loaded yet.
+    expect(id(choice(), defaults({ project: undefined, agent: null }))).toBe("planner");
   });
 
   it("uses the model picked for that provider, else its default model, else its first", () => {
@@ -86,10 +109,102 @@ describe("resolveDraftChoice (the New session draft's defaults)", () => {
     expect(model(choice({ provider: "gone", model: "x" }))).toBe("big");
   });
 
+  it("starts from the Settings agent default model and effort on that provider (#261)", () => {
+    // Settings > Providers > Agent sessions: Planner, Small, high effort.
+    const settingsAgent = defaults({ agent: agentOn("planner", "small", "high") });
+    const resolved = resolveDraftChoice(choice(), settingsAgent);
+    expect(resolved.provider?.id).toBe("planner");
+    expect(resolved).toMatchObject({ model: "small", effort: "high" });
+    // The first send carries them, so the session starts on what Settings says.
+    expect(buildStartRequest("p1", { text: "Go" }, resolved, "")).toMatchObject({
+      provider: "planner",
+      model: "small",
+      effort: "high",
+    });
+  });
+
+  it("takes model and effort from the project, then Settings, then the provider (#261)", () => {
+    const pick = (d: DraftDefaults, c = choice()) => {
+      const { provider, model, effort } = resolveDraftChoice(c, d);
+      return { provider: provider?.id, model, effort };
+    };
+    const settingsSmall = agentOn("planner", "small", "high");
+    // The project's default agent wins over Settings.
+    const projectBig = projectWith({
+      defaultProvider: "planner",
+      defaultModel: "big",
+      defaultEffort: "low",
+    });
+    expect(pick(defaults({ project: projectBig, agent: settingsSmall }))).toEqual({
+      provider: "planner",
+      model: "big",
+      effort: "low",
+    });
+    // A project naming only its provider takes Settings' model and effort on that provider.
+    const projectPlanner = projectWith({ defaultProvider: "planner" });
+    expect(pick(defaults({ project: projectPlanner, agent: settingsSmall }))).toEqual({
+      provider: "planner",
+      model: "small",
+      effort: "high",
+    });
+    // Neither sets one: the provider's default model and the model's own effort.
+    expect(pick(defaults({ project: projectPlanner }))).toEqual({
+      provider: "planner",
+      model: "big",
+      effort: null,
+    });
+    // What the draft picked wins over every default.
+    const picked = choice({ provider: "planner", model: "small", effort: "medium" });
+    expect(pick(defaults({ project: projectBig, agent: settingsSmall }), picked)).toEqual({
+      provider: "planner",
+      model: "small",
+      effort: "medium",
+    });
+  });
+
+  it("never applies a default model or effort on a provider it wasn't set for (#261)", () => {
+    const pick = (d: DraftDefaults, c = choice()) => {
+      const { provider, model, effort } = resolveDraftChoice(c, d);
+      return { provider: provider?.id, model, effort };
+    };
+    // Settings names Planner's model, but the project defaults to Plain.
+    const settingsSmall = agentOn("planner", "small", "high");
+    const projectPlain = projectWith({ defaultProvider: "plain" });
+    expect(pick(defaults({ project: projectPlain, agent: settingsSmall }))).toEqual({
+      provider: "plain",
+      model: "only",
+      effort: null,
+    });
+    // The draft switched provider: neither the project's nor Settings' model follows it.
+    const projectSmall = projectWith({
+      defaultProvider: "planner",
+      defaultModel: "small",
+      defaultEffort: "high",
+    });
+    expect(
+      pick(
+        defaults({ project: projectSmall, agent: settingsSmall }),
+        choice({ provider: "plain" }),
+      ),
+    ).toEqual({ provider: "plain", model: "only", effort: null });
+    // Settings' provider isn't installed: its model isn't used on the first ready provider.
+    expect(pick(defaults({ agent: agentOn("gone", "x", "high") }))).toEqual({
+      provider: "planner",
+      model: "big",
+      effort: null,
+    });
+    // Effort is dropped on a provider without reasoning effort.
+    expect(pick(defaults({ agent: agentOn("plain", "only", "high") }))).toEqual({
+      provider: "plain",
+      model: "only",
+      effort: null,
+    });
+  });
+
   it("takes the autonomy picked, else the project's, else the Settings default", () => {
     const autonomy = (c: DraftChoice, d: DraftDefaults) => resolveDraftChoice(c, d).autonomy;
     expect(autonomy(choice(), defaults({ defaultAutonomy: "supervised" }))).toBe("supervised");
-    const project = { defaultProvider: null, autonomy: "full" as const };
+    const project = projectWith({ autonomy: "full" });
     expect(autonomy(choice(), defaults({ project }))).toBe("full");
     expect(autonomy(choice({ autonomy: "read_only" }), defaults({ project }))).toBe("read_only");
   });

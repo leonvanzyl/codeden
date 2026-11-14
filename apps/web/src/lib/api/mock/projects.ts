@@ -47,6 +47,8 @@ export function mockProjectApi(world: MockWorld): MockProjectApi {
         path,
         defaultBranch: "main",
         defaultProvider: null,
+        defaultModel: null,
+        defaultEffort: null,
         autonomy: null,
         autonomyMode: "assisted",
         visionPath: ".codeden/VISION.md",

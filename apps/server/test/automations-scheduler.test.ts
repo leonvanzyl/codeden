@@ -17,6 +17,8 @@ const project: Project = {
   path: "/tmp/widgets",
   defaultBranch: "main",
   defaultProvider: null,
+  defaultModel: null,
+  defaultEffort: null,
   autonomy: null,
   autonomyMode: "assisted",
   visionPath: ".codeden/VISION.md",

@@ -51,6 +51,30 @@ export function slugify(name: string): string {
 const samePath = (a: string, b: string) =>
   process.platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b;
 
+type DefaultAgent = Pick<Project, "defaultProvider" | "defaultModel" | "defaultEffort">;
+
+/**
+ * A project's default provider, model and effort after an update. A model id belongs to its
+ * provider, so a new default provider without a model in the same update clears the model and
+ * effort; a model or effort without a default provider is refused.
+ */
+export function defaultAgent(current: DefaultAgent, patch: UpdateProjectRequest): DefaultAgent {
+  const provider =
+    patch.defaultProvider !== undefined ? patch.defaultProvider : current.defaultProvider;
+  const keep = provider === current.defaultProvider;
+  const model =
+    patch.defaultModel !== undefined ? patch.defaultModel : keep ? current.defaultModel : null;
+  const effort =
+    patch.defaultEffort !== undefined ? patch.defaultEffort : keep ? current.defaultEffort : null;
+  if (provider === null && (model !== null || effort !== null)) {
+    throw badRequest(
+      "A default model or effort needs a default provider",
+      "default_provider_required",
+    );
+  }
+  return { defaultProvider: provider, defaultModel: model, defaultEffort: effort };
+}
+
 /** Projects: add from a local folder or a git clone, update, archive (§9, §14 step 5). */
 export class ProjectService {
   constructor(private readonly deps: ProjectServiceDeps) {}
@@ -101,7 +125,7 @@ export class ProjectService {
     const current = this.get(id);
     const next = { ...current, updatedAt: new Date().toISOString() } as Project;
     if (patch.name !== undefined) next.name = patch.name;
-    if (patch.defaultProvider !== undefined) next.defaultProvider = patch.defaultProvider;
+    Object.assign(next, defaultAgent(current, patch));
     if (patch.autonomy !== undefined) next.autonomy = patch.autonomy;
     if (patch.timezone !== undefined) next.timezone = patch.timezone;
     if (patch.defaultBranch !== undefined) next.defaultBranch = patch.defaultBranch;
@@ -241,6 +265,8 @@ export class ProjectService {
       path,
       defaultBranch: detected.defaultBranch,
       defaultProvider: req.defaultProvider ?? null,
+      defaultModel: null,
+      defaultEffort: null,
       autonomy: req.autonomy ?? null,
       autonomyMode: "assisted" as const,
       visionPath: DEFAULT_VISION_PATH,
