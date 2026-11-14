@@ -20,6 +20,10 @@
 // file is none), shared by every app-server process of a test like Codex's own archive folder.
 // thread/archive and thread/unarchive answer as Codex 0.160 does, and an archived thread can't
 // be resumed, forked or given a turn until it is unarchived. Without it, nothing stays archived.
+// FAKE_CODEX_ARCHIVE_DELAY_MS makes thread/archive take that long (a loaded machine): the thread
+// is archived, then the answer sent, once it has passed.
+// FAKE_CODEX_TURN=lost answers every turn/start with Codex's "thread not found", as for a thread
+// the app-server has unloaded, even right after a resume.
 // FAKE_CODEX_THREADS names a JSON file of the threads in the Codex home (`{ id, preview }`):
 // thread/list returns those not archived, two per page.
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
@@ -129,9 +133,15 @@ function archiveRequest(msg) {
   const ids = archived();
   if (msg.method === "thread/archive") {
     if (threadId === "missing") return fail(msg, `no rollout found for thread id ${threadId}`);
-    ids.add(threadId);
-    saveArchived(ids);
-    return send({ id: msg.id, result: {} });
+    const delay = Number(process.env.FAKE_CODEX_ARCHIVE_DELAY_MS ?? 0);
+    const done = () => {
+      const now = archived();
+      now.add(threadId);
+      saveArchived(now);
+      send({ id: msg.id, result: {} });
+    };
+    if (delay > 0) return setTimeout(done, delay);
+    return done();
   }
   if (!ids.has(threadId)) return fail(msg, `no archived rollout found for thread id ${threadId}`);
   ids.delete(threadId);
@@ -205,7 +215,9 @@ createInterface({ input: process.stdin }).on("line", (line) => {
       return modelList(msg);
     case "turn/start": {
       // Archiving unloads a thread: a turn on it fails until it is unarchived and resumed.
-      if (archived().has(msg.params?.threadId)) return fail(msg, `thread not found: ${msg.params.threadId}`);
+      if (archived().has(msg.params?.threadId) || turnMode === "lost") {
+        return fail(msg, `thread not found: ${msg.params.threadId}`);
+      }
       if (turnMode === "fail") return fail(msg, "turn refused");
       const turn = { id: `turn-${++turns}`, status: "completed", items: [], error: null };
       send({ id: msg.id, result: { turn: { ...turn, status: "inProgress" } } });

@@ -24,9 +24,9 @@ import { archiveThread, archiveThreadOnce } from "./history";
 import { CodexEventMapper } from "./mapper";
 import { startAppServer } from "./process";
 import type { ServerNotification } from "./protocol";
-import type { Model, TurnStartParams, TurnStartResponse } from "./protocol/v2";
+import type { Model, TurnStartParams } from "./protocol/v2";
 import type { CodexRpc } from "./rpc";
-import { openCodexThread } from "./thread-open";
+import { openCodexThread, startTurn } from "./thread-open";
 
 export interface CodexSessionConfig {
   executable: ResolvedCommand;
@@ -34,6 +34,8 @@ export interface CodexSessionConfig {
   /** Reasoning efforts a model lists (from `model/list`), when known. */
   modelEfforts?: (model: string) => readonly ReasoningEffort[] | undefined;
   interruptTimeoutMs?: number;
+  /** How long archiving the thread may take before the session moves on (`ARCHIVE_TIMEOUT_MS`). */
+  archiveTimeoutMs?: number;
 }
 
 /** Re-exported for callers that know it from here. */
@@ -45,7 +47,9 @@ export { codexEffort };
  *
  * The Codex apps list every thread in the user's Codex home as the user's own recents, so the
  * thread is archived whenever no turn of it runs: when a turn ends and when the session closes
- * (`./history`). Archiving unloads it, so the next `send()` unarchives and resumes it first. A
+ * (`./history`). Archiving unloads it, so the next `send()` unarchives and resumes it first,
+ * whatever the archive answered: one that ran out of time may still have gone through. A
+ * `turn/start` that finds the thread unloaded anyway reopens it and is tried once more. A
  * session whose agent spawned Codex sub-agents is only archived when it closes: unloading the
  * thread could cut off agents a later turn still talks to. A failed `turn/start` archives it
  * too, and so does an app-server that dies with the thread open (through a short-lived one).
@@ -134,13 +138,17 @@ export class CodexSession implements ProviderSession {
         inUse ? this.config.modelEfforts?.(inUse) : undefined,
       );
       const clientUserMessageId = this.mapper.clientMessageId(input);
-      const res = await rpc.request<TurnStartResponse>("turn/start", {
+      const params: TurnStartParams = {
         threadId: this.threadId(),
         input: toCodexInput(input),
         ...(clientUserMessageId ? { clientUserMessageId } : {}),
         ...(effort ? { effort } : {}),
         ...(model !== undefined ? { model } : {}),
         ...(this.autonomyChanged ? this.policyOverride() : {}),
+      };
+      const res = await startTurn(rpc, params, async () => {
+        await this.openThread(rpc);
+        return this.threadId();
       });
       this.mapper.beginTurn(res.turn.id);
     } catch (error) {
@@ -223,7 +231,9 @@ export class CodexSession implements ProviderSession {
     const rpc = this.rpc;
     const threadId = this.mapper.codexThreadId;
     if (this.parked) await this.parked.archived;
-    else if (rpc && !rpc.isClosed && threadId) await archiveThread(rpc, threadId);
+    else if (rpc && !rpc.isClosed && threadId) {
+      await archiveThread(rpc, threadId, this.config.archiveTimeoutMs);
+    }
     await rpc?.close();
   }
 
@@ -266,18 +276,21 @@ export class CodexSession implements ProviderSession {
     const threadId = this.mapper.codexThreadId;
     if (this.closed || this.parked || !rpc || rpc.isClosed || !threadId) return;
     if (this.mapper.hasSubagents()) return;
-    this.parked = { rpc, archived: archiveThread(rpc, threadId) };
+    this.parked = { rpc, archived: archiveThread(rpc, threadId, this.config.archiveTimeoutMs) };
   }
 
   /**
    * Before a turn: wait for an archive still in flight, then open the thread again on `rpc`
-   * (unarchive + resume). A restarted app-server already reopened it in `boot`.
+   * (unarchive + resume). Also when the archive failed or ran out of time: one that answers late
+   * still unloads the thread, and unarchiving a thread that isn't archived changes nothing. A
+   * restarted app-server already reopened it in `boot`.
    */
   private async unpark(rpc: CodexRpc): Promise<void> {
     const parked = this.parked;
     if (!parked) return;
     this.parked = undefined;
-    if (!(await parked.archived) || parked.rpc !== rpc || rpc.isClosed) return;
+    await parked.archived;
+    if (parked.rpc !== rpc || rpc.isClosed) return;
     await this.openThread(rpc);
   }
 

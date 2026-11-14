@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
   FS_CHUNK_MAX_BYTES,
+  FS_LIST_MAX_ENTRIES,
   GitCredential,
+  RUNNER_LINK_MAX_LINE_BYTES,
   RunnerCommand,
   RunnerCommandResults,
   TRANSFER_CHUNK_BYTES,
+  WORKSPACE_FS_MAX_FRAME_BYTES,
   WorkspaceFsErrorCode,
 } from "../src";
 
@@ -134,6 +137,44 @@ describe("fs.* and transfer.* (remote runners §10)", () => {
     ).toThrow();
     expect(() => RunnerCommand.parse({ name: "fs.write", root, path: "a", data: "%%" })).toThrow();
     expect(WorkspaceFsErrorCode.options).toContain("cwd_missing");
+  });
+
+  it("keeps the largest command and result within one workspace-file frame", () => {
+    // The longest root and path, of characters JSON escapes the most (`\u0001`: 6 bytes each).
+    const long = "\u0001".repeat(4096);
+    const id = "i".repeat(100);
+    const frame = (message: unknown) => Buffer.byteLength(JSON.stringify(message));
+    const commands = [
+      { name: "fs.write", root: long, path: long, data: b64(FS_CHUNK_MAX_BYTES), createDirs: true },
+      { name: "transfer.write", transferId: "t".repeat(100), data: b64(TRANSFER_CHUNK_BYTES) },
+    ];
+    for (const command of commands) {
+      const parsed = RunnerCommand.parse(command);
+      expect(frame({ type: "command", id, command: parsed })).toBeLessThan(
+        WORKSPACE_FS_MAX_FRAME_BYTES,
+      );
+    }
+    const results = [
+      RunnerCommandResults["fs.read"].parse({
+        data: b64(FS_CHUNK_MAX_BYTES),
+        sizeBytes: Number.MAX_SAFE_INTEGER,
+        eof: false,
+      }),
+      RunnerCommandResults["transfer.read"].parse({ data: b64(TRANSFER_CHUNK_BYTES), eof: true }),
+    ];
+    for (const result of results) {
+      expect(frame({ type: "result", id, ok: true, result })).toBeLessThan(
+        WORKSPACE_FS_MAX_FRAME_BYTES,
+      );
+    }
+    // Half the link's line, so file traffic never comes near it.
+    expect(WORKSPACE_FS_MAX_FRAME_BYTES * 2).toBe(RUNNER_LINK_MAX_LINE_BYTES);
+    // A listing is capped by entries too (and cut off by size on the runner).
+    const entries = Array.from({ length: FS_LIST_MAX_ENTRIES + 1 }, (_, i) => ({
+      path: `f${i}`,
+      kind: "file",
+    }));
+    expect(() => RunnerCommandResults["fs.list"].parse({ entries, truncated: false })).toThrow();
   });
 });
 
