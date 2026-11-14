@@ -1,5 +1,6 @@
 import { resolve } from "node:path";
 import {
+  type McpLinkRunnerFrame,
   RequestId,
   RUNNER_PROTOCOL_VERSION,
   type RunnerToServerMessage,
@@ -9,14 +10,16 @@ import {
 import type { WSContext, WSEvents } from "hono/ws";
 import { executeCommand, type RunnerCore } from "./commands";
 import { CommandError } from "./errors";
+import type { McpLinkChannel } from "./mcp/link-upstream";
 
 export type { RunnerCore };
 
 /**
  * One server connection. Handshake (`hello` -> `welcome` -> `resume`), then commands, acks
- * and journaled events. Only one connection is "attached" (receives events) at a time.
+ * and journaled events. Only one connection is "attached" (receives events) at a time. The
+ * MCP proxy's link upstream sends agents' requests on the attached one too.
  */
-export class ServerConnection {
+export class ServerConnection implements McpLinkChannel {
   private attached = false;
 
   constructor(
@@ -32,6 +35,13 @@ export class ServerConnection {
   /** Deliver a freshly journaled event or stream message if attached. */
   deliver(msg: RunnerToServerMessage): void {
     if (this.attached) this.send(msg);
+  }
+
+  /** Send an MCP frame (never journaled); false when this connection isn't attached and open. */
+  sendMcp(frame: McpLinkRunnerFrame): boolean {
+    if (!this.attached || this.ws.readyState !== 1) return false;
+    this.ws.send(JSON.stringify(frame));
+    return true;
   }
 
   detach(): void {
@@ -106,6 +116,9 @@ export class ServerConnection {
           const message = error instanceof Error ? error.message : String(error);
           this.send({ type: "result", id: msg.id, ok: false, error: { code, message } });
         }
+        return;
+      case "mcp.response":
+        this.core.mcpResponse(this, msg);
         return;
       case "ping":
         this.send({ type: "pong", id: msg.id });
