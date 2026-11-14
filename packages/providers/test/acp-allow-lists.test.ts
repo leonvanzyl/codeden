@@ -17,7 +17,7 @@ import {
   GEMINI_ADMIN_POLICY,
   geminiAdminPolicyPath,
   geminiSessionArgs,
-  writeGeminiAdminPolicy,
+  writeGeminiAdminPolicies,
 } from "../src/gemini/admin-policy";
 import { geminiAllowListNotice, geminiAllowRules } from "../src/gemini/allow-list";
 import { chunk, completedOf, fakeAcp } from "./support/fake-acp";
@@ -145,19 +145,46 @@ describe("Gemini CLI's allow settings", () => {
 });
 
 describe("Gemini CLI's admin policy", () => {
+  // No rules of the user's: an empty Gemini CLI folder and worktree.
+  const noRules = () => ({ cwd: worktree({}), geminiHome: worktree({}) });
+
   it("is written to CodeDen's home once and passed with --admin-policy", () => {
     const home = mkdtempSync(join(tmpdir(), "codeden-home-"));
-    const file = writeGeminiAdminPolicy(home);
+    const [file, ...rest] = writeGeminiAdminPolicies(home, noRules());
+    expect(rest).toEqual([]);
     expect(file).toBe(geminiAdminPolicyPath(home));
     expect(file).toBe(join(home, "gemini", "admin-policy.toml"));
-    expect(readFileSync(file, "utf8")).toBe(GEMINI_ADMIN_POLICY);
-    writeFileSync(file, "tampered");
-    expect(readFileSync(writeGeminiAdminPolicy(home), "utf8")).toBe(GEMINI_ADMIN_POLICY);
-    expect(geminiSessionArgs(["--acp"], file)).toEqual(["--acp", "--admin-policy", file]);
+    expect(readFileSync(file as string, "utf8")).toBe(GEMINI_ADMIN_POLICY);
+    writeFileSync(file as string, "tampered");
+    const [again] = writeGeminiAdminPolicies(home, noRules());
+    expect(readFileSync(again as string, "utf8")).toBe(GEMINI_ADMIN_POLICY);
+    expect(geminiSessionArgs(["--acp"], ["a.toml", "b.toml"])).toEqual([
+      "--acp",
+      "--admin-policy",
+      "a.toml",
+      "--admin-policy",
+      "b.toml",
+    ]);
+  });
+
+  it("writes the user's deny rules beside it, in a file named by its content", () => {
+    const home = mkdtempSync(join(tmpdir(), "codeden-home-"));
+    const sources = {
+      cwd: worktree({
+        ".gemini/settings.json": '{ "tools": { "exclude": ["run_shell_command"] } }',
+      }),
+      geminiHome: worktree({}),
+    };
+    const files = writeGeminiAdminPolicies(home, sources);
+    expect(files).toHaveLength(2);
+    expect(dirname(files[1] as string)).toBe(join(home, "gemini"));
+    expect(basename(files[1] as string)).toMatch(/^user-rules-[0-9a-f]{16}\.toml$/);
+    expect(readFileSync(files[1] as string, "utf8")).toContain('decision = "deny"');
+    expect(writeGeminiAdminPolicies(home, sources)).toEqual(files);
   });
 
   it("without CodeDen's home, goes to a private temp folder of its own, not a fixed name", () => {
-    const file = writeGeminiAdminPolicy();
+    const [file = ""] = writeGeminiAdminPolicies(undefined, noRules());
     expect(file).toBe(geminiAdminPolicyPath());
     expect(dirname(file)).not.toBe(join(tmpdir(), "codeden-gemini"));
     expect(basename(dirname(file))).toMatch(/^codeden-gemini-.+/);
@@ -171,7 +198,8 @@ describe("Gemini CLI's admin policy", () => {
     expect(rules).toHaveLength(3);
     for (const rule of rules) {
       expect(rule).toContain('decision = "ask_user"');
-      expect(rule).toContain("priority = 999");
+      // The lowest admin priority: the user's own rules, copied above, come first.
+      expect(rule).toContain("priority = 0");
     }
     expect(rules[0]).toContain('toolName = "run_shell_command"');
     expect(rules[0]).not.toContain("modes");
