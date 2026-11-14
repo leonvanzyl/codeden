@@ -110,6 +110,23 @@ export class RunnerCommandError extends Error {
   }
 }
 
+/**
+ * A command's result, checked against its schema: one over a cap (a file chunk past its size,
+ * which keeps `fs.*` and `transfer.*` frames within `WORKSPACE_FS_MAX_FRAME_BYTES`) fails with
+ * `too_large`, anything else malformed with `invalid_result`.
+ */
+export function commandResult<N extends RunnerCommandName>(
+  name: N,
+  raw: unknown,
+): RunnerCommandResult<N> {
+  const parsed = RunnerCommandResults[name].safeParse(raw);
+  if (parsed.success) return parsed.data as RunnerCommandResult<N>;
+  const tooLarge = parsed.error.issues.some((issue) => issue.code === "too_big");
+  throw tooLarge
+    ? new RunnerCommandError("too_large", `The runner's ${name} result is larger than it may be`)
+    : new RunnerCommandError("invalid_result", `The runner's ${name} result is malformed`);
+}
+
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 /** Wait `ms`, or less when `signal` aborts first. */
 const pause = (ms: number, signal: AbortSignal) =>
@@ -214,8 +231,7 @@ export class RunnerClient {
       if (pending) clearTimeout(pending.timer);
       pending?.reject(new RunnerCommandError("too_large", (error as Error).message));
     }
-    const raw = await result;
-    return RunnerCommandResults[command.name as N].parse(raw) as RunnerCommandResult<N>;
+    return commandResult(command.name as N, await result);
   }
 
   /**

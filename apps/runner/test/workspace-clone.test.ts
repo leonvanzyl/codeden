@@ -100,6 +100,37 @@ describe("workspace.prepare clone", () => {
     ).rejects.toMatchObject({ code: "unsupported" });
   });
 
+  it("never reuses a clone whose checkout failed, on whatever branch it was left", async () => {
+    const { bare, home, ctx } = setup();
+    // The clone succeeds, then making the session's branch fails (no such base).
+    await expect(
+      prepareWorkspace(clone("sess-clone-6", bare, { baseRef: "no-such-ref" }), ctx),
+    ).rejects.toMatchObject({ code: "git_failed" });
+    const path = join(home, "ws", "sessclon");
+    expect.soft(existsSync(path), "the partial clone is removed").toBe(false);
+
+    const again = await prepareWorkspace(clone("sess-clone-6", bare), ctx);
+    expect(again).toMatchObject({ cwd: path, created: true, branch: "codeden/sessclon" });
+    expect(sh(path, "rev-parse", "--abbrev-ref", "HEAD")).toBe("codeden/sessclon");
+  });
+
+  it("clones again over a clone left unfinished (the runner stopped mid-prepare)", async () => {
+    const { bare, home, ctx } = setup();
+    // What a runner killed between the clone and the checkout leaves: the default branch.
+    const path = join(home, "ws", "sessclon");
+    sh(home, "clone", "-q", "--", bare, path);
+    const result = await prepareWorkspace(
+      clone("sess-clone-7", bare, { branch: "codeden/seven" }),
+      ctx,
+    );
+    expect(result).toMatchObject({ cwd: path, created: true, branch: "codeden/seven" });
+    expect(sh(path, "rev-parse", "--abbrev-ref", "HEAD")).toBe("codeden/seven");
+
+    // A finished clone is reused as it is, on the branch it was given.
+    const reused = await prepareWorkspace(clone("sess-clone-7", bare), ctx);
+    expect(reused).toMatchObject({ cwd: path, created: false, branch: "codeden/seven" });
+  });
+
   it("pushes the session's branch with a brokered credential", async () => {
     const { bare, ctx } = setup();
     const ws = await prepareWorkspace(clone("sess-clone-5", bare, { branch: "codeden/five" }), ctx);

@@ -6,6 +6,7 @@ import {
   type RunnerCommandResult,
   TRANSFER_CHUNK_BYTES,
   TRANSFER_MAX_BYTES,
+  WORKSPACE_FS_MAX_FRAME_BYTES,
 } from "@codeden/contracts";
 import { DiskWorkspace, tempPathFor, WorkspaceFsError } from "@codeden/providers";
 import { CommandError } from "../errors";
@@ -14,6 +15,11 @@ import { CommandError } from "../errors";
 export const TRANSFER_IDLE_MS = 60_000;
 /** Most transfers open at once; opening another closes the one idle longest. */
 const MAX_TRANSFERS = 16;
+/**
+ * Room kept in a frame for what wraps a listing's entries: the result message with the longest
+ * request id, `truncated` and the brackets (about 150 bytes).
+ */
+const FRAME_ENVELOPE_BYTES = 512;
 
 type FsCommand = Extract<RunnerCommand, { name: `fs.${string}` | `transfer.${string}` }>;
 
@@ -45,6 +51,7 @@ export class WorkspaceFsHost {
   constructor(
     private readonly home: string,
     private readonly idleMs = TRANSFER_IDLE_MS,
+    private readonly maxFrameBytes = WORKSPACE_FS_MAX_FRAME_BYTES,
   ) {}
 
   /** Run one command; guard refusals become `CommandError`s with the same code. */
@@ -70,7 +77,7 @@ export class WorkspaceFsHost {
   private run(command: FsCommand): RunnerCommandResult<FsCommand["name"]> {
     switch (command.name) {
       case "fs.list":
-        return this.workspace(command.root).list(command.path, command.maxEntries);
+        return this.fitFrame(this.workspace(command.root).list(command.path, command.maxEntries));
       case "fs.stat":
         return this.workspace(command.root).stat(command.path);
       case "fs.read": {
@@ -91,6 +98,19 @@ export class WorkspaceFsHost {
       case "transfer.close":
         return { committed: this.drop(command.transferId, command.commit === true) };
     }
+  }
+
+  /**
+   * A listing cut off (`truncated`) where its result message would pass the frame size: 5,000
+   * long paths can, while every other result is held within it by its chunk cap.
+   */
+  private fitFrame(list: RunnerCommandResult<"fs.list">): RunnerCommandResult<"fs.list"> {
+    let bytes = FRAME_ENVELOPE_BYTES;
+    for (const [i, entry] of list.entries.entries()) {
+      bytes += Buffer.byteLength(JSON.stringify(entry)) + 1;
+      if (bytes > this.maxFrameBytes) return { entries: list.entries.slice(0, i), truncated: true };
+    }
+    return list;
   }
 
   private open(cmd: RunnerCommandOf<"transfer.open">): RunnerCommandResult<"transfer.open"> {
