@@ -266,8 +266,11 @@ describe("factory API contracts (§10.1)", () => {
       false,
     );
     expect(
-      KillSwitchRequest.safeParse({ on: true, mode: "drain", drainLimitMin: DRAIN_LIMIT_MAX_MIN + 1 })
-        .success,
+      KillSwitchRequest.safeParse({
+        on: true,
+        mode: "drain",
+        drainLimitMin: DRAIN_LIMIT_MAX_MIN + 1,
+      }).success,
     ).toBe(false);
     // Responses from before drains read as not draining.
     expect(KillSwitchResponse.parse({ on: true, stoppedSessions: ["s1"] })).toEqual({

@@ -219,8 +219,10 @@ describe("orchestration contracts (§8)", () => {
     };
     expect(ProjectStatus.parse(JSON.parse(JSON.stringify(draining)))).toEqual(draining);
     expect(
-      ProjectStatus.safeParse({ ...draining, factory: { loopState: "draining", drainInFlight: -1 } })
-        .success,
+      ProjectStatus.safeParse({
+        ...draining,
+        factory: { loopState: "draining", drainInFlight: -1 },
+      }).success,
     ).toBe(false);
   });
 
