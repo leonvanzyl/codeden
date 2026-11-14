@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  DRAIN_LIMIT_MAX_MIN,
+  drainText,
   EventEnvelope,
   FactoryAllowLargeChangeRequest,
   FactoryDecisionRequest,
@@ -11,6 +13,8 @@ import {
   FactoryTuning,
   FactoryTuningPatch,
   isFactoryMode,
+  KillSwitchRequest,
+  KillSwitchResponse,
   Notice,
   REVIEW_SUMMARY_MAX,
   REVIEW_SUMMARY_TRUNCATED,
@@ -247,6 +251,63 @@ describe("factory API contracts (§10.1)", () => {
     expect(event.type).toBe("factory.item.updated");
   });
 
+  it("round-trips the kill switch's modes and a loop's drain (#286)", () => {
+    // Clients from before the modes send only `on`: that stops now, as it always did.
+    expect(KillSwitchRequest.parse({ on: true })).toEqual({ on: true, mode: "now" });
+    const drain = KillSwitchRequest.parse({ on: true, mode: "drain", drainLimitMin: 60 });
+    expect(KillSwitchRequest.parse(JSON.parse(JSON.stringify(drain)))).toEqual(drain);
+    expect(KillSwitchRequest.parse({ on: true, mode: "drain", drainLimitMin: null })).toEqual({
+      on: true,
+      mode: "drain",
+      drainLimitMin: null,
+    });
+    expect(KillSwitchRequest.safeParse({ on: true, mode: "later" }).success).toBe(false);
+    expect(KillSwitchRequest.safeParse({ on: true, mode: "drain", drainLimitMin: 0 }).success).toBe(
+      false,
+    );
+    expect(
+      KillSwitchRequest.safeParse({ on: true, mode: "drain", drainLimitMin: DRAIN_LIMIT_MAX_MIN + 1 })
+        .success,
+    ).toBe(false);
+    // Responses from before drains read as not draining.
+    expect(KillSwitchResponse.parse({ on: true, stoppedSessions: ["s1"] })).toEqual({
+      on: true,
+      stoppedSessions: ["s1"],
+      draining: false,
+      inFlight: 0,
+    });
+    const res = KillSwitchResponse.parse({
+      on: false,
+      stoppedSessions: [],
+      draining: true,
+      inFlight: 2,
+    });
+    expect(KillSwitchResponse.parse(JSON.parse(JSON.stringify(res)))).toEqual(res);
+    // A loop saved before drains has none; a draining one keeps its snapshot across a restart.
+    const base = {
+      projectId: "p1",
+      state: "idle",
+      pausedReason: null,
+      consecutiveFailures: 0,
+      day: "2026-11-14",
+      mergesToday: 0,
+      lastDigestDay: null,
+      enabledAt: ts,
+      lastTickAt: null,
+      updatedAt: ts,
+    };
+    expect(FactoryLoop.parse(base).drain).toBeNull();
+    const draining = FactoryLoop.parse({
+      ...base,
+      state: "draining",
+      drain: { startedAt: ts, itemIds: ["i1", "i2"] },
+    });
+    expect(draining.drain).toEqual({ startedAt: ts, itemIds: ["i1", "i2"], deadline: null });
+    expect(FactoryLoop.parse(JSON.parse(JSON.stringify(draining)))).toEqual(draining);
+    expect(drainText(1)).toBe("Draining: 1 item in flight");
+    expect(drainText(2)).toBe("Draining: 2 items in flight");
+  });
+
   it("validates verdicts, reports and mode requests", () => {
     const verdict = ReviewVerdict.parse({
       verdict: "approve",
@@ -337,6 +398,17 @@ describe("factory API contracts (§10.1)", () => {
       lastTickAt: null,
     });
     expect(status.tuning.requireCi).toBe(true);
+    // A status from before drains reads as not draining; a draining one round-trips.
+    expect(status.drain).toBeNull();
+    const draining = FactoryStatus.parse({
+      ...status,
+      loopState: "draining",
+      drain: { since: ts, inFlight: 2, total: 3, deadline: null },
+    });
+    expect(FactoryStatus.parse(JSON.parse(JSON.stringify(draining)))).toEqual(draining);
+    expect(
+      FactoryStatus.safeParse({ ...draining, drain: { ...draining.drain, inFlight: -1 } }).success,
+    ).toBe(false);
     // A status from before the Factory view's stats still parses, with empty figures.
     expect(status.stats).toEqual({
       mergedToday: 0,

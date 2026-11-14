@@ -341,6 +341,24 @@ export type FactoryTuningPatch = z.infer<typeof FactoryTuningPatch>;
 export const DiscoveryRun = z.object({ sessionId: Id, area: DiscoveryArea, startedAt: Timestamp });
 export type DiscoveryRun = z.infer<typeof DiscoveryRun>;
 
+/**
+ * A running drain (the kill switch's "Finish current work, then stop", §10.1): the work in flight
+ * when it began carries on to the end of its pipeline, nothing new starts, and once every item of
+ * it has finished the loop stops by itself (the project kill switch turns on). Persisted with the
+ * loop, so a restart keeps draining.
+ */
+export const FactoryDrain = z.object({
+  startedAt: Timestamp,
+  /**
+   * The items in flight when the drain began: building, verifying or watching, and failures the
+   * loop still puts back by itself. Only these may still claim an agent; queued work waits.
+   */
+  itemIds: z.array(Id),
+  /** When the drain gives up and stops everything at once (Stop now); null: no time limit. */
+  deadline: Timestamp.nullable().default(null),
+});
+export type FactoryDrain = z.infer<typeof FactoryDrain>;
+
 /** The persisted loop of one project; resumable after a restart. */
 export const FactoryLoop = z.object({
   projectId: Id,
@@ -365,6 +383,8 @@ export const FactoryLoop = z.object({
   /** Main-branch commits whose failed checks already became items. */
   seenFailedShas: z.array(z.string()).default([]),
   tuning: FactoryTuning.prefault({}),
+  /** The drain in progress ("Finish current work, then stop"); null when none runs. */
+  drain: FactoryDrain.nullable().default(null),
   /**
    * The last tick that changed the loop. A tick that changes nothing else saves nothing, so
    * this can be older than the last tick (`FactoryStatus.lastTickAt` has that).
@@ -503,16 +523,69 @@ export type SetAutonomyModeResponse = z.infer<typeof SetAutonomyModeResponse>;
  */
 export const SCOUT_UNAVAILABLE = "scout_unavailable";
 
-/** `POST /api/projects/:id/kill-switch` and `POST /api/factory/kill-switch`. */
-export const KillSwitchRequest = z.object({ on: z.boolean() });
+/**
+ * How the kill switch stops a factory: `now` stops the loop and every factory session at once;
+ * `drain` ("Finish current work, then stop") starts no new work, lets the work in flight finish
+ * its pipeline, then stops by itself (`FactoryDrain`).
+ */
+export const KillSwitchMode = z.enum(["now", "drain"]);
+export type KillSwitchMode = z.infer<typeof KillSwitchMode>;
+
+/** Longest drain time limit (a week), in minutes. */
+export const DRAIN_LIMIT_MAX_MIN = 7 * 24 * 60;
+
+/** Error code of `POST /api/factory/kill-switch` with `mode: "drain"` (400): drains are per project. */
+export const DRAIN_PER_PROJECT = "drain_per_project";
+
+/** Error code of the scout's tools while the factory drains (409): it files no new work. */
+export const FACTORY_DRAINING = "draining";
+
+/**
+ * `POST /api/projects/:id/kill-switch` and `POST /api/factory/kill-switch`. `on: false` releases
+ * the switch and cancels a drain (Resume). `mode` defaults to `now`, as before it existed; the
+ * global switch only stops now.
+ */
+export const KillSwitchRequest = z.object({
+  on: z.boolean(),
+  mode: KillSwitchMode.default("now"),
+  /**
+   * With `mode: "drain"`: after this many minutes the drain falls back to Stop now. Null or
+   * absent: no time limit.
+   */
+  drainLimitMin: z.int().positive().max(DRAIN_LIMIT_MAX_MIN).nullable().optional(),
+});
 export type KillSwitchRequest = z.infer<typeof KillSwitchRequest>;
+/** What a client sends (`mode` may be left out). */
+export type KillSwitchRequestInit = z.input<typeof KillSwitchRequest>;
 
 export const KillSwitchResponse = z.object({
+  /** Whether the switch is on now (a drain turns it on only once it has finished). */
   on: z.boolean(),
-  /** Sessions stopped by turning the switch on. */
+  /** Sessions stopped by turning the switch on (the scout's while a drain begins). */
   stoppedSessions: z.array(Id),
+  /** A drain is running: the work in flight finishes, then the loop stops. */
+  draining: z.boolean().default(false),
+  /** Items of the drain still in flight. */
+  inFlight: z.int().nonnegative().default(0),
 });
 export type KillSwitchResponse = z.infer<typeof KillSwitchResponse>;
+
+/** A running drain as the factory panel, the Factory view and the PM see it. */
+export const FactoryDrainStatus = z.object({
+  since: Timestamp,
+  /** Items of the drain still in flight ("Draining: N items in flight"). */
+  inFlight: z.int().nonnegative(),
+  /** Items that were in flight when the drain began. */
+  total: z.int().nonnegative(),
+  /** When it falls back to Stop now; null: no time limit. */
+  deadline: Timestamp.nullable(),
+});
+export type FactoryDrainStatus = z.infer<typeof FactoryDrainStatus>;
+
+/** "Draining: 2 items in flight". */
+export function drainText(inFlight: number): string {
+  return `Draining: ${inFlight} item${inFlight === 1 ? "" : "s"} in flight`;
+}
 
 /** A work item as the factory panel and its pipeline diagram show it. */
 export const FactoryWorkItem = z.object({
@@ -644,6 +717,11 @@ export const FactoryStatus = z.object({
   /** The project's switch; `globalKillSwitch` stops every project. */
   killSwitch: z.boolean(),
   globalKillSwitch: z.boolean(),
+  /**
+   * The drain in progress ("Finish current work, then stop"); null when none runs. `loopState` is
+   * `draining` meanwhile, unless the loop is paused.
+   */
+  drain: FactoryDrainStatus.nullable().default(null),
   limits: FactoryLimits,
   tuning: FactoryTuning,
   spendToday: z.object({ tokens: z.int().nonnegative(), usd: z.number().nonnegative() }),

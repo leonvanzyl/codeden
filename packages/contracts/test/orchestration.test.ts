@@ -204,10 +204,24 @@ describe("orchestration contracts (§8)", () => {
       scheduled: [],
       inbox: { open: 0, items: [] },
       recent: [],
+      factory: null,
     };
     expect(ProjectStatus.parse(status)).toEqual(status);
     const { mode: _mode, ...noMode } = status.project;
     expect(ProjectStatus.safeParse({ ...status, project: noMode }).success).toBe(false);
+    // A status from before the factory line has none; a draining factory round-trips (#286).
+    const { factory: _factory, ...old } = status;
+    expect(ProjectStatus.parse(old).factory).toBeNull();
+    const draining: ProjectStatus = {
+      ...status,
+      project: { ...status.project, mode: "dark_factory" },
+      factory: { loopState: "draining", drainInFlight: 2 },
+    };
+    expect(ProjectStatus.parse(JSON.parse(JSON.stringify(draining)))).toEqual(draining);
+    expect(
+      ProjectStatus.safeParse({ ...draining, factory: { loopState: "draining", drainInFlight: -1 } })
+        .success,
+    ).toBe(false);
   });
 
   it("defaults role sessions in the snapshot and validates the HTTP shapes", () => {
