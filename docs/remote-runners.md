@@ -160,7 +160,9 @@ A **`RunnerTransport`** on the server replaces the hard-wired `ws` client: `send
   - `loopback` (`transport-loopback.ts`) is the old `ws` code; the client still finds or starts the runner through its lock file.
   - `exec` (`transport-exec.ts`) runs over a `LinkProcess`: `stdin`, `stdout`, `stderr`, `pid?`, `kill()` and `onExit(code)`. `spawnLinkProcess` and `execLink(command, args)` make a local child process, the shape `docker exec -i` needs. A cloud exec session can implement the same interface.
   - A runner gets the exec transport through `RunnerSpec.link`. Every reconnect opens a new link, and the client resumes by `seq` as after a server restart.
-  - A transport whose handshake fails (a `reject`, or a link that ends before `welcome`) is closed, so failed attempts leave no sockets or processes behind.
+  - A transport whose handshake fails (a `reject`, a refused journal id, or a link that ends before `welcome`) is closed, so failed attempts leave no sockets or processes behind.
+  - `stop()` cancels an attempt at any point, including a loopback socket whose upgrade the runner never answers.
+  - A runner reached through a link is not the home runner, so it is untrusted (§8): its events and streams pass the same checks over the link as over loopback.
 - **Wire format.** It lives in `packages/contracts/src/runner/link.ts`. Each frame is one compact JSON message per line, at most `RUNNER_LINK_MAX_LINE_BYTES` (16 MiB). Every byte except the `\n` counts, including a `\r` before it.
   - `LinkFrameDecoder` reassembles lines split across chunks. It drops a longer line without buffering it, drops a line that is not JSON, and reports each drop.
   - A command too large for a frame fails at once with `too_large` instead of timing out.
