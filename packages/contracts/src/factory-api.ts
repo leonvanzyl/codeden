@@ -607,13 +607,25 @@ export const FactoryWip = z.object({
   /**
    * Open, unmerged factory PRs the loop is still taking to a merge: those of work in the queue
    * (a rebuild), building or verifying, or back by itself after a failure outside its code. Not
-   * those of failed or escalated work waiting for a person.
+   * those of failed or escalated work waiting for a person, nor those of work waiting for its
+   * provider (see `waitingOnProvider`).
    */
   openPrs: z.int().nonnegative().default(0),
   /** The limit in force: `maxOpenPrs`, or the agent limit when that is unset. */
   limit: z.int().positive().default(2),
   /** At or above the limit: no new build starts from the queue and the scout files nothing. */
   holding: z.boolean().default(false),
+  /**
+   * Open PRs of work that failed for a reason outside its code and can only go back once its
+   * builder's provider can take work again (signed out, at its usage limit, not installed).
+   * They don't count in `openPrs`, so a provider being out never stops new work.
+   */
+  waitingOnProvider: z.int().nonnegative().default(0),
+  /**
+   * Why open work sits outside the limit, in words, e.g. "1 PR waits on Codex (not signed in)
+   * and doesn't count"; null when nothing waits on a provider.
+   */
+  note: z.string().nullable().default(null),
 });
 export type FactoryWip = z.infer<typeof FactoryWip>;
 

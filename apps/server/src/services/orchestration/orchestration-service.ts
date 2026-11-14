@@ -36,7 +36,7 @@ import {
 import { deriveGithubNotices, GITHUB_NOTICE_EVENTS } from "./github-notices";
 import { type HeldMessage, LoopGuard, type MessageOrigin, turnOriginsIn } from "./loop-guard";
 import { ProjectNotes } from "./notes";
-import { deriveNotices, type NoticeDraft, NoticeStore } from "./notices";
+import { deriveNotices, formServerOf, type NoticeDraft, NoticeStore } from "./notices";
 import {
   type AutomationPort,
   type GithubPort,
@@ -416,6 +416,7 @@ export class OrchestrationService {
             session,
             finalMessage: (sessionId, turnId) =>
               finalAssistantMessage(this.deps.db, sessionId, turnId),
+            mcpServer: (sessionId, itemId) => formServerOf(this.deps.repo, sessionId, itemId),
           }),
           ...deriveGithubNotices(events, session, this.deps.trustedAuthors),
         ];

@@ -23,7 +23,7 @@ import { OWNED_STAGES } from "./store";
 import { mayAutoMerge } from "./trust";
 import { recoverTurnRaceFailures } from "./turn-race";
 import { advanceVerifying } from "./verify";
-import { finishesOpenWork, wipOf, wipText } from "./wip";
+import { finishesOpenWork, unopenedBuilds, wipOf, wipText } from "./wip";
 
 export { FACTORY_LABEL } from "./intake";
 
@@ -187,9 +187,12 @@ function underMergeCap(
  * builds come after reviews, fixes and rebases, `slots.ts`), the work-in-progress limit
  * (`wip.ts`) and, while auto-merge is on, the daily merge cap. Items that clearly overlap an open
  * PR wait behind those that don't (`overlap.ts`). An item whose issue was closed meanwhile stops.
+ * Every build that will open a PR takes room under the work-in-progress limit, those started
+ * earlier and those this tick starts, so the limit is never overshot.
  */
 async function assignAgents(ctx: FactoryContext, project: Project, loop: FactoryLoop) {
   const wip = wipOf(ctx, project, loop);
+  let building = unopenedBuilds(ctx, project.id);
   const queue = scheduleOrder(
     ctx.store.items(project.id, ["backlog"]).sort(queueOrder),
     openPrFiles(ctx, project),
@@ -206,13 +209,15 @@ async function assignAgents(ctx: FactoryContext, project: Project, loop: Factory
       }));
       continue;
     }
-    if (wip.holding && !finishesOpenWork(ctx, item)) {
-      scheduleNote(ctx, item.id, `Waiting: ${wipText(wip).replace(/^F/, "f")}`);
+    const takesRoom = !finishesOpenWork(ctx, item);
+    if (takesRoom && wip.openPrs + building >= wip.limit) {
+      scheduleNote(ctx, item.id, `Waiting: ${wipText(wip, building).replace(/^F/, "f")}`);
       continue;
     }
     if (!full && underMergeCap(ctx, project, loop, item)) {
       if (claimSlot(ctx, project, "build", `build:${item.id}`, { ordered: true })) {
-        await startBuilder(ctx, project, item, vision, loop);
+        const started = await startBuilder(ctx, project, item, vision, loop);
+        if (started && takesRoom) building++;
         continue;
       }
       full = true;
@@ -252,17 +257,18 @@ function chooseBuilder(
   return { provider: provider ?? (available[0] as string), model: null };
 }
 
+/** Start a builder for a queued item; true when the item is building. */
 async function startBuilder(
   ctx: FactoryContext,
   project: Project,
   item: FactoryItem,
   vision: string,
   loop: FactoryLoop,
-): Promise<void> {
+): Promise<boolean> {
   const choice = chooseBuilder(ctx, project, loop);
   if ("waiting" in choice) {
     ctx.store.updateItem(item.id, (i) => ({ ...i, note: choice.waiting }));
-    return;
+    return false;
   }
   const { provider, model } = choice;
   try {
@@ -273,9 +279,9 @@ async function startBuilder(
         ...i,
         note: `Waiting: overlaps running work (${other})`,
       }));
-      return;
+      return false;
     }
-    if (res.status !== "started" && res.status !== "queued") return;
+    if (res.status !== "started" && res.status !== "queued") return false;
     const session = ctx.repo.find(res.sessionId)?.session;
     ctx.store.updateItem(item.id, (i) => ({
       ...i,
@@ -284,10 +290,12 @@ async function startBuilder(
       builderProvider: session?.provider ?? (provider === "auto" ? null : provider),
       note: null,
     }));
+    return true;
   } catch (error) {
     ctx.store.updateItem(item.id, (i) => ({
       ...i,
       note: `Build not started: ${errorMessage(error)}`,
     }));
+    return false;
   }
 }

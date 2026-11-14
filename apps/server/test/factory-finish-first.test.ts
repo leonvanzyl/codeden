@@ -175,7 +175,7 @@ describe("the work-in-progress limit (maxOpenPrs)", () => {
     // Two PRs open: the limit holds.
     const a = await verifying("success", "Add a counter", 3);
     const b = await verifying("success", "Add a timer", 4);
-    expect((await status()).wip).toEqual({ openPrs: 2, limit: 2, holding: true });
+    expect((await status()).wip).toMatchObject({ openPrs: 2, limit: 2, holding: true });
 
     // The scout plans no area reviewers: it is told to end its turn, and it files nothing.
     const plan = await env.factory.planRound(scout, { lenses: [] });
@@ -229,7 +229,7 @@ describe("the work-in-progress limit (maxOpenPrs)", () => {
     await tick();
     expect(item(a.id).stage).toBe("watching");
     expect(item(queued.id)).toMatchObject({ stage: "building", note: null });
-    expect((await status()).wip).toEqual({ openPrs: 1, limit: 2, holding: false });
+    expect((await status()).wip).toMatchObject({ openPrs: 1, limit: 2, holding: false });
     expect(item(b.id).stage).toBe("verifying");
     expect(lastMessageTo(scout.id)).toMatch(/\*\*Review by yourself now\*\*/);
     expect(loop().scout.round).toMatchObject({ phase: "filing", heldSince: null });
@@ -309,7 +309,7 @@ describe("the work-in-progress limit (maxOpenPrs)", () => {
     await env.setStatus(reviewerOf(id), "idle");
     const queued = backlogItem("Add a timer", 4);
     await tick();
-    expect((await status()).wip).toEqual({ openPrs: 1, limit: 1, holding: true });
+    expect((await status()).wip).toMatchObject({ openPrs: 1, limit: 1, holding: true });
     expect(item(queued.id)).toMatchObject({
       stage: "backlog",
       note: "Waiting: finishing open work (1 of 1 PRs open)",
@@ -318,7 +318,7 @@ describe("the work-in-progress limit (maxOpenPrs)", () => {
     await enable("software_factory", { autoMerge: false, tuning: { maxOpenPrs: 3 } });
     await tick();
     expect(item(queued.id).stage).toBe("building");
-    expect((await status()).wip).toEqual({ openPrs: 1, limit: 3, holding: false });
+    expect((await status()).wip).toMatchObject({ openPrs: 1, limit: 3, holding: false });
   });
 });
 

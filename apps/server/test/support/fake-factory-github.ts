@@ -5,6 +5,7 @@ import type {
   GithubAuthorAssociation,
   GithubIssue,
 } from "@codeden/contracts";
+import { ServiceError } from "../../src/services/errors";
 import type {
   CommitChecks,
   FactoryGithub,
@@ -208,9 +209,15 @@ export class FakeFactoryGithub implements FactoryGithub {
   async updateBranch(_projectId: string, number: number, expectedHeadSha: string): Promise<void> {
     const pr = this.prs.get(number);
     if (!pr) throw new Error(`no PR ${number}`);
+    // Like GitHub (through `toGithubError`): a refusal is a 422.
     if (pr.headSha !== expectedHeadSha)
-      throw new Error("expected head sha didn't match current head");
-    if (pr.mergeable === "conflicting") throw new Error("merge conflict between base and head");
+      throw new ServiceError(
+        422,
+        "github_validation",
+        "expected head sha didn't match current head",
+      );
+    if (pr.mergeable === "conflicting")
+      throw new ServiceError(422, "github_validation", "merge conflict between base and head");
     this.updates.push({ number, expectedHeadSha });
     Object.assign(pr, {
       headSha: `${pr.headSha}-up${this.updates.length}`,
@@ -258,8 +265,9 @@ export class FakeFactoryGithub implements FactoryGithub {
   async merge(_projectId: string, number: number, opts: { sha: string | null; title: string }) {
     const pr = this.prs.get(number);
     if (!pr) throw new Error(`no PR ${number}`);
-    // Like GitHub: a merge pinned to a head that moved is refused.
-    if (opts.sha && opts.sha !== pr.headSha) throw new Error("Head branch was modified");
+    // Like GitHub: a merge pinned to a head that moved is refused (a 409).
+    if (opts.sha && opts.sha !== pr.headSha)
+      throw new ServiceError(409, "github_conflict", "Head branch was modified");
     pr.ref = { ...pr.ref, state: "merged" };
     const sha = `merge${number}`;
     this.merges.push({ number, sha, title: opts.title });

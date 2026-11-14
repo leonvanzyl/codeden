@@ -85,6 +85,8 @@ export function toServiceError(error: unknown): ServiceError {
   const code = runnerErrorCode(error) ?? "runner_error";
   const message = error instanceof Error ? error.message : String(error);
   if (code === "runner_unavailable") return new ServiceError(503, code, message);
+  // An answer that doesn't fit its question (a form's number field): the card shows why.
+  if (code === "invalid_answer") return new ServiceError(400, code, message);
   if (
     code === "unknown_session" ||
     code === "unsupported" ||

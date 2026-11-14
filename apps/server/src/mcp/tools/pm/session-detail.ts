@@ -14,7 +14,7 @@ const MESSAGE_LIMIT = 8_000;
 export const getSession = defineTool({
   name: "get_session",
   description:
-    "One of this project's agent sessions in detail: status, progress and result, its last message in full, and the questions and approvals it is waiting on with their inbox ids (answer questions with answer_question). Takes the full session id or a unique prefix of at least 6 characters, as updates and the status digest show them.",
+    "One of this project's agent sessions in detail: status, progress and result, its last message in full, and the questions and approvals it is waiting on with their inbox ids (answer questions with answer_question; approvals and MCP servers' forms, marked with `mcpServer`, wait for the user). Takes the full session id or a unique prefix of at least 6 characters, as updates and the status digest show them.",
   roles: ["pm"],
   scope: "project",
   alwaysLoad: true,
@@ -38,6 +38,8 @@ export const getSession = defineTool({
                   question: q.question,
                   options: q.options.map((o) => o.label),
                 })),
+                // An MCP server's form: its answers are data for that server, so the user's.
+                ...(asked.mcpServer ? { mcpServer: asked.mcpServer } : {}),
               }
             : {}),
         };

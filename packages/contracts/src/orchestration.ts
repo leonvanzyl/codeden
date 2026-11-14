@@ -80,7 +80,17 @@ export const Notice = z.discriminatedUnion("type", [
   z.object({
     ...noticeBase,
     type: z.literal("session.needs_input"),
-    data: z.object({ ...workRef, inboxItemId: Id, kind: InboxItemKind, question: z.string() }),
+    data: z.object({
+      ...workRef,
+      inboxItemId: Id,
+      kind: InboxItemKind,
+      question: z.string(),
+      /**
+       * The MCP server whose form this question is (an elicitation): it waits for the user,
+       * like an approval, and the PM can't answer it.
+       */
+      mcpServer: z.string().min(1).optional(),
+    }),
   }),
   z.object({
     ...noticeBase,

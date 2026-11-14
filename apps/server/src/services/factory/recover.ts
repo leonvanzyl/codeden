@@ -5,6 +5,7 @@ import { CI_KICK_NUDGE } from "./ci-kick";
 import type { FactoryContext } from "./context";
 import { markStuck } from "./outcomes";
 import { continuePrompt } from "./prompts-integration";
+import { awaitedProvider, noteProviderWaits, type ProviderWait } from "./provider-wait";
 import { prAgent } from "./rebase";
 import { isRecheckObligation } from "./recheck";
 import { CLEAN_REVIEW } from "./review-environment";
@@ -106,6 +107,7 @@ export async function recoverInfraFailures(
   if (loop.state === "paused") return loop;
   let next = loop;
   const providers = ctx.sessions.providers();
+  const waits: ProviderWait[] = [];
   for (const item of ctx.store.items(project.id, ["failed"])) {
     if (!recoverable(item) || (opts.only && !opts.only.has(item.id))) continue;
     // A builder that lost a message race to its own turn is told to carry on by `turn-race.ts`.
@@ -113,12 +115,20 @@ export async function recoverInfraFailures(
     // A person merged or closed its PR meanwhile: ownership finishes the item instead.
     const state = item.pr ? (ctx.github.prRef(project.id, item.pr.number) ?? item.pr).state : null;
     if (state === "merged" || state === "closed") continue;
+    // The cause is gone only once the runner offers the builder's provider (`provider-wait.ts`).
+    const provider = awaitedProvider(ctx, item, providers);
+    if (provider !== undefined) {
+      waits.push({ item, provider });
+      continue;
+    }
     try {
-      next = await recoverOne(ctx, project, next, item, providers, opts.resume);
+      next = await recoverOne(ctx, project, next, item, opts.resume);
     } catch (error) {
       ctx.log?.(`factory: ${item.id}: recovery: ${errorMessage(error)}`);
     }
   }
+  // Once per tick (the pass that only moves items): how long work waited, and the PM's notice.
+  if (!opts.resume) noteProviderWaits(ctx, project, waits);
   return next;
 }
 
@@ -127,13 +137,11 @@ async function recoverOne(
   project: Project,
   loop: FactoryLoop,
   item: FactoryItem,
-  providers: string[],
   resume: boolean,
 ): Promise<FactoryLoop> {
   const builder = prAgent(ctx, item);
-  // The cause is gone: the runner offers the builder's provider, and nothing of it is busy.
-  if (providers.length === 0) return loop;
-  if (builder && (isBusy(builder) || !providers.includes(builder.provider))) return loop;
+  // The cause is gone (its provider can take work, see above), and nothing of it is busy.
+  if (builder && isBusy(builder)) return loop;
   const noCi = NO_CI.test(item.reason ?? "");
   if (noCi && (await ctx.github.actionsAvailable(project.id)) === false) {
     return markStuck(
