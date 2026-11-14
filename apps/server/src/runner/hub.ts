@@ -14,6 +14,7 @@ import {
   listRunnerRecords,
 } from "../events/runner-projection";
 import type { EventStore } from "../events/store";
+import type { McpHandler } from "../mcp/endpoint";
 import { ServiceError } from "../services/errors";
 import { type RunnerPort, type RunnerRouter, runnerPort } from "../services/runner-port";
 import { RunnerClient } from "./client";
@@ -49,6 +50,11 @@ export interface RunnerHubOptions {
   store: EventStore;
   /** The server's MCP endpoint, pushed to each runner after its handshake (read at `add`). */
   mcpUpstreamUrl?: () => string | undefined;
+  /**
+   * The server's MCP handler (the one `/mcp` uses). A runner whose backend isn't `local`
+   * can't reach the loopback endpoint, so its proxy tunnels over its link to this instead.
+   */
+  mcpLink?: McpHandler;
   /** Any runner's connection changed. */
   onStatus?: () => void;
   /** Ephemeral stream data from any runner (terminal output, browser frames). */
@@ -137,6 +143,8 @@ export class RunnerHub implements RunnerRouter {
           return describeRunner({ ...record, runnerId }, true);
         };
     const log = this.opts.log;
+    // Decided by the server's record, never by what the runner reports (§11).
+    const mcpOverLink = record.backend !== "local";
     const client: RunnerClient = new RunnerClient({
       recordId: spec.id,
       describe,
@@ -148,7 +156,8 @@ export class RunnerHub implements RunnerRouter {
       db: this.opts.db,
       store: this.opts.store,
       launch: spec.launch,
-      mcpUpstreamUrl: this.opts.mcpUpstreamUrl?.(),
+      mcpUpstreamUrl: mcpOverLink ? undefined : this.opts.mcpUpstreamUrl?.(),
+      mcpLink: mcpOverLink ? this.opts.mcpLink : undefined,
       startTimeouts: spec.startTimeouts,
       drainTimeoutMs: this.opts.drainTimeoutMs,
       requestTimeoutFloorMs: this.opts.requestTimeoutFloorMs,

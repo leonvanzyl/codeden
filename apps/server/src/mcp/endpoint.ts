@@ -1,4 +1,4 @@
-import { CODEDEN_VERSION } from "@codeden/contracts";
+import { CODEDEN_VERSION, type McpTokenClaims } from "@codeden/contracts";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
@@ -23,15 +23,29 @@ function bearerOf(request: Request): string | undefined {
   return /^Bearer\s+/i.test(auth) ? auth.replace(/^Bearer\s+/i, "").trim() : undefined;
 }
 
+export interface McpRequestOptions {
+  /**
+   * Whether this caller may use a live token's claims. A refused token is answered exactly as
+   * an invalid one, so the caller learns nothing about it (a runner using a token of a session
+   * that isn't routed to it, `docs/remote-runners.md` §11).
+   */
+  accept?: (claims: McpTokenClaims) => boolean;
+}
+
+/** Answers one MCP HTTP request: `/mcp`, or one that came over a runner link. */
+export type McpHandler = (request: Request, opts?: McpRequestOptions) => Promise<Response>;
+
 /**
  * The internal MCP endpoint (`/mcp`, §4.4, §8.3): Streamable HTTP in stateless mode, one MCP
  * server and transport per request. Every request needs a live per-session bearer token,
  * whose role decides which tools are listed and callable. Responses stream as SSE, so a
- * long-running tool (`ask_user`) keeps the connection alive while it waits.
+ * long-running tool (`ask_user`) keeps the connection alive while it waits. Requests from a
+ * remote runner's proxy arrive over its link and are answered here too (`runner/mcp-link.ts`).
  */
-export function createMcpHandler(deps: McpEndpointDeps): (request: Request) => Promise<Response> {
-  return async (request) => {
-    const claims = deps.tokens.verify(bearerOf(request));
+export function createMcpHandler(deps: McpEndpointDeps): McpHandler {
+  return async (request, opts = {}) => {
+    const verified = deps.tokens.verify(bearerOf(request));
+    const claims = verified && (opts.accept?.(verified) ?? true) ? verified : undefined;
     if (!claims) {
       return jsonRpcError(401, "Missing or invalid CodeDen session token", {
         "www-authenticate": 'Bearer realm="codeden"',

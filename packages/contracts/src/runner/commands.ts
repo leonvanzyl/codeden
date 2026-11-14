@@ -55,6 +55,11 @@ export const RunnerCommand = z.discriminatedUnion("name", [
     name: z.literal("runner.configure"),
     /** Where the local MCP proxy forwards to (the server's `/mcp`); `null` disables it. */
     mcpUpstreamUrl: z.url().nullable(),
+    /**
+     * Forward the proxy's requests over this connection instead (`mcp.request` frames, for a
+     * runner that can't reach the server's loopback); `mcpUpstreamUrl` is then `null`.
+     */
+    mcpLink: z.boolean().optional(),
   }),
   /** Exit the runner process after closing sessions and terminals. */
   z.object({ name: z.literal("runner.shutdown") }),

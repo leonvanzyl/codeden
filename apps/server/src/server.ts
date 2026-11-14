@@ -188,6 +188,8 @@ export async function startServer(opts: StartServerOptions): Promise<RunningServ
     db: database.db,
     store,
     mcpUpstreamUrl: () => `http://127.0.0.1:${port}/mcp`,
+    // Sandboxed runners reach the same MCP handler over their link (`/mcp` stays loopback).
+    mcpLink: (request, mcpOpts) => mcp(request, mcpOpts),
     onStatus: () => hub.broadcastRunner(runners.status()),
     onStream: (stream) => {
       if (stream.kind === "pty.output") terminals.onStream(stream);

@@ -4,35 +4,19 @@
  * streams, DELETE to end a session) to the server's `/mcp` with the agent's own
  * session-scoped bearer token, which the server validates.
  *
- * The transport behind the proxy is an `McpUpstream`, so a remote runner can later tunnel
- * over the runner connection instead of plain HTTP without changing the agent-facing side.
+ * The transport behind the proxy is an `McpUpstream`: `HttpMcpUpstream` for a runner next to
+ * the server, `LinkMcpUpstream` (`./link-upstream.ts`) for one that tunnels over the runner
+ * connection (`docs/remote-runners.md` §11). The agent-facing side is the same for both.
  */
+
+import { MCP_REQUEST_HEADERS, MCP_RESPONSE_HEADERS } from "@codeden/contracts";
 
 /** Something that can answer a forwarded MCP HTTP request. */
 export interface McpUpstream {
   forward(request: Request): Promise<Response>;
 }
 
-/** Request headers passed through to the upstream. */
-const REQUEST_HEADERS = [
-  "authorization",
-  "accept",
-  "content-type",
-  "mcp-session-id",
-  "mcp-protocol-version",
-  "last-event-id",
-];
-
-/** Response headers passed back to the agent. */
-const RESPONSE_HEADERS = [
-  "content-type",
-  "cache-control",
-  "mcp-session-id",
-  "mcp-protocol-version",
-  "www-authenticate",
-];
-
-function pick(source: Headers, names: string[]): Headers {
+function pick(source: Headers, names: readonly string[]): Headers {
   const out = new Headers();
   for (const name of names) {
     const value = source.get(name);
@@ -49,7 +33,7 @@ export class HttpMcpUpstream implements McpUpstream {
     const hasBody = request.method !== "GET" && request.method !== "HEAD";
     const upstream = await fetch(this.url, {
       method: request.method,
-      headers: pick(request.headers, REQUEST_HEADERS),
+      headers: pick(request.headers, MCP_REQUEST_HEADERS),
       body: hasBody ? await request.arrayBuffer() : undefined,
       signal: request.signal,
       redirect: "manual",
@@ -57,12 +41,13 @@ export class HttpMcpUpstream implements McpUpstream {
     return new Response(upstream.body, {
       status: upstream.status,
       statusText: upstream.statusText,
-      headers: pick(upstream.headers, RESPONSE_HEADERS),
+      headers: pick(upstream.headers, MCP_RESPONSE_HEADERS),
     });
   }
 }
 
-function jsonRpcError(status: number, message: string): Response {
+/** A JSON-RPC error answer from the proxy itself. */
+export function jsonRpcError(status: number, message: string): Response {
   return new Response(
     JSON.stringify({ jsonrpc: "2.0", id: null, error: { code: -32000, message } }),
     { status, headers: { "content-type": "application/json" } },

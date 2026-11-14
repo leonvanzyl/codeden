@@ -31,6 +31,7 @@ import { connectionHandlers, type ServerConnection } from "./connection";
 import { DeltaBatcher, type DeltaBatcherOptions } from "./delta-batcher";
 import { Journal } from "./journal";
 import { assertSingleInstance, removeOwnLock } from "./lock";
+import { LinkMcpUpstream } from "./mcp/link-upstream";
 import { HttpMcpUpstream, handleMcpRequest, type McpUpstream } from "./mcp/proxy";
 import { ProcessSupervisor } from "./process/supervisor";
 import { TerminalHost } from "./pty/terminal-host";
@@ -145,6 +146,8 @@ export async function startRunner(opts: StartRunnerOptions): Promise<RunningRunn
   let mcpUpstream: McpUpstream | undefined = opts.mcpUpstreamUrl
     ? new HttpMcpUpstream(opts.mcpUpstreamUrl)
     : undefined;
+  // MCP over the server connection, for a runner that can't reach the server's loopback (§11).
+  const mcpLink = new LinkMcpUpstream({ channel: () => attached });
   let port = 0;
 
   let stopped = false;
@@ -200,10 +203,11 @@ export async function startRunner(opts: StartRunnerOptions): Promise<RunningRunn
         drainExit = host.drain(timeoutMs ?? DEFAULT_DRAIN_TIMEOUT).then(finish);
       }
     },
-    configureMcp: (url) => {
-      mcpUpstream = url ? new HttpMcpUpstream(url) : undefined;
-      return url ? `http://127.0.0.1:${port}/mcp` : null;
+    configureMcp: ({ url, link }) => {
+      mcpUpstream = link ? mcpLink : url ? new HttpMcpUpstream(url) : undefined;
+      return mcpUpstream ? `http://127.0.0.1:${port}/mcp` : null;
     },
+    mcpResponse: (from, frame) => mcpLink.receive(from, frame),
     shutdown: () => {
       setTimeout(finish, 50);
     },
@@ -237,6 +241,8 @@ export async function startRunner(opts: StartRunnerOptions): Promise<RunningRunn
         (conn) => {
           connections.delete(conn);
           if (attached === conn) attached = undefined;
+          // Agents' MCP requests that went out on it get no answer now: fail them.
+          mcpLink.closed(conn);
         },
         (conn) => {
           // A newer server connection replaces the previous one.
