@@ -105,7 +105,15 @@ export function noteProviderWaits(
       target: "pm",
       event: "failed",
       title: `Factory work waits on ${what}`,
-      text: `${items.length} factory item${items.length === 1 ? "" : "s"} (${items.map((i) => i.title).join(", ")}${prs.length ? `; ${prs.join(", ")}` : ""}) failed for a reason outside their code and go back by themselves once ${provider ? ctx.sessions.displayName(provider) : "a provider"} can take work again. Until then their pull requests don't count toward the open-PR limit and new work goes to the other providers. Ask the user to sign it in, or wait for its usage limit to reset.`,
+      text: [
+        `${items.length} factory item${items.length === 1 ? "" : "s"} (${items.map((i) => i.title).join(", ")}) failed for a reason outside their code and go back by themselves once ${provider ? ctx.sessions.displayName(provider) : "a provider"} can take work again; until then new work goes to the other providers.`,
+        prs.length
+          ? `Their open pull requests (${prs.join(", ")}) don't count toward the open-PR limit meanwhile.`
+          : "",
+        "Ask the user to sign it in, or wait for its usage limit to reset.",
+      ]
+        .filter(Boolean)
+        .join(" "),
       itemIds: items.map((i) => i.id),
     });
     for (const item of items) {

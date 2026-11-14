@@ -1,7 +1,9 @@
 import type { FactoryItem } from "@codeden/contracts";
 import { afterEach, describe, expect, it } from "vitest";
+import { ServiceError } from "../src/services/errors";
 import { PROVIDER_WAIT_NOTICE_MS } from "../src/services/factory/provider-wait";
 import { stuckInboxId } from "../src/services/factory/stuck";
+import { GithubRateLimitError } from "../src/services/github/client";
 import { createFactoryEnv, type FactoryEnv } from "./support/factory-env";
 import { factorySteps } from "./support/factory-steps";
 
@@ -24,14 +26,20 @@ function pause() {
 
 const REFUSED = "Pull Request is not mergeable: a required status check is expected";
 
-/** GitHub refuses to merge PR `number` (branch protection, a required check that never reports). */
-function refuseMerges(number: number) {
+/**
+ * GitHub fails every merge of PR `number` with `error()`: by default a refusal (a 405, mapped
+ * like `toGithubError` does: branch protection, a required check that never reports).
+ */
+function refuseMerges(
+  number: number,
+  error: () => Error = () => new ServiceError(409, "github_not_allowed", REFUSED),
+) {
   const merge = env.gh.merge.bind(env.gh);
-  const attempts = { count: 0 };
+  const attempts = { count: 0, fail: true };
   env.gh.merge = async (projectId, n, opts) => {
-    if (n !== number) return merge(projectId, n, opts);
+    if (n !== number || !attempts.fail) return merge(projectId, n, opts);
     attempts.count++;
-    throw new Error(REFUSED);
+    throw error();
   };
   return attempts;
 }
@@ -126,7 +134,7 @@ describe("a PR GitHub refuses to merge", () => {
     await tick();
     expect(env.gh.merges.map((m) => m.number)).toEqual([a.pr.ref.number]);
     env.gh.updateBranch = async () => {
-      throw new Error("Resource not accessible by integration");
+      throw new ServiceError(403, "github_forbidden", "Resource not accessible by integration");
     };
     for (let n = 0; n < 4; n++) await tick();
     expect(item(b.id)).toMatchObject({
@@ -136,6 +144,40 @@ describe("a PR GitHub refuses to merge", () => {
         "Could not update it with main 3 times in a row; GitHub said: Resource not accessible by integration",
     });
     expect(failedNotices(b.id)).toHaveLength(1);
+  });
+});
+
+describe("GitHub not answering properly", () => {
+  it("never counts a 5xx, a rate limit or GitHub being away, and merges once it answers", async () => {
+    env = createFactoryEnv();
+    await enable();
+    const { a, b } = await twoQueued();
+    const errors = [
+      () => new ServiceError(502, "github_error", "GitHub request failed: socket hang up"),
+      () => new GithubRateLimitError(Date.now() + 60_000),
+      () => new ServiceError(409, "github_not_connected", "GitHub is not connected."),
+    ];
+    let next = 0;
+    const attempts = refuseMerges(a.pr.ref.number, () =>
+      (errors[next++ % errors.length] as () => Error)(),
+    );
+
+    for (let n = 0; n < 6; n++) await tick();
+    expect(attempts.count).toBe(6);
+    expect(item(a.id)).toMatchObject({
+      stage: "verifying",
+      note: "Merge failed: GitHub is not connected; trying again on the next check",
+    });
+    expect(Object.keys(item(a.id).nudges).filter((k) => k.startsWith("refused_"))).toEqual([]);
+    expect(failedNotices(a.id)).toEqual([]);
+    expect(env.gh.merges).toEqual([]);
+
+    // GitHub answers again: A merges first, then B (brought up to date with main) in its turn.
+    attempts.fail = false;
+    await tick();
+    expect(env.gh.merges.map((m) => m.number)).toEqual([a.pr.ref.number]);
+    expect(item(a.id).stage).toBe("watching");
+    expect(item(b.id).stage).toBe("verifying");
   });
 });
 
