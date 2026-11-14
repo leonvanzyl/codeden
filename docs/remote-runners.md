@@ -18,7 +18,7 @@ CodeDen should scale out: run self-hosted, and run agents in sandboxes (Docker c
 | 8 | Files, artifacts, MCP across the link | New runner commands (`fs.*`) and an MCP tunnel over the link | The server reads worktrees from its own disk today, and MCP goes over loopback HTTP; both broke in the experiment (§10, §11) |
 | 9 | Orchestrator and PMs | **Stay on the home runner** next to the server | They write no code, are long-lived and wake often; a box each would rarely pause (§15) |
 | 10 | Provider credentials | Sent over the link and held in runner memory, never in an image, snapshot or container config | Upstash snapshots carry env vars; `docker inspect` shows `-e` values (§14) |
-| 11 | GitHub credentials in a sandbox | Brokered per git operation by the server; agents in a sandbox get no GitHub token | Keeps the user's token out of the agent's reach between operations. **Needs the user's decision** (§9.2) |
+| 11 | GitHub credentials in a sandbox | Brokered per git operation by the server; agents in a sandbox get no GitHub token | Keeps the user's token out of the agent's reach between operations. Option A, built in Phase 3a (§9.2) |
 
 ## 2. Today's runner, and what assumes "same machine"
 
@@ -217,7 +217,24 @@ The question stays open for two later cases:
 
 The first sandbox phases support **GitHub projects** (clone from `origin`). Local-only projects stay on `local`, and the picker says why. A later phase seeds local-only projects with a `git bundle` sent over the link and brings results back the same way (the server `git fetch`es the bundle into the project).
 
-### 9.2 GitHub credentials: **Needs the user's decision**
+**Built in Phase 3a.**
+- **Which runners clone.** A runner whose `welcome.backend` isn't `local` gets `workspace.prepare` with `strategy: "clone"`. Local runners, including a second runner on this machine that reports `local`, keep worktrees.
+- **The command.** `{ strategy: "clone", remoteUrl, branch, baseRef, fetch, credential? }`, with no `repoPath` and no `path` (the schema requires `repoPath` for every other strategy).
+- **What the runner does** (`apps/runner/src/workspace/clone.ts`):
+  - It clones into `<runnerHome>/ws/<sessionShort>` and returns that path as `cwd`.
+  - It reuses the folder when it already holds a clone of the same remote, fetching first.
+  - It tracks `origin/<branch>` when the remote has the session's branch (a session restored in a new sandbox); otherwise it makes the branch from `baseRef` (default: the remote's default branch).
+  - Setup and `.codeden/project.json` run as for a new worktree.
+  - `ext::` transports are refused.
+- **Where it clones from** (`apps/server/src/services/git-broker.ts`):
+  - A GitHub project is cloned from `https://github.com/<owner>/<repo>.git`, whatever its local remote looks like, so the brokered token works.
+  - Any other project is cloned from its `origin`, without credentials in the URL.
+  - A project with no `origin` fails with `clone_unavailable`.
+- **What the session records.** `cwd` is the runner's path, and `worktreePath` is null: the clone lives as long as its sandbox, and Phases 4 and 7 remove it with the sandbox.
+- **Not supported yet.** Forking a session on such a runner, and the `existing` workspace mode, fail with `unsupported`.
+- **A missing working folder** fails with `cwd_missing` instead of `spawn git ENOENT`, for git, `session.start` and `pty.open`.
+
+### 9.2 GitHub credentials: option A, built in Phase 3a
 
 Pushes and PRs already run on the server side of the protocol (`create_pull_request` asks the runner for `git.commit` and `git.push`, then calls GitHub from the server). Inside a sandbox, `git` still needs a credential for clone, fetch and push. Note that the Upstash node image configures `credential.helper=store`, which would write a token to disk.
 
@@ -229,12 +246,43 @@ Pushes and PRs already run on the server side of the protocol (`create_pull_requ
 
 Running agent processes as a different Unix user from the runner would close the gap in A; it is listed as a later hardening.
 
+**Built in Phase 3a: option A**, as issue #271 set out.
+- **Who gets the token.** `GitBroker.credentialFor` returns the GitHub token as `x-access-token` only for a runner other than the home runner, and only for an `https://github.com/...` remote on the default port with no credentials of its own in the URL. It never does for ssh, `http:`, other hosts or local paths.
+- **Which operations carry it.** It goes with `workspace.prepare` (clone and fetch), the `git.push` of `create_pull_request`, and the workbench push to `origin`.
+- **How the runner uses it** (`apps/runner/src/git/credentials.ts`). It runs that one git process with `-c credential.helper=`, which empties the helper list so no store, keychain or credential manager is asked or told, followed by an inline helper that prints the credential from the process's own environment.
+- **Where it never appears.** Not in the remote URL or `.git/config`, and not in a journal, log or event. Error messages are scrubbed of it. `apps/server/test/remote-workspace.test.ts` greps all of them.
+- **The home runner** sends no credential and uses the user's own git setup, as before.
+
 ## 10. Files, diffs, checkpoints and artifacts
 
 - **Diffs and checkpoints already work** over the link (`git.diff`, `checkpoint.*`); the UI is unchanged.
 - **New runner commands:** `fs.list`, `fs.stat`, `fs.read` (byte range, capped at 4 MiB per call, base64), `fs.write`. On the server a `WorkspaceFs` interface has a local implementation (`node:fs`, today's behaviour) and a runner implementation. The modules in the table in §2 move to it.
 - **`browser.screenshot`** returns the bytes (or a runner path read with `fs.read`) instead of writing into the server's artifacts folder.
 - **Large transfers** (bundles, big artifacts) use a chunked `transfer.*` stream with back-pressure, not one giant JSON message.
+
+**Built in Phase 3a.**
+- **Contracts** (`packages/contracts/src/runner/workspace-fs.ts`). Every command names the workspace `root` (the session's `cwd` as the runner reported it) and a path inside it.
+  - `fs.list` follows the files panel's rules: depth-first, folders first, `.git` and `node_modules` skipped, at most 5,000 entries.
+  - `fs.stat` answers with the real path relative to the root.
+  - `fs.read` takes a byte range, and `fs.write` writes atomically (a temp file renamed into place); both carry at most 4 MiB.
+  - `transfer.open/read/write/close` moves larger files in 1 MiB chunks, pulled one per request, so the link never holds more than one chunk of a transfer. A read pins the file's size at open; a write lands only on `close` with `commit`. Transfers idle for 60 s are closed.
+- **One set of guards** (`DiskWorkspace` and `workspace-guard.ts` in `@codeden/providers`), used by the runner's handlers and by the server for its own disk, so both refuse the same paths with the same codes (`WorkspaceFsErrorCode`):
+  - a path outside the root, by its text and then through links (`path_outside_root`);
+  - CodeDen's data folder or its `runner` state folder as a root (`root_invalid`);
+  - CodeDen's own credential files and their `.invalid-*` copies (`credential_file`);
+  - writes to agents' allow-lists (`agent_permission_file`) and inside `.git` (`protected_path`).
+
+  `apps/server/test/workspace-fs-parity.test.ts` runs one table through both.
+- **Server** (`apps/server/src/services/workspace-fs/`). `workspaceFsFor(session)` gives the home runner `LocalWorkspaceFs`, which uses `node:fs`, and every other runner `RunnerWorkspaceFs`. The choice comes from the server's runner record (`RunnerPort.remote`), never from what a runner reports. A sandbox runner that says it is `local`, or sends back a `cwd` that exists on the server, is still read only through the link. `RunnerWorkspaceFs` refuses escaping paths by their text, using the runner's own path rules, before it sends anything.
+- **Modules moved**:
+  - The files panel.
+  - `share_to_chat` and `attach_evidence` by path. They read from the workspace only (the server's temp folder and artifacts are no place a sandboxed agent can write), and are refused by every name the file goes by, including the real path the runner reports.
+  - `generate_image`: staged on the server, then written into the workspace through the runner; reference images are read from it.
+  - Images made with a provider's own tools: read through the runner.
+  - `browser_screenshot`: bytes over the link, and no host path in its reply.
+  - Agent-config discovery, which reads the project folder, never the runner's path.
+  - Diffs and checkpoints already went through the runner.
+- **Unchanged.** A home-runner session keeps its current behaviour, including `share_to_chat` from the temp folder and artifacts.
 
 ## 11. MCP over the link
 
@@ -314,7 +362,7 @@ Pausing kills processes, so the runner journal (on the box's disk) and provider 
 ## 17. Open questions for the user
 
 1. **Network (§7).** Approve the exec link as the only remote transport for now, which leaves the 127.0.0.1 rule unchanged? The dial-out attach listener would come later and only on request.
-2. **GitHub credentials in sandboxes (§9.2).** A (brokered per operation, agents use CodeDen's GitHub tools, recommended), B (a fine-grained token in the sandbox, agents can use `gh`), or C (no token, git bundles through the server)?
+2. **GitHub credentials in sandboxes (§9.2).** A (brokered per operation, agents use CodeDen's GitHub tools, recommended), B (a fine-grained token in the sandbox, agents can use `gh`), or C (no token, git bundles through the server)? *A was built in Phase 3a, as issue #271 set out; B and C remain possible later.*
 3. **Orchestrator and PMs (§15).** On the home runner (recommended), or in sandboxes too?
 4. **Codex subscriptions in sandboxes (§14).** Recommend API keys and allow a copied `auth.json` with a warning, or refuse copies?
 5. **Docker image (§5.2).** Build locally on first use (recommended, no release change), or also publish `codeden-runner:<version>` to a registry from the release workflow?
@@ -390,6 +438,10 @@ Each phase is one pull request well under 5,000 changed lines, written as an iss
 - [ ] Local sessions behave as before.
 
 **Size.** About 2,500–3,500 lines. Split MCP into its own PR if it grows. **Depends on:** Phase 2.
+
+**Split in two.**
+- **3a (built, #271):** clone workspaces, brokered git credentials, `fs.*`/`transfer.*`, `WorkspaceFs` and the modules moved to it, screenshot bytes and `cwd_missing` (§9.1, §9.2, §10).
+- **3b (next):** MCP over the link. `LinkMcpUpstream` with `mcp.request`/`mcp.response` frames, SSE and `DELETE`, and bad session tokens refused exactly as on `/mcp`.
 
 ### Phase 4: Docker backend
 
