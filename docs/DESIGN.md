@@ -1,6 +1,6 @@
 # CodeDen: Design
 
-> Status: **locked for v1**, 2026-11-07. Changes to anything in "Locked decisions" need an explicit design discussion and an update to this file. The desktop app (§17) was approved on 2026-11-08. Opt-in network access for phones and tablets (§15.1) was approved on 2026-11-08. The software factory and dark factory redesign (§10.1) was approved on 2026-11-11. Remote runners in sandboxes (§4.2, [remote-runners.md](remote-runners.md)) were proposed on 2026-11-12; the network questions in §15.2 await the user's decision.
+> Status: **locked for v1**, 2026-11-07. Changes to anything in "Locked decisions" need an explicit design discussion and an update to this file. The desktop app (§17) was approved on 2026-11-08. Opt-in network access for phones and tablets (§15.1) was approved on 2026-11-08. The software factory and dark factory redesign (§10.1) was approved on 2026-11-11. Remote runners in sandboxes (§4.2, [remote-runners.md](remote-runners.md)) were proposed on 2026-11-12; the network questions in §15.2 await the user's decision. The agent execution model (per-session provider homes and brokered logins, [agent-execution.md](agent-execution.md)) was proposed on 2026-11-14; its changes to this file, including the Locked decisions, await the user's approval and are not applied here yet.
 
 ## 1. What CodeDen is
 
