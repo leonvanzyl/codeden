@@ -127,6 +127,10 @@ export async function readyForYou(
   });
 }
 
+/**
+ * Squash-merge the head of the merge queue. When GitHub refuses, nothing changes here: what it
+ * said comes back as `refused`, and the queue counts it (`queue.ts`).
+ */
 export async function autoMerge(
   ctx: FactoryContext,
   project: Project,
@@ -134,16 +138,12 @@ export async function autoMerge(
   current: FactoryItem,
   pr: FactoryPr,
   checks: FactoryItem["checks"],
-): Promise<FactoryLoop> {
+): Promise<FactoryLoop | { refused: string }> {
   const title = `${current.title} (#${pr.ref.number})`;
   const res = await ctx.github
     .merge(project.id, pr.ref.number, { sha: pr.headSha, title })
     .catch((error: unknown) => ({ merged: false, sha: null, error: errorMessage(error) }));
-  if (!res.merged) {
-    const why = "error" in res ? res.error : "GitHub did not merge it";
-    ctx.store.updateItem(current.id, (i) => ({ ...i, note: `Merge failed: ${why}` }));
-    return loop;
-  }
+  if (!res.merged) return { refused: "error" in res ? res.error : "GitHub did not merge it" };
   const at = ctx.now().toISOString();
   ctx.store.updateItem(current.id, (i) => ({
     ...i,

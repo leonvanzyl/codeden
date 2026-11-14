@@ -346,12 +346,30 @@ describe("factory API contracts (§10.1)", () => {
       merged7d: 0,
     });
     // A status from before the WIP limit reads as not holding anything back.
-    expect(status.wip).toEqual({ openPrs: 0, limit: 2, holding: false });
+    expect(status.wip).toEqual({
+      openPrs: 0,
+      limit: 2,
+      holding: false,
+      waitingOnProvider: 0,
+      note: null,
+    });
     const holding = FactoryStatus.parse({
       ...status,
       wip: { openPrs: 3, limit: 3, holding: true },
     });
     expect(FactoryStatus.parse(JSON.parse(JSON.stringify(holding)))).toEqual(holding);
+    // PRs waiting on a provider round-trip with the note that says so.
+    const waiting = FactoryStatus.parse({
+      ...status,
+      wip: {
+        openPrs: 1,
+        limit: 2,
+        holding: false,
+        waitingOnProvider: 1,
+        note: "1 PR waits on Codex (not signed in) and doesn't count",
+      },
+    });
+    expect(FactoryStatus.parse(JSON.parse(JSON.stringify(waiting)))).toEqual(waiting);
     expect(FactoryStatus.safeParse({ ...status, wip: { openPrs: 1, limit: 0 } }).success).toBe(
       false,
     );
