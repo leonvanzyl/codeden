@@ -5,6 +5,7 @@ import type {
   RunnerCommandResult,
 } from "@codeden/contracts";
 import * as agent from "./agent";
+import * as forms from "./forms";
 import type { BrowserManager } from "./manager";
 import * as pointer from "./pointer";
 
@@ -113,6 +114,8 @@ export function createBrowserCommandHandlers(deps: BrowserCommandDeps): BrowserC
     "browser.press": (c) => agent.press(manager.get(c.sessionId), c.key, c.tabId),
     "browser.mouse": ({ name: _name, sessionId, ...command }) =>
       pointer.mouse(manager.get(sessionId), command),
+    "browser.select": (c) => forms.select(manager.get(c.sessionId), c.ref, c.values, c.tabId),
+    "browser.upload": (c) => forms.upload(manager.get(c.sessionId), c.ref, c.paths, c.tabId),
     "browser.screenshot": (c) =>
       agent.screenshot(manager.get(c.sessionId), c.path, {
         tabId: c.tabId,
