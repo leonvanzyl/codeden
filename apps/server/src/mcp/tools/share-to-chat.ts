@@ -1,9 +1,8 @@
-import { existsSync, readFileSync, statSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { basename, extname, isAbsolute, relative, resolve } from "node:path";
+import { readFileSync, statSync } from "node:fs";
+import { basename, extname } from "node:path";
 import { z } from "zod";
 import { MAX_ATTACHMENT_BYTES } from "../../services/artifacts";
-import { realPathOf } from "../../services/files/path-guard";
+import { localOutgoingFile } from "../../services/outgoing-paths";
 import { assertNotSecret } from "../../services/secret-files";
 import { readOutgoingFile } from "../../services/workspace-fs/outgoing";
 import { remoteWorkspaceFs } from "../../services/workspace-fs/workspace-fs";
@@ -24,11 +23,6 @@ const MEDIA_TYPES: Record<string, string> = {
   ".html": "text/html",
   ".pdf": "application/pdf",
 };
-
-function isInside(root: string, path: string): boolean {
-  const rel = relative(root, path);
-  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
-}
 
 /** `share_to_chat` (§8.3, §12.2): a file or image, stored as an artifact and shown inline. */
 export const shareToChat = defineTool({
@@ -65,18 +59,13 @@ export const shareToChat = defineTool({
       mediaType =
         input.mediaType ?? MEDIA_TYPES[extname(name).toLowerCase()] ?? "application/octet-stream";
     } else if (input.path) {
-      const absolute = resolve(session.cwd, input.path);
       // Checks and the read use the real file (links, junctions and short names resolved).
-      const real = existsSync(absolute) && statSync(absolute).isFile() && realPathOf(absolute);
-      if (!real) throw new ToolError(`File not found: ${input.path}`);
-      const roots = [session.cwd, tmpdir(), services.artifacts.sessionDir(session.id)].flatMap(
-        (p) => realPathOf(p) ?? [],
-      );
-      if (!roots.some((root) => isInside(root, real))) {
-        throw new ToolError(
-          "Only files inside your working directory, the temp folder or your own CodeDen artifacts can be shared",
-        );
-      }
+      const real = localOutgoingFile(input.path, {
+        cwd: session.cwd,
+        artifactsDir: services.artifacts.sessionDir(session.id),
+        home: services.paths.home,
+        use: "shared",
+      });
       name = input.name ?? basename(real);
       // Artifacts can be published with attach_evidence, so secrets never become one.
       const stored = services.artifacts.artifactForFile(real)?.name;
