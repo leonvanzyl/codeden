@@ -1,6 +1,8 @@
 import type {
   ModelInfo,
   ProviderCapabilities,
+  ProviderHistoryEntry,
+  ProviderHistoryHideResult,
   ProviderStatus,
   SessionOptions,
 } from "@codeden/contracts";
@@ -19,6 +21,7 @@ import { DEFAULT_MODEL_ID } from "../util/model";
 import type { UtilityModel } from "../utility";
 import { detectCodex } from "./detect";
 import { forkCodexThread } from "./fork";
+import { hideCodexHistory, listCodexHistory } from "./history";
 import { listCodexModels, visibleCodexModels } from "./models";
 import { CodexUtilityModel } from "./one-shot";
 import { CodexSession } from "./session";
@@ -46,6 +49,8 @@ const capabilities: ProviderCapabilities = {
   // Approval and sandbox policy are per turn (`turn/start` overrides): changes wait for it.
   liveAutonomy: false,
   readOnly: true,
+  // The Codex apps list every thread in the user's Codex home as their recents (`./history`).
+  vendorHistory: true,
 };
 
 const CONFIGURED_MODEL = "The model configured in ~/.codex/config.toml";
@@ -157,6 +162,22 @@ export class CodexAdapter implements ProviderAdapter {
     const executable = this.executable();
     if (!executable) throw new Error("Codex is not installed (no `codex` on PATH)");
     return forkCodexThread(executable, resumeToken, opts);
+  }
+
+  /** Which of these threads the Codex apps list as recents (`thread/list`, Codex's filter). */
+  listVendorHistory(resumeTokens: string[]): Promise<ProviderHistoryEntry[]> {
+    return listCodexHistory(this.requireExecutable(), resumeTokens);
+  }
+
+  /** Archive these threads (and no other): hidden from the Codex apps, still resumable. */
+  hideVendorHistory(resumeTokens: string[]): Promise<ProviderHistoryHideResult> {
+    return hideCodexHistory(this.requireExecutable(), resumeTokens);
+  }
+
+  private requireExecutable(): ResolvedCommand {
+    const executable = this.executable();
+    if (!executable) throw new Error("Codex is not installed (no `codex` on PATH)");
+    return executable;
   }
 
   utilityModel(): UtilityModel {

@@ -37,6 +37,7 @@ export * from "./orchestration-api";
 export * from "./project-config";
 export * from "./projects-api";
 export * from "./provider";
+export * from "./provider-history";
 export * from "./runner/browser";
 export * from "./runner/commands";
 export * from "./runner/events";

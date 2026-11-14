@@ -45,7 +45,12 @@ describe("Codex fork", () => {
       "thread-fork-1",
     );
     const methods = requests(log).map((r) => r.method);
-    expect(methods).toEqual(["initialize", "thread/fork"]);
+    // The source is unarchived for the fork (it wasn't archived here); the copy is archived, so
+    // the Codex apps don't list it until a session resumes it.
+    expect(methods).toEqual(["initialize", "thread/unarchive", "thread/fork", "thread/archive"]);
+    expect(requests(log).find((r) => r.method === "thread/archive")?.params).toEqual({
+      threadId: "thread-fork-1",
+    });
     expect(requests(log).find((r) => r.method === "thread/fork")?.params).toEqual({
       threadId: "thread-source",
       cwd,
@@ -63,9 +68,11 @@ describe("Codex fork", () => {
     );
     expect(requests(log).map((r) => r.method)).toEqual([
       "initialize",
+      "thread/unarchive",
       "thread/turns/list",
       "thread/turns/list",
       "thread/fork",
+      "thread/archive",
     ]);
     expect(requests(log).find((r) => r.method === "thread/fork")?.params).toEqual({
       threadId: "thread-source",
@@ -108,6 +115,7 @@ describe("Codex fork", () => {
     });
     expect(requests(log).map((r) => r.method)).toEqual([
       "initialize",
+      "thread/unarchive",
       "thread/turns/list",
       "thread/fork",
     ]);
@@ -153,7 +161,10 @@ describe("Codex fork", () => {
     try {
       const threadCalls = requests(log).filter((r) => r.method.startsWith("thread/"));
       expect(threadCalls.map((r) => [r.method, r.params.threadId])).toEqual([
+        ["thread/unarchive", "thread-source"],
         ["thread/fork", "thread-source"],
+        ["thread/archive", "thread-fork-1"],
+        ["thread/unarchive", "thread-fork-1"],
         ["thread/resume", "thread-fork-1"],
       ]);
     } finally {

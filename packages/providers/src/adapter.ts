@@ -3,6 +3,8 @@ import type {
   AutonomyLevel,
   ModelInfo,
   ProviderCapabilities,
+  ProviderHistoryEntry,
+  ProviderHistoryHideResult,
   ProviderInfo,
   ProviderStatus,
   ReasoningEffort,
@@ -45,6 +47,17 @@ export interface ProviderAdapter {
    * `cwd` is an existing folder of the project (the copy is resumed from its own worktree).
    */
   forkConversation?(resumeToken: string, opts: ForkConversationOptions): Promise<string>;
+  /**
+   * Which of `resumeTokens` (conversations CodeDen recorded) the provider's own apps list as the
+   * user's history. Looks at no other conversation. Present exactly when
+   * `capabilities().vendorHistory`.
+   */
+  listVendorHistory?(resumeTokens: string[]): Promise<ProviderHistoryEntry[]>;
+  /**
+   * Hide these conversations from the provider's own apps, keeping them resumable. Touches no
+   * other conversation. Present exactly when `capabilities().vendorHistory`.
+   */
+  hideVendorHistory?(resumeTokens: string[]): Promise<ProviderHistoryHideResult>;
   /** One-shot, tool-less model calls for side jobs (§7.4), when the provider supports them. */
   utilityModel?(): UtilityModel;
 }
