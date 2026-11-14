@@ -26,15 +26,16 @@ export const FS_LIST_MAX_ENTRIES = 5000;
  * from the server's own disk, so callers handle both alike:
  * - `path_outside_root`: the path is absolute, escapes with `..`, has a NUL byte, or resolves
  *   (through a link) outside the root;
- * - `root_invalid`: the root isn't an absolute folder, or holds the runner's own state
- *   (`<home>/runner`: its lock file token and journal);
+ * - `root_invalid`: the root isn't an absolute folder, is CodeDen's data folder, or is (or is
+ *   inside) its runner state folder;
  * - `cwd_missing`: the root doesn't exist (any runner command whose `cwd` is gone fails so);
  * - `not_found`, `not_a_file`;
  * - `credential_file`: one of CodeDen's own credential files, or the `.invalid-<time>` copy kept
  *   of a damaged one, which are never read;
  * - `agent_permission_file`: an agent's own allow-list (`.cursor/cli.json`,
  *   `.gemini/settings.json`, ...), which is never written (§11.2);
- * - `protected_path`: inside `.git`, which is never written;
+ * - `protected_path`: inside `.git`, which is never written, or inside CodeDen's runner state
+ *   folder (`<home>/runner`: its lock file and journal), which is never listed, read or written;
  * - `too_large`: more than a command or transfer may carry;
  * - `transfer_not_found`: an unknown, closed or expired transfer.
  */
@@ -171,6 +172,12 @@ export const WorkspaceFsCommandResults = {
  * (no credential helper, no `.git/config`, no remote URL), logged, journaled or put in an event.
  */
 export const GitCredential = z.object({
+  /**
+   * The https origin it was brokered for (`https://github.com`): git hands it only to requests
+   * for that scheme and host, so a remote, push URL or `insteadOf` rewritten to point elsewhere
+   * gets nothing.
+   */
+  scope: z.string().regex(/^https:\/\/[a-z0-9.-]+(:\d{1,5})?$/i),
   username: z.string().min(1).max(200),
   password: z.string().min(1).max(4096),
 });

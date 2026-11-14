@@ -21,7 +21,7 @@ afterEach(() => {
 });
 
 const TOKEN = "ghs_sentinelTOKEN0123456789";
-const credential = { username: "x-access-token", password: TOKEN };
+const credential = { scope: "https://github.com", username: "x-access-token", password: TOKEN };
 
 /** A bare "remote" with one commit on main, and a runner home. */
 function setup() {
@@ -115,19 +115,53 @@ describe("workspace.prepare clone", () => {
 });
 
 describe("brokered git credentials", () => {
-  it("answer git's credential request from the git process's own environment", () => {
+  /**
+   * What `git credential fill` gets for a request, as a clone or push would ask the helpers
+   * under the brokered credential's options: its output, or "" when no helper answered.
+   */
+  function fill(repo: string, request: string): string {
+    try {
+      return execFileSync("git", [...credentialArgs(credential), "credential", "fill"], {
+        cwd: repo,
+        input: `${request}\n\n`,
+        env: {
+          ...process.env,
+          GIT_TERMINAL_PROMPT: "0",
+          GCM_INTERACTIVE: "never",
+          GIT_ASKPASS: "",
+          SSH_ASKPASS: "",
+          ...credentialEnv(credential),
+        },
+        encoding: "utf8",
+        stdio: ["pipe", "pipe", "pipe"],
+        windowsHide: true,
+      });
+    } catch {
+      return ""; // No helper answered, and prompts are off.
+    }
+  }
+
+  it("answer git's credential request for their scope from the process's environment", () => {
     const repo = makeRepo();
     dirs.push(repo);
-    // `git credential fill` asks the configured helpers, as a clone or push over https would.
-    const out = execFileSync("git", [...credentialArgs(), "credential", "fill"], {
-      cwd: repo,
-      input: "protocol=https\nhost=github.com\npath=acme/app.git\n\n",
-      env: { ...process.env, GIT_TERMINAL_PROMPT: "0", ...credentialEnv(credential) },
-      encoding: "utf8",
-      windowsHide: true,
-    });
+    // A helper the repository's own config adds is emptied out first.
+    sh(repo, "config", "credential.helper", "!f() { echo password=from-the-repo; }; f");
+    const out = fill(repo, "protocol=https\nhost=github.com\npath=acme/app.git");
     expect(out).toContain("username=x-access-token");
     expect(out).toContain(`password=${TOKEN}`);
+    expect(out).not.toContain("from-the-repo");
+  });
+
+  it("are given to no other host or scheme (a rewritten remote, push URL or insteadOf)", () => {
+    const repo = makeRepo();
+    dirs.push(repo);
+    for (const request of [
+      "protocol=https\nhost=evil.example\npath=acme/app.git",
+      "protocol=https\nhost=github.com.evil.example",
+      "protocol=http\nhost=github.com\npath=acme/app.git",
+    ]) {
+      expect(fill(repo, request), request).not.toContain(TOKEN);
+    }
   });
 
   it("are scrubbed from git's error messages", async () => {

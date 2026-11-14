@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   FS_CHUNK_MAX_BYTES,
+  GitCredential,
   RunnerCommand,
   RunnerCommandResults,
   TRANSFER_CHUNK_BYTES,
@@ -27,7 +28,7 @@ describe("workspace.prepare clone (remote runners §9.1)", () => {
       depth: 50,
       fetch: true,
       setupCommands: [],
-      credential: { username: "x-access-token", password: "secret" },
+      credential: { scope: "https://github.com", username: "x-access-token", password: "secret" },
     });
     expect(cmd).toMatchObject({ strategy: "clone", depth: 50 });
   });
@@ -46,11 +47,30 @@ describe("workspace.prepare clone (remote runners §9.1)", () => {
       name: "git.push",
       cwd: "/w",
       branch: "b",
-      credential: { username: "x-access-token", password: "t" },
+      credential: { scope: "https://github.com", username: "x-access-token", password: "t" },
     });
     expect(() =>
       RunnerCommand.parse({ name: "git.push", cwd: "/w", credential: { username: "u" } }),
     ).toThrow();
+  });
+
+  it("scopes a credential to one https origin", () => {
+    const credential = (scope: string) => ({ scope, username: "x-access-token", password: "t" });
+    expect(GitCredential.parse(credential("https://github.example:8443")).scope).toBe(
+      "https://github.example:8443",
+    );
+    // Missing, not https, with a path, credentials or anything git would read as more config.
+    for (const scope of [
+      "",
+      "http://github.com",
+      "https://github.com/acme",
+      "https://u:p@github.com",
+      "https://github.com.helper=x",
+      "https://github.com x",
+    ]) {
+      expect(() => GitCredential.parse(credential(scope)), scope).toThrow();
+    }
+    expect(() => GitCredential.parse({ username: "x-access-token", password: "t" })).toThrow();
   });
 });
 

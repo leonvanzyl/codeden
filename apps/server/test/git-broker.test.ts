@@ -52,6 +52,7 @@ describe("credentialFor", () => {
 
   it("brokers the token to a sandbox runner for an https github.com remote", async () => {
     expect(await broker().credentialFor(sandbox, url)).toEqual({
+      scope: "https://github.com",
       username: "x-access-token",
       password: TOKEN,
     });

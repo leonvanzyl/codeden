@@ -5,9 +5,14 @@ import type { GitCredential } from "@codeden/contracts";
  * credential with the one command that needs it (a clone, a fetch, a push); the runner hands it
  * to that git process only and keeps nothing:
  * - `credential.helper=` first empties the helper list, so no configured helper (a credential
- *   store, a keychain, Git Credential Manager) is asked or told to store it;
- * - then an inline helper answers `get` from the git process's own environment, and ignores
- *   `store` and `erase`. The URL and `.git/config` never hold it.
+ *   store, a keychain, Git Credential Manager, one the repository's own config adds) is asked or
+ *   told to store it;
+ * - then an inline helper, set only for the credential's `scope` (`credential.<scope>.helper`),
+ *   answers `get` from the git process's own environment and ignores `store` and `erase`. Git
+ *   asks it only for requests to that scheme and host: an `origin`, `pushurl` or `insteadOf`
+ *   an agent rewrote to point elsewhere finds no helper at all.
+ *
+ * The URL and `.git/config` never hold it.
  */
 
 const USERNAME_VAR = "GIT_BROKER_USERNAME";
@@ -16,9 +21,9 @@ const PASSWORD_VAR = "GIT_BROKER_PASSWORD";
 /** The inline helper: prints the username and password from the environment on `get` only. */
 const HELPER = `!f() { test "$1" = get || exit 0; echo "username=$${USERNAME_VAR}"; echo "password=$${PASSWORD_VAR}"; }; f`;
 
-/** `-c` options that make git use only the brokered credential. */
-export function credentialArgs(): string[] {
-  return ["-c", "credential.helper=", "-c", `credential.helper=${HELPER}`];
+/** `-c` options that make git use only the brokered credential, and only for its scope. */
+export function credentialArgs(credential: GitCredential): string[] {
+  return ["-c", "credential.helper=", "-c", `credential.${credential.scope}.helper=${HELPER}`];
 }
 
 /** The environment that carries the credential to its git process. */

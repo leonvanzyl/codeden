@@ -249,7 +249,7 @@ Running agent processes as a different Unix user from the runner would close the
 **Built in Phase 3a: option A**, as issue #271 set out.
 - **Who gets the token.** `GitBroker.credentialFor` returns the GitHub token as `x-access-token` only for a runner other than the home runner, and only for an `https://github.com/...` remote on the default port with no credentials of its own in the URL. It never does for ssh, `http:`, other hosts or local paths.
 - **Which operations carry it.** It goes with `workspace.prepare` (clone and fetch), the `git.push` of `create_pull_request`, and the workbench push to `origin`.
-- **How the runner uses it** (`apps/runner/src/git/credentials.ts`). It runs that one git process with `-c credential.helper=`, which empties the helper list so no store, keychain or credential manager is asked or told, followed by an inline helper that prints the credential from the process's own environment.
+- **How the runner uses it** (`apps/runner/src/git/credentials.ts`). It runs that one git process with `-c credential.helper=`, which empties the helper list so no store, keychain, credential manager or helper from the repository's own config is asked or told. It then adds an inline helper that prints the credential from the process's own environment, set only for the credential's `scope` (`credential.https://github.com.helper`). Git asks that helper only for requests to that scheme and host, so an `origin`, `pushurl` or `insteadOf` an agent rewrote to point elsewhere finds no helper and gets no token.
 - **Where it never appears.** Not in the remote URL or `.git/config`, and not in a journal, log or event. Error messages are scrubbed of it. `apps/server/test/remote-workspace.test.ts` greps all of them.
 - **The home runner** sends no credential and uses the user's own git setup, as before.
 
@@ -268,7 +268,7 @@ Running agent processes as a different Unix user from the runner would close the
   - `transfer.open/read/write/close` moves larger files in 1 MiB chunks, pulled one per request, so the link never holds more than one chunk of a transfer. A read pins the file's size at open; a write lands only on `close` with `commit`. Transfers idle for 60 s are closed.
 - **One set of guards** (`DiskWorkspace` and `workspace-guard.ts` in `@codeden/providers`), used by the runner's handlers and by the server for its own disk, so both refuse the same paths with the same codes (`WorkspaceFsErrorCode`):
   - a path outside the root, by its text and then through links (`path_outside_root`);
-  - CodeDen's data folder or its `runner` state folder as a root (`root_invalid`);
+  - CodeDen's data folder or its `runner` state folder as a root (`root_invalid`); a root that contains the state folder (a project in the folder that holds CodeDen's data folder) never lists, reads or writes anything in it, the journal included (`protected_path`);
   - CodeDen's own credential files and their `.invalid-*` copies (`credential_file`);
   - writes to agents' allow-lists (`agent_permission_file`) and inside `.git` (`protected_path`).
 

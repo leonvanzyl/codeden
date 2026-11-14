@@ -66,6 +66,7 @@ export {
   assertWorkspaceWritable,
   isCodedenCredentialFile,
   isInsidePath,
+  isRunnerState,
   lexicalTarget,
   platformPath,
   WorkspaceFsError,

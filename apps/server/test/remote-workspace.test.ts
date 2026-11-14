@@ -122,7 +122,11 @@ beforeEach(async () => {
     browser: fakeBrowser(),
     log: (message) => logs.push(message),
   });
-  const credential = { username: "x-access-token", password: SENTINEL };
+  const credential = {
+    scope: "https://github.com",
+    username: "x-access-token",
+    password: SENTINEL,
+  };
   const gitBroker: GitBroker = {
     cloneUrl: async () => bare,
     credentialFor: async (port) => (isRemoteRunner(port) ? credential : undefined),

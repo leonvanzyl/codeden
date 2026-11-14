@@ -87,7 +87,8 @@ export function createGitBroker(deps: GitBrokerDeps): GitBroker {
         return undefined;
       }
       const token = await deps.token();
-      return token ? { username: "x-access-token", password: token } : undefined;
+      const scope = `https://${GITHUB_HOST}`;
+      return token ? { scope, username: "x-access-token", password: token } : undefined;
     },
     async credentialForProject(runner, project) {
       if (!isRemoteRunner(runner) || !project) return undefined;

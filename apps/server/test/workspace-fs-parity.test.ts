@@ -58,6 +58,7 @@ beforeEach(() => {
   write(join(home, "install-token"), "token");
   write(join(home, "runner", "runner.json"), "{}");
   write(join(home, "runner", "runner.json.invalid-1700000000000"), "{}");
+  write(join(home, "runner", "journal", "000001.jsonl"), '{"seq":1}');
   write(join(outside, "secret.txt"), "outside");
   // A folder link out of the workspace (a junction needs no privilege on Windows).
   symlinkSync(outside, join(root, "escape"), "junction");
@@ -111,6 +112,21 @@ describe("WorkspaceFs guards (local and runner alike)", () => {
       (fs) => fs.writeFile(".git/config", Buffer.from("x"), { createDirs: true }),
       "protected_path",
     ],
+    [
+      "the runner journal, in a root that holds the data folder",
+      (fs) => fs.read(".codeden-home/runner/journal/000001.jsonl"),
+      "protected_path",
+    ],
+    [
+      "a look at the runner state folder",
+      (fs) => fs.stat(".codeden-home/runner/journal"),
+      "protected_path",
+    ],
+    [
+      "a write into the runner state folder",
+      (fs) => fs.writeFile(".codeden-home/runner/new.txt", Buffer.from("x")),
+      "protected_path",
+    ],
     ["a missing file", (fs) => fs.read("nope.txt"), "not_found"],
     ["a folder as a file", (fs) => fs.read("src"), "not_a_file"],
   ];
@@ -128,6 +144,16 @@ describe("WorkspaceFs guards (local and runner alike)", () => {
     const remote = new RunnerWorkspaceFs(runnerPort(new WorkspaceFsHost(home)), state);
     expect(await codeOf(() => local.list())).toBe("root_invalid");
     expect(await codeOf(() => remote.list())).toBe("root_invalid");
+  });
+
+  it("leaves the runner state folder out of listings on both", async () => {
+    const local = new LocalWorkspaceFs(root, home);
+    const remote = new RunnerWorkspaceFs(runnerPort(new WorkspaceFsHost(home)), root);
+    for (const fs of [local, remote]) {
+      const paths = (await fs.list()).entries.map((e) => e.path);
+      expect(paths).toContain(".codeden-home/install-token");
+      expect(paths.filter((p) => p.startsWith(".codeden-home/runner"))).toEqual([]);
+    }
   });
 
   it("refuses an escaping path before asking the runner", async () => {

@@ -83,10 +83,19 @@ function canonical(p: string): string {
 }
 
 /**
+ * True when `real` is CodeDen's runner state folder (`<home>/runner`: the lock file token and the
+ * journal) or inside it.
+ */
+export function isRunnerState(real: string, home: string): boolean {
+  return isInsidePath(canonical(path.join(home, "runner")), canonical(real));
+}
+
+/**
  * The real path of a workspace root on this machine. Refused: a root that isn't an absolute
  * folder (`root_invalid`), one that doesn't exist (`cwd_missing`), CodeDen's data folder itself,
- * and its runner state folder (`<home>/runner`: the lock file token and the journal) or a folder
- * inside it.
+ * and its runner state folder or a folder inside it. A root that contains the runner state
+ * folder (a project in the folder CodeDen's data folder is in) is a workspace, but nothing in
+ * that folder is listed, read or written (`assertWorkspaceReadable`).
  */
 export function workspaceRoot(root: string, home: string): string {
   if (root.includes("\0") || !path.isAbsolute(root)) {
@@ -99,9 +108,7 @@ export function workspaceRoot(root: string, home: string): string {
   if (!statSync(real).isDirectory()) {
     throw new WorkspaceFsError("root_invalid", "The workspace root is not a folder");
   }
-  const state = canonical(path.join(home, "runner"));
-  const folded = caseInsensitive(process.platform) ? real.toLowerCase() : real;
-  if (folded === canonical(home) || isInsidePath(state, folded)) {
+  if (canonical(real) === canonical(home) || isRunnerState(real, home)) {
     throw new WorkspaceFsError("root_invalid", "CodeDen's own folders are not a workspace");
   }
   return real;
@@ -147,12 +154,21 @@ export function isCodedenCredentialFile(file: string, home: string): boolean {
   });
 }
 
-/** Refuse reading CodeDen's own credential files (and their `.invalid-*` copies). */
+/**
+ * Refuse reading CodeDen's own credential files (and their `.invalid-*` copies) and anything in
+ * its runner state folder (the journal too), wherever the workspace root is.
+ */
 export function assertWorkspaceReadable(real: string, home: string): void {
   if (isCodedenCredentialFile(real, home)) {
     throw new WorkspaceFsError(
       "credential_file",
       `${path.basename(real)} is one of CodeDen's own credential files, which are never read`,
+    );
+  }
+  if (isRunnerState(real, home)) {
+    throw new WorkspaceFsError(
+      "protected_path",
+      "CodeDen's runner state (its lock file and journal) is never read or written",
     );
   }
 }

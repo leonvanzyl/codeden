@@ -39,7 +39,7 @@ export function cwdMissing(cwd: string): CommandError {
 export function git(cwd: string, args: string[], opts: GitOptions = {}): Promise<GitResult> {
   if (!existsSync(cwd)) return Promise.reject(cwdMissing(cwd));
   const scrub = (text: string) => scrubCredential(text, opts.credential);
-  const auth = opts.credential ? credentialArgs() : [];
+  const auth = opts.credential ? credentialArgs(opts.credential) : [];
   return new Promise((resolve, reject) => {
     const child = spawn("git", ["-c", "core.quotepath=off", ...auth, ...args], {
       cwd,

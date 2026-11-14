@@ -17,6 +17,7 @@ import { FS_CHUNK_MAX_BYTES, FS_LIST_MAX_ENTRIES, type SessionFileEntry } from "
 import {
   assertWorkspaceReadable,
   assertWorkspaceWritable,
+  isRunnerState,
   WorkspaceFsError,
   workspaceRelative,
   workspaceRoot,
@@ -56,13 +57,16 @@ export class DiskWorkspace {
   /**
    * Files under `start` (default: the root), depth-first, folders first, `.git` and
    * `node_modules` skipped, symlinks listed but not followed, at most `max` entries. Paths are
-   * relative to the root, `/`-separated.
+   * relative to the root, `/`-separated. CodeDen's runner state folder, when the root contains
+   * it, is left out.
    */
   list(
     start?: string,
     max = FS_LIST_MAX_ENTRIES,
   ): { entries: SessionFileEntry[]; truncated: boolean } {
-    const from = start ? workspaceTarget(this.root, this.realRoot, start).target : this.root;
+    const target = start ? workspaceTarget(this.root, this.realRoot, start) : undefined;
+    if (target) assertWorkspaceReadable(target.real, this.home);
+    const from = target?.target ?? this.root;
     const prefix = start ? workspaceRelative(this.root, from) : "";
     const entries: SessionFileEntry[] = [];
     let truncated = false;
@@ -87,6 +91,10 @@ export class DiskWorkspace {
         }
         if (SKIP.has(d.name)) continue;
         const path = prefix ? `${prefix}/${d.name}` : d.name;
+        // The walk follows no links, so the state folder is only ever reached by its own name.
+        const state =
+          d.name.toLowerCase() === "runner" && isRunnerState(join(dir, d.name), this.home);
+        if (state) continue;
         if (d.isDirectory()) {
           entries.push({ path, kind: "dir" });
           walk(join(dir, d.name), path);
@@ -105,9 +113,13 @@ export class DiskWorkspace {
     return { entries, truncated };
   }
 
-  /** What `path` is, by its real path; `exists: false` when it doesn't exist. */
+  /**
+   * What `path` is, by its real path; `exists: false` when it doesn't exist. Refused like a read
+   * for CodeDen's credential files and runner state.
+   */
   stat(path: string): DiskStat {
     const { real } = workspaceTarget(this.root, this.realRoot, path);
+    assertWorkspaceReadable(real, this.home);
     if (!existsSync(real)) return { exists: false };
     const info = statSync(real);
     return {
