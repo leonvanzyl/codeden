@@ -340,6 +340,8 @@ Credentials are stored in the OS keychain on the server's machine (as other secr
 
 Setup gets a **Sandboxes** section: per provider, which credential sandboxes will use, with a test that starts a throwaway sandbox and runs `<cli> --version` plus the provider's auth status, with no model call.
 
+A proposal awaiting the user's decision, [agent-execution.md](agent-execution.md), adds per-session provider homes and a login broker for sandboxed sessions.
+
 ## 15. Orchestrator and PMs
 
 **Recommendation: they stay on the home runner, next to the server.** They write no code (`readOnly` for every non-agent role, `launcher.ts`), and need little more than MCP and a read-only view of the repo, which the server's machine has. They are long-lived and woken by every notice, so a box per PM would rarely pause and would cost CPU-hours for little isolation. On the server's machine MCP calls are the fastest.
