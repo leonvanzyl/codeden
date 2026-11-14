@@ -1,13 +1,29 @@
-import { copyFileSync, existsSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { Settings, type SettingsPatch } from "@codeden/contracts";
 import { readJsonFile, writeJsonFile } from "./json-file";
+import { type FileReset, loadUserJsonFile } from "./user-json-file";
 
 /** Loads and saves `<home>/settings.json` (non-secret user settings). */
 export class SettingsStore {
   private current: Settings;
+  /**
+   * Set when the file on disk could not be used (not valid JSON, or invalid settings): it was
+   * kept as `settings.json.invalid-<timestamp>` and CodeDen started from defaults.
+   */
+  readonly reset: FileReset | null;
 
   constructor(private readonly file: string) {
-    this.current = this.load();
+    const existed = existsSync(file);
+    const { value, reset } = loadUserJsonFile(file, Settings);
+    if (!existed) writeJsonFile(file, value);
+    this.current = value;
+    this.reset = reset;
+  }
+
+  /** The settings in `file`, or defaults when it is missing or broken. Never writes anything. */
+  static read(file: string): Settings {
+    const parsed = Settings.safeParse(readJsonFile(file) ?? {});
+    return parsed.success ? parsed.data : Settings.parse({});
   }
 
   get(): Settings {
@@ -21,21 +37,6 @@ export class SettingsStore {
     writeJsonFile(this.file, next);
     this.current = next;
     return next;
-  }
-
-  private load(): Settings {
-    if (!existsSync(this.file)) {
-      const defaults = Settings.parse({});
-      writeJsonFile(this.file, defaults);
-      return defaults;
-    }
-    const parsed = Settings.safeParse(readJsonFile(this.file) ?? {});
-    if (parsed.success) return parsed.data;
-    // Keep the broken file for the user and fall back to defaults.
-    copyFileSync(this.file, `${this.file}.invalid-${Date.now()}`);
-    const defaults = Settings.parse({});
-    writeJsonFile(this.file, defaults);
-    return defaults;
   }
 }
 

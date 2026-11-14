@@ -1,14 +1,16 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { existsSync } from "node:fs";
 import {
   passwordProblem,
   REMOTE_SESSION_DAYS,
   RemoteAccessFile,
   type RemoteSessionRecord,
 } from "@codeden/contracts";
-import { readJsonFile, writeJsonFile } from "../json-file";
+import { writeJsonFile } from "../json-file";
+import { type FileReset, loadUserJsonFile } from "../user-json-file";
 import { hashPassword, verifyPassword } from "./password";
 
+/** Owner-only: the file holds the password's hash and the session token hashes. */
+const FILE_MODE = 0o600;
 /** Prefix of remote session tokens, so they are recognisable in a cookie jar. */
 const TOKEN_PREFIX = "cds_";
 const SESSION_MS = REMOTE_SESSION_DAYS * 24 * 60 * 60_000;
@@ -37,6 +39,8 @@ export class RemoteAccessStore {
   constructor(
     private readonly file: string,
     private readonly now: () => number = Date.now,
+    /** Called when a damaged file was kept as a copy and reset (the server and CLI report it). */
+    private readonly onReset?: (reset: FileReset) => void,
   ) {
     this.data = this.load();
   }
@@ -147,13 +151,17 @@ export class RemoteAccessStore {
   }
 
   private load(): RemoteAccessFile {
-    if (!existsSync(this.file)) return RemoteAccessFile.parse({});
-    const parsed = RemoteAccessFile.safeParse(readJsonFile(this.file) ?? {});
-    // A damaged file fails closed: network access off, no password, nobody signed in.
-    return parsed.success ? parsed.data : RemoteAccessFile.parse({});
+    // A damaged file fails closed: network access off, no password, nobody signed in. It is
+    // kept as a copy (owner-only, like the file) first, so the next save never overwrites it.
+    const { value, reset } = loadUserJsonFile(this.file, RemoteAccessFile, {
+      mode: FILE_MODE,
+      now: this.now,
+    });
+    if (reset) this.onReset?.(reset);
+    return value;
   }
 
   private save(): void {
-    writeJsonFile(this.file, this.data, 0o600);
+    writeJsonFile(this.file, this.data, FILE_MODE);
   }
 }

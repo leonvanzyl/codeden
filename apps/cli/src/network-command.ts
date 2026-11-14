@@ -9,6 +9,8 @@ import {
 import {
   ensureHome,
   ensureInstallToken,
+  FILE_RESET_NOTICES,
+  fileResetMessage,
   generatePassphrase,
   listAddresses,
   PasswordRuleError,
@@ -17,6 +19,16 @@ import {
 import { findRunningServer } from "./running";
 
 const DEFAULT_PORT = 4317;
+
+/**
+ * The home's network access file, used while CodeDen is not running. A damaged file is kept
+ * as a copy and reset (network access off); say so on stderr, as no server is there to.
+ */
+function openStore(home: string): RemoteAccessStore {
+  return new RemoteAccessStore(ensureHome(home).remoteAccess, Date.now, (reset) =>
+    console.error(fileResetMessage(reset, FILE_RESET_NOTICES.remoteAccess)),
+  );
+}
 
 /** Call the running server's network API over loopback with the install token. */
 async function callServer(
@@ -96,7 +108,7 @@ export async function passwordCommand(home: string, opts: { generate: boolean })
     }
     generated = SetNetworkPasswordResponse.parse(viaServer.body).generated;
   } else {
-    const store = new RemoteAccessStore(ensureHome(home).remoteAccess);
+    const store = openStore(home);
     generated = password === null ? generatePassphrase() : null;
     try {
       await store.setPassword(generated ?? (password as string));
@@ -145,7 +157,7 @@ export async function networkCommand(home: string, action: string | undefined): 
     return 0;
   }
 
-  const store = new RemoteAccessStore(ensureHome(home).remoteAccess);
+  const store = openStore(home);
   if (action === undefined) {
     console.log(
       `Network access is ${store.enabled && store.passwordSet ? "on" : "off"} (CodeDen is not running).`,

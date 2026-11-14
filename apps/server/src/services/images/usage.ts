@@ -1,5 +1,6 @@
-import type { ImageUsage } from "@codeden/contracts";
-import { readJsonFile, writeJsonFile } from "../../json-file";
+import { ImageUsage } from "@codeden/contracts";
+import { writeJsonFile } from "../../json-file";
+import { type FileReset, loadUserJsonFile } from "../../user-json-file";
 import { ServiceError } from "../errors";
 
 /** Local calendar date, `YYYY-MM-DD`. */
@@ -19,9 +20,14 @@ export class ImageUsageStore {
   constructor(
     private readonly file: string,
     private readonly now: () => Date = () => new Date(),
+    /** Called when a damaged file was kept as a copy and the counts started again from 0. */
+    onReset?: (reset: FileReset) => void,
   ) {
-    const stored = readJsonFile(file) as ImageUsage | undefined;
-    this.usage = stored?.date ? stored : { date: localDate(this.now()), total: 0, byProject: {} };
+    const { value, reset } = loadUserJsonFile(file, ImageUsage, {
+      defaults: () => ({ date: localDate(this.now()), total: 0, byProject: {} }),
+    });
+    this.usage = value;
+    if (reset) onReset?.(reset);
   }
 
   /** Today's usage (resets when the date changed). */

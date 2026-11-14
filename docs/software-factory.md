@@ -34,7 +34,7 @@ Issue ─► Identify type ┼─ Feature:  Analyze ───► Implement ─�
    - **Feature: Analyze.** The agent checks whether the request already works, fits the vision and the architecture, and writes a spec with acceptance criteria (`factory_submit_analysis`). The spec is posted on the issue. A request that is already possible, unclear or out of scope stops here with a comment.
    - **Feature: Implement.** The same agent builds it to the spec, with tests and docs.
    - **Docs: Implement docs change.** No reproduction, no analysis, and no agent review as long as the change touches only documentation.
-5. **Review.** An **independent reviewer session**, on a different provider from the author when one is available, checks the pull request against the issue, the spec and the vision. `request_changes`, or any failed merge check, sends the work back to the author: the **revise loop** (up to `maxFixAttempts` rounds, default 2). CI on the pull request's head is the authority for the full test suite. A reviewer whose own checkout can't run the tests (a broken install, timeouts under load) marks its verdict `blockers: "environment"`. That verdict never goes to the author: the reviewer gets the CI result and reviews again on the merits. If its environment stops it a second time, the item fails as an infrastructure failure, which the factory recovers by itself without using a revise round, and the next reviewer works in a clean worktree on the PR's head.
+5. **Review.** An **independent reviewer session**, on a different provider from the author when one is available (or the one you pick under [Agents](#settings-and-limits)), checks the pull request against the issue, the spec and the vision. `request_changes`, or any failed merge check, sends the work back to the author: the **revise loop** (up to `maxFixAttempts` rounds, default 2). CI on the pull request's head is the authority for the full test suite. A reviewer whose own checkout can't run the tests (a broken install, timeouts under load) marks its verdict `blockers: "environment"`. That verdict never goes to the author: the reviewer gets the CI result and reviews again on the merits. If its environment stops it a second time, the item fails as an infrastructure failure, which the factory recovers by itself without using a revise round, and the next reviewer works in a clean worktree on the PR's head.
 6. **Merge.** With every check green the pull request is **ready for you**: an inbox item, a comment on the PR, and the item waits at Merge until you merge it on GitHub. With **auto-merge** on, CodeDen squash-merges trusted work itself and watches CI on the default branch afterwards (a regression opens an automatic revert PR and pauses the loop).
 
 Every pull request carries its **test results** (a `## Test results` section in the description, or the raw output attached with `attach_evidence`) and, when UI files changed, **screenshots**. Both are merge checks.
@@ -301,7 +301,7 @@ Settings are **enforced by the server**, never left to agent judgement. Open the
 | Protected paths | none | Added to the vision's protected areas |
 | Allow deploy and release changes (`allowDeploys`) | off | While off, deploy files (`.github/workflows/*deploy*`, `*release*`, `*publish*`, `Dockerfile`, `fly.toml`, `vercel.json`, `netlify.toml`) are protected |
 
-**Tuning.** **PRs open at most**, the **Merge checks** and (in a dark factory) **The scout** sections of the settings cover every knob below except `areas`, `builderProvider` and `idleGraceMin`, which are set through the API's `tuning` field. Saving changes only the knobs you send; the rest keep their saved values.
+**Tuning.** **PRs open at most**, the **Merge checks**, **Agents** and (in a dark factory) **The scout** sections of the settings cover every knob below except `areas` and `idleGraceMin`, which are set through the API's `tuning` field. Saving changes only the knobs you send; the rest keep their saved values.
 
 | Setting | In the settings | Default |
 |---|---|---|
@@ -315,9 +315,24 @@ Settings are **enforced by the server**, never left to agent judgement. Open the
 | `discoveryIntervalMin` | The scout: Every (hours) | `360` (minutes) |
 | `discoveryPerRound` | The scout: Review areas per round | `2` |
 | `maxIssuesPerRound` | The scout: Issues per round | `3` |
+| `builderProvider` / `builderModel` | Agents: Builder provider / Builder model | `auto` (**Automatic**: the project's provider, else the agent role's) / `null` (the provider's default) |
+| `reviewerProvider` / `reviewerModel` | Agents: Reviewer provider / Reviewer model | `auto` (**Automatic**: a different provider from the builder's) / `null` (the provider's default) |
+| `reviewerFallback` | Agents: When the reviewer's provider is unavailable | `builder` |
 | `areas` (dark factory: the review areas the scout may use) | API only | all eight |
-| `builderProvider` | API only | `auto` (the agent role default) |
 | `idleGraceMin` (minutes a builder or reviewer may stay idle after its last turn, once reminded of its step, before the item or review fails) | API only | `10` |
+
+**Agents.** This section picks who builds and who reviews. A reviewer on a different provider from the builder gives the most independent review, which is what **Automatic** does. A model applies only to a provider you chose; with **Automatic**, each provider uses its default model. Changing a provider resets its model to **Provider default**.
+
+New builders and reviewers start only on an **available** provider: installed, signed in and not at its usage limit. The pickers mark the ones that aren't, and say what happens until they are:
+
+- **A builder** whose provider is unavailable starts on another available provider (the project's, then the agent role's, then any), with that provider's default model.
+- **A reviewer** whose provider is unavailable (or fails to start) follows **When the reviewer's provider is unavailable** (`reviewerFallback`):
+  - **Review on the builder's provider and model** (`builder`, the default), in a fresh session;
+  - **Review on any available provider** (`any`);
+  - **Wait until it is available again** (`wait`).
+- **No provider available at all:** the build or review waits, whatever the setting, and the item says until when ("Waiting: no review provider available until …").
+
+The item's page notes when a review didn't run where the settings asked, and why.
 
 Spend comes from the same ledger as the [usage reports](usage-and-costs.md).
 
