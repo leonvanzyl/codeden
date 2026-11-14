@@ -9,6 +9,7 @@ import type {
   ProviderInfo,
   QueueSender,
   RespondRequest,
+  RoleDefaults,
   SendMessageRequest,
   SendMessageResponse,
   Session,
@@ -406,6 +407,11 @@ export class SessionService {
     this.holds.releaseAll(which);
   }
 
+  /** A turn is on its way to the runner for this session (sent, the runner hasn't answered). */
+  isDelivering(id: string): boolean {
+    return this.delivering.has(id);
+  }
+
   /**
    * Re-open a session whose turn was cut off by a runner restart and tell the agent to carry
    * on (§4.2). Resumes through the provider's resume token. A message already on its way
@@ -574,9 +580,13 @@ export class SessionService {
     work: { purpose: string; workKey: string; scope: Session["scope"]; queued: boolean },
   ): Session {
     const settings = this.deps.settings.get();
-    const roleDefaults = settings.providers[req.role];
     const now = new Date().toISOString();
     const provider = this.resolveProvider(req, project ? projectDefaultProvider(project) : null);
+    const defaults = roleModelDefaults(
+      settings.providers[req.role],
+      provider,
+      this.provider(provider),
+    );
     const autonomy = req.autonomy ?? project?.autonomy ?? settings.autonomy.default;
     this.assertReadOnlySupported(req.role, provider, autonomy);
     // Either value is refused where plan mode doesn't exist, as for PATCH.
@@ -593,8 +603,8 @@ export class SessionService {
       progress: null,
       title: req.title ?? null,
       provider,
-      model: req.model ?? roleDefaults.model,
-      effort: req.effort ?? roleDefaults.effort,
+      model: req.model ?? defaults.model,
+      effort: req.effort ?? defaults.effort,
       autonomy,
       planMode: req.planMode ?? false,
       status: work.queued ? "queued" : "starting",
@@ -617,6 +627,23 @@ export class SessionService {
   private missing(id: string): never {
     throw new ServiceError(404, "session_not_found", `No session ${id}`);
   }
+}
+
+/**
+ * The model and effort a new session takes from its role's defaults (Settings > Providers):
+ * only on the role's own provider, whose model they name. A session on any other provider (a
+ * cross-provider reviewer, a fallback builder, a start naming only a provider) gets null, that
+ * provider's own default model and effort. The effort is left out where the provider has none.
+ */
+function roleModelDefaults(
+  defaults: RoleDefaults,
+  provider: string,
+  info: ProviderInfo | undefined,
+): Pick<Session, "model" | "effort"> {
+  if (defaults.provider !== provider) return { model: null, effort: null };
+  // An unknown provider (runner not connected yet) is let through, as for plan mode.
+  const hasEffort = info?.capabilities.reasoningEffort ?? true;
+  return { model: defaults.model, effort: hasEffort ? defaults.effort : null };
 }
 
 function fallbackMeta(): StoredStartMeta {

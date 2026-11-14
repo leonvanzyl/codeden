@@ -12,6 +12,7 @@ import { type RunnerPort, toServiceError } from "../runner-port";
 import type { UtilityService } from "../utility";
 import type { ForkStart } from "./fork";
 import { buildHandoffBrief, handoffTranscript } from "./handoff-brief";
+import { inheritedStarter } from "./origin";
 import { planModeUnsupported, readOnlyUnsupported } from "./permissions";
 import type { SessionRepo, StoredStartMeta } from "./repo";
 
@@ -154,7 +155,9 @@ export async function planHandoff(
 /**
  * The new session: the source's project, work, issue, autonomy and plan mode, started by the
  * user on `target`, with the model and effort asked for (else the source's on the same provider,
- * else the provider's defaults). Its worktree is made like a fork's: a new branch from the
+ * else the provider's defaults). `forkedFrom` records who started the source's work when it
+ * wasn't the user (`inheritedStarter`), so the handoff is trusted no more than the source. Its
+ * worktree is made like a fork's: a new branch from the
  * source's branch with `checkpoint` restored, the pull request targeting the source's base
  * branch, and the plan kept with its start metadata until the worktree exists. No §8.4 conflict
  * check: it is a deliberate, visible continuation (`forkedFrom`, kind `handoff`).
@@ -197,7 +200,7 @@ export function handoffPlan(
     runnerId: source.runnerId,
     automationRunId: null,
     rootThreadId: null,
-    forkedFrom: { sessionId: source.id, checkpoint, kind: "handoff" },
+    forkedFrom: { sessionId: source.id, checkpoint, kind: "handoff", ...inheritedStarter(source) },
     createdAt: now,
     updatedAt: now,
     endedAt: null,

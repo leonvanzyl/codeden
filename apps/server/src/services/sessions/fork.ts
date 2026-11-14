@@ -11,6 +11,7 @@ import type { ProjectService } from "../projects/project-service";
 import { type RunnerPort, toServiceError } from "../runner-port";
 import { confirmedCheckpoint, forkPointMissing, forkTurn } from "./fork-turn";
 import type { LaunchFork } from "./launcher";
+import { inheritedStarter } from "./origin";
 import type { SessionRepo, StoredStartMeta } from "./repo";
 
 const BUSY = new Set(["running", "waiting"]);
@@ -235,6 +236,8 @@ export function forkPlan(
       checkpoint,
       ...(turnId ? { turnId } : {}),
       ...(turnId && turnNumber ? { turnNumber } : {}),
+      // Still the factory's, an automation's or a PM's work: a later handoff keeps that (#248).
+      ...inheritedStarter(source),
     },
     createdAt: now,
     updatedAt: now,

@@ -277,6 +277,24 @@ describe("entities", () => {
         forkedFrom: { sessionId: "s0", checkpoint: null, kind: "handoff" },
       }).forkedFrom?.kind,
     ).toBe("handoff");
+    // A handoff of the factory's work records who started it (#248).
+    expect(
+      roundTrip(Session, {
+        ...sampleSession,
+        forkedFrom: {
+          sessionId: "s0",
+          checkpoint: 1,
+          kind: "handoff",
+          startedBy: { kind: "pm", id: "factory" },
+        },
+      }).forkedFrom?.startedBy,
+    ).toEqual({ kind: "pm", id: "factory" });
+    expect(
+      Session.safeParse({
+        ...sampleSession,
+        forkedFrom: { sessionId: "s0", checkpoint: 1, startedBy: { kind: "factory" } },
+      }).success,
+    ).toBe(false);
     expect(
       Session.safeParse({
         ...sampleSession,

@@ -14,10 +14,12 @@ import { Textarea } from "@/components/ui/textarea";
 import { useClient } from "@/lib/api";
 import { useLayoutStore } from "@/stores/layout";
 import { useAskForPullRequest, usePullRequestOffer } from "./open-pr";
+import { PrRequestedButton, PushToastPrAction } from "./open-pr-controls";
 
 /**
  * Branch, ahead/behind and uncommitted count for the session worktree, with commit, push and
- * **Open PR** (asks the agent) or the session's open PR (§9).
+ * **Open PR** (asks the agent; "PR requested" until the PR is open or the turn that carried the
+ * request ends without one) or the session's open PR (§9).
  */
 export function GitBar({ sessionId, title }: { sessionId: string; title: string }) {
   const client = useClient();
@@ -51,11 +53,7 @@ export function GitBar({ sessionId, title }: { sessionId: string; title: string 
     mutationFn: () => client.gitPush(sessionId, {}),
     onSuccess: (r) => {
       toast.success(`Pushed ${r.branch} to ${r.remote}`, {
-        action: offer.canAsk
-          ? { label: "Open PR", onClick: () => askForPr.mutate() }
-          : offer.pr
-            ? { label: `View PR #${offer.pr.number}`, onClick: () => openTab("github") }
-            : undefined,
+        action: <PushToastPrAction sessionId={sessionId} />,
       });
       refresh();
     },
@@ -106,14 +104,15 @@ export function GitBar({ sessionId, title }: { sessionId: string; title: string 
           >
             <GitPullRequest /> PR #{offer.pr.number}
           </Button>
+        ) : offer.requested ? (
+          <PrRequestedButton requested={offer.requested} size="xs" variant="ghost" />
         ) : (
           offer.canAsk && (
             <Button
               size="xs"
               variant="ghost"
               title="Ask the agent to open a pull request for this work"
-              disabled={askForPr.isPending}
-              onClick={() => askForPr.mutate()}
+              onClick={askForPr}
             >
               <GitPullRequest /> Open PR
             </Button>
