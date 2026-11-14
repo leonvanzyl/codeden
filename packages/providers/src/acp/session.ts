@@ -1,10 +1,11 @@
 import { randomUUID } from "node:crypto";
-import type {
-  AgentEvent,
-  AutonomyLevel,
-  RuntimeResponse,
-  SessionOptions,
-  UserInput,
+import {
+  AGENT_ALLOW_LIST_NOTICE,
+  type AgentEvent,
+  type AutonomyLevel,
+  type RuntimeResponse,
+  type SessionOptions,
+  type UserInput,
 } from "@codeden/contracts";
 import { type ProviderSession, ProviderSessionError, type SessionConfigChange } from "../adapter";
 import { ApprovalBroker } from "../approvals";
@@ -60,7 +61,8 @@ export class AcpSession implements ProviderSession {
   private instructions: string | undefined;
   private mode: string | undefined;
   private planning: boolean;
-  private notice: string | undefined;
+  /** Warnings for the next turn's transcript (a notice needs a turn to sit in). */
+  private notices: Array<{ message: string; code: string }> = [];
 
   constructor(
     private readonly opts: SessionOptions,
@@ -103,6 +105,7 @@ export class AcpSession implements ProviderSession {
   /** Start the agent and open (or resume) its session. */
   async start(): Promise<void> {
     this.events.push({ type: "thread.started", thread: { id: this.mapper.threadId } });
+    this.addNotice(this.config.spec.allowListNotice?.(this.opts.cwd), AGENT_ALLOW_LIST_NOTICE);
     await this.ensureAgent();
   }
 
@@ -257,7 +260,7 @@ export class AcpSession implements ProviderSession {
   private async openSession(rpc: AcpRpc): Promise<void> {
     const { label } = this.config.spec;
     const { servers, skipped } = acpMcpServers(this.opts.mcpServers, agentCan(this.info, "http"));
-    this.notice = skippedNotice(label, skipped) ?? this.notice;
+    this.addNotice(skippedNotice(label, skipped));
     // `session/load` replays the history first, mode and config updates included: none of it
     // is news, and a replayed mode change must not end plan mode.
     this.mapper.replaying = true;
@@ -270,7 +273,7 @@ export class AcpSession implements ProviderSession {
     }).finally(() => {
       this.mapper.replaying = false;
     });
-    this.notice = opened.notice ?? this.notice;
+    this.addNotice(opened.notice);
     this.acpSession = opened.sessionId;
     if (!opened.resumed) this.instructions = this.opts.systemPrompt?.trim() || undefined;
     this.setup = opened.setup;
@@ -405,11 +408,17 @@ export class AcpSession implements ProviderSession {
     throw new AcpRpcError(METHOD_NOT_FOUND, `CodeDen does not support ${message.method}`);
   }
 
+  /** Show a warning in the next turn (once, however often the agent restarts before it). */
+  private addNotice(message: string | undefined, code = "provider_notice"): void {
+    if (message && !this.notices.some((n) => n.message === message)) {
+      this.notices.push({ message, code });
+    }
+  }
+
   private flushNotice(): void {
-    const message = this.notice;
-    if (!message) return;
-    this.notice = undefined;
-    this.mapper.notice("warning", message, "provider_notice");
+    const notices = this.notices;
+    this.notices = [];
+    for (const { message, code } of notices) this.mapper.notice("warning", message, code);
   }
 
   private onExit(rpc: AcpRpc, code: number | null, stderr: string): void {

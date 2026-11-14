@@ -105,6 +105,12 @@ export interface AcpAgentSpec {
   /** Its mode ids: full tools, planning, and read-only (when it has them). */
   modes: { agent: string; plan?: string; readOnly?: string };
   extensions?: AcpExtensions;
+  /**
+   * The warning for the agent's own allow-list in the worktree, if it has one with rules: what
+   * they list runs without the agent asking, so CodeDen never sees it (§11.2). Read when the
+   * session starts and shown in its first turn.
+   */
+  allowListNotice?: (cwd: string) => string | undefined;
 }
 
 export interface AcpSessionConfig {

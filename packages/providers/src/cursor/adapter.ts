@@ -13,6 +13,7 @@ import { executableFingerprint, ModelFreshness } from "../freshness";
 import { ModelCatalog } from "../models";
 import type { ResolvedCommand } from "../util/exec";
 import type { LocateOptions } from "../util/locate";
+import { cursorAllowListNotice } from "./allow-list";
 import { detectCursor, findCursor } from "./detect";
 import { cursorExtensions } from "./extensions";
 import { cursorModelInfos, fallbackCursorModels } from "./models";
@@ -27,6 +28,7 @@ export const CURSOR_AGENT: AcpAgentSpec = {
   authMethod: "cursor_login",
   modes: { agent: "agent", plan: "plan", readOnly: "ask" },
   extensions: cursorExtensions,
+  allowListNotice: cursorAllowListNotice,
 };
 
 /**

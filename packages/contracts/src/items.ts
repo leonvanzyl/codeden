@@ -355,6 +355,13 @@ export const NoticeItem = z.object({
   data: JsonValue.optional(),
 });
 
+/**
+ * `NoticeItem.code` of the warning a session gives when its worktree holds the agent's own
+ * allow-list (`.cursor/cli.json`, `.gemini/settings.json`), whose rules run tools without the
+ * agent asking, so CodeDen's approvals never see them (§11.2). The factory puts it on the item.
+ */
+export const AGENT_ALLOW_LIST_NOTICE = "agent_allow_list";
+
 /** An error shown inline in the transcript (the turn may still continue). */
 export const ErrorItem = z.object({
   ...itemBase,

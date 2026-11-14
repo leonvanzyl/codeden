@@ -33,6 +33,7 @@ import type { ProjectService } from "../projects/project-service";
 import type { RunnerPort } from "../runner-port";
 import type { SessionRepo } from "../sessions/repo";
 import type { SessionService } from "../sessions/session-service";
+import { flagAllowList, isAllowListNotice } from "./allow-lists";
 import { ProviderAvailability } from "./availability";
 import { SessionArchiver } from "./cleanup";
 import type { FactoryContext } from "./context";
@@ -516,6 +517,15 @@ export class FactoryService {
               e,
             ),
         );
+      } else if (isAllowListNotice(e)) {
+        // After the current append: it appends the item's change and an inbox item.
+        setImmediate(() => {
+          try {
+            flagAllowList(this.ctx, e);
+          } catch (error) {
+            this.deps.log?.(`factory: allow-list warning: ${errorMessage(error)}`);
+          }
+        });
       } else if (e.type === "session.updated") {
         const { session } = e.payload as { session: Session };
         if (session.projectId && isFactorySession(session)) this.soon(session.projectId);
