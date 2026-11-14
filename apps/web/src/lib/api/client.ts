@@ -17,10 +17,12 @@ import type {
   GitStatusResponse,
   HandoffSessionRequest,
   HandoffSessionResponse,
+  HideProviderHistoryResponse,
   InboxItem,
   LoginCommandResponse,
   LoginToolId,
   Project,
+  ProviderHistoryResponse,
   RefreshModelsResponse,
   RefreshProjectResponse,
   ResolveConflictRequestInit,
@@ -204,6 +206,13 @@ export interface CodeDenClient {
   loginCommand(tool: LoginToolId): Promise<LoginCommandResponse>;
   /** Ask a provider for its models again (a model was released, the CLI was updated). */
   refreshModels(providerId: string): Promise<RefreshModelsResponse>;
+  /**
+   * The conversations CodeDen started that a provider's own apps still list as the user's
+   * history (`capabilities.vendorHistory`). Changes nothing.
+   */
+  getProviderHistory(providerId: string): Promise<ProviderHistoryResponse>;
+  /** Hide those conversations (archived, not deleted), after the user confirmed the list. */
+  hideProviderHistory(providerId: string): Promise<HideProviderHistoryResponse>;
   /** Claude Code support: the Claude Agent SDK, installed on demand into `<home>/deps`. */
   getClaudeSdkStatus(): Promise<ClaudeSdkStatus>;
   /** Start (or join) the Claude Code support install; poll `getClaudeSdkStatus` for progress. */

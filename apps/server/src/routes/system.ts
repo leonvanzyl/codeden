@@ -3,7 +3,10 @@ import { Readable } from "node:stream";
 import {
   FileReadQuery,
   FileWriteRequest,
+  HideProviderHistoryRequest,
+  type HideProviderHistoryResponse,
   LoginToolId,
+  type ProviderHistoryResponse,
   type RefreshModelsResponse,
   SecretKey,
   type SecretsStatus,
@@ -40,12 +43,27 @@ export function setupRoutes(s: AppServices) {
     });
 }
 
-/** `/api/providers`: the runner's providers. Their model lists arrive with the runner status. */
+/**
+ * `/api/providers`: the runner's providers. Their model lists arrive with the runner status.
+ * `history` finds and hides CodeDen's conversations in a provider's own apps.
+ */
 export function providerRoutes(s: AppServices) {
-  return new Hono().post("/:id/refresh-models", async (c) => {
-    const body: RefreshModelsResponse = await refreshProviderModels(s.runner, c.req.param("id"));
-    return c.json(body);
-  });
+  return new Hono()
+    .post("/:id/refresh-models", async (c) => {
+      const body: RefreshModelsResponse = await refreshProviderModels(s.runner, c.req.param("id"));
+      return c.json(body);
+    })
+    .get("/:id/history", async (c) => {
+      const body: ProviderHistoryResponse = await s.providerHistory.preview(c.req.param("id"));
+      return c.json(body);
+    })
+    .post("/:id/history/hide", jsonBody(HideProviderHistoryRequest), async (c) => {
+      const body: HideProviderHistoryResponse = await s.providerHistory.hide(
+        c.req.param("id"),
+        c.req.valid("json"),
+      );
+      return c.json(body);
+    });
 }
 
 /** `/api/fs` (folder picker) and `/api/files` (config editors). */

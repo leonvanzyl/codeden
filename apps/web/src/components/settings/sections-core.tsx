@@ -12,6 +12,7 @@ import { type ThemePreference, useThemeStore } from "@/stores/theme";
 import { AgentEnvironmentSettings } from "./agent-environment";
 import { CustomModelSettings } from "./custom-models";
 import { ModelVisibilitySettings } from "./model-visibility";
+import { ProviderHistorySettings } from "./provider-history";
 import { Segmented, SettingRow, SettingsSection, useSettings } from "./settings-ui";
 import { UpdateModeSetting } from "./update-mode";
 
@@ -207,6 +208,7 @@ export function ProviderSettings() {
       </SettingsSection>
       <ModelVisibilitySettings />
       <CustomModelSettings />
+      <ProviderHistorySettings />
     </>
   );
 }

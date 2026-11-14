@@ -305,6 +305,7 @@ export const providers: ProviderInfo[] = [
       planMode: false,
       skills: true,
       liveAutonomy: false,
+      vendorHistory: true,
     },
     // What a Codex install reports once discovered: every model takes low to max, each with
     // its own default effort, and exactly one is the default model.
