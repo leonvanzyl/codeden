@@ -9,16 +9,37 @@ import { SessionFileEntry } from "../session-files";
  * (symlinks, junctions) and refuses anything outside the root.
  */
 
-/** Most bytes one `fs.read` returns or one `fs.write` carries, before base64 (4 MiB). */
+/**
+ * Most bytes one `fs.read` returns or one `fs.write` carries, before base64 (4 MiB; 5⅓ MiB as
+ * base64, within `WORKSPACE_FS_MAX_FRAME_BYTES`).
+ */
 export const FS_CHUNK_MAX_BYTES = 4 * 1024 * 1024;
 
-/** Bytes per `transfer.read` chunk (1 MiB), so one frame on the link stays small. */
+/**
+ * Bytes per `transfer.read` chunk, and most per `transfer.write` (1 MiB; 1⅓ MiB as base64), so
+ * one frame on the link stays small.
+ */
 export const TRANSFER_CHUNK_BYTES = 1024 * 1024;
+
+/**
+ * The largest link frame one `fs.*` or `transfer.*` command or result may take: 8 MiB of compact
+ * JSON, half the link's 16 MiB line (`RUNNER_LINK_MAX_LINE_BYTES` in `./link.ts`). The biggest
+ * chunk (`FS_CHUNK_MAX_BYTES` as base64) with a root and path as long as they may be fits in it
+ * with room to spare, so file traffic never comes near the line limit. Both sides hold to it:
+ * - the server sends chunks within their caps and refuses a result over them (`too_large`);
+ * - the runner answers a command over them with `too_large` (it never drops one silently, which
+ *   would leave the server waiting for its timeout) and cuts an `fs.list` off (`truncated`)
+ *   before its result would pass this size.
+ */
+export const WORKSPACE_FS_MAX_FRAME_BYTES = 8 * 1024 * 1024;
 
 /** Most bytes one `transfer.*` write may total (100 MiB). */
 export const TRANSFER_MAX_BYTES = 100 * 1024 * 1024;
 
-/** Most entries one `fs.list` returns; the rest are cut off with `truncated`. */
+/**
+ * Most entries one `fs.list` returns; the rest are cut off with `truncated`, as they are once
+ * the result would pass `WORKSPACE_FS_MAX_FRAME_BYTES`.
+ */
 export const FS_LIST_MAX_ENTRIES = 5000;
 
 /**
@@ -145,7 +166,10 @@ export const FsStatFound = z.object({
 
 /** Result schemas of the `fs.*` and `transfer.*` commands, spread into `RunnerCommandResults`. */
 export const WorkspaceFsCommandResults = {
-  "fs.list": z.object({ entries: z.array(SessionFileEntry), truncated: z.boolean() }),
+  "fs.list": z.object({
+    entries: z.array(SessionFileEntry).max(FS_LIST_MAX_ENTRIES),
+    truncated: z.boolean(),
+  }),
   "fs.stat": z.discriminatedUnion("exists", [z.object({ exists: z.literal(false) }), FsStatFound]),
   "fs.read": z.object({
     data: FsChunkData,

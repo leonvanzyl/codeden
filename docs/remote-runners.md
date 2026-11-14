@@ -166,6 +166,7 @@ A **`RunnerTransport`** on the server replaces the hard-wired `ws` client: `send
 - **Wire format.** It lives in `packages/contracts/src/runner/link.ts`. Each frame is one compact JSON message per line, at most `RUNNER_LINK_MAX_LINE_BYTES` (16 MiB). Every byte except the `\n` counts, including a `\r` before it.
   - `LinkFrameDecoder` reassembles lines split across chunks. It drops a longer line without buffering it, drops a line that is not JSON, and reports each drop.
   - A command too large for a frame fails at once with `too_large` instead of timing out.
+  - Workspace files (`fs.*`, `transfer.*`) keep each frame within 8 MiB, half this limit, on both sides (§10).
 - **Link.** `codeden runner-link [--home <dir>]` lives in `apps/runner/src/link/runner-link.ts`, exported as `@codeden/runner/link`.
   - It reads `<home>/runner/runner.json` and connects to the runner's loopback WebSocket with the lock's token.
   - It splices stdin and stdout to that socket, pausing the socket while stdout is full.
@@ -222,7 +223,7 @@ The first sandbox phases support **GitHub projects** (clone from `origin`). Loca
 - **The command.** `{ strategy: "clone", remoteUrl, branch, baseRef, fetch, credential? }`, with no `repoPath` and no `path` (the schema requires `repoPath` for every other strategy).
 - **What the runner does** (`apps/runner/src/workspace/clone.ts`):
   - It clones into `<runnerHome>/ws/<sessionShort>` and returns that path as `cwd`.
-  - It reuses the folder when it already holds a clone of the same remote, fetching first.
+  - It reuses the folder when it already holds a finished clone of the same remote, fetching first. A clone is finished once its branch is checked out (a marker in its `.git`). A clone whose checkout or branch creation fails is removed, and one left unfinished (the runner stopped half way) is cloned again, so a retry never reuses a clone on the wrong branch.
   - It tracks `origin/<branch>` when the remote has the session's branch (a session restored in a new sandbox); otherwise it makes the branch from `baseRef` (default: the remote's default branch).
   - Setup and `.codeden/project.json` run as for a new worktree.
   - `ext::` transports are refused.
@@ -266,6 +267,9 @@ Running agent processes as a different Unix user from the runner would close the
   - `fs.stat` answers with the real path relative to the root.
   - `fs.read` takes a byte range, and `fs.write` writes atomically (a temp file renamed into place); both carry at most 4 MiB.
   - `transfer.open/read/write/close` moves larger files in 1 MiB chunks, pulled one per request, so the link never holds more than one chunk of a transfer. A read pins the file's size at open; a write lands only on `close` with `commit`. Transfers idle for 60 s are closed.
+  - **Frame size.** One `fs.*` or `transfer.*` command or result takes at most 8 MiB on the link (`WORKSPACE_FS_MAX_FRAME_BYTES`), half the 16 MiB line (§6). A 4 MiB `fs.*` chunk is 5⅓ MiB as base64, and a 1 MiB `transfer.*` chunk is 1⅓ MiB. Both sides enforce the limit:
+    - The server sends chunks within their caps, and refuses a result over them with `too_large`.
+    - The runner answers a command over them with `too_large`. It answers any other malformed command with `bad_request`, never dropping one and leaving the server to time out. It cuts an `fs.list` off (`truncated`) before its result would pass 8 MiB.
 - **One set of guards** (`DiskWorkspace` and `workspace-guard.ts` in `@codeden/providers`), used by the runner's handlers and by the server for its own disk, so both refuse the same paths with the same codes (`WorkspaceFsErrorCode`):
   - a path outside the root, by its text and then through links (`path_outside_root`);
   - CodeDen's data folder or its `runner` state folder as a root (`root_invalid`); a root that contains the state folder (a project in the folder that holds CodeDen's data folder) never lists, reads or writes anything in it, the journal included (`protected_path`);

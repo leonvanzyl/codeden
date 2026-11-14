@@ -2,8 +2,10 @@ import { randomBytes } from "node:crypto";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { FS_CHUNK_MAX_BYTES, TRANSFER_CHUNK_BYTES } from "@codeden/contracts";
+import type { WSContext } from "hono/ws";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { WorkspaceFsHost } from "../src/workspace/fs";
+import { type RunnerCore, ServerConnection } from "../src/connection";
+import { TRANSFER_IDLE_MS, WorkspaceFsHost } from "../src/workspace/fs";
 import { removeDir, tempDir, write } from "./helpers";
 
 /**
@@ -144,5 +146,46 @@ describe("transfer.*", () => {
       expect.objectContaining({ code: "transfer_not_found" }),
     );
     expect(readdirSync(root)).toEqual([]);
+  });
+});
+
+describe("frames on the runner link", () => {
+  it("answers a chunk over its cap with too_large, and a malformed command too", async () => {
+    const sent: string[] = [];
+    const ws = { readyState: 1, send: (text: string) => sent.push(text), close: () => undefined };
+    const conn = new ServerConnection(ws as unknown as WSContext, {} as RunnerCore, () => {});
+    const data = Buffer.alloc(FS_CHUNK_MAX_BYTES + 3).toString("base64");
+    const command = { name: "fs.write", root: "/w", path: "a.bin", data };
+    await conn.handle({ type: "command", id: "big", command });
+    await conn.handle({ type: "command", id: "odd", command: { name: "fs.nope" } });
+    await conn.handle({ type: "command", id: 7, command: { name: "fs.nope" } }); // no id to answer
+    expect(sent.map((text) => JSON.parse(text))).toEqual([
+      {
+        type: "result",
+        id: "big",
+        ok: false,
+        error: expect.objectContaining({ code: "too_large" }),
+      },
+      {
+        type: "result",
+        id: "odd",
+        ok: false,
+        error: expect.objectContaining({ code: "bad_request" }),
+      },
+    ]);
+  });
+
+  it("cuts a listing off before its result would pass the frame size", () => {
+    const { home, root } = setup();
+    for (let i = 0; i < 60; i++)
+      write(root, `${String(i).padStart(2, "0")}-${"x".repeat(120)}.txt`, "");
+    const maxFrameBytes = 4096;
+    const files = new WorkspaceFsHost(home, TRANSFER_IDLE_MS, maxFrameBytes);
+    const list = files.execute({ name: "fs.list", root });
+    expect(list.truncated).toBe(true);
+    expect(list.entries.length).toBeGreaterThan(10);
+    // The whole result message, with the longest request id, still fits the frame.
+    const message = { type: "result", id: "i".repeat(100), ok: true, result: list };
+    expect(Buffer.byteLength(JSON.stringify(message))).toBeLessThanOrEqual(maxFrameBytes);
   });
 });
