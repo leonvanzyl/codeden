@@ -99,6 +99,17 @@ export function shortcut(id: ShortcutId): Shortcut {
   return s;
 }
 
+/**
+ * Whether a combo leaves typing alone: it holds Ctrl/⌘ or Alt, or is a function key (F1–F24).
+ * Shift alone doesn't count (Shift+A types "A"); a combo like `space`, `a` or `enter` would take
+ * that key over in every text field.
+ */
+export function leavesTypingAlone(combo: string): boolean {
+  const parts = combo.toLowerCase().split("+");
+  if (parts.includes("mod") || parts.includes("alt")) return true;
+  return /^f([1-9]|1[0-9]|2[0-4])$/.test(parts.at(-1) ?? "");
+}
+
 /** True when focus is in a text field, where single-key shortcuts must not fire. */
 export function isTyping(target: EventTarget | null): boolean {
   const el = target as HTMLElement | null;

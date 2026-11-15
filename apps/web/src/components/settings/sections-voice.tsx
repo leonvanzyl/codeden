@@ -155,7 +155,7 @@ export function VoiceSettings() {
         </SettingRow>
         <SettingRow
           label="Push-to-talk"
-          help="Hold to dictate, release to stop. Click, then press the keys."
+          help={`Hold to dictate, release to stop. Click, then press a key with ${formatCombo("mod")} or ${formatCombo("alt")} (or an F key).`}
         >
           <ShortcutRecorder
             value={v.dictation.pushToTalkShortcut}

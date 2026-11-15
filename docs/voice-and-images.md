@@ -7,7 +7,7 @@ Both directions sit behind swappable engines. The defaults are free and run in y
 ### Dictation (speech to text)
 
 - Click the **microphone** in the composer, or press **Ctrl/Cmd+Shift+M** to start and stop.
-- **Push-to-talk:** set a key combination in **Settings → Voice**, then hold it to dictate and release to stop.
+- **Push-to-talk:** set a key combination in **Settings → Voice**, then hold it to dictate and release to stop. The combination needs Ctrl/Cmd or Alt (or is a function key such as F8), so it never takes over a key you type with.
 - **Engines:**
 
 | Engine | Needs | Notes |

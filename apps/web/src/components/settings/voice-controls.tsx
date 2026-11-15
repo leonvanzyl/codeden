@@ -3,7 +3,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
-import { formatCombo } from "@/lib/shortcuts";
+import { formatCombo, leavesTypingAlone } from "@/lib/shortcuts";
 import { SettingRow, useSettings } from "./settings-ui";
 
 /** A combo from a key event, e.g. `mod+shift+space` (modifier-only presses return null). */
@@ -26,7 +26,17 @@ export function ShortcutRecorder({
   value: string | null;
   onChange: (v: string | null) => void;
 }) {
-  const [recording, setRecording] = useState(false);
+  // `needsModifier` after a key on its own (Space, a letter, Enter): it would take that key over
+  // in every text field, so the recorder asks for Ctrl/⌘ or Alt with it.
+  const [recording, setRecording] = useState<false | "keys" | "needsModifier">(false);
+  const label =
+    recording === "keys"
+      ? "Press keys…"
+      : recording === "needsModifier"
+        ? `Add ${formatCombo("mod")} or ${formatCombo("alt")}…`
+        : value
+          ? formatCombo(value)
+          : "Not set";
   return (
     <div className="flex items-center gap-2">
       <Button
@@ -34,7 +44,7 @@ export function ShortcutRecorder({
         variant="outline"
         aria-label="Push-to-talk shortcut"
         className="min-w-36 font-mono text-xs"
-        onClick={() => setRecording(true)}
+        onClick={() => setRecording("keys")}
         onBlur={() => setRecording(false)}
         onKeyDown={(e) => {
           if (!recording) return;
@@ -42,11 +52,12 @@ export function ShortcutRecorder({
           if (e.key === "Escape") return setRecording(false);
           const combo = comboFromEvent(e);
           if (!combo) return;
+          if (!leavesTypingAlone(combo)) return setRecording("needsModifier");
           onChange(combo);
           setRecording(false);
         }}
       >
-        <Keyboard /> {recording ? "Press keys…" : value ? formatCombo(value) : "Not set"}
+        <Keyboard /> {label}
       </Button>
       {value && (
         <Button

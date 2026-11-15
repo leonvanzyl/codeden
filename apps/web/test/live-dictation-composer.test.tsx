@@ -1,6 +1,7 @@
-import { act, fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ComposerBox } from "@/components/composer/composer-box";
+import { ShortcutRecorder } from "@/components/settings/voice-controls";
 import type { CodeDenClient } from "@/lib/api/client";
 import { createMockClient } from "@/lib/api/mock";
 import { createBrowserStt, type SpeechToText } from "@/lib/voice/engines";
@@ -222,6 +223,90 @@ describe("push-to-talk", () => {
     expect(mic().getAttribute("aria-pressed")).toBe("false");
     expect(textbox().value).toBe("Fix the flaky test");
     expect(getDraft(useComposerStore.getState(), KEY).text).toBe("Fix the flaky test");
+  });
+
+  it("leaves a key without a modifier to typing in the composer", async () => {
+    // A bare key, as the recorder used to save (or a hand-edited settings file has).
+    const engine: SpeechToText = {
+      supported: true,
+      live: "interim",
+      finishesAfterStop: false,
+      start: vi.fn(),
+      stop: vi.fn(),
+    };
+    renderComposer(engine, withPushToTalk("space"));
+    await screen.findByRole("button", { name: /· hold space$/ });
+
+    textbox().focus();
+    // fireEvent returns false when a handler called preventDefault (the space isn't typed).
+    const typed = fireEvent.keyDown(textbox(), { key: " ", code: "Space" });
+    expect(typed).toBe(true);
+    expect(engine.start).not.toHaveBeenCalled();
+    expect(mic().getAttribute("aria-pressed")).toBe("false");
+
+    // Outside a text field the key still holds to dictate.
+    expect(fireEvent.keyDown(window, { key: " ", code: "Space" })).toBe(false);
+    expect(engine.start).toHaveBeenCalledTimes(1);
+    fireEvent.keyUp(window, { key: " ", code: "Space" });
+    expect(engine.stop).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a dictation started with the button going while its main key is typed", async () => {
+    const engine: SpeechToText = {
+      supported: true,
+      live: "interim",
+      finishesAfterStop: false,
+      start: vi.fn(),
+      stop: vi.fn(),
+    };
+    renderComposer(engine, withPushToTalk(COMBO));
+    await screen.findByRole("button", { name: /· hold Ctrl Shift space$/ });
+
+    fireEvent.click(mic());
+    textbox().focus();
+    fireEvent.keyDown(textbox(), { key: " ", code: "Space" });
+    fireEvent.keyUp(textbox(), { key: " ", code: "Space" });
+    expect(engine.stop).not.toHaveBeenCalled();
+    expect(mic().getAttribute("aria-pressed")).toBe("true");
+  });
+});
+
+describe("push-to-talk shortcut recorder", () => {
+  const recorder = () => {
+    const onChange = vi.fn();
+    render(<ShortcutRecorder value={null} onChange={onChange} />);
+    const button = screen.getByRole("button", { name: "Push-to-talk shortcut" });
+    fireEvent.click(button);
+    return { onChange, button };
+  };
+
+  it.each([
+    [
+      "Ctrl+Shift+Space",
+      { key: " ", code: "Space", ctrlKey: true, shiftKey: true },
+      "mod+shift+space",
+    ],
+    ["Alt+D", { key: "d", code: "KeyD", altKey: true }, "alt+d"],
+    ["an F key on its own", { key: "F8", code: "F8" }, "f8"],
+  ])("records %s", (_, keys, combo) => {
+    const { onChange, button } = recorder();
+    fireEvent.keyDown(button, keys);
+    expect(onChange).toHaveBeenCalledWith(combo);
+  });
+
+  it.each([
+    ["Space", { key: " ", code: "Space" }],
+    ["a letter", { key: "a", code: "KeyA" }],
+    ["Shift and a letter", { key: "A", code: "KeyA", shiftKey: true }],
+    ["Enter", { key: "Enter", code: "Enter" }],
+  ])("doesn't save %s on its own, which would take over that key", (_, keys) => {
+    const { onChange, button } = recorder();
+    fireEvent.keyDown(button, keys);
+    expect(onChange).not.toHaveBeenCalled();
+    expect(button.textContent).toContain("Add Ctrl or Alt…");
+    // Still recording: a combo with a modifier is saved.
+    fireEvent.keyDown(button, { key: " ", code: "Space", ctrlKey: true, shiftKey: true });
+    expect(onChange).toHaveBeenCalledWith("mod+shift+space");
   });
 });
 

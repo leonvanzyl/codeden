@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useSettings } from "@/components/settings/settings-ui";
 import { useClient } from "@/lib/api";
-import { matchesCombo, shortcut } from "@/lib/shortcuts";
+import { isTyping, leavesTypingAlone, matchesCombo, shortcut } from "@/lib/shortcuts";
 import { createCloudStt } from "@/lib/voice/cloud-stt";
 import { stt as browserStt, type SpeechToText } from "@/lib/voice/engines";
 import { separator } from "@/lib/voice/segment-queue";
@@ -95,6 +95,8 @@ export function useDictation({
   const [heard, setHeard] = useState(false);
   const [level] = useState(createLevelStore);
   const phaseRef = useRef<DictationPhase>("idle");
+  /** Whether the push-to-talk shortcut started this dictation (so releasing it stops it). */
+  const held = useRef(false);
   const move = (next: DictationPhase) => {
     phaseRef.current = next;
     setPhase(next);
@@ -102,6 +104,7 @@ export function useDictation({
 
   const start = () => {
     if (!engine.supported || phaseRef.current !== "idle") return;
+    held.current = false;
     // Text goes after what was typed before dictating, into the draft that was open then.
     const typed = baseText.trimEnd();
     const write = (dictated: string) =>
@@ -143,11 +146,18 @@ export function useDictation({
   const handlers = useRef({ toggle, start, stop });
   handlers.current = { toggle, start, stop };
   useEffect(() => {
+    // A push-to-talk key without Ctrl/⌘ or Alt (saved before the recorder required one) would
+    // swallow that key in the composer and every other text field; there it types instead.
+    const typingWins = (e: KeyboardEvent) =>
+      pushToTalk !== null && !leavesTypingAlone(pushToTalk) && isTyping(e.target);
     const onKeyDown = (e: KeyboardEvent) => {
       if (!engine.supported) return;
-      if (pushToTalk && matchesCombo(e, pushToTalk)) {
+      if (pushToTalk && matchesCombo(e, pushToTalk) && !typingWins(e)) {
         e.preventDefault();
-        if (!e.repeat) handlers.current.start();
+        if (!e.repeat && phaseRef.current === "idle") {
+          handlers.current.start();
+          held.current = true;
+        }
         return;
       }
       if (matchesCombo(e, combo)) {
@@ -156,8 +166,9 @@ export function useDictation({
       }
     };
     const onKeyUp = (e: KeyboardEvent) => {
-      if (!pushToTalk || phaseRef.current !== "listening") return;
-      // Releasing the shortcut's main key ends push-to-talk.
+      // Releasing the shortcut's main key ends the dictation it started; one started with the
+      // button or the dictate shortcut keeps going while that key is typed.
+      if (!pushToTalk || !held.current) return;
       const key = pushToTalk.split("+").at(-1)?.toLowerCase();
       if (key && (e.key.toLowerCase() === key || e.code.toLowerCase() === key))
         handlers.current.stop();
