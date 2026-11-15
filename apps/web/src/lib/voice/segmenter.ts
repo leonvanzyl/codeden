@@ -48,21 +48,34 @@ const NOISE_RISE_MS = 10_000;
 /** How far back a forced cut looks for the quietest frame, in ms. */
 const CUT_SEARCH_MS = 2_000;
 /**
- * The first audio, in ms, seeds the noise floor with its median energy. The floor would
- * otherwise rise from zero for seconds, and a room louder than `minThreshold` would count as
- * speech until it caught up.
+ * At least this much of the first audio, in ms, is held to seed the noise floor before any of
+ * it is judged. The floor would otherwise rise from zero for seconds, and a room louder than
+ * `minThreshold` would count as speech until it caught up.
  */
 const SEED_MS = 200;
+/** The seed is the quiet end of the held audio: this share of its frames are quieter. */
+const SEED_QUANTILE = 0.1;
+/** A start whose median energy is at most this is a quiet room, and seeds the floor at once. */
+const QUIET_SEED_MAX = 0.02;
 /**
- * The seed is at most this, so speech already under way when the microphone opens is still
- * heard (its threshold is at most 2.5 x 0.02 = 0.05 RMS). A louder room is learned from there.
+ * A louder start is a loud room or speech already under way when the microphone opens. Speech
+ * dips between words, so it seeds as soon as its quiet end is `NOISE_RATIO` below its median.
+ * A room's hum stays loud, so a start still that steady after this long, in ms (longer than
+ * speech goes without a dip), is the room, and seeds at its own level.
  */
-const SEED_MAX = 0.02;
+const LOUD_SEED_MS = 2_000;
 /**
- * For this long after the floor is seeded, until a segment is sent, every frame is kept. Softer
- * speech already under way set the seed itself and stays under it; the first gap between words
- * drops the floor, and once audio judged silent would count as speech against the lower floor,
- * all of it is judged again, so the first word isn't lost. In ms.
+ * Before the seed, frames at or below this RMS (-80 dBFS) are a microphone still starting up:
+ * zeros or near-zeros far below any room, which say nothing of it.
+ */
+const STARTUP_SILENCE = 1e-4;
+/**
+ * For this long from the first audio (startup silence aside), until a segment is sent, every
+ * frame is kept. Soft speech already under way in a quiet start set the seed itself and stays
+ * under it; the first gap between words drops the floor, and once audio judged silent would
+ * count as speech against the lower floor, all of it is judged again, so the first word isn't
+ * lost. It counts from the first audio, not the seed, so a loud start held until it showed
+ * itself to be the room is never judged again. In ms.
  */
 const RECHECK_MS = 2_000;
 
@@ -116,6 +129,7 @@ export function createSegmenter(options: SegmenterOptions): Segmenter {
   const cutSearchFrames = Math.min(frames(CUT_SEARCH_MS), maxFrames - 1);
   const noiseRise = Math.min(1, o.frameMs / NOISE_RISE_MS);
   const seedFrames = frames(SEED_MS);
+  const loudSeedFrames = frames(LOUD_SEED_MS);
 
   let partial = new Float32Array(frameLength);
   let partialLength = 0;
@@ -125,7 +139,7 @@ export function createSegmenter(options: SegmenterOptions): Segmenter {
   let seed: Omit<Frame, "speech">[] | null = [];
   /** Every frame judged so far, while they can still be judged again (`RECHECK_MS`); else null. */
   let history: Frame[] | null = [];
-  /** Frames after the seed that may still have the start judged again. */
+  /** Frames, from the first audio, that may still have the start judged again. */
   let recheckLeft = frames(RECHECK_MS);
   /** Recent silent frames while no segment is open: the next segment's lead-in. */
   let leadIn: Frame[] = [];
@@ -205,12 +219,29 @@ export function createSegmenter(options: SegmenterOptions): Segmenter {
     }
   };
 
+  /** The held frames' RMS, quietest first. */
+  const seedLevels = (): number[] => (seed ?? []).map((f) => f.rms).sort((a, b) => a - b);
+  /** The level that a share `q` (0..1) of `sorted` is quieter than. */
+  const quantile = (sorted: number[], q: number): number =>
+    sorted[Math.floor(sorted.length * q)] ?? 0;
+
+  /** Whether the held frames tell the room's level: see `QUIET_SEED_MAX` and `LOUD_SEED_MS`. */
+  const seedReady = (): boolean => {
+    const levels = seedLevels();
+    if (levels.length < seedFrames) return false;
+    const median = quantile(levels, 0.5);
+    return (
+      median <= QUIET_SEED_MAX ||
+      quantile(levels, SEED_QUANTILE) * NOISE_RATIO <= median ||
+      levels.length >= loudSeedFrames
+    );
+  };
+
   /** Seed the floor from the held frames, then judge them against it. */
   const seedFloor = (out: Float32Array[]) => {
+    noise = quantile(seedLevels(), SEED_QUANTILE);
     const held = seed ?? [];
     seed = null;
-    const sorted = held.map((f) => f.rms).sort((a, b) => a - b);
-    noise = Math.min(SEED_MAX, sorted[Math.floor(sorted.length / 2)] ?? 0);
     // They are the seed, so they don't move the floor again.
     for (const f of held) {
       const segment = step(f.samples, f.rms, false);
@@ -221,15 +252,16 @@ export function createSegmenter(options: SegmenterOptions): Segmenter {
   const frame = (samples: Float32Array, out: Float32Array[]) => {
     const r = rms(samples);
     level = Math.min(1, r);
-    // A microphone still starting up sends exact zeros: silence that says nothing of the room.
-    if (seed && (seed.length > 0 || r > 0)) {
+    if (seed && (seed.length > 0 || r > STARTUP_SILENCE)) {
       seed.push({ samples, rms: r });
-      if (seed.length >= seedFrames) seedFloor(out);
+      // The held audio is the start too, so it counts towards `RECHECK_MS`.
+      recheckLeft--;
+      if (seedReady()) seedFloor(out);
       return;
     }
     const segment = step(samples, r, true);
     if (segment) out.push(segment);
-    // Only a seeded floor can have been set by speech (startup zeros come before the seed).
+    // Only a seeded floor can have been set by speech (startup silence comes before the seed).
     if (!seed) recheck(out);
   };
 

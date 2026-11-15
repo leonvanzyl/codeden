@@ -121,6 +121,40 @@ describe("dictation segmenter", () => {
     expect(lengthsMs(room.flush())).toEqual([]);
   });
 
+  it("learns a room louder than 0.05 RMS from the start too, so none of its hum is sent", () => {
+    // A loud fan or air conditioner: about 0.07 RMS, above the 0.05 threshold a capped seed gives.
+    const room = (ms: number) => samples(ms, RATE, 0.1, 50);
+    const hum = createSegmenter({ sampleRate: RATE });
+    expect(lengthsMs([...hum.push(room(8000)), ...hum.flush()])).toEqual([]);
+
+    const segmenter = createSegmenter({ sampleRate: RATE });
+    const segments = segmenter.push(audio(room(1500), speech(800), room(1000)));
+    expect(lengthsMs([...segments, ...segmenter.flush()])).toEqual([200 + 800 + 300]);
+  });
+
+  it("still hears speech already under way when the microphone opens, in a quiet room or a loud one", () => {
+    const loud = (ms: number) => samples(ms, RATE, 0.1, 50);
+    for (const room of [quiet, loud]) {
+      // Words with short gaps from the first sample, the last ending at 1.5 s, then the room.
+      const words = audio(...Array.from({ length: 4 }, () => audio(speech(300), room(100))));
+      const segmenter = createSegmenter({ sampleRate: RATE });
+      const segments = [...segmenter.push(audio(words, room(1000))), ...segmenter.flush()];
+      expect(lengthsMs(segments)).toEqual([1500 + 300]);
+    }
+  });
+
+  it("seeds the floor from the room after a microphone's near-zero (not exact-zero) startup", () => {
+    const room = (ms: number) => samples(ms, RATE, 0.04, 50);
+    // About 7e-6 RMS: far below any room a microphone hears, but not exact zeros.
+    const startup = () => samples(500, RATE, 1e-5, 50);
+    const hum = createSegmenter({ sampleRate: RATE });
+    expect(lengthsMs([...hum.push(audio(startup(), room(8000))), ...hum.flush()])).toEqual([]);
+
+    const segmenter = createSegmenter({ sampleRate: RATE });
+    const segments = segmenter.push(audio(startup(), room(1000), speech(800), room(1000)));
+    expect(lengthsMs([...segments, ...segmenter.flush()])).toEqual([200 + 800 + 300]);
+  });
+
   it("flushes the segment still open when dictation stops mid-phrase", () => {
     const segmenter = createSegmenter({ sampleRate: RATE });
     // 510 ms: the last 10 ms are a partial frame.
