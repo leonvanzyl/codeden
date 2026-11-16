@@ -174,7 +174,7 @@ npm uses your normal configuration (`.npmrc`, `npm_config_registry`, proxy setti
 
 ### An update failed or won't apply
 
-One-click updates install into `~/.codeden/app/<version>/` with npm, then CodeDen restarts into the new version (see [Updating](../README.md#updating)).
+One-click updates install into `~/.codeden/app/<version>/` with npm, then CodeDen restarts into the new version (see [Updating](reference.md#updating)).
 
 - **"Couldn't update to X: npm install exited ..."**: npm's reason follows, usually a network, proxy or registry problem. npm uses your normal configuration (`.npmrc`, proxy settings). Fix it, then press **Retry**, or run `codeden update` to see npm's full output.
 - **"Update installed. Restart CodeDen to finish"**: CodeDen couldn't restart itself (it wasn't started by the `codeden` command, or the new version didn't answer within two minutes). Run `codeden stop`, then start it again the usual way; the new version starts.

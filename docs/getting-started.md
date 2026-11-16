@@ -33,7 +33,7 @@ npm i -g codeden
 codeden
 ```
 
-Useful flags: `--port <n>`, `--home <dir>`, `--no-open`. See the [CLI reference](../README.md#cli-reference).
+Useful flags: `--port <n>`, `--home <dir>`, `--no-open`. See the [CLI reference](reference.md#cli-reference).
 
 ## 3. The setup checklist
 
