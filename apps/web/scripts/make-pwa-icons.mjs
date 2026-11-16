@@ -13,9 +13,9 @@ const root = resolve(import.meta.dirname, "..");
 const BG = "#0d0e12";
 const AMBER = "#f59e0b";
 
+/** The mark in a 32-unit box (same path as public/favicon.svg). */
 const mark = `
-  <path d="M9 21V11l7-4 7 4v10l-7 4z" fill="none" stroke="${AMBER}" stroke-width="2.2" stroke-linejoin="round"/>
-  <circle cx="16" cy="16" r="2.6" fill="${AMBER}"/>`;
+  <path d="M15.04 5.78L10.7 5.78A1.04 1.04 0 0 0 9.8 6.3L4.5 15.48A1.04 1.04 0 0 0 4.5 16.52L9.8 25.7A1.04 1.04 0 0 0 10.7 26.22L15.04 26.22L15.04 21.54L13.1 21.54A0.52 0.52 0 0 1 12.65 21.28L9.75 16.26A0.52 0.52 0 0 1 9.75 15.74L12.65 10.72A0.52 0.52 0 0 1 13.1 10.46L15.04 10.46ZM16.96 5.78L21.3 5.78A1.04 1.04 0 0 1 22.2 6.3L27.5 15.48A1.04 1.04 0 0 1 27.5 16.52L22.2 25.7A1.04 1.04 0 0 1 21.3 26.22L16.96 26.22ZM19.32 12.22A0.42 0.42 0 0 1 20.1 12.01L22.25 15.74A0.52 0.52 0 0 1 22.25 16.26L20.1 19.99A0.42 0.42 0 0 1 19.32 19.78Z" fill="${AMBER}" fill-rule="evenodd"/>`;
 
 /** The mark on its rounded tile with transparent corners. */
 const tile = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
@@ -32,8 +32,8 @@ const outputs = [
   ["public/icons/icon-192.png", tile, 192],
   ["public/icons/icon-512.png", tile, 512],
   // Maskable icons are cropped to a circle of 80% of the side: keep the mark well inside it.
-  ["public/icons/maskable-192.png", fullBleed(0.62), 192],
-  ["public/icons/maskable-512.png", fullBleed(0.62), 512],
+  ["public/icons/maskable-192.png", fullBleed(0.72), 192],
+  ["public/icons/maskable-512.png", fullBleed(0.72), 512],
   ["public/apple-touch-icon.png", fullBleed(0.8), 180],
 ];
 
