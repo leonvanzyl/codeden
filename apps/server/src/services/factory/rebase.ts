@@ -1,15 +1,16 @@
 import type { FactoryItem, FactoryLoop, Project, Session } from "@codeden/contracts";
-import { builderWanted, chooseAgent } from "./agent-choice";
 import { baseBranchOf, type FactoryContext } from "./context";
 import type { FactoryPr } from "./github-port";
+import { startIntegrator } from "./integrator";
+import { awaitingStart, awaitingStartNote } from "./late-start";
 import { failItem } from "./outcomes";
 import { prGone } from "./pr-gone";
 import { REBASE_WHY, rebasePrompt } from "./prompts";
-import { type IntegratorTask, integratorPrompt } from "./prompts-integration";
+import { providerFailure, providerWide } from "./provider-failure";
 import { rebuild } from "./rebuild";
 import { owedRecheck, recheckOf, settleRecheck } from "./recheck";
 import { revertBlocked } from "./revert-blocked";
-import { isBusy } from "./sessions";
+import { isBusy, neverRanTurn } from "./sessions";
 import { claimSlot } from "./slots";
 import { FINISHED_STAGES } from "./store";
 
@@ -20,15 +21,18 @@ import { FINISHED_STAGES } from "./store";
  * to rebase (no revise round is spent), and CI is then awaited on the new head, timed from
  * when that head first appeared. The agent is the builder while its session exists (a message
  * resumes a failed one and brings an archived one and its worktree back): it has the context
- * and owns the PR's branch. Otherwise a fresh integrator session takes over the PR. After
- * `MAX_REBASE_ASKS` requests the work is rebuilt from the default branch instead (a revert, which
- * has nothing to rebuild, goes to the user: `revert-blocked.ts`).
+ * and owns the PR's branch. Otherwise, or when the agent's start never reached its provider, a
+ * fresh integrator session takes over the PR (`integrator.ts`). After `MAX_REBASE_ASKS`
+ * requests the work is rebuilt from the default branch instead (a revert, which has nothing to
+ * rebuild, goes to the user: `revert-blocked.ts`).
  */
 
 /** Requests to rebase per conflict before the item is rebuilt. */
 export const MAX_REBASE_ASKS = 3;
 
 const REBASE = "rebase_";
+/** `rebase_start_<n>`: the n-th request to rebase was an integrator's brief (it started with it). */
+const REBASE_START = "rebase_start_";
 /** Per head commit: when it was first seen (its CI clock) and when its worktree was restored. */
 const HEAD = "head_";
 const RESTORE = "restore_";
@@ -162,6 +166,67 @@ export function prAgent(ctx: FactoryContext, item: FactoryItem): Session | undef
   return item.builderSessionId ? ctx.repo.find(item.builderSessionId)?.session : undefined;
 }
 
+/** The PR's agent as a request can use it (`usablePrAgent`), or until when its start is awaited. */
+export type UsablePrAgent = { agent: Session | undefined; refused: boolean } | { awaiting: string };
+
+/**
+ * The PR's agent, when a rebase or CI request can go to it (§10.1, PR agent). One whose start
+ * never reached its provider (it failed without running a turn) never got its brief: a request
+ * would be its first and only instruction, on the provider that refused it. It is let go
+ * (`letGoPrAgent`) and the caller starts a fresh integrator with its brief in the same tick.
+ * `refused`: its provider refused to open it (signed out, a CLI too old), which backs that
+ * provider off once (`backOffRefused`). One whose start the runner left unanswered is waited
+ * for while the factory still expects it to start (`awaiting`, `late-start.ts`).
+ */
+export function usablePrAgent(ctx: FactoryContext, item: FactoryItem): UsablePrAgent {
+  const agent = prAgent(ctx, item);
+  if (agent?.status !== "failed" || !neverRanTurn(ctx.repo, agent)) {
+    return { agent, refused: false };
+  }
+  const until = awaitingStart(ctx, agent);
+  if (until) return { awaiting: until };
+  const refused = backOffRefused(ctx, agent);
+  ctx.store.updateItem(item.id, (i) =>
+    i.builderSessionId === agent.id ? { ...i, ...letGoPrAgent(i, agent.id, refused) } : i,
+  );
+  ctx.log?.(`factory: ${item.id}: its PR agent ${agent.id} never started; let go`);
+  return { agent: undefined, refused };
+}
+
+/**
+ * Whether its provider refused to open `s` (signed out, a CLI too old). New work then keeps off
+ * that provider, as after a builder's refused start (`progress.ts`), unless the factory learned
+ * something about the provider since `s` failed: it backed it off already, or a person asked to
+ * check it again or signed in (`FactorySessions.providerFailed`).
+ */
+export function backOffRefused(ctx: FactoryContext, s: Session): boolean {
+  const cause = providerFailure(ctx.repo, ctx.inbox, s);
+  if (!cause || !providerWide(cause)) return false;
+  ctx.sessions.providerFailed(s.provider, cause, s.updatedAt);
+  return true;
+}
+
+/**
+ * The item once its PR agent `sessionId` is let go: it has none, and the session becomes an
+ * earlier one (cleanup archives it; one that opens late is stopped, `late-start.ts`). When its
+ * provider refused it (`refused`), the request to rebase it was started with doesn't count
+ * toward `MAX_REBASE_ASKS`: refused starts never rebuild the work.
+ */
+export function letGoPrAgent(
+  item: FactoryItem,
+  sessionId: string,
+  refused: boolean,
+): Pick<FactoryItem, "builderSessionId" | "earlierSessionIds" | "nudges"> {
+  const n = rebaseAsks(item);
+  const start = `${REBASE_START}${n}`;
+  const { [`${REBASE}${n}`]: _ask, [start]: _start, ...uncounted } = item.nudges;
+  return {
+    builderSessionId: null,
+    earlierSessionIds: [...new Set([...item.earlierSessionIds, sessionId])],
+    nudges: refused && item.nudges[start] ? uncounted : item.nudges,
+  };
+}
+
 /**
  * Ask the PR's agent to rebase, counted as the next request of the current conflict (plus any
  * `also` nudges). Recorded once the message is delivered, so a failed send is retried. The
@@ -192,82 +257,11 @@ async function askToRebase(
 }
 
 /**
- * A fresh integrator takes over the PR when the session that wrote it is gone: a worktree on
- * the PR's head branch, a brief with the issue, the PR description and the review history.
- * It becomes the item's PR agent, so the PR's later follow-ups (conflicts, CI, the audit, the
- * review's worktree) go to it. Its provider and model are chosen as the item's builder's are
- * (`chooseAgent`): a provider the factory backed off is skipped for an available one, and while
- * none is available it waits with the waiting note, holding no slot. Then it waits for a free
- * agent slot; true once it started. `marks` are nudges recorded when it starts. None starts for
- * a PR that merged or closed since the step read it (`pr-gone.ts`).
- */
-export async function startIntegrator(
-  ctx: FactoryContext,
-  project: Project,
-  loop: FactoryLoop,
-  item: FactoryItem,
-  pr: FactoryPr,
-  task: IntegratorTask,
-  marks: string[],
-): Promise<boolean> {
-  if (prGone(ctx, item)) return false;
-  const base = baseBranchOf(project);
-  const what =
-    task === "conflicts"
-      ? `Merge conflicts with ${base}`
-      : "CI never started on its head and its author's session is gone";
-  const agent = chooseAgent(ctx, project, builderWanted(item, loop.tuning), "integration");
-  if ("waiting" in agent) {
-    if (item.note !== agent.waiting) {
-      ctx.store.updateItem(item.id, (i) => ({ ...i, note: agent.waiting }), { touch: false });
-    }
-    return false;
-  }
-  if (!claimSlot(ctx, project, "repair", `repair:${item.id}`)) {
-    ctx.store.updateItem(item.id, (i) => ({
-      ...i,
-      note: `${what}: waiting for a free agent to take the pull request over`,
-    }));
-    return false;
-  }
-  const res = await ctx.sessions.startIntegrator(
-    item,
-    { number: pr.ref.number, headBranch: pr.headBranch },
-    integratorPrompt(
-      item,
-      { number: pr.ref.number, url: pr.ref.url, body: pr.body, headBranch: pr.headBranch },
-      base,
-      task,
-    ),
-    agent,
-  );
-  if (res.status !== "started") {
-    ctx.store.updateItem(item.id, (i) => ({
-      ...i,
-      note: `${what}: the integrator could not start (${res.status})`,
-    }));
-    return false;
-  }
-  const session = ctx.repo.find(res.sessionId)?.session;
-  const chosen = agent.provider === "auto" ? null : agent.provider;
-  const at = ctx.now().toISOString();
-  ctx.store.updateItem(item.id, (i) => ({
-    ...i,
-    builderSessionId: res.sessionId,
-    builderProvider: session?.provider ?? chosen ?? i.builderProvider,
-    note: `${what}: an integrator took the pull request over`,
-    nudges: { ...i.nudges, ...Object.fromEntries(marks.map((k) => [k, at])) },
-    // Finished work's integrator is archived again once its turn is over.
-    sessionsArchivedAt: FINISHED_STAGES.includes(i.stage) ? null : i.sessionsArchivedAt,
-  }));
-  return true;
-}
-
-/**
  * The PR has merge conflicts and nothing else failed: ask its agent to rebase (or start an
- * integrator), wait for that turn, and ask again while the conflicts remain. After
- * `MAX_REBASE_ASKS` requests the item is rebuilt from the default branch instead of failing;
- * an item that already used its rebuild is stuck.
+ * integrator), wait for that turn, and ask again while the conflicts remain. An agent whose
+ * start never reached its provider gets no request: a fresh integrator with its brief takes
+ * over (`usablePrAgent`). After `MAX_REBASE_ASKS` requests the item is rebuilt from the default
+ * branch instead of failing; an item that already used its rebuild is stuck.
  */
 export async function advanceConflicting(
   ctx: FactoryContext,
@@ -277,7 +271,17 @@ export async function advanceConflicting(
   pr: FactoryPr,
 ): Promise<FactoryLoop> {
   const branch = baseBranchOf(project);
-  const agent = prAgent(ctx, item);
+  const usable = usablePrAgent(ctx, item);
+  if ("awaiting" in usable) {
+    const note = awaitingStartNote("integrator", usable.awaiting);
+    if (item.note !== note) {
+      ctx.store.updateItem(item.id, (i) => ({ ...i, note }), { touch: false });
+    }
+    return loop;
+  }
+  const agent = usable.agent;
+  // Read again: an agent let go just now took a refused start's request with it.
+  item = ctx.store.item(item.id) ?? item;
   const asked = rebaseAsks(item);
   const last = lastRebaseAsk(item);
   // Wait until the agent has taken a turn since the last request.
@@ -298,11 +302,14 @@ export async function advanceConflicting(
       `still had merge conflicts with ${branch} after ${asked} requests to rebase`,
     );
   }
-  // The head the conflict started on, for the reviewer's re-check once it is resolved.
-  const from = asked === 0 && item.stage === "verifying" && pr.headSha;
-  const also = from ? [`${CONFLICT_FROM}${pr.headSha}`] : [];
+  // The head the conflict started on, for the reviewer's re-check once it is resolved (kept as
+  // first recorded when a refused integrator's request didn't count).
+  const fromKey = `${CONFLICT_FROM}${pr.headSha}`;
+  const from = asked === 0 && item.stage === "verifying" && pr.headSha && !item.nudges[fromKey];
+  const also = from ? [fromKey] : [];
   if (!agent) {
-    const marks = [`${REBASE}${asked + 1}`, ...also];
+    const ask = asked + 1;
+    const marks = [`${REBASE}${ask}`, `${REBASE_START}${ask}`, ...also];
     await startIntegrator(ctx, project, loop, item, pr, "conflicts", marks);
     return loop;
   }

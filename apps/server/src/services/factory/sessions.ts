@@ -165,9 +165,12 @@ export class FactorySessions {
 
   /**
    * A factory session failed because of its provider: new work skips it for a while, or until
-   * its login changes after a sign-in failure.
+   * its login changes after a sign-in failure. With `failedAt`, a failure from before the factory
+   * last learned something about the provider (it backed it off, a person asked to check it
+   * again, a new login) changes nothing: it was acted on already, or the provider is fixed since.
    */
-  providerFailed(provider: string, cause: ProviderCause): void {
+  providerFailed(provider: string, cause: ProviderCause, failedAt?: string): void {
+    if (failedAt && this.deps.availability.changedSince(provider, failedAt)) return;
     this.deps.availability.markFailed(provider, cause.reason, cause.until, cause.signin);
   }
 

@@ -98,6 +98,8 @@ export async function advanceVerifying(
   }
   const kicking = await kickCi(ctx, project, loop, item, pr);
   item = ctx.store.item(item.id) ?? item;
+  // The PR merged or closed since it was read (`prGone`): the item is finished already.
+  if (item.stage !== "verifying") return loop;
 
   const vision = visionOf(project);
   const now = ctx.now();

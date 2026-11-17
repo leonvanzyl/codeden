@@ -2,8 +2,10 @@ import type { FactoryItem, FactoryLoop, Project } from "@codeden/contracts";
 import { errorMessage } from "../errors";
 import type { FactoryContext } from "./context";
 import type { FactoryPr } from "./github-port";
+import { startIntegrator } from "./integrator";
+import { prGone } from "./pr-gone";
 import { ciKickPrompt } from "./prompts-integration";
-import { prAgent, repairSlot, startIntegrator } from "./rebase";
+import { repairSlot, usablePrAgent } from "./rebase";
 import { isBusy } from "./sessions";
 
 /**
@@ -12,7 +14,8 @@ import { isBusy } from "./sessions";
  * (`recover.ts`), and the verify step carries the kick out, retrying until it happens:
  * - a PR behind the default branch is brought up to date on GitHub (a new head, no agent);
  * - otherwise its agent pushes an empty commit: the builder while its session exists, or a
- *   fresh integrator on the PR's head branch when it is gone. Either waits for a free agent.
+ *   fresh integrator on the PR's head branch when it is gone or its start never reached its
+ *   provider. Either waits for a free agent.
  * A conflicting PR needs none: the conflict flow rebases it, which makes a new head.
  */
 
@@ -42,11 +45,19 @@ export async function kickCi(
   item: FactoryItem,
   pr: FactoryPr,
 ): Promise<boolean> {
-  const agent = prAgent(ctx, item);
-  if (!item.nudges[KICK]) {
-    const kicked = pr.headSha ? item.nudges[`${KICKED}${pr.headSha}`] : undefined;
-    return Boolean(kicked && agent && isBusy(agent));
+  const kicked = pr.headSha ? item.nudges[`${KICKED}${pr.headSha}`] : undefined;
+  if (!item.nudges[KICK] && !kicked) return false;
+  // The PR's agent, unless its start never reached its provider (`usablePrAgent`): one whose
+  // start a provider refused never pushed this head's kick, so it is owed again, and a fresh
+  // integrator pushes it on a provider that can take work.
+  const usable = usablePrAgent(ctx, item);
+  if ("awaiting" in usable) return true;
+  const agent = usable.agent;
+  if (kicked && usable.refused) {
+    const at = ctx.now().toISOString();
+    item = ctx.store.updateItem(item.id, (i) => ({ ...i, nudges: { ...i.nudges, [KICK]: at } }));
   }
+  if (!item.nudges[KICK]) return Boolean(kicked && agent && isBusy(agent));
   if (pr.checks !== "none" || pr.mergeable === "conflicting" || !pr.headSha) {
     // CI started meanwhile, or a rebase (which makes a new head) comes first.
     ctx.store.updateItem(item.id, (i) => {
@@ -80,6 +91,8 @@ export async function kickCi(
       note(ctx, item, "CI never started: waiting for a free agent to push a commit that starts it");
       return true;
     }
+    // Nothing for a PR that merged or closed since the step read it (`pr-gone.ts`).
+    if (prGone(ctx, item)) return true;
     await ctx.sessions.message(agent.id, ciKickPrompt(item));
     ctx.store.updateItem(item.id, (i) => {
       const { [KICK]: _kick, ...nudges } = i.nudges;

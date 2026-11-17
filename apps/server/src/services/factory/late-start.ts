@@ -34,8 +34,11 @@ export function awaitingStart(ctx: FactoryContext, s: Session): string | null {
   return ctx.now().getTime() < until ? new Date(until).toISOString() : null;
 }
 
-/** The item's note while it waits for its builder's or reviewer's unanswered start. */
-export function awaitingStartNote(role: "builder" | "reviewer", until: string): string {
+/** The item's note while it waits for its builder's, reviewer's or integrator's unanswered start. */
+export function awaitingStartNote(
+  role: "builder" | "reviewer" | "integrator",
+  until: string,
+): string {
   return `The runner was too busy to answer the ${role}'s start: waiting${untilText(until)} to see whether it started`;
 }
 
