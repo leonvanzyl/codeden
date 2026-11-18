@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { accessSync, constants, statSync } from "node:fs";
 import { delimiter, extname, isAbsolute, join } from "node:path";
+import { knownLocations } from "@codeden/providers";
 
 /** Result of running a tool. Output is capped; never log it when it may hold secrets. */
 export interface ExecResult {
@@ -8,7 +9,7 @@ export interface ExecResult {
   code: number | null;
   stdout: string;
   stderr: string;
-  /** The executable was not found on PATH. */
+  /** The executable was not found on PATH or in its known install locations. */
   notFound: boolean;
   timedOut: boolean;
   /** Resolved executable path. */
@@ -65,6 +66,23 @@ export function resolveExecutable(
 }
 
 /**
+ * Find a named tool the way the setup checks do (§14): PATH first, then the tool's known
+ * install locations (its installer's folders and, for `gh` and the agent CLIs, the package
+ * managers' global bin folders). So the GitHub token look-up runs the same `gh` the checklist
+ * reports, even when this process has the minimal PATH of an app started from the Dock or
+ * Finder. Paths are taken as they are. Returns null when not found.
+ */
+export function resolveTool(
+  name: string,
+  env: NodeJS.ProcessEnv = process.env,
+  known: (name: string) => readonly string[] = knownLocations,
+): string | null {
+  const onPath = resolveExecutable(name, env);
+  if (onPath || isAbsolute(name) || name.includes("/") || name.includes("\\")) return onPath;
+  return known(name).find(isFile) ?? null;
+}
+
+/**
  * Quote one argument for `cmd.exe /s /c`. Characters cmd would interpret are refused rather
  * than escaped, so a shim can never be made to run something else.
  */
@@ -107,7 +125,7 @@ function comspec(): string {
 
 export const runTool: Exec = (command, args, opts = {}) => {
   const env = mergeEnv(process.env, opts.env);
-  const resolved = resolveExecutable(command, env);
+  const resolved = resolveTool(command, env);
   const empty = { stdout: "", stderr: "", timedOut: false };
   if (!resolved) return Promise.resolve({ ...empty, code: null, notFound: true, path: null });
 

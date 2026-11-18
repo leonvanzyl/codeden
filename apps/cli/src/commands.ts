@@ -5,6 +5,7 @@
  */
 import { join } from "node:path";
 import { CODEDEN_VERSION } from "@codeden/contracts";
+import { applyLoginShellPath } from "@codeden/providers";
 import {
   ensureHome,
   ensureInstallToken,
@@ -44,6 +45,9 @@ export async function runCommand(args: string[], parsed: ParsedCli): Promise<num
   const home = resolveHome(values.home);
   const launch = launchInfo(home);
   const command = positionals[0];
+  // Started from a desktop launcher, this process has the system's minimal PATH: the checks,
+  // the server and the runner it starts look for tools on the user's login-shell PATH.
+  if (command === undefined || command === "doctor") await applyLoginShellPath();
   if (command === "doctor") return doctor(home, { install: values.install, launch });
   if (command === "stop") return stop(home);
   if (command === "update") return updateCommand(home, { rollback: values.rollback, launch });

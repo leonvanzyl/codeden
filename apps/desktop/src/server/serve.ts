@@ -1,4 +1,5 @@
 import { CODEDEN_VERSION, DesktopHostMessage, type DesktopServerMessage } from "@codeden/contracts";
+import { applyLoginShellPath } from "@codeden/providers";
 import { ensureHome, ensureInstallToken, resolveHome, startServer } from "@codeden/server";
 import { serverLog } from "./log";
 import { IpcDesktopUpdater } from "./update-bridge";
@@ -18,6 +19,9 @@ export async function serve(opts: { home?: string; port: number; fake: boolean }
   const token = ensureInstallToken(paths.token);
   const desktop = new IpcDesktopUpdater(send, CODEDEN_VERSION);
   let closing = false;
+  // An app started from the Dock, the Finder or a desktop launcher has the system's minimal
+  // PATH: the checks, the runner and agents look for tools on the user's login-shell PATH.
+  await applyLoginShellPath();
 
   const server = await startServer({
     port: opts.port,

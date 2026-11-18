@@ -289,6 +289,21 @@ describe("SetupService", () => {
     expect(signedOut.check).toMatchObject({ state: "missing", loggedIn: false });
     expect(signedOut.check?.fix).toEqual({ kind: "login", command: "/bin/agent login" });
 
+    // `agent status` reads only that a login was stored; when the CLI's own check asks for a
+    // login, so would every session (and Cursor's ACP sign-in would open the browser).
+    const stale = await run({
+      ...version,
+      "agent acp --help": { stdout: "Start the ACP server" },
+      "agent status": { stdout: "✓ Login successful!\nLogged in (unable to fetch user details)" },
+      "agent --list-models": {
+        stderr: "Error: Authentication required. Run 'agent login', pass --api-key/--auth-token.",
+        code: 1,
+      },
+    });
+    expect(stale.check).toMatchObject({ state: "missing", installed: true, loggedIn: false });
+    expect(stale.check?.message).toContain("sign in again");
+    expect(stale.check?.fix).toEqual({ kind: "login", command: "/bin/agent login" });
+
     const old = await run({
       ...version,
       "agent acp --help": { stderr: "error: unknown command 'acp'", code: 1 },

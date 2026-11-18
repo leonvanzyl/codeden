@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { type Database, openDatabase } from "../src/db/client";
 import { EventStore } from "../src/events/store";
 import { ServiceError } from "../src/services/errors";
-import { runTool } from "../src/services/exec";
+import { resolveTool, runTool } from "../src/services/exec";
 import {
   detectPackageManager,
   normalizeCloneUrl,
@@ -126,6 +126,30 @@ describe("runTool", () => {
   it("reports missing executables", async () => {
     const result = await runTool("definitely-not-a-real-tool-xyz", []);
     expect(result).toMatchObject({ notFound: true, code: null });
+  });
+
+  it("finds a tool in its known install locations when PATH lacks it, like the setup checks", () => {
+    // An app started from the Dock: gh is in Homebrew's folder, which is not on PATH.
+    const win = process.platform === "win32";
+    const brew = join(dir, "homebrew-bin");
+    const onPath = join(dir, "on-path");
+    mkdirSync(brew);
+    mkdirSync(onPath);
+    const tool = (folder: string) => {
+      const file = join(folder, win ? "gh.exe" : "gh");
+      writeFileSync(file, "");
+      chmodSync(file, 0o755);
+      return file;
+    };
+    const known = () => [join(dir, "missing", "gh"), tool(brew)];
+    expect(resolveTool("gh", { PATH: join(dir, "empty") }, known)).toBe(
+      join(brew, win ? "gh.exe" : "gh"),
+    );
+    expect(resolveTool("gh", { PATH: onPath, PATHEXT: ".EXE" }, () => [])).toBeNull();
+    // A copy on PATH still wins, and paths are never looked up elsewhere.
+    const first = tool(onPath);
+    expect(resolveTool("gh", { PATH: onPath, PATHEXT: ".EXE" }, known)).toBe(first);
+    expect(resolveTool(join(dir, "nope", "gh"), { PATH: "" }, known)).toBeNull();
   });
 
   it.runIf(process.platform === "win32")("runs .cmd shims on Windows", async () => {

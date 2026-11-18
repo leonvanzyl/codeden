@@ -5,6 +5,7 @@
  */
 import { parseArgs } from "node:util";
 import { RunnerBackendId } from "@codeden/contracts";
+import { applyLoginShellPath } from "@codeden/providers";
 import { startRunner } from "./runner";
 
 const { values } = parseArgs({
@@ -36,6 +37,10 @@ if (!backend.success) {
 }
 
 const log = (m: string) => console.log(`[${new Date().toISOString()}] ${m}`);
+
+// The real agent CLIs, terminals and git run with the user's login-shell PATH, even when the
+// app that started this runner was opened from the Dock or Finder (tests run `--no-builtin`).
+if (!values["no-builtin"]) await applyLoginShellPath();
 
 try {
   const runner = await startRunner({

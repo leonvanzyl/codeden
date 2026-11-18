@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import path from "node:path";
+import { refreshLoginShellPath } from "./login-shell-path";
 
 /** Registry keys that hold the user's and the machine's `Path` on Windows. */
 export const PATH_REGISTRY_KEYS = {
@@ -24,11 +25,15 @@ export interface RefreshPathOptions {
  * CodeDen runs. On Windows the user's and the machine's `Path` are read from the registry,
  * variables expanded, and folders that are not on this process's PATH yet are appended, so
  * everything started afterwards (checks, agents, terminals) sees them. Existing entries keep
- * their order. macOS and Linux have no such store; PATH is left as it is. Never throws.
- * Returns the folders that were added.
+ * their order. On macOS and Linux the user's login shell is asked for its PATH again, when
+ * start-up turned that on (`applyLoginShellPath`); otherwise PATH is left as it is. Never
+ * throws. Returns the folders that were added.
  */
 export async function refreshProcessPath(opts: RefreshPathOptions = {}): Promise<string[]> {
-  if ((opts.platform ?? process.platform) !== "win32") return [];
+  const platform = opts.platform ?? process.platform;
+  if (platform !== "win32") {
+    return refreshLoginShellPath({ platform, ...(opts.env ? { env: opts.env } : {}) });
+  }
   const env = opts.env ?? process.env;
   const read = opts.readRegistry ?? readRegistryPath;
   let machine: string | null = null;

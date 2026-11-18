@@ -165,10 +165,15 @@ describe("OpenCode config", () => {
     expect(knownLocations("opencode", { platform: "win32", home: "C:\\Users\\me" })).toEqual([
       "C:\\Users\\me\\.opencode\\bin\\opencode.exe",
     ]);
-    expect(knownLocations("opencode", { platform: "darwin", home: "/Users/me" })).toEqual([
+    expect(knownLocations("opencode", { platform: "darwin", home: "/Users/me", env: {} })).toEqual([
       "/Users/me/.opencode/bin/opencode",
       "/opt/homebrew/bin/opencode",
       "/usr/local/bin/opencode",
+      "/Users/me/.bun/bin/opencode",
+      "/Users/me/Library/pnpm/opencode",
+      "/Users/me/.volta/bin/opencode",
+      "/Users/me/.npm-global/bin/opencode",
+      "/Users/me/.local/bin/opencode",
     ]);
   });
 

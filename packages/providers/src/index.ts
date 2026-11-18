@@ -46,6 +46,12 @@ export {
   runsVersion,
   type Validation,
 } from "./util/locate";
+export {
+  applyLoginShellPath,
+  type LoginShellPathOptions,
+  mergeShellPath,
+  usesLoginShellPath,
+} from "./util/login-shell-path";
 export { resolveNpm } from "./util/npm";
 export { npmFailure, type RunNpmOptions, runNpm } from "./util/npm-run";
 export {

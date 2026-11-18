@@ -160,20 +160,13 @@ describe("CodexAdapter model discovery", () => {
   });
 
   it("skips discovery when Codex is not installed", async () => {
-    const saved = { PATH: process.env.PATH, Path: process.env.Path };
     const empty = mkdtempSync(join(tmpdir(), "codeden-empty-path-"));
-    process.env.PATH = empty;
-    if (process.platform === "win32") process.env.Path = empty;
-    try {
-      const adapter = new CodexAdapter();
-      await adapter.refreshModels();
-      expect(adapter.models()).toMatchObject([
-        { id: "default", description: "The model configured in ~/.codex/config.toml" },
-      ]);
-    } finally {
-      process.env.PATH = saved.PATH;
-      if (process.platform === "win32") process.env.Path = saved.Path;
-    }
+    // Nothing on PATH and no known install locations: a Codex on this machine is never run.
+    const adapter = new CodexAdapter({ locate: { pathEnv: empty, knownLocations: [] } });
+    await adapter.refreshModels();
+    expect(adapter.models()).toMatchObject([
+      { id: "default", description: "The model configured in ~/.codex/config.toml" },
+    ]);
   });
 
   it("reports the models a session lists", async () => {

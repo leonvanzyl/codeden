@@ -238,14 +238,48 @@ describe("known install locations", () => {
     expect(knownLocations("claude", { platform: "win32", home: "C:\\Users\\Ada" })).toEqual([
       "C:\\Users\\Ada\\.local\\bin\\claude.exe",
     ]);
-    expect(knownLocations("claude", { platform: "darwin", home: "/Users/ada" })).toEqual([
+    expect(knownLocations("claude", { platform: "darwin", home: "/Users/ada", env: {} })).toEqual([
       "/Users/ada/.local/bin/claude",
       "/Users/ada/.claude/local/claude",
+      // Then the package managers' global bin folders (an app started from the Dock).
+      "/Users/ada/.bun/bin/claude",
+      "/Users/ada/Library/pnpm/claude",
+      "/Users/ada/.volta/bin/claude",
+      "/Users/ada/.npm-global/bin/claude",
+      "/opt/homebrew/bin/claude",
+      "/usr/local/bin/claude",
     ]);
     expect(knownLocations("codex", { platform: "linux", home: "/home/ada", env: {} })).toEqual([
       "/home/ada/.local/bin/codex",
       "/home/ada/.codex/packages/standalone/current/bin/codex",
       "/home/ada/.codex/packages/standalone/current/codex",
+      "/home/ada/.bun/bin/codex",
+      "/home/ada/.local/share/pnpm/codex",
+      "/home/ada/.volta/bin/codex",
+      "/home/ada/.npm-global/bin/codex",
+      "/home/linuxbrew/.linuxbrew/bin/codex",
+      "/usr/local/bin/codex",
+    ]);
+    // The package managers' own variables move their folders; gh is found in `~/.local/bin` too.
+    expect(
+      knownLocations("gh", {
+        platform: "darwin",
+        home: "/Users/ada",
+        env: { BUN_INSTALL: "/opt/bun", PNPM_HOME: "/p", npm_config_prefix: "/n" },
+      }),
+    ).toEqual([
+      "/opt/homebrew/bin/gh",
+      "/usr/local/bin/gh",
+      "/opt/bun/bin/gh",
+      "/p/gh",
+      "/Users/ada/.volta/bin/gh",
+      "/n/bin/gh",
+      "/Users/ada/.npm-global/bin/gh",
+      "/Users/ada/.local/bin/gh",
+    ]);
+    // Windows keeps its installers' folders only; npm's folder is on the user's Path there.
+    expect(knownLocations("gh", { platform: "win32", home: "C:\\Users\\Ada", env: {} })).toEqual([
+      "C:\\Program Files\\GitHub CLI\\gh.exe",
     ]);
     expect(knownLocations("codex", { platform: "win32", home: "C:\\Users\\Ada", env: {} })[0]).toBe(
       "C:\\Users\\Ada\\.codex\\packages\\standalone\\current\\bin\\codex.exe",

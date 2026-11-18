@@ -16,7 +16,7 @@ import {
 import { executableFingerprint, ModelFreshness } from "../freshness";
 import { ModelCatalog } from "../models";
 import type { ResolvedCommand } from "../util/exec";
-import { quickLocate } from "../util/locate";
+import { type LocateOptions, quickLocate } from "../util/locate";
 import { DEFAULT_MODEL_ID } from "../util/model";
 import type { UtilityModel } from "../utility";
 import { detectCodex } from "./detect";
@@ -79,6 +79,8 @@ function fallbackModels(note?: string): ModelInfo[] {
 
 export interface CodexAdapterOptions {
   executable?: ResolvedCommand;
+  /** Where to look for `codex` (tests); default PATH, then its known install locations. */
+  locate?: LocateOptions;
   /** Max time for model discovery, app-server start-up included. */
   modelListTimeoutMs?: number;
 }
@@ -102,12 +104,18 @@ export class CodexAdapter implements ProviderAdapter {
    * found broken are skipped until they change.
    */
   private executable(): ResolvedCommand | undefined {
-    return this.options.executable ?? quickLocate("codex");
+    return this.options.executable ?? quickLocate("codex", this.options.locate);
   }
 
   /** Finds a working copy (validating each one), so a broken shim never wins. */
   detect(): Promise<ProviderStatus> {
-    return detectCodex(this.options.executable ? { executable: this.options.executable } : {});
+    return detectCodex(
+      this.options.executable
+        ? { executable: this.options.executable }
+        : this.options.locate
+          ? { locate: this.options.locate }
+          : {},
+    );
   }
 
   capabilities(): ProviderCapabilities {
