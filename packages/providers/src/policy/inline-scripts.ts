@@ -25,11 +25,25 @@ export interface InlineScript {
 
 const SHELLS = new Set(["sh", "bash", "zsh", "dash", "ksh", "ash", "fish"]);
 
-/** The command lines `bin` runs, given the words after it; `cmd`: the command they are from. */
-export function inlineScripts(bin: string, args: string[], cmd: SimpleCommand): InlineScript[] {
+/** True for a program that runs a command line given to it: a POSIX shell, PowerShell or cmd. */
+export const isShell = (bin: string): boolean =>
+  SHELLS.has(bin) || bin === "pwsh" || bin === "powershell" || bin === "cmd";
+
+/**
+ * The command lines `bin` runs, given the words after it; `cmd`: the command they are from.
+ * `joined`: the words are a started shell's whole argument list (`Start-Process bash`), so a POSIX
+ * shell's script is everything after `-c`, as the other shells read theirs.
+ */
+export function inlineScripts(
+  bin: string,
+  args: string[],
+  cmd: SimpleCommand,
+  joined = false,
+): InlineScript[] {
   if (SHELLS.has(bin)) {
     const flag = args.findIndex((a) => /^-[a-z]*c[a-z]*$/i.test(a));
-    const text = flag >= 0 ? args.slice(flag + 1).find((a) => !a.startsWith("-")) : undefined;
+    const rest = flag >= 0 ? args.slice(flag + 1) : [];
+    const text = joined ? rest.join(" ") : rest.find((a) => !a.startsWith("-"));
     return text ? [{ text, dialect: "posix" }] : [];
   }
   if (bin === "pwsh" || bin === "powershell") {

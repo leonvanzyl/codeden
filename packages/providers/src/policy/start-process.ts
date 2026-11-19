@@ -1,4 +1,5 @@
-import type { InlineScript } from "./inline-scripts";
+import { binName } from "./command-words";
+import { type InlineScript, inlineScripts, isShell } from "./inline-scripts";
 import { parseShell, type SimpleCommand, wordPaths } from "./shell";
 
 /**
@@ -88,12 +89,33 @@ const CMD_SWITCH =
 /** cmd `start`'s switches that take the next word as their value. */
 const CMD_VALUED = /^\/\/?(?:node|affinity|machine)$/i;
 
+/** What a Start-Process (or `start`) command line says: its parameters and its words. */
+interface Parsed {
+  named: Map<string, string[]>;
+  positional: string[];
+  dir?: string;
+}
+
 /** The command lines `Start-Process` runs, given the words after it; none for another command. */
-export function startedProcesses(bin: string, args: string[], cmd: SimpleCommand): InlineScript[] {
+export function startedProcesses(bin: string, words: string[], cmd: SimpleCommand): InlineScript[] {
   if (!STARTS.has(bin)) return [];
+  const args = bin === "start" ? splitDirEscape(words) : words;
+  const first = parseWords(cmd, args, false);
+  const parsed = [first];
+  // cmd's `start "title" /b prog`: the quotes are gone, so read it with a title too.
+  if (bin === "start" && !first.named.has("filepath")) parsed.push(parseWords(cmd, args, true));
+  return parsed.flatMap((p) => processes(cmd, p));
+}
+
+/**
+ * Reads the words after `Start-Process`. With `skipTitle` (cmd's `start`), the first word that
+ * isn't a switch is the window title (`start "" /b prog`), so the switches after it are skipped too.
+ */
+function parseWords(cmd: SimpleCommand, args: string[], skipTitle: boolean): Parsed {
   const named = new Map<string, string[]>();
   const positional: string[] = [];
   let dir: string | undefined;
+  let titled = !skipTitle;
   for (let i = 0; i < args.length; i += 1) {
     const arg = args[i] as string;
     const param = PARAM.exec(arg);
@@ -114,17 +136,20 @@ export function startedProcesses(bin: string, args: string[], cmd: SimpleCommand
       const d = /^\/\/?d(.*)$/i.exec(arg);
       if (d) dir = d[1] || args[++i];
       else if (CMD_VALUED.test(arg)) i += 1;
-    } else positional.push(arg);
+    } else if (!program && !titled) titled = true;
+    else positional.push(arg);
   }
+  return { named, positional, dir };
+}
+
+/** The command lines one reading of a `Start-Process` command line runs. */
+function processes(cmd: SimpleCommand, { named, positional, dir }: Parsed): InlineScript[] {
   const filePath = named.get("filepath")?.[0];
   const listed = named.get("argumentlist") ?? [];
   const extra = (words: string[]) => [...words.flatMap((w) => elements(cmd, w)), ...listed];
-  const forms: Array<[string | undefined, string[]]> = filePath
-    ? [[filePath, extra(positional)]]
-    : [[positional[0], extra(positional.slice(1))]];
-  if (bin === "start" && !filePath && positional.length > 1) {
-    forms.push([positional[1], extra(positional.slice(2))]);
-  }
+  const program = filePath ?? positional[0];
+  if (!program) return [];
+  const words = extra(filePath ? positional : positional.slice(1));
   const workingDir = named.get("workingdirectory")?.[0] ?? dir;
   const elevated = (named.get("verb") ?? []).some((v) => /^runas/i.test(v));
   const redirects = [
@@ -132,11 +157,45 @@ export function startedProcesses(bin: string, args: string[], cmd: SimpleCommand
     ...(named.get("redirectstandarderror") ?? []).map((f) => `2> ${quote(f)}`),
     ...(named.get("redirectstandardinput") ?? []).map((f) => `< ${quote(f)}`),
   ];
-  return forms.flatMap(([program, words]) => {
-    if (!program) return [];
-    const text = [quote(program), ...words, ...redirects].join(" ");
-    return [{ text, dialect: "auto" as const, dir: workingDir, elevated }];
-  });
+  const as = (text: string): InlineScript => ({ text, dialect: "auto", dir: workingDir, elevated });
+  // A started shell gets the arguments joined into one command line, and its script is all of it
+  // (`-c 'a | b'`): the `|` is the script's, not a pipe of this command line.
+  const shell = binName(program);
+  const scripts = isShell(shell)
+    ? inlineScripts(shell, windowsWords(words.join(" ")), cmd, true)
+    : [];
+  if (scripts.length === 0) return [as([quote(program), ...words, ...redirects].join(" "))];
+  const own = redirects.length > 0 ? [as([quote(program), ...redirects].join(" "))] : [];
+  return [...scripts.map((s) => ({ ...s, dir: workingDir, elevated })), ...own];
+}
+
+/** A command line split into words as a Windows program reads it: spaces split, `"` groups. */
+function windowsWords(line: string): string[] {
+  return (line.match(/(?:[^\s"]+|"[^"]*"?)+/g) ?? []).map((w) => w.replace(/"/g, ""));
+}
+
+/**
+ * The lexer reads `\ ` as an escaped space, so `/d C:\ cmd` gives one word, `C:\ cmd`. In cmd the
+ * directory ends at the `\`, and what follows is the program.
+ */
+function splitDirEscape(args: string[]): string[] {
+  const out: string[] = [];
+  let value = false;
+  for (const arg of args) {
+    const at = arg.indexOf("\\ ");
+    const dir = value || /^\/\/?d./i.test(arg);
+    value = /^\/\/?d$/i.test(arg);
+    if (at < 0 || !dir) out.push(arg);
+    else
+      out.push(
+        arg.slice(0, at + 1),
+        ...arg
+          .slice(at + 2)
+          .split(" ")
+          .filter(Boolean),
+      );
+  }
+  return out;
 }
 
 /** The Start-Process parameter a name stands for: the name, an alias or an unambiguous prefix. */
