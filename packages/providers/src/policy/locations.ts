@@ -11,7 +11,9 @@ import type { SimpleCommand } from "./shell";
  * `Pop-Location` go back to the latest one saved (#541). With nothing saved earlier in the command,
  * the shell's own stack is unknown, so the location stays. Named stacks (`-StackName x`) are kept
  * apart. `Set-Location -StackName x` makes another stack the default and `popd +N` drops an entry,
- * so both forget the stack and later pops stay where they are.
+ * so both forget the stack and later pops stay where they are. So does a pop that doesn't really
+ * pop (`popd -n` keeps the location, `popd x` and `Pop-Location -Bogus` fail, `dirs -c` empties
+ * the stack), and it leaves the location where it is.
  */
 
 const PUSH = new Set(["pushd", "push-location"]);
@@ -21,11 +23,14 @@ const POP = new Set(["popd", "pop-location"]);
 export function afterCd<T extends PathContext>(cmd: SimpleCommand, ctx: T): T {
   const { tokens } = unwrap(cmd.words);
   const bin = binName(tokens[0]);
+  if (bin === "dirs") return tokens.slice(1).some((a) => /^-[a-z]*c/.test(a)) ? forget(ctx) : ctx;
   if (!CD.has(bin) && !POP.has(bin)) return ctx;
   const { stack, args } = withoutStackName(tokens.slice(1));
   if (POP.has(bin)) {
-    if (args.some((a) => /^[+-]\d+$/.test(a))) return { ...ctx, pushed: undefined };
-    return popLocation(ctx, stack);
+    if (args.some((a) => /^[+-]\d+$/.test(a))) return forget(ctx);
+    // Anything but a plain pop (`popd -n`, `popd x`, `Pop-Location -Bogus`) doesn't go back.
+    const plain = bin === "popd" ? tokens.length === 1 : args.every(isPassThru);
+    return plain ? popLocation(ctx, stack) : forget(ctx);
   }
   if (args.includes("-")) return ctx;
   const target = namedArg(args, ["-path", "-literalpath"]) ?? args.find((a) => !a.startsWith("-"));
@@ -46,6 +51,15 @@ export function moveTo<T extends PathContext>(target: string, ctx: T): T {
   const onDisk = { ...ctx, psDrive: undefined };
   return { ...onDisk, dir: resolveAgainst(provider?.path ?? target, onDisk) };
 }
+
+/** `Pop-Location`'s only other parameter, `-PassThru` (or a prefix of it, `-pa:$false`). */
+const isPassThru = (arg: string) => {
+  const param = /^-(p[a-z]+)(?::.*)?$/i.exec(arg);
+  return param !== null && "passthru".startsWith((param[1] as string).toLowerCase());
+};
+
+/** The stack is unknown from here on: later pops stay where they are. */
+const forget = <T extends PathContext>(ctx: T): T => ({ ...ctx, pushed: undefined });
 
 /** Back to the latest location saved on `stack` (the default stack when undefined). */
 function popLocation<T extends PathContext>(ctx: T, stack: string | undefined): T {
