@@ -147,6 +147,10 @@ describe("runner-link", () => {
     });
     const stall = createServer((socket) => {
       socket.on("error", () => undefined);
+      // Read and discard the upgrade request. A socket nobody reads from keeps the request in
+      // its buffer and never gets to the end of the stream behind it, so it would not see the
+      // link drop the connection (`close`) whenever the request arrived before the abort.
+      socket.resume();
       accepted.push(socket);
       onConnection();
     });
