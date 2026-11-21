@@ -1,0 +1,5 @@
+---
+section: fixed
+---
+
+- **The factory's `tests` check no longer fails pull requests whose tests are named by another convention.** It said "Code changed but no test files were added or updated" when the changed tests weren't `x.test.*` or `x.spec.*` in JavaScript or TypeScript, `x_test.go`, `x_test.py`, `test_x.py` or in a `test/`, `tests/`, `__tests__/`, `spec/` or `e2e/` folder, and a pull request that failed that way after its revise rounds counted towards the pause after failures in a row. It now also knows .NET test projects (`App.Tests/`, `App.UnitTests/`), test classes (`OrderServiceTest.java`, `OrderTests.cs`, `OrderSpec.scala`), `x_test.rs`, `x_spec.rb`, `x-test.js`, `test_x.sh`, `X.Tests.ps1`, `x.cy.ts`, `x.e2e-spec.ts`, `.test.` and `.spec.` files in other languages, Django's `tests.py`, `conftest.py`, `__snapshots__/` and folders such as `integration-tests/`. As before, a test file is told from its path alone, so it counts whether the pull request added, modified, renamed or removed it.
