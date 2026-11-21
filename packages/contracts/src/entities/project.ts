@@ -88,6 +88,12 @@ const projectBase = {
    * the GitHub remote again, or by disconnecting GitHub.
    */
   remoteWarning: ProjectRemoteWarning.optional(),
+  /**
+   * The project group this project belongs to (DESIGN.md "Project groups"), at most one: its
+   * agent sessions get the group's skills, and its PM and agents share the group's memory.
+   * Defaults to null so events written before groups existed still parse.
+   */
+  groupId: Id.nullable().default(null),
   createdAt: Timestamp,
   updatedAt: Timestamp,
   archivedAt: Timestamp.nullable(),
