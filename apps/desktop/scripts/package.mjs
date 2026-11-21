@@ -13,7 +13,7 @@
 import { spawnSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { Arch, build, Platform } from "electron-builder";
 import config, { keyringBinary } from "../electron-builder.config.mjs";
@@ -104,6 +104,13 @@ const platform = { win32: Platform.WINDOWS, darwin: Platform.MAC, linux: Platfor
 const archList = archs.map((a) => Arch[a]);
 if (archList.some((a) => a === undefined)) throw new Error(`Unknown --arch in ${archs.join(", ")}`);
 const hostOnly = archs.length === 1 && archs[0] === process.arch;
+// The electron package's `dist` folder: the binary on Windows and Linux, `Electron.app` on
+// macOS, which is what electron-builder expects. (Requiring the package downloads the binary
+// on first use; the path it returns is the binary inside the app on macOS, not `dist`.)
+const electronDist = () => {
+  require("electron");
+  return join(dirname(require.resolve("electron/package.json")), "dist");
+};
 const targets = platform.createTarget(values.dir ? ["dir"] : null, ...archList);
 const artifacts = await build({
   projectDir: root,
@@ -113,8 +120,7 @@ const artifacts = await build({
     ...config,
     electronVersion,
     // The installed Electron for host builds; electron-builder downloads other architectures.
-    // (The electron package downloads its binary on first `require`.)
-    ...(hostOnly ? { electronDist: resolve(require("electron"), "..") } : {}),
+    ...(hostOnly ? { electronDist: electronDist() } : {}),
   },
 });
 for (const file of artifacts) console.log(`built ${file}`);
