@@ -23,6 +23,16 @@ export function isAlive(pid: number): boolean {
   }
 }
 
+/** Resolves true once `pid` is gone, false if it is still alive after `timeoutMs`. */
+export async function waitForExit(pid: number, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!isAlive(pid)) return true;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  return !isAlive(pid);
+}
+
 /**
  * Kill a process and everything it started.
  * - Windows: `taskkill /T /F /PID <pid>` (walks the parent-pid tree).
