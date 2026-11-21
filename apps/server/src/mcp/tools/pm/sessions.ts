@@ -11,6 +11,7 @@ import {
 import { z } from "zod";
 import { defineTool, ToolError } from "../../define";
 import { agentSessionOf, compactSession, compactWork, projectFor } from "../shared/helpers";
+import { describeProviderParam } from "../shared/provider-choices";
 import { assertMayStartOnIssues, issuesNamed } from "./issue-trust";
 
 const ENDED = new Set(["completed", "failed", "stopped"]);
@@ -48,6 +49,11 @@ export const startSession = defineTool({
   roles: ["pm"],
   scope: "project",
   alwaysLoad: true,
+  // The loaded providers and whether each is ready, as of this listing.
+  describeInput: describeProviderParam(
+    "provider",
+    "Leave it out to use the project's default provider.",
+  ),
   input: z.object({
     prompt: z
       .string()

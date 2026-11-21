@@ -2,6 +2,13 @@ import { AutonomyLevel, type Project, ProviderId } from "@codeden/contracts";
 import { z } from "zod";
 import { defineTool, ToolError } from "../../define";
 import { projectFor } from "../shared/helpers";
+import { describeProviderParam } from "../shared/provider-choices";
+
+/** The loaded providers and whether each is ready, as the PM's `start_session` lists them. */
+const describeDefaultProvider = describeProviderParam(
+  "defaultProvider",
+  "The provider this project's sessions use unless one is named.",
+);
 
 function compactProject(p: Project) {
   return {
@@ -41,6 +48,7 @@ export const createProject = defineTool({
     "Add a project: either an existing local folder (`path`) or a git URL / owner/repo to clone (`cloneUrl`). Only do this when the user asked for it.",
   roles: ["orchestrator"],
   scope: "global",
+  describeInput: describeDefaultProvider,
   input: z
     .object({
       path: z.string().min(1).optional().describe("Absolute path of an existing folder"),
@@ -73,6 +81,7 @@ export const updateProject = defineTool({
     "Change a project's name, default provider, default autonomy level, timezone, default branch, or whether its agent sessions run with CI=true. Pass null to clear an override.",
   roles: ["orchestrator"],
   scope: "global",
+  describeInput: describeDefaultProvider,
   input: z.object({
     projectId: z.string().min(1),
     name: z.string().trim().min(1).max(100).optional(),

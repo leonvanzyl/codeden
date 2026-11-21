@@ -64,7 +64,7 @@ export function createMcpHandler(deps: McpEndpointDeps): McpHandler {
       },
     );
     server.setRequestHandler(ListToolsRequestSchema, async () => ({
-      tools: deps.registry.list(claims.role, {
+      tools: await deps.registry.listNow(claims.role, {
         projectId: claims.projectId,
         sessionId: claims.sessionId,
       }),
