@@ -75,6 +75,7 @@ import type {
   SecretsApi,
   VoiceApi,
 } from "./feature-apis";
+import type { GroupsApi } from "./groups-api";
 import type { AuthApi, NetworkApi } from "./network-api";
 import type { QueueApi } from "./queue-api";
 import type { MentionCandidate, OpenTerminalOptions, TerminalChannel } from "./types";
@@ -248,6 +249,8 @@ export interface CodeDenClient {
   /** Make a GitHub project local-only, once its folder no longer has a GitHub `origin`. */
   disconnectGithub(projectId: string): Promise<DisconnectGithubResponse>;
   readonly automations: AutomationsApi;
+  /** Project groups: shared skills and memory for a set of projects. */
+  readonly groups: GroupsApi;
   /** Autonomy modes, the vision, the factory panel and kill switches (§10.1, experimental). */
   readonly factory: FactoryApi;
 

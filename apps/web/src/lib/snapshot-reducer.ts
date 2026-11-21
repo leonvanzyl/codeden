@@ -1,6 +1,7 @@
 import {
   type EventEnvelope,
   type Project,
+  type ProjectGroup,
   type Session,
   type Snapshot,
   sortProjects,
@@ -19,6 +20,13 @@ function upsert<T extends { id: string }>(list: T[], next: T): T[] {
 function upsertProject(list: Project[], project: Project): Project[] {
   if (project.archivedAt !== null) return list.filter((p) => p.id !== project.id);
   return sortProjects(upsert(list, project));
+}
+
+/** Groups are listed by name, then id (like `GET /api/groups`). */
+function upsertGroup(list: ProjectGroup[], group: ProjectGroup): ProjectGroup[] {
+  return upsert(list, group).sort(
+    (a, b) => a.name.localeCompare(b.name) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+  );
 }
 
 /** Move a project's archived agent session count by `delta`; projects at zero are left out. */
@@ -98,6 +106,12 @@ export function applyDomainEvent(snap: Snapshot, env: EventEnvelope): Snapshot {
       break;
     case "automation.deleted":
       next.automations = snap.automations.filter((a) => a.id !== env.payload.automationId);
+      break;
+    case "project_group.saved":
+      next.groups = upsertGroup(snap.groups, env.payload.group);
+      break;
+    case "project_group.deleted":
+      next.groups = snap.groups.filter((g) => g.id !== env.payload.groupId);
       break;
     case "settings.updated":
       next.settings = env.payload.settings;

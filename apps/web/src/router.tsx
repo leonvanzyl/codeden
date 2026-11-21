@@ -43,6 +43,7 @@ const FactoryViewPage = lazyRouteComponent(
   () => import("@/routes/factory-view"),
   "FactoryViewPage",
 );
+const GroupsPage = lazyRouteComponent(() => import("@/routes/groups"), "GroupsPage");
 const HomePage = lazyRouteComponent(() => import("@/routes/home"), "HomePage");
 const InboxPage = lazyRouteComponent(() => import("@/routes/inbox"), "InboxPage");
 const NewSessionPage = lazyRouteComponent(() => import("@/routes/new-session"), "NewSessionPage");
@@ -292,6 +293,17 @@ const agentsRoute = createRoute({
   }),
 });
 
+const groupsRoute = createRoute({
+  getParentRoute: () => shell,
+  path: "/groups",
+  validateSearch: (s: Record<string, unknown>): { group?: string } =>
+    typeof s.group === "string" && s.group ? { group: s.group } : {},
+  component: withPage(GroupsPage, function Groups() {
+    const { group } = groupsRoute.useSearch();
+    return <GroupsPage groupId={group ?? null} />;
+  }),
+});
+
 const inboxRoute = createRoute({
   getParentRoute: () => shell,
   path: "/inbox",
@@ -339,6 +351,7 @@ const routeTree = rootRoute.addChildren([
     }),
     settingsSectionRoute,
     agentsRoute,
+    groupsRoute,
   ]),
   createRoute({ getParentRoute: () => rootRoute, path: "/setup", component: SetupPage }),
   factoryViewRoute,

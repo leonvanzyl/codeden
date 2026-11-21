@@ -118,6 +118,9 @@ export function mockProjectApi(world: MockWorld): MockProjectApi {
       if (patch.execution?.backend === "docker" && find(id).kind !== "github") {
         throw new ApiRequestError(400, "backend_unavailable", NOT_GITHUB);
       }
+      if (patch.groupId && !world.snapshot.groups.some((g) => g.id === patch.groupId)) {
+        throw new ApiRequestError(404, "group_not_found", "That group doesn't exist");
+      }
       const project = {
         ...find(id),
         ...Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)),

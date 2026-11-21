@@ -7,6 +7,7 @@ import {
   GitFork,
   Inbox,
   Keyboard,
+  Layers,
   MessageSquarePlus,
   MonitorPlay,
   Moon,
@@ -339,6 +340,12 @@ export function CommandPalette() {
               label="Agent configuration"
               hint="Memory, skills, subagents, MCP"
               onSelect={run(() => navigate({ to: "/agents" }))}
+            />
+            <Row
+              icon={<Layers />}
+              label="Project groups"
+              hint="Shared skills and memory"
+              onSelect={run(() => navigate({ to: "/groups" }))}
             />
             <Row
               icon={<Rocket />}
