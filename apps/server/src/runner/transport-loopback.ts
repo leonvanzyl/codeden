@@ -1,4 +1,6 @@
+import { join } from "node:path";
 import type { RunnerLock } from "@codeden/contracts";
+import { installedClaudeSdkVersion } from "@codeden/providers";
 import WebSocket from "ws";
 import { type RunnerLaunchConfig, type RunnerStartTimeouts, startRunnerProcess } from "./launcher";
 import { probeRunnerLock, readLiveRunnerLock } from "./lock";
@@ -17,6 +19,12 @@ export interface FindRunnerOptions {
   onStarting: () => void;
   /** A started runner is taking longer than usual. */
   onSlow: () => void;
+  /**
+   * When set, an existing live runner whose `<home>/deps` holds a different Claude Agent SDK
+   * version is treated as stale and replaced. Guards against reconnecting to a runner that
+   * started before a `claude update` or a manual SDK upgrade in `~/.codeden/deps`.
+   */
+  requiredSdkVersion?: string;
 }
 
 /**
@@ -25,7 +33,20 @@ export interface FindRunnerOptions {
  */
 export async function findOrStartRunner(opts: FindRunnerOptions): Promise<RunnerLock> {
   const existing = readLiveRunnerLock(opts.lockFile);
-  if (existing && (await probeRunnerLock(existing, undefined, opts.signal))) return existing;
+  if (existing && (await probeRunnerLock(existing, undefined, opts.signal))) {
+    if (opts.requiredSdkVersion) {
+      const installed = installedClaudeSdkVersion(join(opts.home, "deps"));
+      if (installed !== opts.requiredSdkVersion) {
+        opts.log?.(
+          `runner: SDK in deps changed (${installed ?? "none"} → ${opts.requiredSdkVersion}); restarting runner to pick up the new version`,
+        );
+      } else {
+        return existing;
+      }
+    } else {
+      return existing;
+    }
+  }
   opts.signal?.throwIfAborted();
   if (existing) {
     opts.log?.(`runner: pid ${existing.pid} does not answer; starting a new runner`);

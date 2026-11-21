@@ -95,6 +95,11 @@ export interface RunnerClientOptions {
    * e.g. to resume sessions interrupted by a runner restart.
    */
   onReady?: (runnerId: string) => void;
+  /**
+   * When set, a live runner whose `<home>/deps` holds a different Claude Agent SDK version is
+   * restarted so it loads the updated SDK. See `FindRunnerOptions.requiredSdkVersion`.
+   */
+  requiredSdkVersion?: string;
 }
 
 /** Where a runner runs, as its `welcome` reported it (each part absent from older runners). */
@@ -387,6 +392,7 @@ export class RunnerClient {
       lockFile: this.opts.lockFile,
       launch: this.opts.launch,
       startTimeouts: this.opts.startTimeouts,
+      requiredSdkVersion: this.opts.requiredSdkVersion,
       signal,
       log: this.opts.log,
       onStarting: () => {
