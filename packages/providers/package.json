@@ -16,7 +16,7 @@
     "test:live": "node scripts/test-live.mjs"
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "0.3.318",
+    "@anthropic-ai/claude-agent-sdk": "0.3.330",
     "@codeden/contracts": "workspace:*",
     "@decimalturn/toml-patch": "3.3.1"
   }

@@ -11,7 +11,7 @@ import { installFromRegistry } from "../../util/registry-install";
 /** The Claude Agent SDK package. */
 export const CLAUDE_SDK_PACKAGE = "@anthropic-ai/claude-agent-sdk";
 /** The SDK version CodeDen is tested with (keep in step with `packages/providers/package.json`). */
-export const CLAUDE_SDK_VERSION = "0.3.318";
+export const CLAUDE_SDK_VERSION = "0.3.330";
 
 export type ClaudeSdkModule = typeof import("@anthropic-ai/claude-agent-sdk");
 

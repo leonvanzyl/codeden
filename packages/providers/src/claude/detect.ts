@@ -3,8 +3,8 @@ import { brokenInstallMessage, type DetectExeOptions, lookupForDetect } from "..
 import { runCommand } from "../util/exec";
 import { compareVersions } from "../util/version";
 
-/** Oldest Claude Code version the adapter is tested against (pinned SDK 0.3.318). */
-export const CLAUDE_MIN_VERSION = "2.1.250";
+/** Oldest Claude Code version the adapter is tested against (pinned SDK 0.3.330). */
+export const CLAUDE_MIN_VERSION = "2.1.290";
 const LOGIN_EXPIRY_WARNING_MS = 3 * 24 * 60 * 60 * 1000;
 const INSTALL = { kind: "install", command: "npm install -g @anthropic-ai/claude-code" } as const;
 
