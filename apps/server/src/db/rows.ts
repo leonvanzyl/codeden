@@ -57,6 +57,8 @@ export function projectToRow(p: Project): ProjectRow {
     sortOrder: p.sortOrder,
     github: p.kind === "github" ? p.github : null,
     remoteWarning: p.remoteWarning ?? null,
+    // Events written before groups existed carry none.
+    groupId: p.groupId ?? null,
     createdAt: p.createdAt,
     updatedAt: p.updatedAt,
     archivedAt: p.archivedAt,

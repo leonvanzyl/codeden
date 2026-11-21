@@ -16,6 +16,7 @@ import {
   resetGithubProjection,
 } from "../services/github/projection";
 import { applyOrchestrationProjection } from "../services/orchestration/projection";
+import { applyGroupProjection } from "../services/projects/group-projection";
 import { indexUnfinishedItems } from "../services/search/index-writer";
 import { applyUsageReport } from "../services/usage/ledger";
 import { applyMutations, DbProjectionReader, derivedEvents, type Tx } from "./projection-db";
@@ -60,6 +61,11 @@ export function applyProjection(tx: Tx, e: EventEnvelope): NewEvent[] {
       e.payload.projectIds.forEach((id, index) => {
         tx.update(projects).set({ sortOrder: index }).where(eq(projects.id, id)).run();
       });
+      return [];
+    case "project_group.saved":
+    case "project_group.deleted":
+    case "project_group.memory_written":
+      applyGroupProjection(tx, e);
       return [];
     case "session.created":
     case "session.updated": {

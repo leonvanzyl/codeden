@@ -35,6 +35,7 @@ function project(
     execution: { backend: "local" as const },
     pinned: false,
     sortOrder: 0,
+    groupId: null,
     createdAt: ago(60 * 24 * 12),
     updatedAt: ago(30),
     archivedAt: null,

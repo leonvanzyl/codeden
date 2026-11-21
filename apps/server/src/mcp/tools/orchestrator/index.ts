@@ -1,4 +1,5 @@
 import type { AnyServerTool } from "../../define";
+import { assignProjectGroup, createGroup, listGroups, updateGroup } from "./groups";
 import { askPm, getOverview, listInbox, messagePm } from "./messaging";
 import { createProject, listProjects, updateProject } from "./projects";
 
@@ -8,6 +9,10 @@ export const orchestratorTools: AnyServerTool[] = [
   listProjects,
   createProject,
   updateProject,
+  listGroups,
+  createGroup,
+  updateGroup,
+  assignProjectGroup,
   messagePm,
   askPm,
   listInbox,

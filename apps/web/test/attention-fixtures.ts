@@ -51,6 +51,7 @@ export function snapshot(
     generatedAt: ts,
     settings: { ...settings, notifications: { ...settings.notifications, ...notifications } },
     projects: [],
+    groups: [],
     sessions: [],
     archivedSessionCounts: {},
     inbox,

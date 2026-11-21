@@ -86,6 +86,7 @@ export function mockProjectApi(world: MockWorld): MockProjectApi {
         execution: { backend: "local" },
         pinned: false,
         sortOrder: last + 1,
+        groupId: null,
         createdAt: now,
         updatedAt: now,
         archivedAt: null,

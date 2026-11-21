@@ -32,6 +32,7 @@ import {
   OrchestrationService,
 } from "./orchestration/orchestration-service";
 import type { AutomationPort, GithubPort } from "./orchestration/ports";
+import { ProjectGroupService } from "./projects/group-service";
 import { ProjectService } from "./projects/project-service";
 import { ProjectRedetector } from "./projects/redetector";
 import { ProviderHistoryService } from "./providers/history";
@@ -148,6 +149,8 @@ export interface AppServices {
   secrets: SecretStore;
   utility: UtilityService;
   projects: ProjectService;
+  /** Project groups: shared skills and memory (DESIGN.md "Project groups"). */
+  groups: ProjectGroupService;
   /** Re-detects projects' git checkout and GitHub remote (§9): on demand, on start, after turns. */
   redetector: ProjectRedetector;
   sessionRepo: SessionRepo;
@@ -227,6 +230,7 @@ export function createServices(opts: ServicesOptions): AppServices {
     exec,
     projectsDir: opts.projectsDir ?? join(userHome, "codeden-projects"),
   });
+  const groups = new ProjectGroupService({ db: opts.db, store: opts.store });
   const sessionRepo = new SessionRepo(opts.db, opts.store);
   const artifacts = new ArtifactService(opts.db, opts.store, opts.paths.artifacts);
   const outbox = new Outbox(opts.db, opts.store);
@@ -253,6 +257,7 @@ export function createServices(opts: ServicesOptions): AppServices {
   const launcher = new SessionLauncher({
     repo: sessionRepo,
     projects,
+    groups,
     runner: opts.runner,
     runners,
     inbox,
@@ -450,6 +455,7 @@ export function createServices(opts: ServicesOptions): AppServices {
     secrets: opts.secrets,
     utility,
     projects,
+    groups,
     redetector,
     sessionRepo,
     sessions,

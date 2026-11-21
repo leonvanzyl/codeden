@@ -15,6 +15,7 @@ import type { ArtifactService } from "../artifacts";
 import { errorMessage, ServiceError } from "../errors";
 import type { GitBroker } from "../git-broker";
 import type { InboxService } from "../inbox-service";
+import type { ProjectGroupService } from "../projects/group-service";
 import type { ProjectService } from "../projects/project-service";
 import {
   clonesWorkspaces,
@@ -37,6 +38,11 @@ import { setUnanswered, unansweredCode } from "./unanswered-start";
 export interface LauncherDeps extends RunnerDeps {
   repo: SessionRepo;
   projects: ProjectService;
+  /**
+   * The project's group, for the system prompt and the skills an agent session gets from it
+   * (`SessionOptions.sharedSkills`, DESIGN.md "Project groups"). Absent: no group features.
+   */
+  groups?: Pick<ProjectGroupService, "groupOf" | "sharedSkillsFor">;
   inbox: InboxService;
   /**
    * CodeDen's data directory (§6), sent with every session so the agent's policy guards the
@@ -375,16 +381,35 @@ export class SessionLauncher {
       autonomy: session.autonomy,
       planMode: session.planMode ?? false,
       resumeToken: session.resumeToken ?? undefined,
-      systemPrompt: codedenSystemPrompt(session, project),
+      systemPrompt: codedenSystemPrompt(
+        session,
+        project,
+        this.deps.groups?.groupOf(project?.id ?? null) ?? null,
+      ),
       // The orchestrator and PMs never write project code (§11.2). Agent sessions at the
       // `read_only` level carry it in `autonomy`, so it can change live.
       readOnly: session.role !== "agent",
       codedenHome: this.deps.home,
       artifactsDir: this.deps.artifacts?.sessionDir(session.id),
       mcpServers,
+      ...this.sharedSkills(session, project),
       ...(ownBranch(session) ? { ownBranch: ownBranch(session) } : {}),
       ...(project?.agentCiEnv === false ? { ciEnv: false } : {}),
     });
+  }
+
+  /**
+   * The group's skills for an agent session in a workspace of its own (a worktree, or a
+   * sandbox's clone): the runner writes them there and removes the ones the group no longer has,
+   * so a project that left its group gets none on the next open. A session in the project's own
+   * checkout (or a PM) gets none: CodeDen never adds files to the user's folder.
+   */
+  private sharedSkills(session: Session, project: Project | null) {
+    if (!this.deps.groups || session.role !== "agent") return {};
+    const ownWorkspace =
+      session.worktreePath !== null || clonesWorkspaces(runnerForSession(this.deps, session.id));
+    if (!ownWorkspace) return {};
+    return { sharedSkills: this.deps.groups.sharedSkillsFor(project?.id ?? null) };
   }
 
   /** A fork's workspace plan while its worktree doesn't exist yet (`ForkStart`). */

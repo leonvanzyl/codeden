@@ -407,6 +407,7 @@ describe("issue intake ownership (§10.1)", () => {
     execution: { backend: "local" },
     pinned: false,
     sortOrder: 0,
+    groupId: null,
     createdAt: "2026-11-07T10:00:00.000Z",
     updatedAt: "2026-11-07T10:00:00.000Z",
     archivedAt: null,

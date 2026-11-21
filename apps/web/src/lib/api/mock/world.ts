@@ -55,6 +55,7 @@ export class MockWorld {
       generatedAt: new Date().toISOString(),
       settings: structuredClone(settings),
       projects: structuredClone(projects),
+      groups: [],
       sessions: structuredClone(sessions),
       archivedSessionCounts: mockArchivedCounts(sessions),
       inbox: structuredClone(inboxItems),

@@ -84,11 +84,13 @@ export const projects = sqliteTable(
     github: json<GitHubRepo>("github"),
     /** Set when re-detection found the GitHub remote missing (§9); null when all is well. */
     remoteWarning: json<ProjectRemoteWarning>("remote_warning"),
+    /** The project's group (`Project.groupId`); null when it is in none. */
+    groupId: text("group_id"),
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at").notNull(),
     archivedAt: text("archived_at"),
   },
-  (t) => [uniqueIndex("projects_slug").on(t.slug)],
+  (t) => [uniqueIndex("projects_slug").on(t.slug), index("projects_group").on(t.groupId)],
 );
 
 export const sessions = sqliteTable(

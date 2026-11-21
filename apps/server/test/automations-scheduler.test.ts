@@ -31,6 +31,7 @@ const project: Project = {
   execution: { backend: "local" },
   pinned: false,
   sortOrder: 0,
+  groupId: null,
   createdAt: ts,
   updatedAt: ts,
   archivedAt: null,
