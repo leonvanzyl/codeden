@@ -114,7 +114,12 @@ export class OpenCodeAdapter implements ProviderAdapter {
     if (!executable) throw new Error("OpenCode is not installed (no `opencode` on PATH)");
     const efforts = (model: string | undefined) => {
       const list = this.catalog.list();
-      return modelEfforts(list, model ?? list.find((m) => m.isDefault)?.id);
+      // A model OpenCode doesn't list (a custom id) has no known variants, and OpenCode fails
+      // the turn on a variant the model lacks, so none is sent; before discovery, efforts pass.
+      return (
+        modelEfforts(list, model ?? list.find((m) => m.isDefault)?.id) ??
+        (this.listed ? [] : undefined)
+      );
     };
     const session = new OpenCodeSession(opts, {
       executable,
