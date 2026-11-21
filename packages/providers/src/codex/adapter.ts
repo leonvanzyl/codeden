@@ -46,6 +46,8 @@ const capabilities: ProviderCapabilities = {
   reasoningEffort: true,
   mcp: true,
   skills: true,
+  // Codex reads repository skills from `.agents/skills`.
+  skillDirs: [".agents/skills"],
   // Approval and sandbox policy are per turn (`turn/start` overrides): changes wait for it.
   liveAutonomy: false,
   readOnly: true,

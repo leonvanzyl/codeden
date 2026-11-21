@@ -20,6 +20,9 @@
   "reasoningEffort": true,
   "mcp": true,
   "skills": true,
+  "skillDirs": [
+   ".claude/skills"
+  ],
   "liveAutonomy": true,
   "readOnly": true,
   "compact": true,
