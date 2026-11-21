@@ -50,7 +50,11 @@ try {
     log,
     onShutdown: () => process.exit(0),
   });
-  const stop = () => void runner.close().then(() => process.exit(0));
+  const stop = () => {
+    // Backstop (#588): a runner told to stop never outlives the signal, whatever hangs.
+    setTimeout(() => process.exit(1), 60_000).unref();
+    void runner.close().then(() => process.exit(0));
+  };
   for (const signal of ["SIGINT", "SIGTERM", "SIGHUP", "SIGBREAK"] as const) {
     process.on(signal, stop);
   }
