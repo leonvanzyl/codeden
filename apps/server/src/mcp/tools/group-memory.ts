@@ -2,7 +2,7 @@ import { MemoryWriteMode } from "@codeden/contracts";
 import { z } from "zod";
 import type { AppServices } from "../../services/container";
 import { defineTool, type ToolAvailabilityContext, ToolError } from "../define";
-import { memoryWrite } from "./shared/memory-writes";
+import { memorySource, memoryWrite } from "./shared/memory-writes";
 
 /** Listed only to PMs and agents of a project that is in a group. */
 const inGroup = (services: AppServices, caller?: ToolAvailabilityContext) =>
@@ -48,7 +48,9 @@ export const updateGroupMemory = defineTool({
     ),
   handler: async (input, { services, projectId, sessionId, role }) => {
     const mode = input.mode ?? "append";
-    const content = memoryWrite(services, { role, sessionId }, input.content, mode);
+    const caller = { role, sessionId };
+    const text = await memoryWrite(services, caller, input.content, mode);
+    const content = `${memorySource(services, projectId, caller)}\n\n${text.trim()}`;
     const current = services.groups.groupOf(projectId);
     if (input.groupId && current && input.groupId !== current.id) {
       throw new ToolError(

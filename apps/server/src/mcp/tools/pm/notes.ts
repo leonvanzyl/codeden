@@ -30,7 +30,7 @@ export const updateProjectNotes = defineTool({
     mode: z.enum(["append", "replace"]).optional(),
   }),
   handler: async ({ content, mode = "append" }, { services, projectId, role, sessionId }) => {
-    const text = memoryWrite(services, { role, sessionId }, content, mode);
+    const text = await memoryWrite(services, { role, sessionId }, content, mode);
     const next = services.orchestration.notes.write(projectId, text, mode);
     return `Notes saved (${Buffer.byteLength(next, "utf8")} bytes).`;
   },
