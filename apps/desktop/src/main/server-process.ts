@@ -1,5 +1,6 @@
-import { type ChildProcess, fork } from "node:child_process";
+import { type ChildProcess, execFile, fork } from "node:child_process";
 import { mkdirSync, openSync, renameSync, statSync } from "node:fs";
+import { homedir } from "node:os";
 import { dirname } from "node:path";
 
 /** The server log is moved aside to `<file>.1` (one copy kept) when it grows past this. */
@@ -22,6 +23,26 @@ import {
   DesktopServerMessage,
   type DesktopUpdateCommand,
 } from "@codeden/contracts";
+
+/** Finder and Dock launches miss the PATH set by macOS login and interactive shell profiles. */
+async function macLoginPath(): Promise<string | undefined> {
+  if (process.platform !== "darwin") return undefined;
+
+  return new Promise((resolve) => {
+    const shell = process.env.SHELL || "/bin/zsh";
+    // Delimit PATH so profile banners or prompts don't become part of it.
+    const child = execFile(
+      shell,
+      ["-i", "-l", "-c", "command printf '\\000%s\\000' \"$PATH\""],
+      { cwd: homedir(), timeout: 5_000, killSignal: "SIGKILL", maxBuffer: 256 * 1024 },
+      (error, stdout) => {
+        const [, path, trailing] = stdout.split("\0");
+        resolve(!error && trailing !== undefined && path ? path : undefined);
+      },
+    );
+    child.stdin?.end();
+  });
+}
 
 export interface ServerReady {
   url: string;
@@ -70,7 +91,8 @@ export class ServerProcess {
     return this.child?.pid;
   }
 
-  start(): Promise<ServerReady> {
+  async start(): Promise<ServerReady> {
+    const loginPath = await macLoginPath();
     mkdirSync(dirname(this.opts.logFile), { recursive: true });
     rotateLog(this.opts.logFile);
     const out = openSync(this.opts.logFile, "a");
@@ -78,7 +100,11 @@ export class ServerProcess {
     if (this.opts.fake) args.push("--fake");
     const child = fork(this.opts.entry, args, {
       stdio: ["ignore", out, out, "ipc"],
-      env: { ...process.env, CODEDEN_DEPS_INSTALLER: "registry" },
+      env: {
+        ...process.env,
+        ...(loginPath ? { PATH: loginPath } : {}),
+        CODEDEN_DEPS_INSTALLER: "registry",
+      },
       windowsHide: true,
     });
     this.child = child;
