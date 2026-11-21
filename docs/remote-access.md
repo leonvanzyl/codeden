@@ -59,6 +59,21 @@ Network access serves CodeDen over plain `http://` (there's no certificate for a
 
 Everything else works: the orchestrator and PM chats, sessions and their transcripts, approvals and questions, the inbox, projects, automations and settings.
 
+## HTTPS through Tailscale Serve
+
+A plain `http://100.x.y.z:4317` address can't give a phone notifications or dictation. If the computer runs Tailscale, **Tailscale Serve** can put HTTPS in front of CodeDen on a name like `https://<machine>.<tailnet>.ts.net:8445`. That unlocks **notifications**, **dictation** and **installing to the home screen** as a real app. Serve must run on the same computer as CodeDen.
+
+1. Set a password (once): `codeden password`.
+2. Tell CodeDen the address to trust: `codeden network origin add https://<machine>.<tailnet>.ts.net:8445`. Only `https://<host name>[:port]` is accepted (no path, no IP address). Check them with `codeden network origin list`.
+3. Turn network access on and keep CodeDen on `127.0.0.1`, so the proxy is the only way in: `codeden network on --loopback-only`. The same choice is **Settings › Network access › Listen on this computer only**. Without `--loopback-only`, `network on` listens on every interface as before.
+4. Start the proxy: `tailscale serve --bg --https=8445 http://127.0.0.1:4317`.
+
+On the phone (on your tailnet), open `https://<machine>.<tailnet>.ts.net:8445`, sign in with the password and allow notifications. Without a session, or while network access is off, that address answers 401 or 403; `ss -ltn` shows CodeDen only on `127.0.0.1`.
+
+Keep **Tailscale Funnel off** for CodeDen: Funnel puts it on the public internet and isn't supported. Only a proxy on this computer, which you named with `origin add`, is trusted; a proxy on another machine isn't supported. Turning network access off, or removing the origin, ends access through it at once.
+
+How CodeDen treats a request for a trusted address: it counts as coming from another device even though the proxy connects from this computer, so it needs the password session, never the install token, and `/mcp` answers 404. CodeDen does not log anyone in from Tailscale's identity headers (`Tailscale-User-Login` and others): any program on this computer could send those itself. The proxy's `X-Forwarded-For` is used only to tell devices apart for sign-in throttling and to show an address (marked *reported by proxy*) in Signed-in devices and the log.
+
 ## Signed-in devices
 
 **Settings › Network access › Signed-in devices** lists each phone or tablet with its browser, address and when it was last seen. **Sign out** removes one; **Sign out all** removes them all. Changing the password signs out every device too. A signed-out device goes back to the sign-in page at once.
@@ -67,8 +82,8 @@ Everything else works: the orchestrator and PM chats, sessions and their transcr
 
 - **Off by default, and only with a password.** CodeDen refuses to listen beyond `127.0.0.1` unless network access is switched on *and* a password is set, including at startup.
 - **Only a hash is stored.** The password is kept as a salted scrypt hash in `~/.codeden/remote-access.json` (readable only by you where the OS supports file modes). Each device's 90-day session token is random; only its SHA-256 hash is stored, with the device's browser name and when it was last seen.
-- **Session cookie.** A signed-in device holds the token in an `HttpOnly`, `SameSite=Lax` cookie (also `Secure` when CodeDen is served over HTTPS).
-- **Who is remote** is decided by the connection's own address: anything other than this computer's loopback (`127.0.0.0/8`, `::1`, and their IPv4-mapped forms) is remote. `X-Forwarded-For` and similar headers are never trusted, so they grant nothing.
+- **Session cookie.** A signed-in device holds the token in an `HttpOnly`, `SameSite=Lax` cookie (also `Secure` when CodeDen is served over HTTPS, including through a trusted origin).
+- **Who is remote** is decided by the connection's own address: anything other than this computer's loopback (`127.0.0.0/8`, `::1`, and their IPv4-mapped forms) is remote. `X-Forwarded-For` and similar headers are never trusted, so they grant nothing. The one addition is a trusted origin (above): a request naming its host is also remote, which only ever demands more.
 - **Remote devices sign in with the password; the install token doesn't work for them.** This computer keeps using the install token exactly as before, so `npx codeden` and the desktop app are unaffected.
 - **Guessing is throttled.** Only failed sign-ins count, per address. After three wrong passwords each try has to wait 1 s, then 2 s, 4 s … up to 30 s; ten failures within 15 minutes lock that address out for 15 minutes. Other devices keep working. Failed sign-ins are logged with their address (never the password) in `~/.codeden/logs/remote-access.log`.
 - **What a signed-in device can reach:** the web UI, its HTTP API and its WebSockets (live updates, the terminal and browser panels), the same things you can do at the computer.

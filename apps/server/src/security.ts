@@ -1,6 +1,8 @@
+import { isIP } from "node:net";
 import type { Context, MiddlewareHandler } from "hono";
 import { getCookie, setCookie } from "hono/cookie";
 import { isLoopbackAddress, normalizeAddress } from "./network/addresses";
+import { proxiedSockets } from "./network/listener";
 import { tokensEqual } from "./token";
 
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]", "::1"]);
@@ -25,6 +27,11 @@ export interface RemoteAuth {
   enabled(): boolean;
   /** The machine's own LAN/VPN hosts, accepted in `Host` and `Origin` while enabled. */
   ownHosts(): ReadonlySet<string>;
+  /**
+   * Stored trusted origins (`https://host[:port]`) of a reverse proxy on this machine, whether
+   * or not access is on: while it is off they grant nothing, but are named in the refusal.
+   */
+  trustedOrigins(): readonly string[];
   /** The server's port (Host/Origin for own addresses must name it). */
   port(): number;
   /** Cookie holding a remote session token. */
@@ -69,9 +76,54 @@ export function peerAddress(c: Context): string {
   return normalizeAddress(env?.incoming?.socket?.remoteAddress);
 }
 
-/** Did this request come from another device? */
+/** What the middleware records on a request that named a trusted origin's host. */
+interface SecurityVariables {
+  /** The matched trusted origin (`https://host[:port]`). */
+  trustedOrigin?: string;
+  /** The `X-Forwarded-For` address, only when the peer is loopback (the proxy). */
+  forwardedFor?: string | null;
+}
+
+/** The trusted origin a request came in through, if its `Host` matched one (§15.1). */
+export function trustedOriginOf(c: Context): string | undefined {
+  return (c as Context<{ Variables: SecurityVariables }>).get("trustedOrigin");
+}
+
+/**
+ * The trusted proxy's report of the client's address: set only for a request that named a
+ * trusted host *and* arrived from a loopback peer. `null` inside it means the header was
+ * missing or not an IP. Used for throttling and display, never for any access decision.
+ */
+export function proxyClientOf(c: Context): { address: string | null } | undefined {
+  const vars = c as Context<{ Variables: SecurityVariables }>;
+  if (vars.get("trustedOrigin") === undefined) return undefined;
+  const forwarded = vars.get("forwardedFor");
+  return forwarded === undefined ? undefined : { address: forwarded };
+}
+
+/** First `X-Forwarded-For` address, when it is a plain IP (else null). */
+function firstForwardedAddress(header: string | undefined): string | null {
+  const first = header?.split(",")[0]?.trim();
+  if (!first || isIP(first.replace(/^\[|\]$/g, "")) === 0) return null;
+  return normalizeAddress(first.replace(/^\[|\]$/g, ""));
+}
+
+/**
+ * Did this request come from another device? A request through a trusted proxy's host counts
+ * as remote even from a loopback peer: it can only ever demand more.
+ */
 export function isRemoteRequest(c: Context): boolean {
-  return !isLoopbackAddress(peerAddress(c));
+  return !isLoopbackAddress(peerAddress(c)) || trustedOriginOf(c) !== undefined;
+}
+
+/** The trusted origin whose host and port are `host` (a `Host` header value), if any. */
+function matchTrustedOrigin(
+  origins: readonly string[],
+  host: string | undefined,
+): string | undefined {
+  if (!host) return undefined;
+  const wanted = host.toLowerCase().replace(/:443$/, "");
+  return origins.find((origin) => origin.slice("https://".length) === wanted);
 }
 
 /** `Host` values for the machine's own addresses on `port`. */
@@ -105,27 +157,47 @@ function isShellRequest(c: Context): boolean {
  *    ports on the same host, which count as same-site for cookies, and `null`).
  * 3. Loopback peers need the install token via `Authorization: Bearer`, the HttpOnly cookie,
  *    or `?token=` (exchanged for the cookie and stripped from the URL with a redirect).
+ * 3b. A request whose `Host` is a trusted origin's (a reverse proxy on this machine, §15.1)
+ *    is remote even from a loopback peer, with its own `Origin` rule, and only while network
+ *    access is on.
  * 4. Remote peers need a remote session cookie (from the password sign-in); the install token
  *    is never accepted from them, and loopback-only paths answer 404.
  */
 export function securityMiddleware(opts: SecurityOptions): MiddlewareHandler {
   return async (c, next) => {
-    const remote = isRemoteRequest(c);
     const networkOn = opts.remote?.enabled() ?? false;
+    const host = c.req.header("host");
+    const trusted = opts.remote
+      ? matchTrustedOrigin(opts.remote.trustedOrigins(), host)
+      : undefined;
+    if (trusted !== undefined) {
+      if (!networkOn) return c.text("Network access is off", 403);
+      const vars = c as Context<{ Variables: SecurityVariables }>;
+      vars.set("trustedOrigin", trusted);
+      const env = c.env as { incoming?: { socket?: object } } | undefined;
+      // Another device naming the proxy's host is remote as usual: nothing forwarded is read.
+      if (isLoopbackAddress(peerAddress(c))) {
+        vars.set("forwardedFor", firstForwardedAddress(c.req.header("x-forwarded-for")));
+        if (env?.incoming?.socket) proxiedSockets.add(env.incoming.socket);
+      }
+    }
+    const remote = isRemoteRequest(c);
     if (remote && !networkOn) return c.text("Network access is off", 403);
 
-    const host = c.req.header("host");
     const hostName = host ? hostnameOf(host).toLowerCase() : "";
     const hostOk =
       Boolean(host) &&
-      (LOOPBACK_HOSTS.has(hostName) ||
+      (trusted !== undefined ||
+        LOOPBACK_HOSTS.has(hostName) ||
         (networkOn && opts.remote !== undefined && ownHostValues(opts.remote).has(host as string)));
     if (!hostOk) return c.text("Forbidden host", 403);
 
     const origin = c.req.header("origin");
-    if (origin && !opts.allowedOrigins().has(origin)) {
-      return c.text("Forbidden origin", 403);
-    }
+    // Through a trusted host the only Origin is that host's own https origin; everywhere else
+    // a trusted origin is just another website.
+    const originOk =
+      trusted !== undefined ? origin === trusted : opts.allowedOrigins().has(origin as string);
+    if (origin && !originOk) return c.text("Forbidden origin", 403);
 
     if (remote) return remoteGate(c, next, opts);
 

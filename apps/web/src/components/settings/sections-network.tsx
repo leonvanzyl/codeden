@@ -108,8 +108,9 @@ function DeviceRow({
           {device.current && <span className="ml-2 text-2xs text-primary">This device</span>}
         </div>
         <div className="truncate text-2xs text-muted-foreground">
-          {device.address ?? "Unknown address"} · seen {ago(device.lastSeenAt)} · signed in{" "}
-          {ago(device.createdAt)}
+          {device.address ?? "Unknown address"}
+          {device.addressViaProxy && device.address ? " (reported by proxy)" : ""} · seen{" "}
+          {ago(device.lastSeenAt)} · signed in {ago(device.createdAt)}
         </div>
       </div>
       <Button size="sm" variant="outline" onClick={onSignOut} disabled={pending}>
@@ -138,6 +139,11 @@ export function NetworkSettings() {
       apply(next);
       toast.success(next.enabled ? "Network access is on" : "Network access is off");
     },
+    onError: (e) => toast.error("Network access not changed", { description: e.message }),
+  });
+  const loopback = useMutation({
+    mutationFn: (loopbackOnly: boolean) => client.network.setLoopbackOnly(loopbackOnly),
+    onSuccess: apply,
     onError: (e) => toast.error("Network access not changed", { description: e.message }),
   });
   const signOut = useMutation({
@@ -182,8 +188,24 @@ export function NetworkSettings() {
             aria-label="Allow network access"
             data-testid="network-toggle"
             checked={status.enabled}
-            disabled={remote || !status.passwordSet || toggle.isPending}
+            disabled={remote || !status.passwordSet || toggle.isPending || loopback.isPending}
             onCheckedChange={(enabled) => toggle.mutate(enabled)}
+          />
+        </SettingRow>
+        <SettingRow
+          label="Listen on this computer only"
+          help={
+            remote
+              ? "Change this on the computer running CodeDen."
+              : "Keep CodeDen on 127.0.0.1 while access is on, so a proxy on this computer (Tailscale Serve) is the only way in."
+          }
+        >
+          <Switch
+            aria-label="Listen on this computer only"
+            data-testid="network-loopback-only"
+            checked={status.loopbackOnly}
+            disabled={remote || loopback.isPending || toggle.isPending}
+            onCheckedChange={(on) => loopback.mutate(on)}
           />
         </SettingRow>
         {!remote && (
@@ -222,6 +244,29 @@ export function NetworkSettings() {
           needs nothing else. These are plain http addresses, so phones won't allow notifications or
           the microphone on them. Tip: open CodeDen on your phone and use Add to Home Screen.
         </p>
+      </SettingsSection>
+
+      <SettingsSection
+        title="Trusted origins"
+        description="HTTPS addresses of a reverse proxy on this computer, such as Tailscale Serve. Phones get notifications and dictation there."
+      >
+        {status.trustedOrigins.length === 0 ? (
+          <p className="px-4 py-3.5 text-[13px] text-muted-foreground">
+            None. Add one with{" "}
+            <code className="font-mono">codeden network origin add https://&lt;host&gt;</code> on
+            this computer.
+          </p>
+        ) : (
+          status.trustedOrigins.map((origin) => (
+            <p
+              key={origin}
+              className="px-4 py-3 font-mono text-[12.5px] text-muted-foreground"
+              data-testid="network-trusted-origin"
+            >
+              {origin}
+            </p>
+          ))
+        )}
       </SettingsSection>
 
       <SettingsSection

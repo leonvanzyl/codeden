@@ -5,7 +5,8 @@
  *   codeden update [--rollback]
  *   codeden stop
  *   codeden password [--generate]
- *   codeden network [on|off]
+ *   codeden network [on [--loopback-only]|off]
+ *   codeden network origin add|remove|list [<https-url>]
  *   codeden runner-link [--home <dir>]
  * Loaded by `cli.ts` once the launcher has picked the version to run. Kept light: the server
  * code (`commands.ts`) loads only for the commands that need it, never for `runner-link`.

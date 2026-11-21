@@ -48,7 +48,11 @@ export async function runCommand(args: string[], parsed: ParsedCli): Promise<num
   if (command === "stop") return stop(home);
   if (command === "update") return updateCommand(home, { rollback: values.rollback, launch });
   if (command === "password") return passwordCommand(home, { generate: values.generate });
-  if (command === "network") return networkCommand(home, positionals[1]);
+  if (command === "network")
+    return networkCommand(home, positionals[1], {
+      loopbackOnly: values["loopback-only"],
+      args: positionals.slice(2),
+    });
   if (command) {
     console.error(`Unknown command "${command}".\n\n${HELP}`);
     return 2;
@@ -114,7 +118,10 @@ export async function runCommand(args: string[], parsed: ParsedCli): Promise<num
 
   console.log(`CodeDen ${CODEDEN_VERSION} is running at ${server.url}`);
   console.log(`Open: ${server.launchUrl}`);
-  if (server.network.enabled) {
+  if (server.network.enabled && server.network.store.loopbackOnly) {
+    console.log("Network access is on, loopback only: reachable through the trusted proxy:");
+    for (const origin of server.network.store.trustedOrigins) console.log(`  ${origin}`);
+  } else if (server.network.enabled) {
     console.log("Network access is on. Open CodeDen on your phone or tablet at:");
     for (const a of server.network.addresses()) console.log(`  ${a.label.padEnd(16)} ${a.url}`);
   }

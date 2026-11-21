@@ -12,6 +12,9 @@ Usage:
   codeden stop           Stop the server and the runner
   codeden password       Set the network access password (--generate: make one up)
   codeden network on|off Let phones on your network open CodeDen, or stop it
+                         (on --loopback-only: stay on 127.0.0.1 behind a proxy such as Tailscale Serve)
+  codeden network origin add|remove|list <https-url>
+                         HTTPS addresses of a proxy on this computer that CodeDen trusts
   codeden runner-link    Connect stdin/stdout to the runner in --home (run by the server
                          inside a sandbox; stdout carries only protocol frames)
 
@@ -35,6 +38,7 @@ export function parseCli(args: string[]) {
       install: { type: "boolean", default: false },
       rollback: { type: "boolean", default: false },
       generate: { type: "boolean", default: false },
+      "loopback-only": { type: "boolean", default: false },
       version: { type: "boolean", short: "v", default: false },
       help: { type: "boolean", short: "h", default: false },
     },

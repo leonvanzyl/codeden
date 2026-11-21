@@ -15,6 +15,7 @@ import {
   listAddresses,
   PasswordRuleError,
   RemoteAccessStore,
+  TrustedOriginError,
 } from "@codeden/server";
 import { findRunningServer } from "./running";
 
@@ -128,10 +129,117 @@ export async function passwordCommand(home: string, opts: { generate: boolean })
   return 0;
 }
 
-/** `codeden network [on|off]`: switch network access, or show its state. */
-export async function networkCommand(home: string, action: string | undefined): Promise<number> {
-  if (action !== undefined && action !== "on" && action !== "off") {
-    console.error("Usage: codeden network [on|off]");
+const NETWORK_USAGE = `Usage: codeden network [on [--loopback-only] | off]
+       codeden network origin add <https-url> | remove <https-url> | list`;
+
+function printOrigins(origins: readonly string[]): void {
+  if (origins.length === 0) {
+    console.log("No trusted origins. Add one with: codeden network origin add https://<host>");
+    return;
+  }
+  console.log("Trusted origins (a reverse proxy on this computer, e.g. Tailscale Serve):");
+  for (const origin of origins) console.log(`  ${origin}`);
+}
+
+/** Print what is on, where it listens and the trusted origins. */
+function printStatus(status: {
+  enabled: boolean;
+  loopbackOnly: boolean;
+  /** Where the listener is bound right now (not what is configured). */
+  listening: "loopback" | "network";
+  addresses: NetworkAddress[];
+  trustedOrigins: readonly string[];
+}): void {
+  if (status.enabled && status.listening === "loopback" && status.loopbackOnly) {
+    console.log("Network access is on, loopback only: CodeDen listens on 127.0.0.1 and is");
+    console.log("reachable only through a trusted origin (the proxy on this computer).");
+  } else if (status.enabled && status.listening === "loopback") {
+    console.log("Network access is on, but CodeDen is listening on 127.0.0.1 only right now");
+    console.log("(the wider bind did not happen). Check the server's log.");
+  } else if (status.enabled) {
+    console.log("Network access is on. Open CodeDen on your phone at:");
+    printAddresses(status.addresses);
+  } else {
+    console.log("Network access is off: CodeDen only answers on this computer (127.0.0.1).");
+  }
+  printOrigins(status.trustedOrigins);
+}
+
+/**
+ * `codeden network origin add|remove|list`: the HTTPS addresses of a reverse proxy on this
+ * computer (Tailscale Serve) that CodeDen trusts. Through the running server, else the home.
+ */
+async function originCommand(home: string, args: string[]): Promise<number> {
+  const [sub, url] = args;
+  if (
+    !(sub === "list" ? args.length === 1 : (sub === "add" || sub === "remove") && args.length === 2)
+  ) {
+    console.error(NETWORK_USAGE);
+    return 2;
+  }
+  const viaServer = await callServer(
+    home,
+    sub === "add"
+      ? "/api/network/origins"
+      : sub === "remove"
+        ? `/api/network/origins?url=${encodeURIComponent(url as string)}`
+        : "/api/network",
+    sub === "add"
+      ? { method: "POST", body: { url } }
+      : { method: sub === "remove" ? "DELETE" : "GET" },
+  );
+  let origins: readonly string[];
+  if (viaServer) {
+    if (!viaServer.ok) {
+      console.error(errorMessage(viaServer.body));
+      return 1;
+    }
+    origins = NetworkStatus.parse(viaServer.body).trustedOrigins;
+  } else {
+    const store = openStore(home);
+    try {
+      if (sub === "add") store.addTrustedOrigin(url as string);
+      else if (sub === "remove" && !store.removeTrustedOrigin(url as string)) {
+        console.error("No such trusted origin.");
+        return 1;
+      }
+    } catch (error) {
+      if (error instanceof TrustedOriginError) {
+        console.error(error.message);
+        return 1;
+      }
+      throw error;
+    }
+    origins = store.trustedOrigins;
+  }
+  if (sub === "list") printOrigins(origins);
+  else {
+    console.log(sub === "add" ? "Trusted origin added." : "Trusted origin removed.");
+    if (sub === "add") {
+      console.log("It only works while network access is on and a password is set.");
+    }
+  }
+  return 0;
+}
+
+/**
+ * `codeden network [on [--loopback-only]|off]` switches network access or shows its state;
+ * `codeden network origin ...` manages trusted origins. `on` without `--loopback-only` puts
+ * the listener back on every interface.
+ */
+export async function networkCommand(
+  home: string,
+  action: string | undefined,
+  opts: { loopbackOnly?: boolean; args?: string[] } = {},
+): Promise<number> {
+  if (action === "origin") return originCommand(home, opts.args ?? []);
+  const loopbackOnly = opts.loopbackOnly === true;
+  if (
+    (action !== undefined && action !== "on" && action !== "off") ||
+    (loopbackOnly && action !== "on") ||
+    (opts.args?.length ?? 0) > 0
+  ) {
+    console.error(NETWORK_USAGE);
     return 2;
   }
   const viaServer = await callServer(
@@ -139,7 +247,10 @@ export async function networkCommand(home: string, action: string | undefined): 
     "/api/network",
     action === undefined
       ? { method: "GET" }
-      : { method: "PUT", body: { enabled: action === "on" } },
+      : {
+          method: "PUT",
+          body: action === "on" ? { enabled: true, loopbackOnly } : { enabled: false },
+        },
   );
   if (viaServer) {
     if (!viaServer.ok) {
@@ -147,31 +258,34 @@ export async function networkCommand(home: string, action: string | undefined): 
       if (viaServer.status === 400) console.error("Run: codeden password");
       return 1;
     }
-    const status = NetworkStatus.parse(viaServer.body);
-    if (status.enabled) {
-      console.log("Network access is on. Open CodeDen on your phone at:");
-      printAddresses(status.addresses);
-    } else {
-      console.log("Network access is off: CodeDen only answers on this computer (127.0.0.1).");
-    }
+    printStatus(NetworkStatus.parse(viaServer.body));
     return 0;
   }
 
   const store = openStore(home);
   if (action === undefined) {
     console.log(
-      `Network access is ${store.enabled && store.passwordSet ? "on" : "off"} (CodeDen is not running).`,
+      `Network access is ${store.enabled && store.passwordSet ? "on" : "off"}${
+        store.loopbackOnly ? ", loopback only" : ""
+      } (CodeDen is not running).`,
     );
+    printOrigins(store.trustedOrigins);
     return 0;
   }
   try {
+    if (action === "on") store.setLoopbackOnly(loopbackOnly);
     store.setEnabled(action === "on");
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));
     console.error("Run: codeden password");
     return 1;
   }
-  if (action === "on") {
+  if (action === "on" && loopbackOnly) {
+    console.log("Network access is on, loopback only. When CodeDen starts it listens on");
+    console.log(
+      "127.0.0.1 and answers only through a trusted origin (codeden network origin add).",
+    );
+  } else if (action === "on") {
     console.log("Network access is on. When CodeDen starts it will answer on:");
     printAddresses(listAddresses(DEFAULT_PORT));
   } else {

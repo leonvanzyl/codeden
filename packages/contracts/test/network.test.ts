@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  AddTrustedOriginRequest,
   AuthStatus,
   NetworkStatus,
   PASSWORD_MIN_LENGTH,
+  parseTrustedOrigin,
   passwordProblem,
   RemoteAccessFile,
   SetNetworkAccessRequest,
@@ -20,6 +22,8 @@ const status: NetworkStatus = {
   passwordSet: true,
   passwordSetAt: "2026-11-08T09:00:00.000Z",
   listening: "network",
+  loopbackOnly: false,
+  trustedOrigins: ["https://box.tail1234.ts.net:8445"],
   port: 4317,
   addresses: [
     {
@@ -49,6 +53,7 @@ const status: NetworkStatus = {
     {
       id: "d1",
       label: "Mozilla/5.0 (iPhone)",
+      addressViaProxy: false,
       address: "192.168.1.30",
       createdAt: "2026-11-08T09:00:00.000Z",
       lastSeenAt: "2026-11-08T09:10:00.000Z",
@@ -87,17 +92,22 @@ describe("network access contracts", () => {
       enabled: false,
       password: null,
       sessions: [],
+      loopbackOnly: false,
+      trustedOrigins: [],
     });
     const file: RemoteAccessFile = {
       schemaVersion: 1,
       enabled: true,
       password: { hash: "scrypt$32768$8$1$c2FsdA$aGFzaA", setAt: "2026-11-08T09:00:00.000Z" },
+      loopbackOnly: true,
+      trustedOrigins: ["https://box.tail1234.ts.net:8445"],
       sessions: [
         {
           id: "s1",
           tokenHash: "a".repeat(64),
           label: "Safari",
           address: "192.168.1.30",
+          addressViaProxy: true,
           createdAt: "2026-11-08T09:00:00.000Z",
           lastSeenAt: "2026-11-08T09:00:00.000Z",
           expiresAt: "2027-02-06T09:00:00.000Z",
@@ -165,5 +175,93 @@ describe("passwordProblem", () => {
     ]) {
       expect(passwordProblem(pw), pw).not.toBeNull();
     }
+  });
+});
+
+describe("trusted origins", () => {
+  const origin = (input: string) => {
+    const r = parseTrustedOrigin(input);
+    return r.ok ? r.origin : null;
+  };
+
+  it("normalizes: lowercase, :443 dropped", () => {
+    expect(origin("https://Box.Tail1234.TS.net:8445")).toBe("https://box.tail1234.ts.net:8445");
+    expect(origin("https://box.ts.net:443")).toBe("https://box.ts.net");
+    expect(origin("  https://box.ts.net ")).toBe("https://box.ts.net");
+    expect(origin("https://my-box")).toBe("https://my-box");
+  });
+
+  it("refuses http, paths, queries, fragments, credentials, IPs and loopback names", () => {
+    for (const bad of [
+      "http://box.ts.net",
+      "box.ts.net",
+      "https://box.ts.net/",
+      "https://box.ts.net/app",
+      "https://box.ts.net?x=1",
+      "https://box.ts.net/?x=1",
+      "https://box.ts.net#x",
+      "https://user@box.ts.net",
+      "https://user:pw@box.ts.net",
+      "https://127.0.0.1:8445",
+      "https://100.101.102.103",
+      "https://[::1]:8445",
+      "https://localhost",
+      "https://x.localhost",
+      "https://box.ts.net:0",
+      "https://box.ts.net:65536",
+      "https://box.ts.net:80:90",
+      "https://-box.ts.net",
+      "https://box..ts.net",
+      "https://bo x.ts.net",
+      "https://",
+    ]) {
+      expect(origin(bad), bad).toBeNull();
+    }
+  });
+
+  it("is used by the add request", () => {
+    expect(AddTrustedOriginRequest.parse({ url: "https://A.ts.net:443" }).url).toBe(
+      "https://a.ts.net",
+    );
+    expect(AddTrustedOriginRequest.safeParse({ url: "http://a.ts.net" }).success).toBe(false);
+  });
+
+  it("lets a network change name loopbackOnly, enabled or both, but not nothing", () => {
+    expect(SetNetworkAccessRequest.safeParse({ loopbackOnly: true }).success).toBe(true);
+    expect(SetNetworkAccessRequest.safeParse({ enabled: true, loopbackOnly: true }).success).toBe(
+      true,
+    );
+    expect(SetNetworkAccessRequest.safeParse({}).success).toBe(false);
+  });
+
+  it("is enforced by the shared schemas, not only the store", () => {
+    const eleven = Array.from({ length: 11 }, (_, i) => `https://h${i}.ts.net`);
+    expect(NetworkStatus.safeParse({ ...status, trustedOrigins: eleven }).success).toBe(false);
+    for (const bad of ["http://a.ts.net/x", "https://a.ts.net/", "https://Upper.ts.net"]) {
+      // Only the normalized form is accepted from the wire.
+      const parsed = NetworkStatus.safeParse({ ...status, trustedOrigins: [bad] });
+      expect(parsed.success && parsed.data.trustedOrigins[0] === bad, bad).toBe(false);
+    }
+    expect(NetworkStatus.parse({ ...status, trustedOrigins: undefined }).trustedOrigins).toEqual(
+      [],
+    );
+  });
+
+  it("drops bad hand-edited entries from the file, keeping the rest and the password", () => {
+    const edited = {
+      password: { hash: "scrypt$32768$8$1$c2FsdA$aGFzaA", setAt: "2026-11-08T09:00:00.000Z" },
+      trustedOrigins: [
+        "http://a.ts.net/x",
+        "HTTPS://Ok.ts.net:443",
+        "https://ok.ts.net",
+        42,
+        ...Array.from({ length: 12 }, (_, i) => `https://h${i}.ts.net`),
+      ],
+    };
+    const file = RemoteAccessFile.parse(edited);
+    expect(file.password).not.toBeNull();
+    expect(file.trustedOrigins).toHaveLength(10);
+    expect(file.trustedOrigins.slice(0, 2)).toEqual(["https://ok.ts.net", "https://h0.ts.net"]);
+    expect(RemoteAccessFile.parse({ trustedOrigins: "nope" }).trustedOrigins).toEqual([]);
   });
 });

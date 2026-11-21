@@ -132,6 +132,69 @@ function isRepeatedUnitOf(text: string, units: ReadonlySet<string>): boolean {
   return false;
 }
 
+/** Most trusted origins a home can list. */
+export const TRUSTED_ORIGINS_MAX = 10;
+
+const TRUSTED_ORIGIN_RE =
+  /^https:\/\/((?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)(?::(\d{1,5}))?$/;
+
+/**
+ * Check a trusted origin (§15.1): the HTTPS address of a reverse proxy on this machine, such as
+ * Tailscale Serve. Returns the normalized form (lowercase, `:443` dropped)
+ * or the reason it is refused. Only `https://<dns name>[:port]` is accepted: no path, query,
+ * fragment or credentials, no IP literals (a proxy certificate names a host), no loopback
+ * names (those are already local), no port 0 or above 65535.
+ */
+export function parseTrustedOrigin(
+  input: string,
+): { ok: true; origin: string } | { ok: false; problem: string } {
+  const text = input.trim().toLowerCase();
+  if (text.startsWith("http://")) return { ok: false, problem: "Use an https:// address." };
+  const match = TRUSTED_ORIGIN_RE.exec(text);
+  if (!match || text.length > 260) {
+    return {
+      ok: false,
+      problem: "Use https://<host name>[:port] only: no path, query, credentials or IP address.",
+    };
+  }
+  const host = match[1] as string;
+  const labels = host.split(".");
+  if (/^\d+$/.test(labels.at(-1) as string)) {
+    return { ok: false, problem: "Use a host name, not an IP address." };
+  }
+  if (host === "localhost" || host.endsWith(".localhost")) {
+    return { ok: false, problem: "That is this computer; it needs no trusted origin." };
+  }
+  const port = match[2] === undefined ? 443 : Number(match[2]);
+  if (port < 1 || port > 65535) return { ok: false, problem: "That port is not valid." };
+  return { ok: true, origin: `https://${host}${port === 443 ? "" : `:${port}`}` };
+}
+
+/** A trusted origin in its normalized form (see `parseTrustedOrigin`). */
+export const TrustedOrigin = z.string().transform((value, ctx) => {
+  const parsed = parseTrustedOrigin(value);
+  if (!parsed.ok) {
+    ctx.addIssue({ code: "custom", message: parsed.problem });
+    return z.NEVER;
+  }
+  return parsed.origin;
+});
+
+/**
+ * Recovery for a hand-edited `remote-access.json`: keep the entries that pass
+ * `parseTrustedOrigin` (normalized, without repeats, at most `TRUSTED_ORIGINS_MAX`) and drop
+ * the rest, so one bad entry never resets the password and sessions beside it.
+ */
+function keepValidOrigins(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const kept: string[] = [];
+  for (const entry of value) {
+    const parsed = typeof entry === "string" ? parseTrustedOrigin(entry) : undefined;
+    if (parsed?.ok && !kept.includes(parsed.origin)) kept.push(parsed.origin);
+  }
+  return kept.slice(0, TRUSTED_ORIGINS_MAX);
+}
+
 /** Which kind of address the server answers on. `vpn` covers Tailscale's `100.64.0.0/10`. */
 export const NetworkAddressKind = z.enum(["local", "lan", "vpn"]);
 export type NetworkAddressKind = z.infer<typeof NetworkAddressKind>;
@@ -157,6 +220,8 @@ export const RemoteDevice = z.object({
   label: z.string(),
   /** The address it signed in from. */
   address: z.string().nullable(),
+  /** `address` was reported by a trusted proxy (`X-Forwarded-For`), not seen on the socket. */
+  addressViaProxy: z.boolean().default(false),
   createdAt: Timestamp,
   lastSeenAt: Timestamp,
   expiresAt: Timestamp,
@@ -176,6 +241,10 @@ export const NetworkStatus = z.object({
   passwordSetAt: Timestamp.nullable(),
   /** Where the HTTP listener is bound right now. */
   listening: z.enum(["loopback", "network"]),
+  /** Keep the listener on 127.0.0.1 while access is on, so a proxy on this machine is the only way in. */
+  loopbackOnly: z.boolean().default(false),
+  /** HTTPS addresses of a trusted reverse proxy on this machine (e.g. Tailscale Serve). */
+  trustedOrigins: z.array(TrustedOrigin).max(TRUSTED_ORIGINS_MAX).default([]),
   port: z.int().nonnegative(),
   /** Addresses CodeDen answers on: localhost always, LAN and VPN addresses when enabled. */
   addresses: z.array(NetworkAddress),
@@ -203,9 +272,20 @@ export const SetNetworkPasswordResponse = z.object({
 });
 export type SetNetworkPasswordResponse = z.infer<typeof SetNetworkPasswordResponse>;
 
-/** `PUT /api/network` (loopback only): turn network access on or off. */
-export const SetNetworkAccessRequest = z.object({ enabled: z.boolean() });
+/**
+ * `PUT /api/network` (loopback only): turn network access on or off, and/or keep the listener
+ * on 127.0.0.1 (`loopbackOnly`) so only a trusted proxy on this machine reaches it.
+ */
+export const SetNetworkAccessRequest = z
+  .object({ enabled: z.boolean().optional(), loopbackOnly: z.boolean().optional() })
+  .refine((v) => v.enabled !== undefined || v.loopbackOnly !== undefined, {
+    message: "Say what to change.",
+  });
 export type SetNetworkAccessRequest = z.infer<typeof SetNetworkAccessRequest>;
+
+/** `POST /api/network/origins` (loopback only): trust the HTTPS address of a proxy on this machine. */
+export const AddTrustedOriginRequest = z.object({ url: TrustedOrigin });
+export type AddTrustedOriginRequest = z.infer<typeof AddTrustedOriginRequest>;
 
 /** `POST /api/auth/sign-in` from a remote device. */
 export const SignInRequest = z.object({ password: z.string().max(PASSWORD_MAX_LENGTH) });
@@ -237,6 +317,7 @@ export const RemoteSessionRecord = z.object({
   tokenHash: z.string().regex(/^[0-9a-f]{64}$/),
   label: z.string(),
   address: z.string().nullable(),
+  addressViaProxy: z.boolean().default(false),
   createdAt: Timestamp,
   lastSeenAt: Timestamp,
   expiresAt: Timestamp,
@@ -260,5 +341,12 @@ export const RemoteAccessFile = z.object({
     .nullable()
     .default(null),
   sessions: z.array(RemoteSessionRecord).default([]),
+  /** Keep the listener on 127.0.0.1 while `enabled` (a proxy on this machine fronts it). */
+  loopbackOnly: z.boolean().default(false),
+  /**
+   * `https://host[:port]` origins of a trusted proxy on this machine, at most 10. Entries that
+   * break the rules (hand edits) are dropped when the file is read, never trusted.
+   */
+  trustedOrigins: z.preprocess(keepValidOrigins, z.array(TrustedOrigin).max(TRUSTED_ORIGINS_MAX)),
 });
 export type RemoteAccessFile = z.infer<typeof RemoteAccessFile>;

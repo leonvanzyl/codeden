@@ -2,7 +2,7 @@
 export type { NetworkAccess } from "./network/access";
 export { isLoopbackAddress, listAddresses } from "./network/addresses";
 export { generatePassphrase } from "./network/password";
-export { PasswordRuleError, RemoteAccessStore } from "./network/store";
+export { PasswordRuleError, RemoteAccessStore, TrustedOriginError } from "./network/store";
 export { ensureHome, type HomePaths, homePaths, resolveHome } from "./paths";
 export { RunnerClient, RunnerCommandError, type RunnerHostInfo } from "./runner/client";
 export { RunnerHub, type RunnerSpec, type RunnersStatus } from "./runner/hub";

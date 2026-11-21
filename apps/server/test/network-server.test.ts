@@ -1,4 +1,5 @@
 import { mkdtempSync, writeFileSync } from "node:fs";
+import { request as httpRequest } from "node:http";
 import { networkInterfaces, tmpdir } from "node:os";
 import { join } from "node:path";
 import type { NetworkStatus } from "@codeden/contracts";
@@ -152,5 +153,185 @@ describe("network access on a real server", () => {
     // Off: nothing answers on the LAN address any more.
     await api("/api/network", { method: "PUT", body: JSON.stringify({ enabled: false }) });
     await expect(fetch(`${remote}/api/health`)).rejects.toThrow();
+  });
+
+  describe("behind a reverse proxy on this machine", () => {
+    const HOST = "box.tail1234.ts.net:8445";
+    const ORIGIN = "https://box.tail1234.ts.net:8445";
+    const post = (path: string, body: unknown) =>
+      api(path, { method: "POST", body: JSON.stringify(body) });
+    const put = (body: unknown) =>
+      api("/api/network", { method: "PUT", body: JSON.stringify(body) });
+
+    /** A request from this machine that names the proxy's host, as Tailscale Serve sends it. */
+    const viaProxy = (
+      path: string,
+      headers: Record<string, string> = {},
+      send?: { method: string; body: string },
+    ) =>
+      new Promise<{ status: number; body: string; setCookie: string[] }>((resolve, reject) => {
+        const s = server as RunningServer;
+        const req = httpRequest(
+          {
+            host: "127.0.0.1",
+            port: s.port,
+            path,
+            method: send?.method ?? "GET",
+            headers: { host: HOST, ...headers },
+          },
+          (res) => {
+            let body = "";
+            res.on("data", (d) => {
+              body += d;
+            });
+            res.on("end", () =>
+              resolve({
+                status: res.statusCode ?? 0,
+                body,
+                setCookie: res.headers["set-cookie"] ?? [],
+              }),
+            );
+          },
+        );
+        req.once("error", reject);
+        req.end(send?.body);
+      });
+
+    it("keeps the listener on 127.0.0.1 with access on, and reports it", async () => {
+      server = await start();
+      await post("/api/network/password", { password: GOOD });
+      const on = await put({ enabled: true, loopbackOnly: true });
+      expect(on.status).toBe(200);
+      expect(await on.json()).toMatchObject({
+        enabled: true,
+        loopbackOnly: true,
+        listening: "loopback",
+      });
+      expect(server.network.desiredHost()).toBe("127.0.0.1");
+      if (lanAddress) {
+        await expect(fetch(`http://${lanAddress}:${server.port}/api/health`)).rejects.toThrow();
+      }
+      // Turning the choice off goes wide again; it is remembered across restarts.
+      expect(await (await put({ loopbackOnly: false })).json()).toMatchObject({
+        listening: "network",
+      });
+      await put({ loopbackOnly: true });
+      await server.close();
+      server = await start();
+      expect(await (await api("/api/network")).json()).toMatchObject({
+        enabled: true,
+        loopbackOnly: true,
+        listening: "loopback",
+      });
+    });
+
+    it("keeps the stored policy and the socket in step when changes overlap", async () => {
+      server = await start();
+      await post("/api/network/password", { password: GOOD });
+      await put({ enabled: true });
+      const flips = [true, false, true, false, true, true, false, true];
+      // Straight at the access object: HTTP clients would race the socket swap itself.
+      await Promise.all(flips.map((loopbackOnly) => server?.network.update({ loopbackOnly })));
+      const status = (await (await api("/api/network")).json()) as NetworkStatus;
+      expect(status.loopbackOnly).toBe(true);
+      expect(status.listening).toBe("loopback");
+      expect(server.network.desiredHost()).toBe("127.0.0.1");
+      if (lanAddress) {
+        await expect(fetch(`http://${lanAddress}:${server.port}/api/health`)).rejects.toThrow();
+      }
+      await Promise.all(
+        [false, true, false].map((loopbackOnly) => server?.network.update({ loopbackOnly })),
+      );
+      const wide = (await (await api("/api/network")).json()) as NetworkStatus;
+      expect(wide).toMatchObject({ loopbackOnly: false, listening: "network" });
+    });
+
+    it("lists, adds and removes trusted origins on this machine only, validating them", async () => {
+      server = await start();
+      const added = await post("/api/network/origins", { url: "https://Box.Tail1234.ts.net:8445" });
+      expect(await added.json()).toMatchObject({ trustedOrigins: [ORIGIN] });
+      for (const url of ["http://box.ts.net", "https://box.ts.net/x", "https://127.0.0.1"]) {
+        expect((await post("/api/network/origins", { url })).status, url).toBe(400);
+      }
+      expect(
+        (
+          await api(`/api/network/origins?url=${encodeURIComponent("https://other.ts.net")}`, {
+            method: "DELETE",
+          })
+        ).status,
+      ).toBe(404);
+      const removed = await api(`/api/network/origins?url=${encodeURIComponent(ORIGIN)}`, {
+        method: "DELETE",
+      });
+      expect(await removed.json()).toMatchObject({ trustedOrigins: [] });
+    });
+
+    it("answers a trusted host 401 without a session, 403 when access is off, never the token", async () => {
+      server = await start();
+      await post("/api/network/password", { password: GOOD });
+      await post("/api/network/origins", { url: ORIGIN });
+      const bearer = { authorization: auth.authorization };
+
+      // Access off: trusted origins grant nothing.
+      expect((await viaProxy("/api/snapshot", bearer)).status).toBe(403);
+
+      await put({ enabled: true, loopbackOnly: true });
+      const noSession = await viaProxy("/api/snapshot");
+      expect(noSession.status).toBe(401);
+      expect(JSON.parse(noSession.body).error.code).toBe("sign_in_required");
+      expect((await viaProxy("/api/snapshot", bearer)).status).toBe(401);
+      expect((await viaProxy(`/api/snapshot?token=${TOKEN}`)).status).toBe(401);
+      expect((await viaProxy("/mcp")).status).toBe(404);
+      expect((await viaProxy("/api/network", { ...bearer, origin: ORIGIN })).status).toBe(401);
+      // The same server answers this machine with the token as before.
+      expect((await api("/api/snapshot")).status).toBe(200);
+    });
+
+    it("needs a session for the UI socket through the trusted host, and drops it on sign-out", async () => {
+      server = await start();
+      await post("/api/network/password", { password: GOOD });
+      await post("/api/network/origins", { url: ORIGIN });
+      await put({ enabled: true, loopbackOnly: true });
+      const url = `ws://127.0.0.1:${server.port}/ws`;
+
+      const refused = await new Promise<number>((resolve) => {
+        const ws = new WebSocket(url, { headers: { host: HOST, origin: ORIGIN } });
+        ws.once("unexpected-response", (_req, res) => resolve(res.statusCode ?? 0));
+        ws.once("open", () => resolve(101));
+        ws.once("error", () => {});
+      });
+      expect(refused).toBe(401);
+      // The install token doesn't open it either.
+      const withToken = await new Promise<number>((resolve) => {
+        const ws = new WebSocket(url, {
+          headers: { host: HOST, origin: ORIGIN, authorization: auth.authorization },
+        });
+        ws.once("unexpected-response", (_req, res) => resolve(res.statusCode ?? 0));
+        ws.once("open", () => resolve(101));
+        ws.once("error", () => {});
+      });
+      expect(withToken).toBe(401);
+
+      const signIn = await viaProxy(
+        "/api/auth/sign-in",
+        { origin: ORIGIN, "content-type": "application/json", "x-forwarded-for": "100.64.0.9" },
+        { method: "POST", body: JSON.stringify({ password: GOOD }) },
+      );
+      expect(signIn.status).toBe(200);
+      expect(signIn.setCookie.join()).toMatch(/Secure/);
+      const cookie = (signIn.setCookie[0] ?? "").split(";")[0] as string;
+      const ws = new WebSocket(url, { headers: { host: HOST, origin: ORIGIN, cookie } });
+      await new Promise((resolve, reject) => {
+        ws.once("open", resolve);
+        ws.once("error", reject);
+      });
+      const closed = new Promise((resolve) => ws.once("close", resolve));
+      const status = (await (await api("/api/network")).json()) as NetworkStatus;
+      expect(status.devices[0]).toMatchObject({ address: "100.64.0.9", addressViaProxy: true });
+
+      // Signing out closes the proxied socket too: its peer is 127.0.0.1.
+      await api("/api/network/devices", { method: "DELETE" });
+      await closed;
+    });
   });
 });

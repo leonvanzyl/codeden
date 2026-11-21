@@ -13,6 +13,8 @@ export interface NetworkApi {
   status(): Promise<NetworkStatus>;
   /** Turn network access on (needs a password) or off. This computer only. */
   setEnabled(enabled: boolean): Promise<NetworkStatus>;
+  /** Keep the listener on 127.0.0.1 while access is on (a proxy on this computer fronts it). */
+  setLoopbackOnly(loopbackOnly: boolean): Promise<NetworkStatus>;
   /** Set a password, or generate one (returned once). Signs out every remote device. */
   setPassword(
     input: { password: string } | { generate: true },
@@ -46,6 +48,7 @@ export function httpNetworkApi(http: Fetcher): NetworkApi {
   return {
     status: () => http.get("/network", parse),
     setEnabled: (enabled) => http.call("PUT", "/network", { enabled }, parse),
+    setLoopbackOnly: (loopbackOnly) => http.call("PUT", "/network", { loopbackOnly }, parse),
     setPassword: (input) =>
       http.post("/network/password", input, (v) => SetNetworkPasswordResponse.parse(v)),
     signOutDevice: (id) =>
@@ -120,6 +123,8 @@ export function mockNetworkApi(): NetworkApi {
     passwordSet: false,
     passwordSetAt: null,
     listening: "loopback",
+    loopbackOnly: false,
+    trustedOrigins: [],
     port: 4317,
     addresses: MOCK_ADDRESSES.slice(0, 1),
     candidates: MOCK_ADDRESSES,
@@ -128,6 +133,7 @@ export function mockNetworkApi(): NetworkApi {
         id: "dev-phone",
         label: "Mozilla/5.0 (iPhone; CPU iPhone OS 19_1 like Mac OS X) Safari/605.1.15",
         address: "192.168.1.31",
+        addressViaProxy: false,
         createdAt: new Date(now - 3 * 86_400_000).toISOString(),
         lastSeenAt: new Date(now - 4 * 60_000).toISOString(),
         expiresAt: new Date(now + 87 * 86_400_000).toISOString(),
@@ -138,8 +144,9 @@ export function mockNetworkApi(): NetworkApi {
   };
   const set = (patch: Partial<NetworkStatus>) => {
     status = { ...status, ...patch };
-    status.addresses = status.enabled ? MOCK_ADDRESSES : MOCK_ADDRESSES.slice(0, 1);
-    status.listening = status.enabled ? "network" : "loopback";
+    const wide = status.enabled && !status.loopbackOnly;
+    status.addresses = wide ? MOCK_ADDRESSES : MOCK_ADDRESSES.slice(0, 1);
+    status.listening = wide ? "network" : "loopback";
     return structuredClone(status);
   };
   const words = ["maple", "river", "quiet", "orbit", "candle", "lantern", "harbor", "violet"];
@@ -151,6 +158,7 @@ export function mockNetworkApi(): NetworkApi {
       }
       return set({ enabled });
     },
+    setLoopbackOnly: async (loopbackOnly) => set({ loopbackOnly }),
     async setPassword(input) {
       const generated =
         "generate" in input

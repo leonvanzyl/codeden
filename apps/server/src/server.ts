@@ -325,6 +325,7 @@ export async function startServer(opts: StartServerOptions): Promise<RunningServ
       remote: {
         enabled: () => network.enabled,
         ownHosts: () => network.ownHosts(),
+        trustedOrigins: () => network.store.trustedOrigins,
         port: () => port,
         sessionCookieName: sessionCookie,
         verifySession: (token) => network.store.verifySession(token),

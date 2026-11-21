@@ -48,6 +48,26 @@ describe("Settings › Network access", () => {
     ]);
   });
 
+  it("keeps the listener on this computer when asked, and lists trusted origins", async () => {
+    const user = userEvent.setup();
+    const client = createMockClient();
+    const status = await client.network.status();
+    const withOrigin: CodeDenClient = {
+      ...client,
+      network: {
+        ...client.network,
+        status: async () => ({ ...status, trustedOrigins: ["https://box.ts.net:8445"] }),
+      },
+    };
+    renderWithClient(<NetworkSettings />, withOrigin);
+    expect((await screen.findByTestId("network-trusted-origin")).textContent).toBe(
+      "https://box.ts.net:8445",
+    );
+    const toggle = screen.getByTestId("network-loopback-only");
+    await user.click(toggle);
+    await waitFor(() => expect(toggle.getAttribute("data-state")).toBe("checked"));
+  });
+
   it("shows a generated password once, with a copy button", async () => {
     const user = userEvent.setup();
     renderWithClient(<NetworkSettings />);
@@ -77,8 +97,9 @@ describe("Settings › Network access", () => {
       network: { ...client.network, status: async () => ({ ...status, remote: true }) },
     };
     renderWithClient(<NetworkSettings />, remote);
-    expect(await screen.findByText(/computer running CodeDen/)).toBeTruthy();
+    expect((await screen.findAllByText(/computer running CodeDen/)).length).toBeGreaterThan(0);
     expect(isDisabled(screen.getByTestId("network-toggle"))).toBe(true);
+    expect(isDisabled(screen.getByTestId("network-loopback-only"))).toBe(true);
     expect(screen.queryByTestId("network-password-input")).toBeNull();
   });
 
