@@ -1,0 +1,132 @@
+name: Bug report
+description: Something isn't working as expected
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! The more detail you provide, the faster it can be fixed.
+
+        **Found a security problem?** Please don't file it here. Issues are public. Report it privately as [SECURITY.md](https://github.com/leonvanzyl/codeden/blob/main/SECURITY.md) describes: <https://github.com/leonvanzyl/codeden/security/advisories/new>.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Describe the problem clearly. What did you expect, and what happened instead?
+      placeholder: "After I approved a command in an Auto session, the turn stayed on 'Waiting for approval' and never continued..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: The exact steps that trigger the problem, starting from a fresh session if you can.
+      placeholder: |
+        1. Added a project and started a session with Claude Code on Auto
+        2. Asked the agent to run the tests
+        3. Approved the command it asked about
+        4. The session stayed on "Waiting for approval"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      description: Which part of CodeDen is involved? Pick the closest one.
+      options:
+        - Sessions / chat / transcript
+        - Agent providers (sign-in, models, adapters)
+        - Permissions / approvals / Auto
+        - Orchestrator / project managers
+        - Software factory / automations
+        - Workbench (terminal, browser, diff, editor)
+        - Git / worktrees
+        - GitHub (issues, pull requests, merges)
+        - Usage / costs / budgets
+        - Voice / images
+        - Remote access / remote runners / mobile
+        - Web UI (layout, navigation, settings)
+        - Desktop app
+        - CLI / install / update
+        - Server / runner / database
+        - Documentation
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: provider
+    attributes:
+      label: Agent provider
+      description: Which agent was the session using, if the problem involves one?
+      options:
+        - Not provider-specific
+        - Claude Code
+        - Codex
+        - OpenCode
+        - Cursor
+        - Gemini CLI
+        - Other
+    validations:
+      required: false
+
+  - type: dropdown
+    id: install
+    attributes:
+      label: How do you run CodeDen?
+      options:
+        - npx codeden / npm install
+        - Desktop app
+        - Source checkout (pnpm dev)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - macOS
+        - Windows
+        - Linux
+        - Windows (WSL)
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: "`codeden doctor` output"
+      description: |
+        Run `npx codeden doctor` and paste what it prints. It shows the CodeDen, Node and git versions and the state of each agent provider.
+        In the desktop app, give the version from **Settings > About** instead.
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: |
+        Paste the relevant lines. Where to look:
+        - Runner output: the end of `~/.codeden/logs/runner.log`
+        - Server log lines: run with `CODEDEN_DEBUG=1 codeden` to print them in the terminal
+        - Desktop app: `~/.codeden/logs/desktop-server.log`
+        - UI problems: the browser's developer console
+
+        **Check for anything private first. Do NOT paste tokens, API keys, or the install token from your CodeDen URL.**
+      render: shell
+    validations:
+      required: false
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Screenshots, a screen recording, the autonomy level and settings involved, or anything else that might help.
+    validations:
+      required: false

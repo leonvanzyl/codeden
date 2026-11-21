@@ -1,0 +1,61 @@
+name: Feature request
+description: Suggest a new feature or an improvement
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Have an idea? Great. Describe the problem first; it makes the right solution much easier to find.
+
+        Changes to anything in the "Locked decisions" table of [docs/DESIGN.md](https://github.com/leonvanzyl/codeden/blob/main/docs/DESIGN.md) need a design discussion, and this issue is the place for it.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: Describe the use case or the pain point.
+      placeholder: "When a session finishes while I'm in another project, I only notice when I go back to it. I'd like to..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: How do you think this should work? Include UI, settings or behaviour details if you have them.
+    validations:
+      required: false
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Workarounds you've tried, or other approaches you've thought about.
+    validations:
+      required: false
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      description: Which part of CodeDen would this change? Pick the closest one.
+      options:
+        - Sessions / chat / transcript
+        - Agent providers (sign-in, models, adapters)
+        - Permissions / approvals / Auto
+        - Orchestrator / project managers
+        - Software factory / automations
+        - Workbench (terminal, browser, diff, editor)
+        - Git / worktrees
+        - GitHub (issues, pull requests, merges)
+        - Usage / costs / budgets
+        - Voice / images
+        - Remote access / remote runners / mobile
+        - Web UI (layout, navigation, settings)
+        - Desktop app
+        - CLI / install / update
+        - Server / runner / database
+        - Documentation
+        - Other
+    validations:
+      required: true
