@@ -129,7 +129,7 @@ Open **Settings** (**Ctrl/Cmd+,**):
 | Notifications | Toasts, which inbox categories notify you (needs you, failures, factory activity, automations), the chime when an agent needs you (with a test button), browser notifications |
 | Keyboard shortcuts | The full list (also **Shift+?**) |
 
-A project can override these for its own new sessions: open the project and its **Settings** tab to choose a default agent (provider, model and effort, such as a cheaper model for a docs repository) and default permissions. A new session starts on what you pick there, else the project's defaults, else Settings; a model saved for one provider is never used on another.
+A project can override these for its own new sessions: open the project and its **Settings** tab to choose a default agent (provider, model and effort, such as a cheaper model for a docs repository) and default permissions. A new session starts on what you pick there, else the project's defaults, else Settings; a model saved for one provider is never used on another. These are defaults for new sessions: a session that already exists keeps its own permissions, which you change in its **Permissions** picker (see [Security](security.md#permissions)).
 
 ## Stopping CodeDen
 

@@ -79,7 +79,14 @@ They always run read-only, whatever their level: Claude gets no edit tools and a
 
 ## Permissions
 
-Each agent session and each automation runs at a **permission level**, from Read-only to Full. The default comes from **Settings → Autonomy**; change it per session in the composer's **Permissions** picker (in a new session too, before its first message), and per automation in its editor. Each level maps onto the provider's **native** enforcement:
+Each agent session and each automation runs at a **permission level**, from Read-only to Full. The default comes from **Settings → Autonomy**; change it per session in the composer's **Permissions** picker (in a new session too, before its first message), and per automation in its editor. Each level maps onto the provider's **native** enforcement (the table below).
+
+**Where a session's level comes from.** A session gets its level when it is created and keeps it: what you pick in the New session draft, else the project's default (the project's **Settings** tab, **Permissions**), else **Settings → Autonomy**. Changing either default only affects sessions started afterwards. A session that already exists, running or not, keeps the level it has, also when it is resumed, and a fork or a hand-off starts on its source's level. The project's Settings tab lists the open sessions that are on another level than its default. To change a session's level, use the **Permissions** picker under its message box: that applies while it runs, from the agent's next tool call (Codex: from its next turn), and approvals already waiting stay waiting.
+
+**Supervised asks about everything, reads included.** Under Supervised, every command needs your approval, also ones that only read (`git status`, `ls`, `grep`, `sed -n 1,40p file`). Pick **Auto** when you want those to run and only risky actions to ask. Under Auto a command that only reads still asks when what it reads is sensitive: a secrets file (`.env`, a key), an agent CLI's login, or anything in CodeDen's own home.
+
+**The permission level is not the project's autonomy mode.** The [autonomy mode](software-factory.md) (Manual, Assisted, Software factory, Dark factory) decides who finds work and who merges. It never changes what a session asks about: a project in Assisted mode whose sessions run at Auto asks exactly as often as one in Manual mode. The two are set in different places and stored separately (`autonomy` and `autonomyMode` on a project).
+
 
 | Level | Claude Code | Codex | OpenCode |
 |---|---|---|---|

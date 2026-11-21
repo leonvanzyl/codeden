@@ -70,7 +70,7 @@ export const createProject = defineTool({
 export const updateProject = defineTool({
   name: "update_project",
   description:
-    "Change a project's name, default provider, default autonomy level, timezone, default branch, or whether its agent sessions run with CI=true. Pass null to clear an override.",
+    "Change a project's name, default provider, default autonomy level, timezone, default branch, or whether its agent sessions run with CI=true. Pass null to clear an override. The autonomy level (read_only, supervised, auto, full: which actions an agent asks about) is what the project's new sessions start with: sessions that exist keep theirs, which the user changes in each session's Permissions picker. It is not the project's autonomy mode (who finds work and who merges), which this tool doesn't change.",
   roles: ["orchestrator"],
   scope: "global",
   input: z.object({
@@ -91,6 +91,11 @@ export const updateProject = defineTool({
     projectFor(services, projectId);
     if (Object.values(patch).every((v) => v === undefined))
       throw new ToolError("Nothing to change");
-    return { project: compactProject(services.projects.update(projectId, patch)) };
+    const project = compactProject(services.projects.update(projectId, patch));
+    if (patch.autonomy === undefined) return { project };
+    return {
+      project,
+      note: "New sessions in this project start with this level. Sessions that already exist keep the level they have; the user changes it in each session's Permissions picker.",
+    };
   },
 });
