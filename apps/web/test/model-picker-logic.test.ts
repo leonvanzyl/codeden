@@ -12,7 +12,9 @@ import {
   providerAvailability,
   providerOptionLabel,
   providerTabs,
+  ROLE_PROVIDER_SETTING,
   resolveModel,
+  roleSwitchHint,
   searchRows,
   sortEfforts,
   tabRows,
@@ -259,6 +261,14 @@ describe("tabs", () => {
     const tabs = providerTabs(providers, undefined, "codex");
     expect(tabs.find((t) => t.id === "codex")?.lockedReason).toBeNull();
     expect(tabs.find((t) => t.id === "claude")?.lockedReason).toMatch(/Start a new session/);
+  });
+
+  it("says how a role session's provider is changed instead of 'start a new session'", () => {
+    const tabs = providerTabs(providers, undefined, "codex", { switchHint: roleSwitchHint("pm") });
+    const reason = tabs.find((t) => t.id === "claude")?.lockedReason;
+    expect(reason).toContain(ROLE_PROVIDER_SETTING);
+    expect(reason).not.toMatch(/Start a new session/);
+    expect(roleSwitchHint("orchestrator")).toMatch(/^The orchestrator runs/);
   });
 
   it("moves between open tabs, skipping locked ones and wrapping", () => {

@@ -1,5 +1,6 @@
 import type { Session, Snapshot, UpdateSessionRequest } from "@codeden/contracts";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "@tanstack/react-router";
 import { useRef } from "react";
 import { toast } from "sonner";
 import { AUTONOMY, supportsReadOnly } from "@/components/thread/autonomy";
@@ -8,6 +9,8 @@ import { snapshotKey, useSnapshotData } from "@/lib/queries";
 import { NOT_A_REPO_ACTION_REASON, useHandoffBlocked } from "@/lib/session-actions";
 import { useUiStore } from "@/stores/ui";
 import { ChecksToggle } from "./checks-toggle";
+import { PickerFooterAction } from "./model-picker/footer";
+import { roleSwitchHint } from "./model-picker/logic";
 import { ModelPicker } from "./model-picker/model-picker";
 import { AutonomyPicker, PlanToggle } from "./pickers";
 
@@ -47,11 +50,13 @@ export function appliesFrom(
  * its settings); autonomy and plan mode apply from the next tool call or the next turn, as the
  * provider allows. The provider is fixed for the life of a session, so the picker shows the
  * other providers locked; in an agent session they offer to hand the work off to a new session
- * on that provider (§9). The pickers show the server's values, never a local-only choice.
+ * on that provider (§9), and in the orchestrator's or a PM's they point to the role's provider
+ * setting (§8.1). The pickers show the server's values, never a local-only choice.
  */
 export function SessionOptions({ session, running }: { session: Session; running: boolean }) {
   const client = useClient();
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const providers = useSnapshotData((s) => s.runner.providers, []);
   const providerInfo = providers.find((p) => p.id === session.provider);
   const liveAutonomy = providerInfo?.capabilities.liveAutonomy ?? false;
@@ -90,6 +95,22 @@ export function SessionOptions({ session, running }: { session: Session; running
                 onHandoff: (provider) => setHandoff({ sessionId: session.id, provider }),
               }
             : undefined
+        }
+        // The orchestrator and PMs can't be handed off: their provider is the role's setting.
+        switchHint={session.role === "agent" ? undefined : roleSwitchHint(session.role)}
+        footer={
+          session.role === "agent" || providers.length < 2
+            ? undefined
+            : (close) => (
+                <PickerFooterAction
+                  note={`${session.role === "orchestrator" ? "The orchestrator" : "Project managers"} can run on another provider.`}
+                  action="Change provider"
+                  onClick={() => {
+                    close();
+                    void navigate({ to: "/settings/$section", params: { section: "providers" } });
+                  }}
+                />
+              )
         }
         value={{ provider: session.provider, model: session.model, effort: session.effort }}
         shortcut

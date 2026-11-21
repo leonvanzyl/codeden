@@ -10,6 +10,8 @@ CodeDen runs three kinds of agent: one **orchestrator**, one **project manager (
 
 The orchestrator and PMs run **read-only**: Claude gets no edit tools and a policy that denies writing commands, Codex gets a read-only sandbox, and CodeDen's policy refuses OpenCode's, Cursor's and Gemini CLI's edits and writing commands (Cursor also runs in its read-only `ask` mode). They act only through CodeDen's tools. Choose the provider, model and effort for each role in **Settings → Providers** (Claude Code is the default for the orchestrator and PMs when it's available).
 
+**Which provider they run on.** The orchestrator and PMs use the provider, model and effort set in **Settings → Providers → Defaults per role** (a project's own default agent wins for its PM). On **Auto** they take the first provider CodeDen finds, Claude Code first. A session can't change provider, so the model picker in their chat offers the models of their current provider only, with **Change provider** leading to that setting. When you choose another provider there, the current orchestrator or PM conversation is retired (right away, or once its running turn has ended) and your next message starts a fresh one on the new provider. Project notes, the status digest and the work in progress carry over; the old conversation's history doesn't.
+
 ![A PM reporting on its project](images/pm-chat.png)
 
 ## How work flows

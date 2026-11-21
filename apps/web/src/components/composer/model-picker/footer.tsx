@@ -1,4 +1,4 @@
-import { Check, Sparkles } from "lucide-react";
+import { ArrowRight, Check, Sparkles } from "lucide-react";
 import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
@@ -27,5 +27,30 @@ export function PickerFooterChoice({
       <span className="min-w-0 flex-1 truncate">{children}</span>
       {active && <Check className="size-3.5" aria-hidden />}
     </button>
+  );
+}
+
+/** A note in the picker footer with one action beside it, such as a link to a setting. */
+export function PickerFooterAction({
+  note,
+  action,
+  onClick,
+}: {
+  note: ReactNode;
+  action: string;
+  onClick: () => void;
+}) {
+  return (
+    <div className="flex w-full items-center gap-2 px-2 py-0.5 text-xs text-muted-foreground">
+      <span className="min-w-0 flex-1">{note}</span>
+      <button
+        type="button"
+        onClick={onClick}
+        className="flex shrink-0 items-center gap-1 rounded-md px-1.5 py-1 font-medium text-primary outline-none hover:bg-accent focus-visible:bg-accent"
+      >
+        {action}
+        <ArrowRight className="size-3.5" aria-hidden />
+      </button>
+    </div>
   );
 }

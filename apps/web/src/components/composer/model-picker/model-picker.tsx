@@ -53,6 +53,11 @@ export interface ModelPickerProps {
    * `lasting` that it won't lift on its own.
    */
   handoff?: HandoffState & { onHandoff: (providerId: string) => void };
+  /**
+   * With `lockedProvider` and no `handoff`: how the provider is changed instead, shown on the
+   * other providers' tiles in place of "Start a new session to switch providers."
+   */
+  switchHint?: string;
   /** Offer effort levels beside the list (default true). */
   effort?: boolean;
   disabled?: boolean;
@@ -77,6 +82,7 @@ export function ModelPicker({
   onChange,
   lockedProvider,
   handoff,
+  switchHint,
   effort: offerEffort = true,
   disabled,
   placeholder = "Choose a model",
@@ -111,6 +117,7 @@ export function ModelPicker({
   const tabs = providerTabs(providers, checks, lockedProvider, {
     favorites: true,
     ...(handoff ? { handoff: { blocked: handoff.blocked, lasting: handoff.lasting } } : {}),
+    switchHint,
   });
   const openTabs = openProviderTabs(tabs);
   const tab: PickerTab | undefined = tabs.find((t) => t.id === tabId) ?? openTabs[0];

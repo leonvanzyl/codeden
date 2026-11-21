@@ -77,7 +77,7 @@ export function Sidebar({ width, onClose }: { width: number | string; onClose?: 
 
   const inbox = data?.inbox.filter((i) => i.status === "open") ?? [];
   const urgent = inbox.some((i) => i.kind === "approval" || i.kind === "question");
-  const orchestrator = data?.sessions.find((s) => s.role === "orchestrator");
+  const orchestrator = data?.sessions.findLast((s) => s.role === "orchestrator" && !s.archivedAt);
   const waiting = data?.sessions.filter((s) => s.status === "waiting" && s.role === "agent") ?? [];
   const projectName = (id: string | null) => data?.projects.find((p) => p.id === id)?.name ?? "";
   const { pinned, others } = splitPinned(data?.projects ?? []);

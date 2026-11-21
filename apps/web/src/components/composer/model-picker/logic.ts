@@ -204,6 +204,18 @@ export function providerOptionLabel(name: string, availability: Availability): s
   return availability.ready ? name : `${name} (${lowerFirst(availability.reason ?? "Not ready")})`;
 }
 
+/** Where the provider of the orchestrator and of PMs is chosen. */
+export const ROLE_PROVIDER_SETTING = "Settings → Providers → Defaults per role";
+
+/**
+ * How a role session (orchestrator, PM) moves to another provider: its provider is the role's
+ * default in settings, and changing that starts a fresh session (§8.1).
+ */
+export function roleSwitchHint(role: "orchestrator" | "pm"): string {
+  const who = role === "orchestrator" ? "The orchestrator" : "A project manager";
+  return `${who} runs on its role's provider: change it in ${ROLE_PROVIDER_SETTING}, and the next message starts a fresh conversation there.`;
+}
+
 // ---------------------------------------------------------------- tabs and search
 
 /** Id of the Favourites tab; provider ids can't clash with it (they never contain a colon). */
@@ -243,11 +255,14 @@ function lockedTab(
   provider: ProviderInfo,
   lockedProvider: string | undefined,
   handoff: HandoffState | undefined,
+  switchHint: string | undefined,
 ): Pick<ProviderTab, "lockedReason" | "handoff"> {
   if (!lockedProvider || provider.id === lockedProvider) return { lockedReason: null };
   const name = provider.displayName;
   const newSession = "Start a new session to switch providers.";
-  if (!handoff) return { lockedReason: `${name} can't be used in this session. ${newSession}` };
+  if (!handoff) {
+    return { lockedReason: `${name} can't be used in this session. ${switchHint ?? newSession}` };
+  }
   if (!handoff.blocked) {
     return { lockedReason: `Continue in a new ${name} session`, handoff: "ready" };
   }
@@ -263,20 +278,21 @@ function lockedTab(
 /**
  * The rail's tabs: Favourites first (when offered), then one per provider. In a session
  * (`lockedProvider`) the other providers are locked; with `handoff` they offer to continue the
- * session in a new one on that provider instead.
+ * session in a new one on that provider instead. `switchHint` says how the provider is changed
+ * where "start a new session" isn't it, as for the orchestrator and PMs.
  */
 export function providerTabs(
   providers: readonly ProviderInfo[],
   checks: readonly SetupCheck[] | undefined,
   lockedProvider: string | undefined,
-  opts: { favorites?: boolean; handoff?: HandoffState } = {},
+  opts: { favorites?: boolean; handoff?: HandoffState; switchHint?: string } = {},
 ): PickerTab[] {
   const tabs: PickerTab[] = providers.map((provider) => ({
     kind: "provider" as const,
     id: provider.id,
     provider,
     availability: providerAvailability(provider.id, checks),
-    ...lockedTab(provider, lockedProvider, opts.handoff),
+    ...lockedTab(provider, lockedProvider, opts.handoff, opts.switchHint),
   }));
   return opts.favorites
     ? [{ kind: "favorites", id: FAVORITES_TAB, lockedReason: null }, ...tabs]

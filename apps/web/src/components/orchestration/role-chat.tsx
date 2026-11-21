@@ -23,7 +23,11 @@ import { ReadOnlyBadge, RoleBadge } from "./role-badge";
 export const roleDraftKey = (role: OrchestrationRole, projectId: string | null) =>
   role === "orchestrator" ? "role:orchestrator" : `role:pm:${projectId}`;
 
-/** The orchestrator or a project's PM session from the snapshot (`roleSessions` first). */
+/**
+ * The orchestrator or a project's PM session from the snapshot (`roleSessions` first). A retired
+ * one (archived when the role moved to another provider, §8.1) doesn't count: the role shows as
+ * not started until its next message starts a fresh session.
+ */
 export function useRoleSession(
   role: OrchestrationRole,
   projectId: string | null,
@@ -31,10 +35,15 @@ export function useRoleSession(
   return useSnapshotData((s) => {
     const ref =
       role === "orchestrator" ? s.roleSessions?.orchestrator : s.roleSessions?.pms[projectId ?? ""];
-    const byRef = ref ? s.sessions.find((x) => x.id === ref) : undefined;
+    const byRef = ref ? s.sessions.find((x) => x.id === ref && !x.archivedAt) : undefined;
     if (byRef) return byRef;
     return s.sessions
-      .filter((x) => x.role === role && (role === "orchestrator" || x.projectId === projectId))
+      .filter(
+        (x) =>
+          x.role === role &&
+          !x.archivedAt &&
+          (role === "orchestrator" || x.projectId === projectId),
+      )
       .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))[0];
   }, undefined);
 }

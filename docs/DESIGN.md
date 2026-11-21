@@ -325,7 +325,7 @@ When a turn completes (not a compaction, §7.1), CodeDen offers two to four sugg
 
 ### 8.1 Roles
 
-All three roles are the same kind of agent session, differing only in **role**, **system prompt**, **working directory** and **tool set**. Each can run on any provider. Claude Code is the default for the orchestrator and PMs, and each role can be switched to another provider.
+All three roles are the same kind of agent session, differing only in **role**, **system prompt**, **working directory** and **tool set**. Each can run on any provider. Claude Code is the default for the orchestrator and PMs, and each role can be switched to another provider (Settings → Providers → Defaults per role). A session never changes provider, so switching the orchestrator's or the PMs' provider retires their current session (stopped and archived, once no turn is running) and the next message or wake starts a fresh one on the chosen provider; the model picker in a role chat names that setting on the other providers' tiles and links to it.
 
 | Role | Count | Works in | Purpose |
 |---|---|---|---|
