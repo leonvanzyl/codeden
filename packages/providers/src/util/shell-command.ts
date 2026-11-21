@@ -14,6 +14,24 @@ export function defaultShell(
   return env.SHELL || "/bin/bash";
 }
 
+/** Shells that take `-l` to start as a login shell. */
+const LOGIN_SHELLS = new Set(["zsh", "bash", "sh", "ksh", "dash", "fish", "tcsh", "csh"]);
+
+/**
+ * The arguments the default shell of a terminal starts with. On macOS it is a login shell
+ * (`-l`), as in the system's own terminal: the PATH set up for Homebrew, nvm and the like
+ * usually lives in `~/.zprofile` or `~/.bash_profile`, which only a login shell reads, and an
+ * app started from the Dock has only the system's bare PATH to hand down. Elsewhere the login
+ * session has already set the environment up, so the shell starts plain.
+ */
+export function defaultShellArgs(
+  shell: string,
+  platform: NodeJS.Platform = process.platform,
+): string[] {
+  if (platform !== "darwin") return [];
+  return LOGIN_SHELLS.has(path.posix.basename(shell).toLowerCase()) ? ["-l"] : [];
+}
+
 /** How a shell parses a command line. */
 export type ShellSyntax = "powershell" | "cmd" | "posix";
 

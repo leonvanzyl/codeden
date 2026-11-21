@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { defaultShell, shellCommandLine, shellSyntax } from "../src/util/shell-command";
+import {
+  defaultShell,
+  defaultShellArgs,
+  shellCommandLine,
+  shellSyntax,
+} from "../src/util/shell-command";
 import { parseRegQuery } from "../src/util/system-path";
 
 describe("sign-in command lines", () => {
@@ -56,6 +61,30 @@ describe("sign-in command lines", () => {
     expect(defaultShell({}, "win32")).toBe("powershell.exe");
     expect(defaultShell({ SHELL: "/bin/zsh" }, "darwin")).toBe("/bin/zsh");
     expect(defaultShell({ CODEDEN_SHELL: "pwsh" }, "linux")).toBe("pwsh");
+  });
+
+  it("starts the default shell as a login shell on macOS only", () => {
+    // Every shell on the list, by file name: a bare name or any folder.
+    for (const name of ["zsh", "bash", "sh", "ksh", "dash", "fish", "tcsh", "csh"]) {
+      expect(defaultShellArgs(name, "darwin")).toEqual(["-l"]);
+      expect(defaultShellArgs(`/bin/${name}`, "darwin")).toEqual(["-l"]);
+      expect(defaultShellArgs(`/opt/homebrew/bin/${name}`, "darwin")).toEqual(["-l"]);
+      // The same shells start plain everywhere else.
+      expect(defaultShellArgs(`/bin/${name}`, "linux")).toEqual([]);
+      expect(defaultShellArgs(`/bin/${name}`, "win32")).toEqual([]);
+    }
+    // A shell that isn't on the list starts plain, as before: only the exact names match.
+    for (const shell of [
+      "/opt/homebrew/bin/nu",
+      "xonsh",
+      "elvish",
+      "pwsh",
+      "/bin/zsh-5.9",
+      "mksh",
+    ]) {
+      expect(defaultShellArgs(shell, "darwin")).toEqual([]);
+    }
+    expect(defaultShellArgs("powershell.exe", "win32")).toEqual([]);
   });
 });
 

@@ -150,7 +150,7 @@ A tree of the worktree with a syntax-highlighted viewer. Binary files are detect
 
 Terminals are real PTYs (node-pty) owned by the **runner**, so they survive a server restart and keep their scrollback. Each session has a terminal in its worktree, and you can open more. **Ctrl/Cmd+J** toggles a bottom terminal drawer.
 
-The shell is PowerShell on Windows and your `$SHELL` elsewhere. Set `CODEDEN_SHELL` to use another (for example `pwsh.exe` or `C:\Program Files\Git\bin\bash.exe`).
+The shell is PowerShell on Windows and your `$SHELL` elsewhere. Set `CODEDEN_SHELL` to use another (for example `pwsh.exe` or `C:\Program Files\Git\bin\bash.exe`). On macOS, zsh, bash, sh, ksh, dash, fish, tcsh and csh start as a login shell (`-l`), as in the system's Terminal, so what `~/.zprofile` or `~/.bash_profile` puts on your PATH (Homebrew, nvm and the like) is there. Everything else those files do happens in each terminal too, and a login bash reads `~/.bash_profile` (or `~/.bash_login`, or `~/.profile`) instead of `~/.bashrc`. Any other shell starts with no arguments, as on Linux and Windows.
 
 ![A terminal in the session's worktree](images/terminal.png)
 

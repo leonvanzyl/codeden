@@ -50,6 +50,7 @@ export { resolveNpm } from "./util/npm";
 export { npmFailure, type RunNpmOptions, runNpm } from "./util/npm-run";
 export {
   defaultShell,
+  defaultShellArgs,
   quoteForShell,
   type ShellSyntax,
   shellCommandLine,

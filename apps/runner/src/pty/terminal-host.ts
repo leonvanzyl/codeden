@@ -7,7 +7,7 @@ import type {
   RunnerEvent,
   RunnerStream,
 } from "@codeden/contracts";
-import { defaultShell } from "@codeden/providers";
+import { defaultShell, defaultShellArgs } from "@codeden/providers";
 import type * as NodePty from "node-pty";
 import { CommandError } from "../errors";
 import { cwdMissing } from "../git/exec";
@@ -109,7 +109,11 @@ export class TerminalHost {
       throw new CommandError("pty_exists", `Terminal ${cmd.ptyId} already exists`);
     }
     if (!existsSync(cmd.cwd)) throw cwdMissing(cmd.cwd);
-    const pty = ptyModule.spawn(cmd.shell ?? defaultShell(), cmd.args ?? [], {
+    // A shell the caller names starts as the caller says; the default one starts the way the
+    // system's own terminal starts it (a login shell on macOS).
+    const shell = cmd.shell ?? defaultShell();
+    const args = cmd.args ?? (cmd.shell ? [] : defaultShellArgs(shell));
+    const pty = ptyModule.spawn(shell, args, {
       name: "xterm-256color",
       cols: cmd.cols,
       rows: cmd.rows,
