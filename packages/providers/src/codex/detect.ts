@@ -1,5 +1,10 @@
 import type { ProviderIssue, ProviderStatus } from "@codeden/contracts";
-import { brokenInstallMessage, type DetectExeOptions, lookupForDetect } from "../util/detect-exe";
+import {
+  brokenInstallMessage,
+  type DetectExeOptions,
+  lookupForDetect,
+  outdatedVersionMessage,
+} from "../util/detect-exe";
 import { runCommand } from "../util/exec";
 import { compareVersions } from "../util/version";
 
@@ -11,8 +16,9 @@ const INSTALL = { kind: "install", command: "npm install -g @openai/codex" } as 
 export type CodexDetectOptions = DetectExeOptions;
 
 /**
- * Find a working `codex` (PATH, then the standalone installer's folders), then
- * `codex login status` (§14). Never throws.
+ * Find a working `codex` (PATH, then the standalone installer's folders; a copy older than
+ * `CODEX_MIN_VERSION` only when there is no newer one), then `codex login status` (§14).
+ * Never throws.
  */
 export async function detectCodex(opts: CodexDetectOptions = {}): Promise<ProviderStatus> {
   const status: ProviderStatus = {
@@ -30,7 +36,11 @@ export async function detectCodex(opts: CodexDetectOptions = {}): Promise<Provid
   };
   const issues: ProviderIssue[] = [];
   const timeoutMs = opts.timeoutMs ?? 15_000;
-  const lookup = await lookupForDetect("codex", { ...opts, timeoutMs });
+  const lookup = await lookupForDetect("codex", {
+    ...opts,
+    timeoutMs,
+    minVersion: CODEX_MIN_VERSION,
+  });
   const broken = lookup.broken.length > 0 ? { broken: lookup.broken } : {};
   const exe = lookup.command;
   if (!exe) {
@@ -50,13 +60,17 @@ export async function detectCodex(opts: CodexDetectOptions = {}): Promise<Provid
     return { ...status, ...broken, issues };
   }
   const version = lookup.version;
+  const executablePath = exe.kind === "node-script" ? exe.script : exe.path;
   const supported = version !== null && compareVersions(version, CODEX_MIN_VERSION) >= 0;
   if (!supported) {
+    // The login state is not asked of a copy this old: it can fail on a current configuration
+    // and read as "not logged in", which would hide the real cause.
     issues.push({
       code: "version_unsupported",
-      message: `Codex ${version ?? "(unknown version)"} is older than the tested minimum ${CODEX_MIN_VERSION}.`,
+      message: outdatedVersionMessage("Codex", version, executablePath, CODEX_MIN_VERSION),
       fix: { kind: "upgrade", command: "npm install -g @openai/codex@latest" },
     });
+    return { ...status, installed: true, version, executablePath, ...broken, issues };
   }
   const login = await runCommand(exe, ["login", "status"], { timeoutMs });
   const auth = parseCodexLoginStatus(`${login.stdout}\n${login.stderr}`, login.code);
@@ -73,8 +87,8 @@ export async function detectCodex(opts: CodexDetectOptions = {}): Promise<Provid
     ...status,
     installed: true,
     version,
-    executablePath: exe.kind === "node-script" ? exe.script : exe.path,
-    supported,
+    executablePath,
+    supported: true,
     loggedIn: auth.loggedIn,
     authMethod: auth.authMethod,
     ...broken,

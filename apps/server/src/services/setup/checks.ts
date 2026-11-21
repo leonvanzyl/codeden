@@ -1,5 +1,5 @@
 import type { SetupToolId } from "@codeden/contracts";
-import { isElectronRuntime } from "@codeden/providers";
+import { CLAUDE_MIN_VERSION, CODEX_MIN_VERSION, isElectronRuntime } from "@codeden/providers";
 import { detectBrowser } from "./browsers";
 import { base, type CheckEnv, type CheckResult, installFix, MIN_NODE_MAJOR } from "./check-base";
 import { checkCursor } from "./check-cursor";
@@ -24,6 +24,26 @@ export const OPENCODE_MIN_VERSION = "2.2.0";
 /** Days before `loginExpiresAt` at which a Claude login is flagged. */
 export const LOGIN_EXPIRY_WARNING_DAYS = 3;
 
+/**
+ * The check for a copy older than the provider's minimum, else null. It comes before the
+ * sign-in state, which an old copy can't report reliably (and signing in would not fix).
+ */
+function outdated(
+  installed: Omit<CheckResult, "state" | "message">,
+  minVersion: string,
+  upgrade: string,
+): CheckResult | null {
+  const { version, executablePath: file } = installed;
+  if (!version || compareVersions(version, minVersion) >= 0) return null;
+  return {
+    ...installed,
+    state: "warning",
+    message: `${installed.label} ${version} is older than ${minVersion}; update it`,
+    detail: `Found at \`${file}\`. No copy of version ${minVersion} or newer was found on PATH or in the usual install folders. Update this copy, or remove it if a newer one is installed elsewhere.`,
+    fix: { kind: "upgrade", command: upgrade },
+  };
+}
+
 export async function checkClaude({
   exec,
   locate,
@@ -31,10 +51,13 @@ export async function checkClaude({
   platform,
   now,
 }: CheckEnv): Promise<CheckResult> {
-  const tool = await lookupTool(locate, "claude", base("claude"), {
-    message: "Claude Code is not installed",
-    fix: installFix("claude", platform),
-  });
+  const tool = await lookupTool(
+    locate,
+    "claude",
+    base("claude"),
+    { message: "Claude Code is not installed", fix: installFix("claude", platform) },
+    { minVersion: CLAUDE_MIN_VERSION },
+  );
   if (!tool.found) return tool.result;
   const installed = {
     ...base("claude"),
@@ -43,6 +66,8 @@ export async function checkClaude({
     version: tool.version,
     executablePath: tool.path,
   };
+  const old = outdated(installed, CLAUDE_MIN_VERSION, "claude update");
+  if (old) return old;
   const login = loginFix("claude", shell, tool.path);
   const status = await exec(tool.path, ["auth", "status"], { timeoutMs: 10_000 });
   const auth = parseClaudeAuth(status.stdout);
@@ -76,10 +101,13 @@ export async function checkCodex({
   shell,
   platform,
 }: CheckEnv): Promise<CheckResult> {
-  const tool = await lookupTool(locate, "codex", base("codex"), {
-    message: "Codex is not installed",
-    fix: installFix("codex", platform),
-  });
+  const tool = await lookupTool(
+    locate,
+    "codex",
+    base("codex"),
+    { message: "Codex is not installed", fix: installFix("codex", platform) },
+    { minVersion: CODEX_MIN_VERSION },
+  );
   if (!tool.found) return tool.result;
   const installed = {
     ...base("codex"),
@@ -88,6 +116,8 @@ export async function checkCodex({
     version: tool.version,
     executablePath: tool.path,
   };
+  const old = outdated(installed, CODEX_MIN_VERSION, "npm install -g @openai/codex@latest");
+  if (old) return old;
   const status = await exec(tool.path, ["login", "status"], { timeoutMs: 10_000 });
   const login = parseCodexLogin(
     status.code,
@@ -125,10 +155,13 @@ export async function checkOpenCode({
   shell,
   platform,
 }: CheckEnv): Promise<CheckResult> {
-  const tool = await lookupTool(locate, "opencode", base("opencode"), {
-    message: "OpenCode is not installed",
-    fix: installFix("opencode", platform),
-  });
+  const tool = await lookupTool(
+    locate,
+    "opencode",
+    base("opencode"),
+    { message: "OpenCode is not installed", fix: installFix("opencode", platform) },
+    { minVersion: OPENCODE_MIN_VERSION },
+  );
   if (!tool.found) return tool.result;
   const found = tool.version;
   const installed = {

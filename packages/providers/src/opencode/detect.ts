@@ -49,6 +49,7 @@ export async function detectOpenCode(opts: OpenCodeDetectOptions = {}): Promise<
   const lookup = await lookupForDetect("opencode", {
     ...opts,
     timeoutMs: opts.timeoutMs ?? 15_000,
+    minVersion: OPENCODE_MIN_VERSION,
   });
   const broken = lookup.broken.length > 0 ? { broken: lookup.broken } : {};
   if (!lookup.command) {

@@ -1,4 +1,5 @@
 import {
+  GEMINI_MIN_VERSION,
   GEMINI_UPGRADE_COMMAND,
   geminiTooOldMessage,
   isSupportedGeminiVersion,
@@ -21,10 +22,13 @@ export async function checkGemini({
   userHome,
   env,
 }: CheckEnv): Promise<CheckResult> {
-  const tool = await lookupTool(locate, "gemini", base("gemini"), {
-    message: "Gemini CLI is not installed",
-    fix: installFix("gemini", platform),
-  });
+  const tool = await lookupTool(
+    locate,
+    "gemini",
+    base("gemini"),
+    { message: "Gemini CLI is not installed", fix: installFix("gemini", platform) },
+    { minVersion: GEMINI_MIN_VERSION },
+  );
   if (!tool.found) return tool.result;
   const installed = {
     ...base("gemini"),

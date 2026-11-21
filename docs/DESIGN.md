@@ -909,6 +909,7 @@ The goal is to get from `npx codeden` to your first session in under a minute, w
    - The install command for the tool.
    - Or a **Sign in** button that runs the tool's own login (`claude auth login`, `codex login`, `opencode auth login`, `agent login`, `gemini`, `gh auth login`) in an embedded terminal, so the provider's normal browser login flow handles it. It runs the exact copy detection found, by its full path and quoted for the terminal's shell (`& 'C:\Users\x\.local\bin\claude.exe' auth login` in PowerShell), so a broken shim or an outdated PATH in the terminal can't get in the way.
    - A login state that can't be read is a warning with the underlying error (exit code, output) in the row's details.
+   - A copy older than the provider's minimum version (Claude Code, Codex, OpenCode, Gemini CLI) is passed over while a later copy, on PATH or in a known folder, meets it, so a leftover old install early on PATH doesn't hide a current one; sessions start the same copy. When only an old copy exists, the row says which version it is and where, and offers the update command rather than **Sign in**: an old copy is not asked for its login state, which it can't report reliably.
    - API keys are only an advanced alternative, never the default ask.
 
    At least one agent provider is required; GitHub is recommended but optional (local-only projects work without it).

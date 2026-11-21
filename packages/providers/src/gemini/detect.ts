@@ -55,7 +55,11 @@ export async function detectGemini(opts: GeminiDetectOptions = {}): Promise<Prov
   const issues: ProviderIssue[] = [];
   const install = { kind: "install" as const, command: GEMINI_INSTALL_COMMAND };
   const upgrade = { kind: "upgrade" as const, command: GEMINI_UPGRADE_COMMAND };
-  const lookup = await lookupForDetect("gemini", { ...opts, timeoutMs: opts.timeoutMs ?? 15_000 });
+  const lookup = await lookupForDetect("gemini", {
+    ...opts,
+    timeoutMs: opts.timeoutMs ?? 15_000,
+    minVersion: GEMINI_MIN_VERSION,
+  });
   const broken = lookup.broken.length > 0 ? { broken: lookup.broken } : {};
   const exe = lookup.command;
   if (!exe) {

@@ -31,7 +31,7 @@ const fakeExec: Exec = async (command, args) => {
     timedOut: false,
     path: command,
   });
-  if (key === "codex --version") return ok("codex-cli 0.1.0");
+  if (key === "codex --version") return ok("codex-cli 0.160.1");
   if (key === "codex login status") return ok("Logged in using ChatGPT");
   return { code: null, stdout: "", stderr: "", notFound: true, timedOut: false, path: null };
 };
