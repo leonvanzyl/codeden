@@ -528,6 +528,27 @@ describe("OpenCode session", () => {
     ).toBe(true);
   });
 
+  // Issue #585: a custom provider's model (`9router/Worker`) OpenCode's list doesn't have.
+  it("sends a custom model as is, without guessing a variant, and refuses a bare id", async () => {
+    const a = adapter();
+    await a.refreshModels();
+    const { session, reader } = await open({ model: "9router/Worker", effort: "high" }, a);
+    await reader.until((e) => e.type === "session.updated" && !!e.resumeToken);
+    // OpenCode fails the turn on a variant the model lacks; the listed one keeps its effort.
+    expect(requests(/^\/api\/session$/, "POST")[0]?.body?.model).toEqual({
+      providerID: "9router",
+      id: "Worker",
+    });
+    await session.configure?.({ model: "anthropic/claude-opus-5-5" });
+    await reader.turn("hello");
+    expect(requests(/\/model$/, "POST").at(-1)?.body).toEqual({
+      model: { providerID: "anthropic", id: "claude-opus-5-5", variant: "high" },
+    });
+    await expect(a.openSession(options({ model: "Worker" }))).rejects.toThrow(
+      /OpenCode model "Worker" needs its provider/,
+    );
+  });
+
   it("survives a server crash: the turn fails, the next send resumes the same session", async () => {
     const { session, reader } = await open();
     await reader.turn("hello");
