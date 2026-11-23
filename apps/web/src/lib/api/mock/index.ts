@@ -17,6 +17,7 @@ import { startFactoryDemo } from "./factory-demo";
 import { mockFeatureApis } from "./feature-apis";
 import { makeSession } from "./fixtures/helpers";
 import { setupChecks } from "./fixtures/ops";
+import { mockGroupsApi } from "./groups";
 import { mockInboxBulkApi } from "./inbox-bulk";
 import { type Script, scriptedTurn, uid } from "./live";
 import { mockOrchestration } from "./orchestration";
@@ -431,6 +432,7 @@ export function createMockClient(opts: MockClientOptions = {}): CodeDenClient {
     ...mockInboxBulkApi(world),
     ...mockProjectApi(world),
     automations: mockAutomationsApi(world),
+    groups: mockGroupsApi(world),
     factory: mockFactoryApi(world),
 
     async updateSettings(patch: SettingsPatch) {

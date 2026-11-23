@@ -23,6 +23,7 @@ import { browserRoutes, sessionBrowserRoutes } from "./browser";
 import { executionRoutes } from "./execution";
 import { factoryRoutes, projectFactoryRoutes } from "./factory";
 import { githubRoutes, projectGithubRoutes, prRoutes, sessionGithubRoutes } from "./github";
+import { groupRoutes } from "./groups";
 import { imageRoutes } from "./images";
 import { inboxRoutes } from "./inbox";
 import { authRoutes, type NetworkRouteContext, networkRoutes } from "./network";
@@ -77,6 +78,7 @@ export function createApi(ctx: ApiContext) {
         c.json(sessionSnapshot(s, c.req.param("id"), c.req.valid("query"))),
       )
       .route("/projects", projectRoutes(s))
+      .route("/groups", groupRoutes(s))
       .route("/execution", executionRoutes(s))
       .route("/projects", projectGithubRoutes(s))
       .route("/projects", projectFactoryRoutes(s))
@@ -147,6 +149,7 @@ function buildSnapshot(ctx: ApiContext): Snapshot {
     generatedAt: new Date().toISOString(),
     settings: s.settings.get(),
     projects: s.projects.list(),
+    groups: s.groups.list(),
     sessions: snapshotSessions(s.db),
     archivedSessionCounts: archivedSessionCounts(s.db),
     inbox: s.inbox.list({ status: "open" }),

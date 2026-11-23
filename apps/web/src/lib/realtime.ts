@@ -12,6 +12,7 @@ import type { CodeDenClient } from "./api/client";
 import { syncSessionQueries } from "./archived-sessions";
 import { invalidateAutomations } from "./automations";
 import { invalidateFactory } from "./factory";
+import { invalidateGroupMemory } from "./groups";
 import { snapshotKey } from "./queries";
 import { applyDomainEvent } from "./snapshot-reducer";
 import { updatesKey } from "./updates";
@@ -78,6 +79,7 @@ export function startRealtime(client: CodeDenClient, queryClient: QueryClient): 
       invalidateWorkbench(queryClient, env);
       invalidateAutomations(queryClient, env);
       invalidateFactory(queryClient, env);
+      invalidateGroupMemory(queryClient, env);
     }
     if (env.seq > conn().seq) conn().setSeq(env.seq);
     for (const l of listeners) l(env);

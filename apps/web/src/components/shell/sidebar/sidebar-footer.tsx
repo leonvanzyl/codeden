@@ -1,5 +1,5 @@
 import { Link } from "@tanstack/react-router";
-import { Keyboard, Moon, Settings, SlidersHorizontal, Sun } from "lucide-react";
+import { Keyboard, Layers, Moon, Settings, SlidersHorizontal, Sun } from "lucide-react";
 import { StatusDot } from "@/components/common/status-dot";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -76,6 +76,22 @@ export function SidebarFooter({ compact = false }: { compact?: boolean }) {
       <IconButton label={dark ? "Light theme" : "Dark theme"} onClick={toggleTheme}>
         {dark ? <Sun /> : <Moon />}
       </IconButton>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            className="text-muted-foreground"
+            aria-label="Project groups"
+            asChild
+          >
+            <Link to="/groups">
+              <Layers />
+            </Link>
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>Project groups</TooltipContent>
+      </Tooltip>
       <Tooltip>
         <TooltipTrigger asChild>
           <Button

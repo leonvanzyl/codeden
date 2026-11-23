@@ -70,6 +70,7 @@ describe("agent system prompt", () => {
       - \`generate_image\` (when listed): create images into your worktree, e.g. \`public/hero.png\`.
       - GitHub projects: \`create_pull_request\` pushes your branch and opens the PR (linked to your issue and this session); \`attach_evidence\` posts screenshots, files and test output on it, or on any issue (\`target\`); \`comment_on_issue\` and \`get_pr_status\` (checks, reviews, mergeability). For anything else on GitHub (reading or editing issues, labels, checks, reviews) use the \`gh\` CLI, which is signed in as the user. GitHub has no API for uploading images, so \`gh\` can't attach screenshots: post them with \`attach_evidence\` (pass the \`File:\` path \`browser_screenshot\` prints, a file in your worktree, or an \`artifactId\`), and reuse the image URLs it returns if you also edit an issue or PR description with \`gh\`.
       - If a CodeDen tool fails with "CodeDen server unreachable", CodeDen is restarting: wait a few seconds and call the same tool again.
+      - \`read_project_notes\`, \`update_project_notes\`: the project's notes, shared with its project manager: decisions, conventions and follow-ups that outlast this session.
       - \`finish\`: record the outcome and a short summary once your assigned task is done.
       - \`suggest_followups\`: 2 to 4 short next prompts the user might send, including optional next steps you would otherwise ask about. Call it as the last action of every turn."
     `);
@@ -280,6 +281,7 @@ describe("orchestrator system prompt", () => {
 
       - \`get_overview\`: every project's running work, upcoming runs, inbox counts and recent outcomes.
       - \`list_projects\`, \`create_project\`, \`update_project\`.
+      - Project groups: \`list_groups\`, \`create_group\`, \`update_group\` (name, description, skills), \`assign_project_group\` (null takes a project out). A group's member projects share its skills and one memory store.
       - \`ask_pm\`: ask a project's PM and wait for its answer. Use it whenever a request concerns a project's work (for example "run a security audit on X"): the PM knows what is already running there and decides how to proceed.
       - \`message_pm\`: hand a PM a task or information without waiting; its reply arrives later as a message.
       - \`list_inbox\`: what is waiting on the user.

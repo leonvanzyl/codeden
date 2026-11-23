@@ -3,6 +3,7 @@ import { ErrorInfo, Id, Timestamp } from "./common";
 import { Automation } from "./entities/automation";
 import { InboxItem } from "./entities/inbox";
 import { Project } from "./entities/project";
+import { ProjectGroup } from "./entities/project-group";
 import { ItemRecord, Session, Thread, Turn } from "./entities/session";
 import { RawEventEnvelope } from "./events";
 import { RoleSessionsRef } from "./orchestration";
@@ -44,6 +45,8 @@ export const Snapshot = z.object({
   generatedAt: Timestamp,
   settings: Settings,
   projects: z.array(Project),
+  /** Every project group (DESIGN.md "Project groups"), by name. Memory is fetched per group. */
+  groups: z.array(ProjectGroup).default([]),
   /**
    * Every session that isn't archived, plus the recently archived ones
    * (`SNAPSHOT_ARCHIVED_SESSIONS_DAYS`, at most `SNAPSHOT_ARCHIVED_SESSIONS_MAX`), oldest first.

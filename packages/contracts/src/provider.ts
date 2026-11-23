@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { AutonomyLevel, Id, ProviderId, ReasoningEffort, Role, Timestamp } from "./common";
+import { SharedSkillFile } from "./entities/project-group";
 import { ApprovalDecider, ApprovalDecision } from "./items";
 
 /**
@@ -33,6 +34,12 @@ export const ProviderCapabilities = z.object({
   /** MCP servers can be injected (required for CodeDen tools). */
   mcp: z.boolean(),
   skills: z.boolean(),
+  /**
+   * Where the provider finds a project's skills, relative to the working directory, one folder
+   * per skill (`<dir>/<name>/SKILL.md`), such as `.claude/skills`. The runner writes a session's
+   * `SessionOptions.sharedSkills` there. Absent or empty: shared skills can't be delivered.
+   */
+  skillDirs: z.array(z.string().min(1)).optional(),
   /**
    * An autonomy change reaches a running turn from its next tool call. When false (or absent),
    * a running turn keeps its autonomy and the change applies from the next turn.
@@ -242,6 +249,13 @@ export const SessionOptions = z.object({
    */
   forkFrom: z.string().min(1).optional(),
   mcpServers: z.array(McpServerConfig).default([]),
+  /**
+   * Skills the session gets besides the project's own: its project group's (DESIGN.md "Project
+   * groups"). Before the provider opens, the runner writes each one into the provider's
+   * `capabilities.skillDirs` in `cwd`, skipping a name the workspace already has a skill for
+   * (the project's wins), and removes the copies it wrote earlier that are no longer listed.
+   */
+  sharedSkills: z.array(SharedSkillFile).max(50).optional(),
   /** Extra env vars for the agent process (CodeDen secrets are never included). */
   env: z.record(z.string(), z.string()).optional(),
   /**

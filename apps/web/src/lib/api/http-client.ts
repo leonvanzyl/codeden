@@ -48,6 +48,7 @@ import {
 import { httpAutomationsApi } from "./automations-api";
 import type { CodeDenClient, SendMode } from "./client";
 import { httpFactoryApi } from "./factory-api";
+import { httpGroupsApi } from "./groups-api";
 import { createFetcher } from "./http";
 import {
   httpAgentConfigApi,
@@ -193,6 +194,7 @@ export function createHttpClient(origin: string, opts: HttpClientOptions = {}): 
     disconnectGithub: (id) =>
       post(`/projects/${enc(id)}/disconnect-github`, {}, (v) => DisconnectGithubResponse.parse(v)),
     automations: httpAutomationsApi(http),
+    groups: httpGroupsApi(http),
     factory: httpFactoryApi(http),
 
     updateSettings: (patch) => call("PATCH", "/settings", patch, (v) => Settings.parse(v)),

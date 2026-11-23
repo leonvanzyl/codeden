@@ -91,6 +91,8 @@ describe("CodeDen MCP endpoint", () => {
       "browser_wait",
       "browser_evaluate",
       "browser_open_dev_server",
+      "read_project_notes",
+      "update_project_notes",
     ]);
     expect(tools[0]?._meta).toEqual({ "anthropic/alwaysLoad": true });
     // A flat object schema, so every provider accepts it (no top-level anyOf/oneOf).

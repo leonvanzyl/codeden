@@ -18,6 +18,7 @@ import { Artifact } from "./entities/artifact";
 import { Automation, AutomationRun } from "./entities/automation";
 import { InboxItem } from "./entities/inbox";
 import { Project } from "./entities/project";
+import { MemoryWriteMode, MemoryWriter, ProjectGroup } from "./entities/project-group";
 import { Session } from "./entities/session";
 import { FACTORY_EVENT_PAYLOADS } from "./factory-api";
 import { GITHUB_EVENT_PAYLOADS } from "./github";
@@ -83,6 +84,28 @@ export const EventEnvelope = z.discriminatedUnion("type", [
    * its new order; each one's `sortOrder` becomes its index. Archived projects keep theirs.
    */
   globalEvent("projects.reordered", z.object({ projectIds: z.array(Id) })),
+  /** A project group was created or changed (name, description, skills). */
+  globalEvent("project_group.saved", z.object({ group: ProjectGroup })),
+  /**
+   * A group was deleted, with its memory. Its members were taken out first, each by a
+   * `project.updated` with `groupId: null` in the same append.
+   */
+  globalEvent("project_group.deleted", z.object({ groupId: Id })),
+  /**
+   * A write to a group's memory. The projection applies it to the current content
+   * (`nextMemoryContent`) inside the append transaction, so writes from several projects never
+   * lose one another; `revision` is the memory's revision after this write.
+   */
+  globalEvent(
+    "project_group.memory_written",
+    z.object({
+      groupId: Id,
+      mode: MemoryWriteMode,
+      content: z.string(),
+      revision: z.int().positive(),
+      by: MemoryWriter,
+    }),
+  ),
   globalEvent("session.created", z.object({ session: Session })),
   /** Any change to a session row, including status transitions. */
   globalEvent("session.updated", z.object({ session: Session })),

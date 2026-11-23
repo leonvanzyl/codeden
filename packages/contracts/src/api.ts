@@ -110,6 +110,11 @@ export const UpdateProjectRequest = z.object({
    * isn't on GitHub and while Docker isn't available, with the reason.
    */
   execution: z.object({ backend: ProjectExecutionBackend }).optional(),
+  /**
+   * Put the project in a group, or take it out with null (`Project.groupId`). An unknown group
+   * is refused (`404 group_not_found`). Applies to sessions opened from now on.
+   */
+  groupId: Id.nullable().optional(),
 });
 export type UpdateProjectRequest = z.infer<typeof UpdateProjectRequest>;
 

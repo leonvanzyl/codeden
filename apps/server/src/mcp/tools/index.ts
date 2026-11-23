@@ -20,6 +20,7 @@ import { factoryTools } from "./factory";
 import { finish } from "./finish";
 import { generateImage } from "./generate-image";
 import { githubTools } from "./github";
+import { readGroupMemory, updateGroupMemory } from "./group-memory";
 import { orchestratorTools } from "./orchestrator";
 import { pmTools } from "./pm";
 import { reportProgress } from "./report-progress";
@@ -51,6 +52,8 @@ export const allTools: AnyServerTool[] = [
   generateImage,
   ...orchestratorTools,
   ...pmTools,
+  readGroupMemory,
+  updateGroupMemory,
   ...wakeupTools,
   ...githubTools,
   ...factoryTools,

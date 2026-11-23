@@ -84,6 +84,7 @@ describe("issue triage (§10)", () => {
       execution: { backend: "local" },
       pinned: false,
       sortOrder: 0,
+      groupId: null,
       createdAt: ts,
       updatedAt: ts,
       archivedAt: null,

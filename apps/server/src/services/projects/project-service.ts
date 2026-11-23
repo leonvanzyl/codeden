@@ -17,7 +17,7 @@ import {
 import { eq, max } from "drizzle-orm";
 import type { Db } from "../../db/client";
 import { rowToProject } from "../../db/rows";
-import { projects } from "../../db/schema";
+import { projectGroups, projects } from "../../db/schema";
 import type { EventStore } from "../../events/store";
 import { badRequest, conflict, notFound, ServiceError } from "../errors";
 import type { Exec } from "../exec";
@@ -149,6 +149,13 @@ export class ProjectService {
         );
       }
       next.execution = { backend: patch.execution.backend };
+    }
+    // Applies to sessions opened from now on (their skills, prompt and memory tools).
+    if (patch.groupId !== undefined) {
+      if (patch.groupId !== null && !this.groupExists(patch.groupId)) {
+        throw notFound(`No project group ${patch.groupId}`, "group_not_found");
+      }
+      next.groupId = patch.groupId;
     }
     this.deps.store.append([
       { type: "project.updated", sessionId: null, payload: { project: next } },
@@ -283,6 +290,16 @@ export class ProjectService {
     return { project: next };
   }
 
+  private groupExists(id: string): boolean {
+    return Boolean(
+      this.deps.db
+        .select({ id: projectGroups.id })
+        .from(projectGroups)
+        .where(eq(projectGroups.id, id))
+        .get(),
+    );
+  }
+
   private reconcile(project: Project, detected: ProjectDetection, now: string): Reconciled {
     return reconcileProject(project, detected, {
       now,
@@ -318,6 +335,7 @@ export class ProjectService {
       execution: { backend: "local" as const },
       pinned: false,
       sortOrder: this.nextSortOrder(),
+      groupId: null,
       createdAt: now,
       updatedAt: now,
       archivedAt: null,

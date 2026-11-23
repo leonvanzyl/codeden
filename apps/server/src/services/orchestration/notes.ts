@@ -29,7 +29,7 @@ export class ProjectNotes {
     const current = mode === "append" ? this.read(projectId) : "";
     const next =
       mode === "append" && current.trim()
-        ? `${current.replace(/\s*$/, "")}\n\n${content.trim()}\n`
+        ? `${current.trimEnd()}\n\n${content.trim()}\n`
         : `${content.trim()}\n`;
     if (Buffer.byteLength(next, "utf8") > MAX_BYTES) {
       throw new ServiceError(413, "notes_too_large", "Project notes are limited to 200 KB");

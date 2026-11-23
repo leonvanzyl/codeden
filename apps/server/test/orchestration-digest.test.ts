@@ -39,6 +39,7 @@ const project = (id: string, name: string): Project => ({
   execution: { backend: "local" },
   pinned: false,
   sortOrder: 0,
+  groupId: null,
   createdAt: ts(1000),
   updatedAt: ts(1000),
   archivedAt: null,

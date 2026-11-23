@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import type {
   AgentEvent,
+  ProviderCapabilities,
   RunnerCommandOf,
   RunnerEvent,
   RunnerSessionInfo,
@@ -14,6 +15,7 @@ import { CommandError } from "./errors";
 import { createCheckpoint, nextCheckpointIndex } from "./git/checkpoints";
 import { cwdMissing, isWorkTree } from "./git/exec";
 import { agentSessionOptions } from "./session-env";
+import { syncSharedSkills } from "./workspace/shared-skills";
 
 export { CommandError };
 
@@ -107,6 +109,7 @@ export class SessionHost {
     let hosted: Hosted;
     try {
       this.emit({ kind: "session.process", sessionId: cmd.sessionId, state: "starting" });
+      await this.deliverSharedSkills(cmd, adapter.capabilities());
       let opened: ProviderSession;
       try {
         opened = await adapter.openSession(agentSessionOptions(cmd.options));
@@ -149,6 +152,35 @@ export class SessionHost {
       await session.send(cmd.input);
     }
     return { resumeToken: session.resumeToken() ?? null };
+  }
+
+  /**
+   * Write the session's shared skills (its project group's) into the workspace before the
+   * provider reads its skills; a provider without skill folders gets none. A failure is logged
+   * and the session opens without them.
+   */
+  private async deliverSharedSkills(
+    cmd: RunnerCommandOf<"session.start">,
+    capabilities: ProviderCapabilities,
+  ): Promise<void> {
+    const skills = cmd.options.sharedSkills;
+    if (!skills) return;
+    const dirs = capabilities.skills ? (capabilities.skillDirs ?? []) : [];
+    try {
+      const done = await syncSharedSkills(cmd.options.cwd, dirs, skills);
+      const parts = [
+        done.written.length > 0 && `written [${done.written.join(", ")}]`,
+        done.skipped.length > 0 && `project's own kept [${done.skipped.join(", ")}]`,
+        done.removed.length > 0 && `removed [${done.removed.join(", ")}]`,
+        done.blocked.length > 0 && `skill folders left alone (links) [${done.blocked.join(", ")}]`,
+      ].filter(Boolean);
+      if (parts.length > 0) {
+        this.opts.log?.(`session ${cmd.sessionId}: shared skills ${parts.join(", ")}`);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.opts.log?.(`session ${cmd.sessionId}: could not write shared skills: ${message}`);
+    }
   }
 
   async send(cmd: RunnerCommandOf<"session.send">): Promise<void> {
