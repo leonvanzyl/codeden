@@ -12,7 +12,7 @@ import {
 import { z } from "zod";
 import { defineTool, ToolError } from "../../define";
 import { agentSessionOf, compactSession, compactWork, projectFor } from "../shared/helpers";
-import { describeProviderParam } from "../shared/provider-choices";
+import { describeProviderParam, fallbackProvider } from "../shared/provider-choices";
 import { assertMayStartOnIssues, issuesNamed } from "./issue-trust";
 
 const ENDED = new Set(["completed", "failed", "stopped"]);
@@ -53,8 +53,8 @@ export const startSession = defineTool({
   // The loaded providers and whether each is ready, as of this listing.
   describeInput: describeProviderParam(
     "provider",
-    "Leave it out to use the project's default provider when it is loaded, else the default provider for agents in Settings when it is loaded, else the first loaded provider in a fixed order, ready or not.",
-    "An id that isn't loaded is refused while the runner is connected. Readiness isn't checked when a session starts: on a provider that isn't ready the session is created and then fails to start or fails its first turn, so pick one that is ready.",
+    "Leave it out to use the project's default provider when it is ready, else the default provider for agents in Settings when it is ready (when that is auto, the first ready provider in a fixed order); when none of them is ready, the call is refused with this list.",
+    "An id that isn't loaded is refused while the runner is connected. A provider you name isn't checked for readiness: on one that isn't ready the session is created and then fails to start or fails its first turn, so pick one that is ready.",
   ),
   input: z.object({
     prompt: z
@@ -85,6 +85,13 @@ export const startSession = defineTool({
   handler: async (input, { services, projectId, sessionId, caller }) => {
     const project = projectFor(services, projectId);
     await assertMayStartOnIssues(services, { caller, sessionId }, project, issuesNamed(input));
+    // `auto` names none, as for the session service. Joining or skipping starts nothing, so it
+    // needs no provider.
+    const named = input.provider === "auto" ? undefined : input.provider;
+    const startsNothing =
+      input.conflict?.resolution === "join" || input.conflict?.resolution === "skip";
+    const provider =
+      named ?? (startsNothing ? undefined : await fallbackProvider(services, project));
     const issue =
       input.issueNumber && project.kind === "github"
         ? {
@@ -95,7 +102,7 @@ export const startSession = defineTool({
     const req = StartSessionRequest.parse({
       projectId,
       role: "agent",
-      provider: input.provider,
+      provider,
       model: input.model,
       effort: input.effort,
       purpose: input.purpose,

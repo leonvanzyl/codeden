@@ -50,9 +50,9 @@ async function listedStates(): Promise<string[]> {
 }
 
 const START_SESSION_HEAD =
-  "Provider id. Leave it out to use the project's default provider when it is loaded, else the default provider for agents in Settings when it is loaded, else the first loaded provider in a fixed order, ready or not. Loaded providers when this list was made: ";
+  "Provider id. Leave it out to use the project's default provider when it is ready, else the default provider for agents in Settings when it is ready (when that is auto, the first ready provider in a fixed order); when none of them is ready, the call is refused with this list. Loaded providers when this list was made: ";
 const START_SESSION_TAIL =
-  ". An id that isn't loaded is refused while the runner is connected. Readiness isn't checked when a session starts: on a provider that isn't ready the session is created and then fails to start or fails its first turn, so pick one that is ready. The states are from the last check and may have changed since.";
+  ". An id that isn't loaded is refused while the runner is connected. A provider you name isn't checked for readiness: on one that isn't ready the session is created and then fails to start or fails its first turn, so pick one that is ready. The states are from the last check and may have changed since.";
 
 describe("start_session's provider parameter", () => {
   it("lists the loaded providers and whether each is ready", async () => {
@@ -188,11 +188,11 @@ describe("start_session's provider parameter", () => {
 });
 
 describe("the orchestrator's defaultProvider parameter", () => {
-  it("lists the same providers and says an id isn't checked", async () => {
+  it("lists the same providers and says an id that isn't loaded is refused", async () => {
     env = createFactoryEnv({ providers: ["fake", "gemini"] });
     env.detected.gemini = NOT_INSTALLED;
     const expected =
-      "Provider id. The provider this project's sessions use unless one is named. Loaded providers when this list was made: `fake`: ready; `gemini`: not installed, fix: `npm install -g @google/gemini-cli`. The id is stored as given, loaded or not: a session uses it only while it is loaded, and otherwise falls back to the Settings default or another loaded provider. Pick one that is ready. The states are from the last check and may have changed since.";
+      "Provider id. The provider this project's sessions use unless one is named. Loaded providers when this list was made: `fake`: ready; `gemini`: not installed, fix: `npm install -g @google/gemini-cli`. An id that isn't loaded is refused while the runner is connected. A session uses it only while it is loaded (one the PM starts without naming a provider, only while it is ready), and otherwise falls back to the Settings default. Pick one that is ready. The states are from the last check and may have changed since.";
     for (const tool of [createProject, updateProject]) {
       const param = await listed(tool as AnyServerTool, "orchestrator", "defaultProvider");
       expect(param.description).toBe(expected);

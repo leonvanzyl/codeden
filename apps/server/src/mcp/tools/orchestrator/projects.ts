@@ -2,13 +2,13 @@ import { AutonomyLevel, type Project, ProviderId } from "@codeden/contracts";
 import { z } from "zod";
 import { defineTool, ToolError } from "../../define";
 import { projectFor } from "../shared/helpers";
-import { describeProviderParam } from "../shared/provider-choices";
+import { assertProviderLoaded, describeProviderParam } from "../shared/provider-choices";
 
 /** The loaded providers and whether each is ready, as the PM's `start_session` lists them. */
 const describeDefaultProvider = describeProviderParam(
   "defaultProvider",
   "The provider this project's sessions use unless one is named.",
-  "The id is stored as given, loaded or not: a session uses it only while it is loaded, and otherwise falls back to the Settings default or another loaded provider. Pick one that is ready.",
+  "An id that isn't loaded is refused while the runner is connected. A session uses it only while it is loaded (one the PM starts without naming a provider, only while it is ready), and otherwise falls back to the Settings default. Pick one that is ready.",
 );
 
 function compactProject(p: Project) {
@@ -62,6 +62,7 @@ export const createProject = defineTool({
       message: "Give exactly one of path or cloneUrl",
     }),
   handler: async (input, { services }) => {
+    await assertProviderLoaded(services, input.defaultProvider);
     const source = input.path
       ? { type: "local" as const, path: input.path }
       : { type: "clone" as const, url: input.cloneUrl as string };
@@ -101,6 +102,7 @@ export const updateProject = defineTool({
     projectFor(services, projectId);
     if (Object.values(patch).every((v) => v === undefined))
       throw new ToolError("Nothing to change");
+    await assertProviderLoaded(services, patch.defaultProvider);
     const project = compactProject(services.projects.update(projectId, patch));
     if (patch.autonomy === undefined) return { project };
     return {
