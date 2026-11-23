@@ -1,10 +1,11 @@
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentEvent, ItemOf, RuntimeResponse, SessionOptions } from "@codeden/contracts";
 import { afterEach, beforeEach } from "vitest";
 import type { ProviderSession } from "../../src/adapter";
 import { CursorAdapter } from "../../src/cursor/adapter";
+import { readJsonLines } from "./json-lines";
 
 /** The scripted ACP agent (`test/fixtures/fake-acp/agent.mjs`) as the Cursor CLI. */
 export const fakeAgent = {
@@ -99,14 +100,9 @@ export function fakeAcp() {
     get dir() {
       return dir;
     },
+    /** The messages logged so far; tests poll this while the agent is still appending. */
     logged(method?: string): Logged[] {
-      return existsSync(logFile())
-        ? readFileSync(logFile(), "utf8")
-            .trim()
-            .split("\n")
-            .map((line) => JSON.parse(line) as Logged)
-            .filter((m) => !method || m.method === method)
-        : [];
+      return readJsonLines<Logged>(logFile()).filter((m) => !method || m.method === method);
     },
     options(script: Step[], extra: Partial<SessionOptions> = {}): SessionOptions {
       const file = join(dir, `script-${Math.random().toString(36).slice(2)}.json`);

@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Options, Query, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
@@ -6,6 +6,7 @@ import type { AgentEvent, SessionOptions } from "@codeden/contracts";
 import { afterEach, describe, expect, it } from "vitest";
 import { ClaudeSession } from "../src/claude/session";
 import { CodexSession } from "../src/codex/session";
+import { readJsonLines } from "./support/json-lines";
 
 const base: SessionOptions = {
   sessionId: "s1",
@@ -177,10 +178,7 @@ describe("Codex interrupt", { timeout: 30_000 }, () => {
     await session.send({ text: "go", attachments: [] });
     await waitFor(() => ready(events));
     const logged = () =>
-      readFileSync(join(dir, "requests.log"), "utf8")
-        .trim()
-        .split("\n")
-        .map((line) => JSON.parse(line))
+      readJsonLines<{ method: string; params: unknown }>(join(dir, "requests.log"))
         .filter((r) => r.method === "turn/interrupt")
         .map((r) => r.params);
     // The fake app-server logs a request a moment after the session sent it, which can be
