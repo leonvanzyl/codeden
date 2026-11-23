@@ -6,12 +6,19 @@ import { afterEach, describe, expect, it } from "vitest";
 import { ApprovalBroker } from "../src/approvals";
 import { handleServerRequest } from "../src/codex/approvals";
 import { codexPolicy } from "../src/codex/config";
+import { commandRisk, levelAllows } from "../src/codex/policy";
 import type { ServerRequest } from "../src/codex/protocol";
 import { CodexSession } from "../src/codex/session";
 
 const T = "thread-x";
 const TURN = "turn-1";
-const risk = { cwd: "/w", platform: "linux" as const, home: "/home/me", tempRoots: ["/tmp"] };
+const risk = {
+  cwd: "/w",
+  platform: "linux" as const,
+  home: "/home/me",
+  tempRoots: ["/tmp"],
+  codedenHome: "/home/me/.codeden",
+};
 
 const command = (cmd: string, extra: Record<string, unknown> = {}) => ({
   method: "item/commandExecution/requestApproval",
@@ -113,6 +120,52 @@ describe("Codex requests under CodeDen's policy (§11.2)", () => {
       // A working directory outside the worktree doesn't widen it.
       expect((await decide(at("/elsewhere", "echo ok > proof.log"), level)).asked).toBe(true);
     }
+  });
+
+  it("asks for a command run outside the worktree unless it only reads (#613)", async () => {
+    const at = (cwd: string, cmd: string, kind = "command") => command(cmd, { cwd, kind });
+    for (const level of ["auto", "full"] as const) {
+      // No path named: the folder it runs in is what it changes. The folder's risk comes first,
+      // so Full can't approve it as a force push.
+      for (const cmd of ["git clean -fdx", "make clean", "git push --force origin main"]) {
+        expect((await decide(at("/elsewhere", cmd), level)).asked, `${level}: ${cmd}`).toBe(true);
+      }
+      // CodeDen's own home, another session's worktree included, asks even for a read.
+      expect((await decide(at("/home/me/.codeden", "rm -rf *"), level)).asked).toBe(true);
+      expect((await decide(at("/home/me/.codeden/wt/p/s2", "git log"), level)).asked).toBe(true);
+      // Input typed into a running terminal: its shell may have moved anywhere.
+      expect((await decide(at("/w", "rm -rf build", "writeStdin"), level)).asked).toBe(true);
+    }
+    for (const [cwd, cmd, kind] of [
+      ["/elsewhere", "git log --oneline"],
+      ["/elsewhere", "bash -lc 'git status'"],
+      ["/tmp/x", "make"],
+      ["/w/frontend", "git clean -fdx"],
+      ["/w", "git status", "writeStdin"],
+    ] as const) {
+      expect((await decide(at(cwd, cmd, kind), "auto")).asked, `${cwd}: ${cmd}`).toBe(false);
+    }
+  });
+
+  it("reads the working directory in Windows and Git Bash forms (#613)", () => {
+    const win = {
+      cwd: "C:\\w",
+      platform: "win32" as const,
+      home: "C:\\Users\\me",
+      tempRoots: ["C:\\Users\\me\\AppData\\Local\\Temp"],
+      codedenHome: "C:\\Users\\me\\.codeden",
+    };
+    const allowed = (cmd: string, cwd: string) =>
+      levelAllows("full", commandRisk([cmd], win, { cwd }));
+    for (const cwd of ["c:\\W\\web", "C:/w/web", "/c/w/web", "/tmp/x"]) {
+      expect(allowed("git clean -fdx", cwd), cwd).toBe(true);
+    }
+    for (const cwd of ["D:\\elsewhere", "/d/elsewhere", "C:\\Users\\me\\.codeden\\wt\\p\\s2"]) {
+      expect(allowed("git clean -fdx", cwd), cwd).toBe(false);
+    }
+    const pwsh = '"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command';
+    expect(allowed(`${pwsh} "git log"`, "D:\\elsewhere")).toBe(true);
+    expect(allowed(`${pwsh} "git log; git clean -fdx"`, "D:\\elsewhere")).toBe(false);
   });
 
   it("asks for everything under Supervised and Read-only", async () => {

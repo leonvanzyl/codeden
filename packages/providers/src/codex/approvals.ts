@@ -1,5 +1,4 @@
 import type { UserQuestion } from "@codeden/contracts";
-import { resolveAgainst } from "../policy/paths";
 import type { RiskAssessment } from "../policy/risk";
 import { shorten } from "../util/text";
 import {
@@ -39,10 +38,10 @@ export async function handleServerRequest(
       const command = p.commandActions?.length
         ? p.commandActions.map((a) => a.command).join(" && ")
         : (p.command ?? "");
-      // Relative paths resolve from where the command runs; the worktree (`cwd`) stays the bound.
       const risk = commandRisk(
         [p.command ?? "", ...(p.commandActions ?? []).map((a) => a.command)],
-        p.cwd ? { ...ac.risk, dir: resolveAgainst(p.cwd, ac.risk) } : ac.risk,
+        ac.risk,
+        { cwd: p.cwd, stdin: p.kind === "writeStdin" },
       );
       const item: ApprovalItem = {
         id: `approval-${p.approvalId ?? p.itemId}`,

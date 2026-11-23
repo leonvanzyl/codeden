@@ -10,6 +10,7 @@ import {
   type RiskAssessment,
   type RiskContext,
 } from "../policy/risk";
+import { workdirRisk } from "../policy/workdir";
 import { str } from "../util/text";
 import type { OcPermissionRequest } from "./protocol";
 
@@ -101,7 +102,12 @@ export class OpenCodePolicy {
 
   private shell(call: PermissionCall): PolicyDecision {
     const command = commandOf(call);
-    const risk = classifyCommand(command, { ...this.ctx, dir: this.workdir(call) });
+    const dir = this.workdir(call);
+    // The folder first (#613), so an ordinary risk Full allows can't hide a run outside the worktree.
+    const risk = mostSevere([
+      workdirRisk([command], dir, this.ctx),
+      classifyCommand(command, { ...this.ctx, dir }),
+    ]);
     if (this.isReadOnly) {
       if (touchesCodeden(risk)) return this.credentialsDenial();
       // Agent sessions at `read_only` may run the project's checks; read-only roles may not.

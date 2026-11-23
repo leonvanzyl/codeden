@@ -1,5 +1,6 @@
 import type { AutonomyLevel } from "@codeden/contracts";
 import { asksAtEveryLevel, mostSevere } from "../policy/assessment";
+import { resolveAgainst } from "../policy/paths";
 import {
   classifyCommand,
   classifyRead,
@@ -7,6 +8,7 @@ import {
   type RiskAssessment,
   type RiskContext,
 } from "../policy/risk";
+import { unknownWorkdirRisk, workdirRisk } from "../policy/workdir";
 import type { RequestPermissionProfile } from "./protocol/v2";
 
 /**
@@ -30,13 +32,32 @@ export function levelAllows(autonomy: AutonomyLevel, risk: RiskAssessment): bool
   return false;
 }
 
+/** Where a command Codex asks to run runs: the request's `cwd`, and whether it is terminal input. */
+export interface CommandFolder {
+  /** The request's working directory; none means the thread's, the session's worktree. */
+  cwd?: string | null;
+  /** Input typed into a running terminal (`kind: "writeStdin"`), whose shell may have moved. */
+  stdin?: boolean;
+}
+
 /**
- * Risk of a command Codex asks to run: the command line as sent and each parsed action, so a
- * redirect or path the parsed form drops still counts. Here and below, CodeDen's own
- * credentials win over an earlier ordinary risk (`mostSevere`).
+ * Risk of a command Codex asks to run: the folder it runs in (`../policy/workdir`, #613), then
+ * the command line as sent and each parsed action, so a redirect or path the parsed form drops
+ * still counts. Relative paths resolve from the request's `cwd`, as the shell resolves them
+ * (#589). The folder comes first, so an ordinary risk Full allows (`git push --force`) can't hide
+ * a run outside the worktree. Here and below, CodeDen's own credentials win over an earlier
+ * ordinary risk (`mostSevere`).
  */
-export function commandRisk(texts: string[], ctx: RiskContext): RiskAssessment {
-  return mostSevere(texts.filter(Boolean).map((text) => classifyCommand(text, ctx)));
+export function commandRisk(
+  texts: string[],
+  ctx: RiskContext,
+  folder: CommandFolder = {},
+): RiskAssessment {
+  const lines = texts.filter(Boolean);
+  const dir = folder.cwd ? resolveAgainst(folder.cwd, ctx) : undefined;
+  const here = dir ? { ...ctx, dir } : ctx;
+  const where = folder.stdin ? unknownWorkdirRisk(lines, ctx) : workdirRisk(lines, dir, ctx);
+  return mostSevere([where, ...lines.map((text) => classifyCommand(text, here))]);
 }
 
 /**

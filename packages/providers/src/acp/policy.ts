@@ -9,6 +9,7 @@ import {
   type RiskAssessment,
   type RiskContext,
 } from "../policy/risk";
+import { workdirRisk } from "../policy/workdir";
 import { str } from "../util/text";
 import { type AcpToolState, commandOf, mcpOf, pathsOf, workdirOf } from "./items";
 
@@ -131,7 +132,11 @@ export class AcpPolicy {
   private shell(call: AcpToolState): AcpPolicyDecision {
     const command = commandOf(call);
     const dir = workdirOf(call, this.ctx.cwd);
-    const risk = classifyCommand(command, { ...this.ctx, dir });
+    // The folder first (#613), so an ordinary risk Full allows can't hide a run outside the worktree.
+    const risk = mostSevere([
+      workdirRisk([command], dir, this.ctx),
+      classifyCommand(command, { ...this.ctx, dir }),
+    ]);
     if (this.isReadOnly || this.planning) {
       if (touchesCodeden(risk) && this.isReadOnly) return this.credentialsDenial();
       // Agent sessions (read-only level, or planning) may run the project's checks; roles may not.

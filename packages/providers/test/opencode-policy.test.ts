@@ -67,6 +67,22 @@ describe("OpenCode policy", () => {
     expect(policy("read_only").decide(shell("pnpm test"))).toEqual({ kind: "allow" });
   });
 
+  it("asks for a command run outside the worktree unless it only reads (#613)", () => {
+    const inDir = (command: string, workdir: string): PermissionCall => ({
+      ...shell(command),
+      toolInput: { command, workdir },
+    });
+    const elsewhere = path.resolve("/elsewhere");
+    for (const level of ["auto", "full"] as const) {
+      expect(policy(level).decide(inDir("git clean -fdx", elsewhere))).toMatchObject({
+        kind: "ask",
+        action: "outside_worktree",
+      });
+    }
+    expect(policy("auto").decide(inDir("git log", elsewhere))).toEqual({ kind: "allow" });
+    expect(policy("auto").decide(inDir("make clean", "web"))).toEqual({ kind: "allow" });
+  });
+
   it("external directories: reads run; writes wait for the edit ask that follows", () => {
     const p = policy("auto");
     expect(p.decide(other("external_directory", ["C:/elsewhere/*"], "read"))).toEqual({

@@ -44,6 +44,24 @@ describe("AcpPolicy", () => {
     });
   });
 
+  it("asks for a command run outside the worktree unless it only reads (#613)", () => {
+    const inDir = (command: string, dir: string): AcpToolState => ({
+      toolCallId: "c",
+      kind: "execute",
+      rawInput: { command, cwd: dir },
+    });
+    const elsewhere = join(tmpdir(), "..", "elsewhere");
+    for (const level of ["auto", "full"] as const) {
+      expect(new AcpPolicy(level, ctx).decide(inDir("git clean -fdx", elsewhere))).toMatchObject({
+        kind: "ask",
+        action: "outside_worktree",
+      });
+    }
+    const auto = new AcpPolicy("auto", ctx);
+    expect(auto.decide(inDir("git log", elsewhere)).kind).toBe("allow");
+    expect(auto.decide(inDir("make clean", join(cwd, "web"))).kind).toBe("allow");
+  });
+
   it("refuses edits and writing commands when read-only or planning, but runs reads and checks", () => {
     const readOnly = new AcpPolicy("read_only", ctx);
     expect(readOnly.decide(edit(join(cwd, "a.ts"))).kind).toBe("deny");
