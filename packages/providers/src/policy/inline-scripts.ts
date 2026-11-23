@@ -48,7 +48,7 @@ export function inlineScripts(bin: string, args: string[], cmd: SimpleCommand): 
  * The word a shell's inline script follows: `-c` (also within `-lc`), `-Command` or cmd's `/c`
  * and `/k` (Git Bash writes them `//c`, which its path conversion leaves alone); -1 for none.
  */
-function scriptFlag(bin: string, args: string[]): number {
+export function scriptFlag(bin: string, args: readonly string[]): number {
   if (SHELLS.has(bin)) return args.findIndex((a) => /^-[a-z]*c[a-z]*$/i.test(a));
   if (bin === "pwsh" || bin === "powershell")
     return args.findIndex((a) => /^-(c|command)$/i.test(a));

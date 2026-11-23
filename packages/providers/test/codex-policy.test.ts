@@ -168,6 +168,34 @@ describe("Codex requests under CodeDen's policy (§11.2)", () => {
     expect(allowed(`${pwsh} "git log; git clean -fdx"`, "D:\\elsewhere")).toBe(false);
   });
 
+  it("counts a shell wrapper as a read only when nothing else runs before its script (#613)", () => {
+    const allowed = (cmd: string) =>
+      levelAllows("full", commandRisk([cmd], risk, { cwd: "/elsewhere" }));
+    for (const cmd of [
+      "bash -lc 'git log'",
+      "/bin/zsh -lc 'ls'",
+      "bash -euo pipefail -c 'git status'",
+      "bash --noprofile --norc -c 'ls'",
+      "powershell.exe -NoProfile -ExecutionPolicy Bypass -Command git log",
+      "cmd /d /c dir",
+    ]) {
+      expect(allowed(cmd), cmd).toBe(true);
+    }
+    // Each runs a file of the other folder, or another script, before or instead of the read.
+    for (const cmd of [
+      "BASH_ENV=./setup.sh bash -c 'ls'",
+      "PATH=. bash -c 'ls'",
+      "env LD_PRELOAD=./x.so bash -c 'ls'",
+      "bash --rcfile ./setup.sh -ic 'ls'",
+      "bash -s -c 'ls'",
+      "pwsh -File ./clean.ps1 -Command ls",
+      "fish -c ls -c 'git clean -fdx'",
+      "fish --init-command='git clean -fdx' -c ls",
+    ]) {
+      expect(allowed(cmd), cmd).toBe(false);
+    }
+  });
+
   it("asks for everything under Supervised and Read-only", async () => {
     for (const level of ["supervised", "read_only"] as const) {
       expect((await decide(command("pnpm test"), level)).asked, level).toBe(true);
