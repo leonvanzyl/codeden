@@ -38,11 +38,6 @@ export interface RunnerSpec {
   lockFile: string;
   /** Loopback: how to start it when none is live; `null` only attaches to a running one. */
   launch: RunnerLaunchConfig | null;
-  /**
-   * When set, restart a live runner whose `<home>/deps` holds a different Claude Agent SDK
-   * version. Only meaningful for the home runner; sandbox runners manage their own deps.
-   */
-  requiredSdkVersion?: string;
   sandboxRef?: string | null;
   projectId?: string | null;
   sessionId?: string | null;
@@ -161,7 +156,6 @@ export class RunnerHub implements RunnerRouter {
       db: this.opts.db,
       store: this.opts.store,
       launch: spec.launch,
-      requiredSdkVersion: spec.requiredSdkVersion,
       mcpUpstreamUrl: mcpOverLink ? undefined : this.opts.mcpUpstreamUrl?.(),
       mcpLink: mcpOverLink ? this.opts.mcpLink : undefined,
       startTimeouts: spec.startTimeouts,

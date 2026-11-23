@@ -5,7 +5,7 @@ import {
   type ServerLock,
   TerminalQuery,
 } from "@codeden/contracts";
-import { CLAUDE_SDK_VERSION, ImageEngineRegistry } from "@codeden/providers";
+import { ImageEngineRegistry } from "@codeden/providers";
 import { createAdaptorServer, upgradeWebSocket } from "@hono/node-server";
 import { Hono } from "hono";
 import { WebSocketServer } from "ws";
@@ -417,7 +417,6 @@ export async function startServer(opts: StartServerOptions): Promise<RunningServ
       lockFile: paths.runnerLock,
       launch,
       startTimeouts: opts.runnerStartTimeouts,
-      requiredSdkVersion: CLAUDE_SDK_VERSION,
     });
     const started = runner.start();
     if (opts.waitForRunner) await started;
