@@ -9,7 +9,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { toast } from "sonner";
 import { useClient } from "@/lib/api";
-import { automationKeys, runResultText } from "@/lib/automations";
+import { automationKeys, toastRunResult } from "@/lib/automations";
 
 const fail = (title: string) => (e: Error) => toast.error(title, { description: e.message });
 
@@ -80,15 +80,10 @@ export function useAutomationActions(projectId: string) {
     }
     setConflict(null);
     refresh();
-    const sessionId = "sessionId" in res ? res.sessionId : null;
-    toast.success(runResultText(res), {
-      action: sessionId
-        ? {
-            label: "Open session",
-            onClick: () => void navigate({ to: "/sessions/$sessionId", params: { sessionId } }),
-          }
-        : undefined,
-    });
+    toastRunResult(
+      res,
+      (sessionId) => void navigate({ to: "/sessions/$sessionId", params: { sessionId } }),
+    );
   };
 
   const run = useMutation({
