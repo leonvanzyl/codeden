@@ -123,12 +123,11 @@ export async function startRunner(opts: StartRunnerOptions): Promise<RunningRunn
   const token = randomBytes(32).toString("hex");
   // The journal's files are this runner's while its lock is missing or still names it: a save
   // after another runner took over (also the one at close) would overwrite that runner's (#615).
-  const journal = new Journal(dir, {
-    owned: () => {
-      const current = readLock(lockFile);
-      return !current || current.token === token;
-    },
-  });
+  const ownsHome = () => {
+    const current = readLock(lockFile);
+    return !current || current.token === token;
+  };
+  const journal = new Journal(dir, { owned: ownsHome });
   // Claude Code support is installed on demand into `<home>/deps` in the published package.
   configureClaudeSdk({
     depsDir: join(opts.home, "deps"),
@@ -169,6 +168,13 @@ export async function startRunner(opts: StartRunnerOptions): Promise<RunningRunn
   let superseded = false;
   const journalEvent = (event: RunnerEvent) => {
     if (stopped) return; // late callbacks after close (killed processes)
+    // Closing removed the lock, so another runner may take the home over before this one is done:
+    // what its sessions still emit then (their ends) stays out of that runner's journal (#615).
+    if (closing && !superseded && !ownsHome()) {
+      log("another runner took over this home while closing");
+      handOver();
+      return;
+    }
     const msg = journal.append(event);
     attached?.deliver(msg);
   };
@@ -193,6 +199,18 @@ export async function startRunner(opts: StartRunnerOptions): Promise<RunningRunn
   const browser = createBrowserCommandHandlers({ manager: browserManager });
   const files = new WorkspaceFsHost(opts.home);
   const finish = () => void close().then(() => opts.onShutdown?.());
+  /**
+   * Another runner took this home over (#588, #615). Its journal files and worktrees are that
+   * runner's now: write nothing more to them, not even a save already pending or one an ack from
+   * a connected server asks for, and no checkpoints. Server connections are closed.
+   */
+  const handOver = () => {
+    superseded = true;
+    stopped = true;
+    journal.handOver();
+    host.stopCheckpoints();
+    for (const conn of connections) conn.close("replaced by another runner");
+  };
 
   const core: RunnerCore = {
     home: opts.home,
@@ -315,13 +333,7 @@ export async function startRunner(opts: StartRunnerOptions): Promise<RunningRunn
     const current = readLock(lockFile);
     if (!current || current.token === token || closing) return;
     log(`runner pid ${current.pid} took over this home; shutting down`);
-    // The journal files and worktrees are the new runner's now: write nothing more to them,
-    // not even a save already pending or one an ack from a connected server asks for (#615).
-    superseded = true;
-    stopped = true;
-    journal.handOver();
-    host.stopCheckpoints();
-    for (const conn of connections) conn.close("replaced by another runner");
+    handOver();
     finish();
   }, opts.lockCheckMs ?? LOCK_CHECK_MS);
   lockWatch.unref();

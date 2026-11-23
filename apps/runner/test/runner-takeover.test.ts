@@ -100,6 +100,19 @@ class StuckClose extends FakeProvider {
   }
 }
 
+/** A Fake provider whose sessions finish closing only once `released` resolves. */
+class HeldClose extends FakeProvider {
+  constructor(private readonly released: Promise<void>) {
+    super();
+  }
+
+  override async openSession(opts: SessionOptions): Promise<ProviderSession> {
+    const session = await super.openSession(opts);
+    const close = session.close.bind(session);
+    return Object.assign(session, { close: () => this.released.then(close) });
+  }
+}
+
 async function startSession(server: TestServer): Promise<void> {
   await server.request({
     name: "session.start",
@@ -155,15 +168,26 @@ describe("a runner replaced by another (#588, #615)", () => {
     await server.close();
   });
 
-  it("saves no journal at close once another runner took over meanwhile", async () => {
-    runner = await startRunner({ home, enableFakeProvider: true });
+  it("writes no journal at close once another runner took over meanwhile", async () => {
+    let release = () => {};
+    const released = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    runner = await startRunner({ home, adapters: [new HeldClose(released)] });
+    const server = await TestServer.attach(runner);
+    await startSession(server);
     // Closing removes the lock at once; a new runner may start before the close ends.
     const closing = runner.close();
     const state = `${JSON.stringify({ runnerId: "kept", lastSeq: 42, ackedSeq: 40 })}\n`;
     writeFileSync(runnerFile("state.json"), state);
     writeFileSync(runner.lockFile, JSON.stringify(lockOf({ pid: process.pid + 1 })));
+    const journal = read(runnerFile("journal.jsonl"));
+    // The session ends after the takeover: neither its end nor the save at close is written.
+    release();
     await closing;
     expect(read(runnerFile("state.json"))).toBe(state);
+    expect(read(runnerFile("journal.jsonl"))).toBe(journal);
+    await server.close();
   });
 
   it("ends sessions whose provider never finishes closing", async () => {
