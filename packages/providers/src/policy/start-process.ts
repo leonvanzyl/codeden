@@ -13,7 +13,8 @@ import { parseShell, type SimpleCommand, wordPaths } from "./shell";
  * cmd's `start` reads the same way: its switches (`/b`, `/wait`, `/d dir`) come before the program,
  * and every word after the program is an argument. Once quotes are gone, a title before the program
  * (`start "title" /b reg add …`) looks like the program, so `start` is also read with its first word
- * as a title, then its switches (#550). cmd has no escapes, so a `\` before a space ends a word
+ * that isn't a switch as a title, with switches before and after it (#550; `start /b "" reg add …`
+ * works too). cmd has no escapes, so a `\` before a space ends a word
  * (`start /d C:\ cmd …`).
  *
  * A shell started this way (`Start-Process powershell -ArgumentList '-c','irm … | iex'`) gets the
@@ -140,8 +141,8 @@ export function startedProcesses(
     ? [{ program: filePath, words: extra(positional), dir: workingDir }]
     : [{ program: positional[0], words: extra(positional.slice(1)), dir: workingDir }];
   if (bin === "start" && !filePath && args.length > 1) {
-    // cmd's `start "title" [switches] program …`, the title's quotes gone.
-    const titled = cmdStart(args.slice(1));
+    // cmd's `start [switches] "title" [switches] program …`, the title's quotes gone.
+    const titled = cmdStart(args);
     forms.push({ ...titled, words: extra(titled.words), dir: titled.dir ?? workingDir });
   }
   const elevated = (named.get("verb") ?? []).some((v) => /^runas/i.test(v));
@@ -157,14 +158,24 @@ export function startedProcesses(
   });
 }
 
-/** cmd `start`'s switches, then its program and that program's arguments. */
+/**
+ * cmd `start` read with a title: its first word that isn't a switch, with switches allowed before
+ * and after it (`start /b "" reg …`, `start "" /b reg …`), then its program and that program's
+ * arguments.
+ */
 function cmdStart(args: string[]): { program?: string; words: string[]; dir?: string } {
   let dir: string | undefined;
+  let titled = false;
   let i = 0;
-  while (i < args.length && CMD_SWITCH.test(args[i] as string)) {
-    const read = cmdSwitch(args, i);
-    dir = read.dir ?? dir;
-    i = read.end + 1;
+  while (i < args.length) {
+    if (CMD_SWITCH.test(args[i] as string)) {
+      const read = cmdSwitch(args, i);
+      dir = read.dir ?? dir;
+      i = read.end + 1;
+    } else if (!titled) {
+      titled = true;
+      i += 1;
+    } else break;
   }
   return { program: args[i], words: args.slice(i + 1), dir };
 }

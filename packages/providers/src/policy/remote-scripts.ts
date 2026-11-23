@@ -140,8 +140,9 @@ function runsStdin(cmd: SimpleCommand): boolean {
   const { tokens } = unwrap(cmd.words);
   const bin = binName(tokens[0]);
   if (bin === "iex" || bin === "invoke-expression") return true;
-  // cmd runs the lines it reads unless `/c` or `/k` gives it a command (#550).
-  if (bin === "cmd") return !tokens.slice(1).some((a) => /^\/\/?[ck]/i.test(a));
+  // cmd runs the lines it reads unless `/c` gives it a command (#550). `/k` runs its command,
+  // if any, and then goes on reading.
+  if (bin === "cmd") return !tokens.slice(1).some((a) => /^\/\/?c$/i.test(a));
   const spec = interpreter(bin);
   if (!spec) return false;
   const args = tokens.slice(1);

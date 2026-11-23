@@ -71,8 +71,12 @@ function afterCd<T extends PathContext>(cmd: SimpleCommand, ctx: T): T[] {
 function afterPop<T extends PathContext>(bin: string, words: string[], ctx: T): T[] {
   const { stack, args } = withoutStackName(words);
   const back = popLocation(ctx, stack);
-  // `-PassThru` only also writes the new location out.
-  const passThru = (a: string) => /^-pa/i.test(a) && "-passthru".startsWith(a.toLowerCase());
+  // `-PassThru` (a prefix from `-Pa`, or bound, `-PassThru:$false`) only also writes the new
+  // location out.
+  const passThru = (a: string) => {
+    const name = /^-(pa[a-z]*)(?::.*)?$/is.exec(a)?.[1];
+    return name !== undefined && "passthru".startsWith(name.toLowerCase());
+  };
   if (bin === "pop-location") return args.every(passThru) ? [back] : [ctx, back];
   if (words.length === 0) return [back];
   const out = [ctx, back, popLocation(ctx, undefined)];

@@ -145,11 +145,20 @@ function firstInList(
         if (found) return found;
       }
     }
-    // Past the limit, `classifyList` asks for the command anyway.
-    heres = locationsAfter(cmd, heres).slice(0, MAX_LOCATIONS);
+    heres = locationsAfter(cmd, heres);
+    // A location past the limit isn't checked, so it may be CodeDen's home: every level asks.
+    if (heres.length > MAX_LOCATIONS) return TOO_MANY_LOCATIONS;
   }
   return undefined;
 }
+
+/** A command line that may leave the shell in more folders than are followed (`./locations`). */
+const TOO_MANY_LOCATIONS: RiskAssessment = {
+  risky: true,
+  action: "outside_worktree",
+  reason: "Changes folders in more ways than can be followed",
+  always: true,
+};
 
 /**
  * Classify commands in order. A `cd` moves where later relative paths resolve; commands in
@@ -188,9 +197,7 @@ function classifyList(
       }
     }
     heres = locationsAfter(cmd, heres);
-    if (heres.length > MAX_LOCATIONS) {
-      return risky("outside_worktree", "Changes folders in more ways than can be followed");
-    }
+    if (heres.length > MAX_LOCATIONS) return TOO_MANY_LOCATIONS;
   }
   return SAFE;
 }
