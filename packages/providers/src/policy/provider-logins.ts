@@ -83,8 +83,8 @@ export function providerLoginFolders(ctx: PathContext): string[] {
   return folders.map((dir) => resolveAgainst(dir, ctx));
 }
 
-/** A location variable at the start of a path, in POSIX, PowerShell or cmd form. */
-const LOCATION_VAR = /^(?:\$\{(\w+)\}|\$env:(\w+)|\$(\w+)|%(\w+)%)(?=$|[\\/])/i;
+/** A location variable at the start of a path, in POSIX, PowerShell (`${env:X}` too) or cmd form. */
+const LOCATION_VAR = /^(?:\$\{(?:env:)?(\w+)\}|\$env:(\w+)|\$(\w+)|%(\w+)%)(?=$|[\\/])/i;
 
 /**
  * The paths `target` stands for once a location variable at its start is replaced: one per
@@ -189,6 +189,9 @@ export function providerLoginCommand(
   cmd: SimpleCommand,
   ctx: PathContext,
 ): RiskAssessment | undefined {
+  // A file PowerShell's variable syntax reads (`${C:\Users\me\.codex\auth.json}`).
+  const item = cmd.reads?.find((r) => touchesProviderLogin(r, ctx));
+  if (item) return loginRisk(`Reads an agent CLI's login: ${item}`);
   const { tokens } = unwrap(cmd.words);
   const bin = binName(tokens[0]);
   if (NO_READ.has(bin)) return undefined;

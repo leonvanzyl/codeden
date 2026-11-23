@@ -19,6 +19,7 @@ import {
   unwrap,
 } from "./command-words";
 import { classifyDelete } from "./deletes";
+import { downloadWrites } from "./downloads";
 import { dumpsEnvironment } from "./env-dumps";
 import { type ListOutput, namesOnly } from "./env-names";
 import { classifyGit } from "./git";
@@ -276,11 +277,18 @@ function classifySimple(
       : [dest];
   const outputs = [...toolOutputs(bin, args), ...registryExports(bin, args)];
   const items = itemWrites(cmd, ctx, at.source);
-  const written = [...dests, ...outputs, ...items.words];
+  const downloads = downloadWrites(cmd, ctx);
+  const written = [...dests, ...outputs, ...items.words, ...downloads.words];
   const targets = [...(dest && !block ? copyTargets(bin, args, dest, ctx) : dests), ...outputs];
-  for (const target of [...targets, ...items.targets]) {
+  for (const target of [...targets, ...items.targets, ...downloads.targets]) {
     const write = classifyWrite(target, ctx);
     if (write.risky) return write;
+  }
+
+  // A file PowerShell's variable syntax reads (`${C:\Users\me\.ssh\id_rsa}`), whatever the command.
+  for (const item of cmd.reads ?? []) {
+    const read = classifyRead(item, ctx);
+    if (read.risky) return read;
   }
 
   // Secrets: any argument (or element of a PowerShell list) that reads a credentials file.

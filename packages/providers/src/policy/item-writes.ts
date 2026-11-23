@@ -85,9 +85,17 @@ const CMDLETS: Record<string, ItemCmdlet> = {
 };
 
 /** Switch parameters (they take no value); a prefix of one counts, as PowerShell allows. */
-const SWITCHES = ["force", "passthru", "whatif", "confirm", "usetransaction", "verbose", "debug"];
+export const SWITCHES = [
+  "force",
+  "passthru",
+  "whatif",
+  "confirm",
+  "usetransaction",
+  "verbose",
+  "debug",
+];
 /** A PowerShell parameter (`-Path`, `-Path:x`); not a negative number or a lone `-`. */
-const PARAM = /^-([a-z][\w-]*)(?::(.*))?$/is;
+export const PARAM = /^-([a-z][\w-]*)(?::(.*))?$/is;
 
 /**
  * What an item cmdlet writes: the paths to judge, and the words naming them that read nothing (a
@@ -133,8 +141,14 @@ export function itemWrites(
   return { targets, words: name ? [...words, name] : words };
 }
 
-/** The named parameters (lower-cased, without the dash) and positional words of a cmdlet call. */
-function readParams(args: string[]): { named: Map<string, string[]>; positional: string[] } {
+/**
+ * The named parameters (lower-cased, without the dash) and positional words of a cmdlet call.
+ * `switches`: its parameters that take no value.
+ */
+export function readParams(
+  args: string[],
+  switches: readonly string[] = SWITCHES,
+): { named: Map<string, string[]>; positional: string[] } {
   const named = new Map<string, string[]>();
   const positional: string[] = [];
   for (let i = 0; i < args.length; i += 1) {
@@ -148,7 +162,7 @@ function readParams(args: string[]): { named: Map<string, string[]>; positional:
     const name = (param[1] as string).toLowerCase();
     let value = param[2];
     if (value === undefined) {
-      if (SWITCHES.some((s) => s.startsWith(name))) continue;
+      if (switches.some((s) => s.startsWith(name))) continue;
       value = args[i + 1];
       i += 1;
     }
@@ -158,7 +172,7 @@ function readParams(args: string[]): { named: Map<string, string[]>; positional:
 }
 
 /** The values given for parameter `full`: by its name, an alias in `PATHS`, or a prefix of it. */
-function valuesOf(named: Map<string, string[]>, full: string): string[] {
+export function valuesOf(named: Map<string, string[]>, full: string): string[] {
   const out: string[] = [];
   for (const [name, values] of named) {
     if (name === full || (name.length >= 2 && full.startsWith(name))) out.push(...values);

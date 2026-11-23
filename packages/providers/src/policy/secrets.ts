@@ -11,12 +11,15 @@ import type { WordPaths } from "./shell";
 /**
  * The argument as a path, or undefined when it can't be one: inline code, multi-line text
  * or anything with shell or code punctuation (`selected={row.key`) is not a file name. A
- * variable in braces (`${HOME}/.env`) is a path, and so is an option's value: `--file=x`, or
- * PowerShell's colon-bound `-Path:x` and `-LiteralPath:x`.
+ * variable in braces (`${HOME}/.env`, PowerShell's `${env:USERPROFILE}\.aws\credentials`) is a
+ * path, and so is an option's value: `--file=x`, or PowerShell's colon-bound `-Path:x` and
+ * `-LiteralPath:x`.
  */
 export function asPath(arg: string): string | undefined {
   const value = arg.replace(/^-+[a-z-]*=/i, "").replace(/^-[a-z][a-z-]*:(?=.)/i, "");
-  if (!value || /[\n\r{}()<>|;=`]/.test(value.replace(/\$\{\w+\}/g, ""))) return undefined;
+  if (!value || /[\n\r{}()<>|;=`]/.test(value.replace(/\$\{(?:env:)?\w+\}/gi, ""))) {
+    return undefined;
+  }
   return value;
 }
 

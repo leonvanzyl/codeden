@@ -4,5 +4,13 @@
   "extends": "//",
   "files": {
     "includes": ["**", "!**/dist", "!**/*.md", "!src/codex/protocol", "!test/fixtures"]
-  }
+  },
+  "overrides": [
+    {
+      "includes": ["test/risk-ps-file-paths.test.ts"],
+      "linter": {
+        "rules": { "suspicious": { "noTemplateCurlyInString": "off" } }
+      }
+    }
+  ]
 }

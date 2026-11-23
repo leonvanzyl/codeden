@@ -93,10 +93,11 @@ export function slashes(value: string, ctx: PathContext): string {
 }
 
 /**
- * Variables left in a resolved path (`$f`, `${f}`, `$env:F`, `%F%`) could be any name, so they
- * match like `*`. `$CODEDEN_HOME`, `$HOME` and the temp variables at the start resolve first.
+ * Variables left in a resolved path (`$f`, `${f}`, `$env:F`, `${env:F}`, `%F%`) could be any name,
+ * so they match like `*`. `$CODEDEN_HOME`, `$HOME` and the temp variables at the start resolve
+ * first.
  */
-const PATH_VARIABLE = /\$\{\w+\}|\$env:\w+|\$\w+|%\w+%/gi;
+const PATH_VARIABLE = /\$\{(?:env:)?\w+\}|\$env:\w+|\$\w+|%\w+%/gi;
 
 /**
  * How many leading characters of `abs` are CodeDen's home or a folder above it, at a folder
