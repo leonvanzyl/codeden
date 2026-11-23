@@ -5,6 +5,7 @@ import type {
   RunAutomationResponse,
 } from "@codeden/contracts";
 import { type QueryClient, useQuery } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { useClient } from "./api";
 import type { AutomationRunsQuery } from "./api/automations-api";
 
@@ -107,18 +108,47 @@ export function switchValue(item: AutomationListItem, projectId?: string): boole
   return item.automation.enabled;
 }
 
-/** Toast text for a run-now result that is not a conflict. */
-export function runResultText(res: RunAutomationResponse): string {
-  switch (res.status) {
-    case "started":
-      return "Run started";
-    case "queued":
-      return "Queued behind running work";
-    case "skipped":
-      return "Skipped";
-    case "joined":
-      return "Sent to the running session";
-    case "conflict":
-      return "Matching work is already running";
+/** A run-now result other than a conflict (each entry point handles conflicts its own way). */
+export type RunResult = Exclude<RunAutomationResponse, { status: "conflict" }>;
+
+/** The notification for a run-now result: what happened, or why the run failed. */
+export type RunResultToast =
+  | { kind: "success"; title: string; sessionId: string | null }
+  | { kind: "error"; title: string; description: string; sessionId: string | null };
+
+const RESULT_TITLE: Record<RunResult["status"], string> = {
+  started: "Run started",
+  queued: "Queued behind running work",
+  skipped: "Skipped",
+  joined: "Sent to the running session",
+};
+
+/**
+ * The notification for a run-now result. A launch that throws (the session or PM message
+ * couldn't start) is recorded as a failed run and still answered with `started`, so the run's
+ * own outcome decides: a failed run is an error with the run's message, never "Run started".
+ */
+export function runResultToast(res: RunResult): RunResultToast {
+  const sessionId = "sessionId" in res ? res.sessionId : null;
+  if ("run" in res && res.run.status === "failed") {
+    return {
+      kind: "error",
+      title: "Run failed",
+      description: res.run.error?.message ?? "The automation couldn't start.",
+      sessionId,
+    };
   }
+  return { kind: "success", title: RESULT_TITLE[res.status], sessionId };
+}
+
+/** Show a run-now result; with `openSession`, an "Open session" action when it has one. */
+export function toastRunResult(res: RunResult, openSession?: (sessionId: string) => void): void {
+  const shown = runResultToast(res);
+  const sessionId = shown.sessionId;
+  const action =
+    sessionId && openSession
+      ? { label: "Open session", onClick: () => openSession(sessionId) }
+      : undefined;
+  if (shown.kind === "error") toast.error(shown.title, { description: shown.description, action });
+  else toast.success(shown.title, { action });
 }

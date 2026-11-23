@@ -1,13 +1,7 @@
-import type { SessionStatus, WorkScope, WorkSummary } from "@codeden/contracts";
+import { ACTIVE_SESSION_STATUSES, type WorkScope, type WorkSummary } from "@codeden/contracts";
 
 /** Session statuses that count as running or queued work for conflict detection (§8.4). */
-export const ACTIVE_SESSION_STATUSES: readonly SessionStatus[] = [
-  "created",
-  "queued",
-  "starting",
-  "running",
-  "waiting",
-];
+export { ACTIVE_SESSION_STATUSES };
 
 /** Automation run statuses that count as running or queued work. */
 export const ACTIVE_RUN_STATUSES = ["queued", "running"] as const;

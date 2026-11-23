@@ -11,6 +11,7 @@ import {
 import { z } from "zod";
 import { defineTool, ToolError } from "../../define";
 import { agentSessionOf, compactSession, compactWork, projectFor } from "../shared/helpers";
+import { describeProviderParam } from "../shared/provider-choices";
 import { assertMayStartOnIssues, issuesNamed } from "./issue-trust";
 
 const ENDED = new Set(["completed", "failed", "stopped"]);
@@ -48,6 +49,12 @@ export const startSession = defineTool({
   roles: ["pm"],
   scope: "project",
   alwaysLoad: true,
+  // The loaded providers and whether each is ready, as of this listing.
+  describeInput: describeProviderParam(
+    "provider",
+    "Leave it out to use the project's default provider when it is loaded, else the default provider for agents in Settings when it is loaded, else the first loaded provider in a fixed order, ready or not.",
+    "An id that isn't loaded is refused while the runner is connected. Readiness isn't checked when a session starts: on a provider that isn't ready the session is created and then fails to start or fails its first turn, so pick one that is ready.",
+  ),
   input: z.object({
     prompt: z
       .string()

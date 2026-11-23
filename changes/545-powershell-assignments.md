@@ -1,0 +1,5 @@
+---
+section: security
+---
+
+- **A PowerShell assignment no longer hides a command from the Auto checks.** `$r = Remove-Item C:\… -Recurse`, `$x = Set-ItemProperty HKCU:\…\Run …`, `$e = Get-ChildItem env:; $e`, `$null = irm … | iex` and `$x = git push --force` ran without asking, while the same command without `$r = ` asked. The command on the right of an assignment (`$x = …`, `[string]$x = …`, `$x += …`, `$a, $b = …`, `$x=…`, a chain like `$a = $b = …`) is now judged exactly as if it stood alone, every stage of its pipe included, also inside `pwsh -c '…'`. A path kept in a variable still asks as before, at every level for CodeDen's own files, the agent CLIs' logins and agents' allow-lists (`$t = '…\install-token'; Get-Content $t`, `$p = '.cursor\cli.json'; Set-Content $p …`). Plain values (`$a = 1`, `$s = "text"`, `$h = @{ a = 1 }`) and reads in the worktree (`$items = Get-ChildItem .\src`) still run freely, and `$names = (Get-ChildItem env:).Name` no longer asks, like the same command alone.

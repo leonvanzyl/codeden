@@ -1,0 +1,5 @@
+---
+section: security
+---
+
+- **PowerShell downloads saved outside the worktree, and files reached through `${C:\path}`, now ask at Auto.** `Invoke-WebRequest https://… -OutFile C:\Windows\Temp\x.exe` ran without asking, as did `iwr`, `irm`, `Invoke-RestMethod` and the `curl` and `wget` aliases with `-OutFile`, and `Start-BitsTransfer` with `-Destination`. CodeDen now judges where the download is saved, as it judges `Set-Content`. PowerShell's variable syntax for a file also slipped past every check: `${C:\Users\me\.ssh\id_ed25519}` reads the file and `${C:\Users\me\.bashrc} = '…'` writes it. Reading a secrets file this way now asks, as `Get-Content` does, and so does writing outside the worktree. `Get-Content ${env:USERPROFILE}\.aws\credentials` and `Set-Content ${env:USERPROFILE}\…` ran freely too, because the braced `${env:…}` form wasn't read as a path; they now ask like `$env:USERPROFILE`. Downloads into the worktree or temp (`-OutFile .\vendor\x.zip`, `-OutFile $env:TEMP\x.zip`), `${env:PATH}` and other variables still run freely.

@@ -1,3 +1,5 @@
+import { assignsAt, itemsIn, variableItem } from "./ps-variables";
+
 /**
  * A small shell lexer for the risk classifier (§11.2). It splits a command line into simple
  * commands the way a shell would, so quoted text, heredoc bodies and PowerShell here-strings
@@ -6,6 +8,8 @@
  * it is not a full parser.
  */
 
+import { dropAssignments } from "./ps-assignments";
+
 /** Which quoting rules to apply. `auto` is for callers that cannot tell the shell. */
 export type ShellDialect = "posix" | "powershell" | "auto";
 
@@ -13,8 +17,16 @@ export type ShellDialect = "posix" | "powershell" | "auto";
 export interface SimpleCommand {
   /** Words with quotes removed. Substitutions such as `$(pwd)` stay as written. */
   words: string[];
-  /** Output redirection targets (`> f`, `>> f`, `2> f`, `&> f`, `*> f`). */
+  /**
+   * Output redirection targets (`> f`, `>> f`, `2> f`, `&> f`, `*> f`), and the items a PowerShell
+   * variable on a drive assigns (`${C:\x} = …`, `./ps-variables`).
+   */
   writes: string[];
+  /**
+   * Items a PowerShell variable on a drive reads (`${C:\Users\me\.ssh\id_rsa}` as a value, or
+   * inside a double-quoted string or `@"…"@` here-string; `./ps-variables`).
+   */
+  reads?: string[];
   /** Command lists inside substitutions and subshells (`$(…)`, `(…)`, `<(…)`), in order. */
   nested: SimpleCommand[][];
   /** Here-string words (`<<< text`), which the command reads on its input. */
@@ -26,6 +38,11 @@ export interface SimpleCommand {
    * positions of its unquoted commas. A comma inside quotes or escaped is part of the name.
    */
   lists?: Map<string, number[]>;
+  /**
+   * True when the words are the right-hand side of a PowerShell assignment (`$p = '.env'`,
+   * `$r = Remove-Item …`), whose target `./ps-assignments` dropped.
+   */
+  assigned?: boolean;
 }
 
 /** What a word may stand for as paths, from `from` on (after an attached option, `-fFILE`). */
@@ -54,6 +71,12 @@ export function parseShell(src: string, dialect: ShellDialect = "auto"): SimpleC
 /** Placeholder for heredoc and here-string bodies, which are data, never commands. */
 const BODY = "<body>";
 
+/**
+ * When the shell is unknown, a `${…}` that may be a PowerShell drive item: up to the first `}`,
+ * with no `$`, backtick or line break in its name (bash's `${x:-$(cmd)}` runs a command instead).
+ */
+const BRACED_NAME = /\$\{([^}`$\n\r]*)\}/y;
+
 type Target = "word" | "write" | "heredoc" | "skip";
 
 /** The command being built and the word being read. */
@@ -68,7 +91,15 @@ class Builder {
   /** Where the word's unquoted commas are: a PowerShell list's element boundaries. */
   private commas: number[] = [];
 
-  constructor(private readonly out: SimpleCommand[]) {}
+  constructor(
+    private readonly out: SimpleCommand[],
+    private readonly dialect: ShellDialect,
+  ) {}
+
+  /** Note an item a PowerShell variable reads. */
+  read(item: string): void {
+    this.cmd.reads = [...(this.cmd.reads ?? []), item];
+  }
 
   add(text: string): void {
     this.word += text;
@@ -112,7 +143,10 @@ class Builder {
     this.endWord();
     this.target = "word";
     const { cmd } = this;
-    // An empty command keeps its state, so `curl … |` then `sh` on the next line stays piped.
+    // PowerShell runs the right-hand side of `$r = Remove-Item …`: judge it as if it stood alone.
+    if (this.dialect !== "posix") dropAssignments(cmd);
+    // An empty command keeps its state, so `curl … |` then `sh` on the next line stays piped (and
+    // `$x =` then a command on the next line assigns that command, as in PowerShell).
     if (!cmd.words.length && !cmd.writes.length && !cmd.nested.length) return;
     this.out.push(cmd);
     this.cmd = { words: [], writes: [], nested: [] };
@@ -130,7 +164,7 @@ class Lexer {
   /** Read simple commands until `closer` (`)` or a backtick) or the end of the input. */
   list(closer: ")" | "`" | null): SimpleCommand[] {
     const out: SimpleCommand[] = [];
-    const b = new Builder(out);
+    const b = new Builder(out, this.dialect);
     const { src } = this;
     while (this.i < src.length) {
       const c = src[this.i] as string;
@@ -168,7 +202,11 @@ class Lexer {
         this.redirect(b, c);
       } else if (c === "'" || c === '"') {
         if (b.inWord && b.word.endsWith("@") && this.lineEndsAt(this.i + 1)) {
-          this.skipHereString(c);
+          const body = this.skipHereString(c);
+          // `@"…"@` expands its variables; `@'…'@` doesn't.
+          if (c === '"' && this.dialect !== "posix") {
+            for (const item of itemsIn(body, this.dialect === "auto")) b.read(item);
+          }
           b.add(BODY);
         } else if (c === "'") {
           b.add(this.readSingle());
@@ -195,6 +233,8 @@ class Lexer {
         // PowerShell passes `a,b` as a list of two paths; a POSIX shell, as one name.
         b.addComma();
         this.i += 1;
+      } else if (c === "$" && next === "{" && this.dialect !== "posix") {
+        b.add(this.braced(b, false));
       } else {
         b.add(c);
         this.i += 1;
@@ -311,6 +351,8 @@ class Lexer {
         this.i += 2;
         b.cmd.nested.push(this.list(")"));
         text += src.slice(start, this.i);
+      } else if (c === "$" && next === "{" && this.dialect !== "posix") {
+        text += this.braced(b, true);
       } else {
         text += c;
         this.i += 1;
@@ -319,18 +361,57 @@ class Lexer {
     return text;
   }
 
+  /**
+   * `${…}` at `this.i`. In PowerShell it is one variable, read whole: the name may hold spaces and
+   * ends at the first `}` a backtick doesn't escape. When the shell is unknown (`auto`) it may be
+   * bash's `${x:-$(cmd)}`, whose `$(…)` and backticks run commands, so only the `$` is taken here
+   * and the rest is lexed as usual; the item it names is found by looking ahead. The text taken.
+   */
+  private braced(b: Builder, quoted: boolean): string {
+    const { src } = this;
+    const start = this.i;
+    if (this.dialect !== "powershell") {
+      BRACED_NAME.lastIndex = start;
+      const m = BRACED_NAME.exec(src);
+      if (m) this.noteItem(b, variableItem(m[1] as string, true), quoted, start + m[0].length);
+      this.i += 1;
+      return "$";
+    }
+    let j = start + 2;
+    while (j < src.length && src[j] !== "}") j += src[j] === "`" ? 2 : 1;
+    this.i = Math.min(j + 1, src.length);
+    this.noteItem(b, variableItem(src.slice(start + 2, Math.min(j, src.length))), quoted, this.i);
+    return src.slice(start, this.i);
+  }
+
+  /**
+   * Note the item a PowerShell variable on a drive names (`${C:\x}`, `./ps-variables`): written
+   * when an assignment operator follows it (at `after`), and read unless it is only the target of
+   * an assignment that starts the command (`${C:\x} = …`, `[string]${C:\x} = …`). `quoted`: inside
+   * a double-quoted string, where it is always read.
+   */
+  private noteItem(b: Builder, item: string | undefined, quoted: boolean, after: number): void {
+    if (item === undefined) return;
+    const assigns = !quoted && assignsAt(this.src, after);
+    const target = assigns && !b.cmd.words.length && /^(?:\[[^\]]*\])*$/.test(b.word);
+    if (assigns) b.cmd.writes.push(item);
+    if (!target) b.read(item);
+  }
+
   /** True when only spaces or tabs remain before the end of the line at `j`. */
   private lineEndsAt(j: number): boolean {
     const rest = /^[ \t]*(\r?\n|$)/.exec(this.src.slice(j));
     return rest !== null;
   }
 
-  /** Skip a PowerShell here-string (`@'` … `'@`) whose opening quote is at `this.i`. */
-  private skipHereString(quote: "'" | '"'): void {
+  /** Skip a PowerShell here-string (`@'` … `'@`) whose opening quote is at `this.i`; its body. */
+  private skipHereString(quote: "'" | '"'): string {
     const close = new RegExp(`(^|\\n)${quote}@`, "g");
-    close.lastIndex = this.i + 1;
+    const from = this.i + 1;
+    close.lastIndex = from;
     const m = close.exec(this.src);
     this.i = m ? m.index + m[0].length : this.src.length;
+    return this.src.slice(from, m ? m.index : this.src.length);
   }
 
   /** Skip the bodies of heredocs opened on the line that just ended. */

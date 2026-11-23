@@ -30,8 +30,16 @@ describe("OpenCode config", () => {
       id: "openai/gpt-oss-20b",
     });
     expect(modelRef("default")).toBeUndefined();
-    expect(modelRef("no-slash")).toBeUndefined();
     expect(modelRef(null)).toBeUndefined();
+  });
+
+  // Issue #585: a custom provider's model keeps its case, and a bare id fails instead of
+  // silently running OpenCode's default model.
+  it("parses a custom provider's model and refuses an id without a provider", () => {
+    expect(modelRef("9router/Worker")).toEqual({ providerID: "9router", id: "Worker" });
+    for (const bad of ["Worker", "/Worker", "9router/"]) {
+      expect(() => modelRef(bad)).toThrow(/needs its provider: use <providerID>\/<modelID>/);
+    }
   });
 
   it("maps efforts onto the model's variants, falling back to the nearest", () => {

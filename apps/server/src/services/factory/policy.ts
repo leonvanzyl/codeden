@@ -5,6 +5,7 @@ import type {
   ProtectedAreas,
 } from "@codeden/contracts";
 import { matchingGlobs } from "./globs";
+import { isTestFile } from "./test-files";
 import { DEPLOY_GLOBS, mentionsTopic } from "./vision";
 
 /**
@@ -89,8 +90,6 @@ export function shouldPause(consecutiveFailures: number, limits: FactoryLimits):
   return consecutiveFailures >= limits.pauseAfterConsecutiveFailures;
 }
 
-const TEST_FILE =
-  /(^|\/)(__tests__|tests?|spec|e2e)\/|\.(test|spec)\.[cm]?[jt]sx?$|_test\.(go|py)$|(^|\/)test_[^/]+\.py$/i;
 const UI_FILE = /\.(tsx|jsx|vue|svelte|astro|css|scss|sass|less|html)$/i;
 const NON_CODE =
   /\.(md|mdx|txt|rst|json|ya?ml|toml|ini|lock|svg|png|jpe?g|gif|webp|ico)$|(^|\/)(\.gitignore|\.editorconfig)$/i;
@@ -118,7 +117,7 @@ const LICENSE_FILE =
 
 const normalizePath = (path: string) => path.replace(/\\/g, "/").replace(/^\.\//, "");
 
-export const isTestFile = (path: string) => TEST_FILE.test(path);
+export { isTestFile };
 export const isUiFile = (path: string) => UI_FILE.test(path) && !isTestFile(path);
 /** A license file (`LICENSE_FILE`): always protected, never documentation. */
 export const isLicenseFile = (path: string) => LICENSE_FILE.test(normalizePath(path));

@@ -2,7 +2,7 @@
 
 > **Experimental.** Both factory modes are marked experimental. Try them on a sandbox repository first, set a budget and protected areas, and keep the kill switch in reach. **Assisted** remains the default for every new project.
 
-Each project has an **autonomy mode**, a ladder you climb one step at a time. (This is separate from the per-session [permission level](security.md#permissions), which decides which actions an agent must ask about.)
+Each project has an **autonomy mode**, a ladder you climb one step at a time. (This is separate from the per-session [permission level](security.md#permissions), which decides which actions an agent must ask about. The mode never changes what a session asks about, and changing one leaves the other as it is. In a dark factory the factory's own sessions get a denial at once instead of waiting for you, see [Nobody waits on you in a dark factory](#nobody-waits-on-you-in-a-dark-factory).)
 
 | Mode | Who finds work | Who merges | You |
 |---|---|---|---|

@@ -57,9 +57,29 @@ export class ToolRegistry {
     );
   }
 
-  /** MCP `tools/list` entries for a role (and caller, when known). */
+  /** A role's tools as listed, with their static schemas (see `listNow` for MCP clients). */
   list(role: McpTokenClaims["role"], caller?: ToolAvailabilityContext): ListedTool[] {
     return this.forRole(role, caller).map((tool) => describeTool(tool));
+  }
+
+  /**
+   * MCP `tools/list` entries for a role (and caller, when known): `list`, plus the parameter
+   * descriptions that depend on the server's state now (`ServerTool.describeInput`).
+   */
+  listNow(role: McpTokenClaims["role"], caller?: ToolAvailabilityContext): Promise<ListedTool[]> {
+    return Promise.all(
+      this.forRole(role, caller).map(async (tool) => {
+        const listed = describeTool(tool);
+        if (!tool.describeInput) return listed;
+        try {
+          return withParamDescriptions(listed, await tool.describeInput(this.services, caller));
+        } catch (error) {
+          // The tool is still listed, with its static schema.
+          this.log?.(`tool ${tool.name}: describing its input failed: ${errorMessage(error)}`);
+          return listed;
+        }
+      }),
+    );
   }
 
   async call(name: string, args: unknown, caller: ToolCaller): Promise<ToolCallResult> {
@@ -139,6 +159,15 @@ export function invalidInputMessage(name: string, error: z.ZodError, args: unkno
     ...problems,
     `Fix the arguments and call \`${name}\` again.`,
   ].join("\n");
+}
+
+/** A listed tool with the descriptions of the named top-level parameters replaced. */
+function withParamDescriptions(tool: ListedTool, descriptions: Record<string, string>): ListedTool {
+  const properties = { ...(tool.inputSchema.properties as Record<string, object> | undefined) };
+  for (const [name, description] of Object.entries(descriptions)) {
+    if (properties[name]) properties[name] = { ...properties[name], description };
+  }
+  return { ...tool, inputSchema: { ...tool.inputSchema, properties } };
 }
 
 /** JSON Schema and metadata of a tool for MCP clients. */

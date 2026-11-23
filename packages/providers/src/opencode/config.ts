@@ -1,5 +1,6 @@
 import { pathToFileURL } from "node:url";
 import type { McpServerConfig, ReasoningEffort, UserInput } from "@codeden/contracts";
+import { ProviderSessionError } from "../adapter";
 import { explicitModel } from "../util/model";
 import { pluginConfigPath } from "./plugin";
 import type { OcModelRef, OcPermissionRule } from "./protocol";
@@ -64,8 +65,9 @@ export const SESSION_PERMISSIONS: readonly OcPermissionRule[] = [
 
 /**
  * A CodeDen model id (`<providerID>/<modelID>`, as `opencode run -m` takes it) as an OpenCode
- * model reference; undefined for "default" (OpenCode's configured model) or a malformed id.
- * The model id itself may contain slashes (`lmstudio/openai/gpt-oss-20b`).
+ * model reference; undefined for "default" (OpenCode's configured model). The model id itself
+ * may contain slashes (`lmstudio/openai/gpt-oss-20b`). Throws for an id without a provider
+ * (`Worker`): leaving it out would run OpenCode's default model without saying so.
  */
 export function modelRef(
   model: string | null | undefined,
@@ -74,7 +76,12 @@ export function modelRef(
   const id = explicitModel(model);
   if (!id) return undefined;
   const slash = id.indexOf("/");
-  if (slash <= 0 || slash === id.length - 1) return undefined;
+  if (slash <= 0 || slash === id.length - 1) {
+    throw new ProviderSessionError(
+      "invalid_model",
+      `OpenCode model "${id}" needs its provider: use <providerID>/<modelID>, the form \`opencode run -m\` takes`,
+    );
+  }
   return {
     providerID: id.slice(0, slash),
     id: id.slice(slash + 1),

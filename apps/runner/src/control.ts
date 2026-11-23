@@ -7,7 +7,7 @@ import {
 } from "@codeden/contracts";
 import WebSocket from "ws";
 import { readLock } from "./lock";
-import { isAlive, killTree } from "./process/tree";
+import { isAlive, killTree, waitForExit } from "./process/tree";
 
 /**
  * Ask a runner to shut down over its protocol (`hello` + `runner.shutdown`), so it closes
@@ -51,15 +51,6 @@ export function requestShutdown(lock: RunnerLock, timeoutMs = 5_000): Promise<bo
     });
     ws.on("error", () => done(false));
   });
-}
-
-async function waitForExit(pid: number, timeoutMs: number): Promise<boolean> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (!isAlive(pid)) return true;
-    await new Promise((r) => setTimeout(r, 100));
-  }
-  return !isAlive(pid);
 }
 
 /**

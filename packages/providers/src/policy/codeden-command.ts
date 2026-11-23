@@ -52,6 +52,11 @@ export function codedenCommand(
     const access = codedenAccess(word, ctx);
     if (access) return credentialsRisk(`Passes ${CODEDEN_WHAT[access]}: ${word}`);
   }
+  // A file PowerShell's variable syntax reads (`${C:\Users\me\.codeden\codeden.db}`).
+  for (const item of cmd.reads ?? []) {
+    const access = codedenAccess(item, feeds ? ctx : forReading(ctx));
+    if (access) return credentialsRisk(`Reads ${CODEDEN_WHAT[access]}: ${item}`);
+  }
   if (CD.has(bin)) return undefined;
   const paths = pathsOf(cmd);
   const reads = (a: string) => touchesCodedenCredentials(a, ctx);

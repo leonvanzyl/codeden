@@ -18,6 +18,7 @@ import type { AppServices } from "../services/container";
 import { badRequest } from "../services/errors";
 import { listDirectories } from "../services/files/fs-browser";
 import { refreshProviderModels } from "../services/runner-port";
+import { contentDisposition } from "./content-disposition";
 import { jsonBody, queryOf } from "./validate";
 
 /** `/api/setup`: first-run detection, login commands, Claude Code support, completion (§14). */
@@ -105,7 +106,7 @@ export function artifactRoutes(s: AppServices) {
       return c.body(stream, 200, {
         "content-type": inline ? artifact.mediaType : "application/octet-stream",
         "content-length": String(size),
-        "content-disposition": `${inline ? "inline" : "attachment"}; filename="${artifact.name.replace(/["\\\r\n]/g, "_")}"`,
+        "content-disposition": contentDisposition(inline ? "inline" : "attachment", artifact.name),
         "x-content-type-options": "nosniff",
         "content-security-policy": "default-src 'none'; sandbox",
         "cache-control": "private, max-age=31536000, immutable",

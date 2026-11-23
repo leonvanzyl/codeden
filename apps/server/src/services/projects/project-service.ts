@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, statSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import {
+  ACTIVE_SESSION_STATUSES,
   type CreateProjectRequest,
   type CreateProjectResponse,
   DEFAULT_VISION_PATH,
@@ -14,10 +15,10 @@ import {
   sortProjects,
   type UpdateProjectRequest,
 } from "@codeden/contracts";
-import { eq, max } from "drizzle-orm";
+import { and, count, eq, inArray, max } from "drizzle-orm";
 import type { Db } from "../../db/client";
 import { rowToProject } from "../../db/rows";
-import { projects } from "../../db/schema";
+import { projects, sessions } from "../../db/schema";
 import type { EventStore } from "../../events/store";
 import { badRequest, conflict, notFound, ServiceError } from "../errors";
 import type { Exec } from "../exec";
@@ -189,8 +190,23 @@ export class ProjectService {
     return this.list();
   }
 
+  /**
+   * Archive a project (§13). Refused (409 `project_has_active_sessions`) while any of its
+   * sessions, of any role, is working or about to (`ACTIVE_SESSION_STATUSES`): the worktree
+   * cleanup that follows leaves those alone, so they would carry on, or start, in a project
+   * that is no longer listed. The check and the event are one synchronous step.
+   */
   archive(id: string): void {
     this.get(id);
+    const active = this.activeSessionCount(id);
+    if (active > 0) {
+      throw conflict(
+        active === 1
+          ? "1 session of this project is still working or waiting to start. Stop it first."
+          : `${active} sessions of this project are still working or waiting to start. Stop them first.`,
+        "project_has_active_sessions",
+      );
+    }
     this.deps.store.append([
       { type: "project.archived", sessionId: null, payload: { projectId: id } },
     ]);
@@ -325,6 +341,21 @@ export class ProjectService {
     return detected.github
       ? { ...base, kind: "github", github: detected.github }
       : { ...base, kind: "local" };
+  }
+
+  /** How many of the project's sessions are working or about to, archived ones included. */
+  private activeSessionCount(projectId: string): number {
+    const row = this.deps.db
+      .select({ n: count() })
+      .from(sessions)
+      .where(
+        and(
+          eq(sessions.projectId, projectId),
+          inArray(sessions.status, [...ACTIVE_SESSION_STATUSES]),
+        ),
+      )
+      .get();
+    return row?.n ?? 0;
   }
 
   /** New projects go to the end of the unpinned group, after every slot (archived included). */

@@ -84,15 +84,19 @@ function tempRootsOf(ctx: PathContext): readonly string[] {
   return ctx.tempRoots ?? osTempRoots(ctx.platform);
 }
 
-/** Home variables. Matched in any case: PowerShell's `$home` is the home directory too. */
-const HOME_VARS = /^(\$HOME|\$\{HOME\}|\$env:USERPROFILE|%USERPROFILE%)(?=$|[\\/])/i;
+/**
+ * Home variables. Matched in any case: PowerShell's `$home` is the home directory too. PowerShell
+ * also writes `$env:X` in braces, `${env:X}`.
+ */
+const HOME_VARS =
+  /^(\$HOME|\$\{HOME\}|\$env:USERPROFILE|\$\{env:USERPROFILE\}|%USERPROFILE%)(?=$|[\\/])/i;
 /**
  * Temp variables. Shell names are case-sensitive, so `$tmp` (a common name for what `mktemp`
  * printed) is not the temp directory; PowerShell's and cmd's names are not.
  */
 const TEMP_VARS = [
   /^(\$TMPDIR|\$\{TMPDIR\}|\$TEMP|\$\{TEMP\}|\$TMP|\$\{TMP\})(?=$|[\\/])/,
-  /^(\$env:TEMP|\$env:TMP|%TEMP%|%TMP%)(?=$|[\\/])/i,
+  /^(\$env:TEMP|\$env:TMP|\$\{env:TEMP\}|\$\{env:TMP\}|%TEMP%|%TMP%)(?=$|[\\/])/i,
 ];
 /**
  * CodeDen's home variable: case-sensitive in POSIX shells only. Agents don't inherit it
@@ -101,7 +105,7 @@ const TEMP_VARS = [
  */
 const CODEDEN_HOME_VARS = [
   /^(\$CODEDEN_HOME|\$\{CODEDEN_HOME\})(?=$|[\\/])/,
-  /^(\$env:CODEDEN_HOME|%CODEDEN_HOME%)(?=$|[\\/])/i,
+  /^(\$env:CODEDEN_HOME|\$\{env:CODEDEN_HOME\}|%CODEDEN_HOME%)(?=$|[\\/])/i,
 ];
 
 /**

@@ -17,7 +17,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { useClient } from "@/lib/api";
-import { automationKeys, runResultText, useAutomationTemplates } from "@/lib/automations";
+import { automationKeys, toastRunResult, useAutomationTemplates } from "@/lib/automations";
 import { localTimezone } from "@/lib/cron";
 import { useProject, useSnapshotData } from "@/lib/queries";
 import { PageHeader } from "./page-header";
@@ -102,7 +102,7 @@ export function NewAutomationPage({
         toast.warning("Not run: matching work is already running", {
           description: "Use Run now on the automation to wait, join or run anyway.",
         });
-      } else if (run) toast.success(runResultText(run));
+      } else if (run) toastRunResult(run);
       void navigate({
         to: "/projects/$projectId/automations/$automationId",
         params: { projectId, automationId: item.automation.id },
