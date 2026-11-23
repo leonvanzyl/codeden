@@ -101,6 +101,10 @@ export type AutomationState = z.infer<typeof AutomationState>;
 export const AutomationListItem = z.object({
   automation: Automation,
   states: z.array(AutomationState),
+  /**
+   * The newest run: in the listed project when the list is scoped to one (`projectId`), else
+   * across every project. Null when there is none.
+   */
   lastRun: AutomationRun.nullable(),
   /** Source file for file-based automations. */
   path: z.string().nullable(),
