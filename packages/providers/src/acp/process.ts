@@ -11,6 +11,11 @@ export interface StartAgentOptions {
   label: string;
   /** Authentication method to run after `initialize` when the agent offers it. */
   authMethod?: string;
+  /**
+   * Started with the agent and awaited before `authenticate`: an error message stops the
+   * handshake there (the agent never gets the chance to open a browser login).
+   */
+  authGuard?: () => Promise<string | undefined>;
   /** Extra `clientCapabilities` fields (vendor flags). */
   clientCapabilities?: Record<string, unknown>;
   cwd?: string;
@@ -54,6 +59,8 @@ export async function startAgent(
     );
     timer.unref?.();
   });
+  // Runs while the agent starts; only consulted when there is an `authenticate` to send.
+  const guard = opts.authMethod && opts.authGuard ? opts.authGuard().catch(() => undefined) : null;
   try {
     const info = await Promise.race([
       rpc.request<AcpInitializeResult>("initialize", {
@@ -74,6 +81,8 @@ export async function startAgent(
     }
     const methods = Array.isArray(info?.authMethods) ? info.authMethods : [];
     if (opts.authMethod && methods.some((m) => m?.id === opts.authMethod)) {
+      const refused = guard ? await Promise.race([guard, timeout]) : undefined;
+      if (refused) throw new AcpRpcError(-32001, refused);
       await Promise.race([rpc.request("authenticate", { methodId: opts.authMethod }), timeout]);
     }
     return { rpc, info: info ?? {} };

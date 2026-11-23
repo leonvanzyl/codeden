@@ -102,6 +102,12 @@ export interface AcpAgentSpec {
    * Without one, CodeDen never authenticates: the agent uses the login it already has.
    */
   authMethod?: string;
+  /**
+   * Checked before `authenticate` (while `initialize` runs): an error message when the
+   * agent's login can't be used, so the session fails as "sign in again" instead of the agent
+   * opening its own browser login, which CodeDen never starts on its own.
+   */
+  authGuard?: (exe: ResolvedCommand) => Promise<string | undefined>;
   /** Its mode ids: full tools, planning, and read-only (when it has them). */
   modes: { agent: string; plan?: string; readOnly?: string };
   extensions?: AcpExtensions;

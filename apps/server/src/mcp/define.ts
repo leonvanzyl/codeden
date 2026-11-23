@@ -28,6 +28,15 @@ export interface ServerTool<TInput extends z.ZodType = z.ZodType, S extends Tool
    * local-only project). `caller` is the token's project and session when known.
    */
   isAvailable?: (services: AppServices, caller?: ToolAvailabilityContext) => boolean;
+  /**
+   * Descriptions of top-level input parameters that depend on the server's state when the tools
+   * are listed (e.g. which providers are loaded and ready), keyed by parameter name. They replace
+   * the schema's own description in the listing only; validation doesn't change.
+   */
+  describeInput?: (
+    services: AppServices,
+    caller?: ToolAvailabilityContext,
+  ) => Promise<Record<string, string>>;
   /** Returns text (or a JSON-serialisable value) for the agent. */
   handler: (input: z.output<TInput>, ctx: ServerToolContext<S>) => Promise<unknown>;
 }

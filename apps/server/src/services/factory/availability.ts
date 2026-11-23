@@ -99,6 +99,8 @@ function loginOf(status: ProviderStatus | undefined): string | null {
 export class ProviderAvailability {
   private statuses = new Map<string, ProviderStatus>();
   private checkedAt = 0;
+  /** Whether a detection has answered yet; until then nothing is known about any provider. */
+  private detected = false;
   private running: Promise<void> | undefined;
   /** Providers a factory session failed on, and until when (persisted through `backoffs`). */
   private readonly failures: Map<string, ProviderBackoff>;
@@ -136,6 +138,25 @@ export class ProviderAvailability {
     await this.running;
   }
 
+  /**
+   * Whether providers have been detected at all. The first time, detects and waits for it up to
+   * `waitMs` (a tool list shouldn't call every provider ready before anyone looked); afterwards
+   * answers at once and refreshes in the background like a tick does.
+   */
+  async ensureDetected(waitMs = 5_000): Promise<boolean> {
+    if (this.detected) {
+      this.refresh();
+      return true;
+    }
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, waitMs);
+    });
+    await Promise.race([this.detectNow(), timeout]);
+    clearTimeout(timer);
+    return this.detected;
+  }
+
   private async detect(): Promise<void> {
     try {
       const res = await this.deps.runner.request(
@@ -143,6 +164,7 @@ export class ProviderAvailability {
         60_000,
       );
       this.statuses = new Map(res.statuses.map((s) => [s.providerId, s]));
+      this.detected = true;
       this.noticeLogins();
     } catch (error) {
       // Tried again next interval; what was known stays.

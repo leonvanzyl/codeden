@@ -26,7 +26,7 @@ import { classifyGit } from "./git";
 import { type InlineScript, inlineScripts } from "./inline-scripts";
 import { classifyInstall } from "./installs";
 import { itemWrites } from "./item-writes";
-import { afterCd, moveTo } from "./locations";
+import { locationsAfter, MAX_LOCATIONS, moveTo } from "./locations";
 import {
   isInside,
   isInWorkspace,
@@ -123,30 +123,42 @@ function firstInList(
   check: CommandCheck,
   feeds = false,
 ): RiskAssessment | undefined {
-  let here = ctx;
+  let heres = [ctx];
   for (const [i, cmd] of list.entries()) {
-    for (const nested of cmd.nested) {
-      const found = firstInList(nested, here, depth, check, true);
-      if (found) return found;
-    }
     const piped = list[i + 1]?.piped === true;
     const { tokens } = unwrap(cmd.words);
     const bin = binName(tokens[0]);
     const scripts = depth < MAX_DEPTH ? inlineScripts(bin, tokens.slice(1), cmd) : [];
-    for (const script of scripts) {
-      const inner = parseShell(script.text, script.dialect);
-      const into = feeds || piped || script.feeds === true;
-      const found = firstInList(inner, scriptContext(script, here), depth + 1, check, into);
-      if (found) return found;
+    for (const here of heres) {
+      for (const nested of cmd.nested) {
+        const found = firstInList(nested, here, depth, check, true);
+        if (found) return found;
+      }
+      for (const script of scripts) {
+        const inner = parseShell(script.text, script.dialect);
+        const into = feeds || piped || script.feeds === true;
+        const found = firstInList(inner, scriptContext(script, here), depth + 1, check, into);
+        if (found) return found;
+      }
+      for (const one of withKept(cmd)) {
+        const found = check(one, here, feeds || piped);
+        if (found) return found;
+      }
     }
-    for (const one of withKept(cmd)) {
-      const found = check(one, here, feeds || piped);
-      if (found) return found;
-    }
-    here = afterCd(cmd, here);
+    heres = locationsAfter(cmd, heres);
+    // A location past the limit isn't checked, so it may be CodeDen's home: every level asks.
+    if (heres.length > MAX_LOCATIONS) return TOO_MANY_LOCATIONS;
   }
   return undefined;
 }
+
+/** A command line that may leave the shell in more folders than are followed (`./locations`). */
+const TOO_MANY_LOCATIONS: RiskAssessment = {
+  risky: true,
+  action: "outside_worktree",
+  reason: "Changes folders in more ways than can be followed",
+  always: true,
+};
 
 /**
  * Classify commands in order. A `cd` moves where later relative paths resolve; commands in
@@ -165,23 +177,27 @@ function classifyList(
     return risky("network", "Pipes a downloaded script straight into a shell");
   }
   const names = namesOnly(list, output);
-  let here = ctx;
+  // Where the shell may be: one location, unless a pop may or may not happen (`./locations`).
+  let heres = [ctx];
   let head = 0;
   for (const [i, cmd] of list.entries()) {
     if (!cmd.piped) head = i;
-    for (const [k, nested] of cmd.nested.entries()) {
-      const into = k === 0 && names.projections.has(i) ? "names" : "feeds";
-      const result = classifyList(nested, here, depth, into);
-      if (result.risky) return result;
-    }
     const shown = output === "shown" && list[i + 1]?.piped !== true;
     const source = cmd.piped ? list[head] : undefined;
     const at = { namesOnly: names.listings.has(i), shown, source };
-    for (const one of withKept(cmd)) {
-      const result = classifySimple(one, here, depth, at);
-      if (result.risky) return result;
+    for (const here of heres) {
+      for (const [k, nested] of cmd.nested.entries()) {
+        const into = k === 0 && names.projections.has(i) ? "names" : "feeds";
+        const result = classifyList(nested, here, depth, into);
+        if (result.risky) return result;
+      }
+      for (const one of withKept(cmd)) {
+        const result = classifySimple(one, here, depth, at);
+        if (result.risky) return result;
+      }
     }
-    here = afterCd(cmd, here);
+    heres = locationsAfter(cmd, heres);
+    if (heres.length > MAX_LOCATIONS) return TOO_MANY_LOCATIONS;
   }
   return SAFE;
 }

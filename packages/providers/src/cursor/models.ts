@@ -42,39 +42,6 @@ export function cursorModelInfos(models: readonly AcpModel[]): ModelInfo[] {
 }
 
 /**
- * Models in the answer of Cursor's model-listing request: an array of models, or an object
- * holding one (`models`, `availableModels`, `data`). Each entry names its id as `modelId`,
- * `id`, `value` or `name`. Unknown shapes give an empty list.
- */
-export function modelsFromListing(result: unknown): { models: AcpModel[]; current?: string } {
-  const record = (result ?? {}) as Record<string, unknown>;
-  const list = Array.isArray(result)
-    ? result
-    : ([record.models, record.availableModels, record.data].find(Array.isArray) ?? []);
-  const models: AcpModel[] = [];
-  for (const raw of list as unknown[]) {
-    if (typeof raw === "string") {
-      models.push({ id: raw });
-      continue;
-    }
-    const m = (raw ?? {}) as Record<string, unknown>;
-    const id = [m.modelId, m.id, m.value, m.name].find((v) => typeof v === "string" && v);
-    if (typeof id !== "string") continue;
-    const name = [m.displayName, m.name, m.label].find((v) => typeof v === "string" && v);
-    const description = typeof m.description === "string" ? m.description : undefined;
-    models.push({
-      id,
-      ...(typeof name === "string" ? { name } : {}),
-      ...(description ? { description } : {}),
-    });
-  }
-  const current = [record.currentModelId, record.current, record.default].find(
-    (v) => typeof v === "string" && v,
-  );
-  return { models, ...(typeof current === "string" ? { current } : {}) };
-}
-
-/**
  * The model list the CLI prints (`agent --list-models`): one model per line as
  * `<id> - <name>`, the selected one marked `(current)` or `(default)`. Headings and blank
  * lines are skipped.

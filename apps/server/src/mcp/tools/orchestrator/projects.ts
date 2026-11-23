@@ -2,6 +2,14 @@ import { AutonomyLevel, type Project, ProviderId } from "@codeden/contracts";
 import { z } from "zod";
 import { defineTool, ToolError } from "../../define";
 import { projectFor } from "../shared/helpers";
+import { describeProviderParam } from "../shared/provider-choices";
+
+/** The loaded providers and whether each is ready, as the PM's `start_session` lists them. */
+const describeDefaultProvider = describeProviderParam(
+  "defaultProvider",
+  "The provider this project's sessions use unless one is named.",
+  "The id is stored as given, loaded or not: a session uses it only while it is loaded, and otherwise falls back to the Settings default or another loaded provider. Pick one that is ready.",
+);
 
 function compactProject(p: Project) {
   return {
@@ -41,6 +49,7 @@ export const createProject = defineTool({
     "Add a project: either an existing local folder (`path`) or a git URL / owner/repo to clone (`cloneUrl`). Only do this when the user asked for it.",
   roles: ["orchestrator"],
   scope: "global",
+  describeInput: describeDefaultProvider,
   input: z
     .object({
       path: z.string().min(1).optional().describe("Absolute path of an existing folder"),
@@ -70,9 +79,10 @@ export const createProject = defineTool({
 export const updateProject = defineTool({
   name: "update_project",
   description:
-    "Change a project's name, default provider, default autonomy level, timezone, default branch, or whether its agent sessions run with CI=true. Pass null to clear an override.",
+    "Change a project's name, default provider, default autonomy level, timezone, default branch, or whether its agent sessions run with CI=true. Pass null to clear an override. The autonomy level (read_only, supervised, auto, full: which actions an agent asks about) is what the project's new sessions start with: sessions that exist keep theirs, which the user changes in each session's Permissions picker. It is not the project's autonomy mode (who finds work and who merges), which this tool doesn't change.",
   roles: ["orchestrator"],
   scope: "global",
+  describeInput: describeDefaultProvider,
   input: z.object({
     projectId: z.string().min(1),
     name: z.string().trim().min(1).max(100).optional(),
@@ -91,6 +101,11 @@ export const updateProject = defineTool({
     projectFor(services, projectId);
     if (Object.values(patch).every((v) => v === undefined))
       throw new ToolError("Nothing to change");
-    return { project: compactProject(services.projects.update(projectId, patch)) };
+    const project = compactProject(services.projects.update(projectId, patch));
+    if (patch.autonomy === undefined) return { project };
+    return {
+      project,
+      note: "New sessions in this project start with this level. Sessions that already exist keep the level they have; the user changes it in each session's Permissions picker.",
+    };
   },
 });

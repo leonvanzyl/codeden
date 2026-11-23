@@ -5,19 +5,25 @@ import { ModelPicker } from "@/components/composer/model-picker/model-picker";
 import { Segmented, SettingRow, SettingsSection } from "@/components/settings/settings-ui";
 import { AUTONOMY, AUTONOMY_LEVELS } from "@/components/thread/autonomy";
 import { useProjectActions } from "@/lib/project-actions";
+import { sessionsKeepingLevel } from "@/lib/project-permissions";
 import { useSnapshotData } from "@/lib/queries";
 
 const SETTINGS_DEFAULT = "default";
+/** How many sessions on another permission level are named before "and N more". */
+const SHOWN = 3;
 
 /**
  * Project page > Settings: what new sessions in this project start with (#261). The default
  * agent (provider, model and effort) and permissions override Settings for this project; the
- * New session draft starts from them, and a pick there still wins.
+ * New session draft starts from them, and a pick there still wins. Sessions that exist keep the
+ * permissions they have (§11.2), so the ones on another level are named with where to change it.
  */
 export function ProjectSettings({ project }: { project: Project }) {
   const providers = useSnapshotData((s) => s.runner.providers, []);
   const globalAutonomy = useSnapshotData<AutonomyLevel>((s) => s.settings.autonomy.default, "auto");
   const { setSessionDefaults } = useProjectActions();
+  const level = project.autonomy ?? globalAutonomy;
+  const keeping = useSnapshotData((s) => sessionsKeepingLevel(s.sessions, project.id, level), []);
   const inherits = project.defaultProvider === null;
   const toSettings = (
     <Link
@@ -85,7 +91,7 @@ export function ProjectSettings({ project }: { project: Project }) {
       </SettingRow>
       <SettingRow
         label="Permissions"
-        help={`Default: ${AUTONOMY[globalAutonomy].short}, from Settings → Autonomy.`}
+        help={`What new sessions start with. Default: ${AUTONOMY[globalAutonomy].short}, from Settings → Autonomy.`}
         stacked
       >
         <Segmented<AutonomyLevel | typeof SETTINGS_DEFAULT>
@@ -98,6 +104,32 @@ export function ProjectSettings({ project }: { project: Project }) {
             ...AUTONOMY_LEVELS.map((level) => ({ value: level, label: AUTONOMY[level].short })),
           ]}
         />
+        {keeping.length > 0 && (
+          <p
+            className="mt-2 text-2xs leading-relaxed text-muted-foreground"
+            data-testid="sessions-keeping-level"
+          >
+            {keeping.length === 1
+              ? "1 open session is on another level and keeps it: "
+              : `${keeping.length} open sessions are on another level and keep it: `}
+            {keeping.slice(0, SHOWN).map((s, i) => (
+              <span key={s.id}>
+                {i > 0 && ", "}
+                <Link
+                  to="/sessions/$sessionId"
+                  params={{ sessionId: s.id }}
+                  className="underline underline-offset-2 hover:text-foreground"
+                >
+                  {s.title ?? s.purpose ?? "Untitled session"}
+                </Link>{" "}
+                ({AUTONOMY[s.autonomy].short})
+              </span>
+            ))}
+            {keeping.length > SHOWN && ` and ${keeping.length - SHOWN} more`}. To change a
+            session's, open it and use the Permissions picker under its message box: it applies
+            while the session runs.
+          </p>
+        )}
       </SettingRow>
     </SettingsSection>
   );

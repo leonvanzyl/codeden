@@ -701,7 +701,10 @@ export class SessionService {
     const connected = this.deps.runner.isConnected();
     if (req.provider && req.provider !== "auto") {
       if (connected && !available.includes(req.provider)) {
-        throw badRequest(`Provider ${req.provider} is not available`, "unknown_provider");
+        throw badRequest(
+          `Provider ${req.provider} is not available. Loaded providers: ${available.join(", ") || "none"}`,
+          "unknown_provider",
+        );
       }
       return req.provider;
     }

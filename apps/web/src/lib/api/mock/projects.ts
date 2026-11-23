@@ -1,4 +1,4 @@
-import type { BackendStatus, Project } from "@codeden/contracts";
+import { type BackendStatus, isActiveSession, type Project } from "@codeden/contracts";
 import type { CodeDenClient } from "../client";
 import { ApiRequestError } from "../http";
 import { defaultFactoryLimits } from "./fixtures/ops";
@@ -13,6 +13,7 @@ type MockProjectApi = Pick<
   | "reorderProjects"
   | "refreshProject"
   | "disconnectGithub"
+  | "archiveProject"
 >;
 
 const NOT_GITHUB =
@@ -166,6 +167,20 @@ export function mockProjectApi(world: MockWorld): MockProjectApi {
       const project: Project = { ...rest, kind: "local", updatedAt: new Date().toISOString() };
       world.emitDomain({ type: "project.updated", sessionId: null, payload: { project } });
       return later({ project }, 80);
+    },
+
+    async archiveProject(id) {
+      const { id: projectId } = find(id);
+      // As the server does: refused while a session of the project is working or about to.
+      if (world.snapshot.sessions.some((s) => s.projectId === projectId && isActiveSession(s))) {
+        throw new ApiRequestError(
+          409,
+          "project_has_active_sessions",
+          "Sessions of this project are still working or waiting to start. Stop them first.",
+        );
+      }
+      world.emitDomain({ type: "project.archived", sessionId: null, payload: { projectId } });
+      return later(undefined, 80);
     },
   };
 }

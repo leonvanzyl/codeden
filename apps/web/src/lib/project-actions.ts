@@ -14,8 +14,8 @@ export type ProjectSessionDefaults =
   | Pick<Project, "autonomy">;
 
 /**
- * Pin, unpin and reorder projects (§13), set their defaults for new sessions, and turn
- * `CI=true` in their agent sessions on or off (§4.2). Changes apply to the snapshot at once and
+ * Pin, unpin, reorder and archive projects (§13), set their defaults for new sessions, and turn
+ * `CI=true` in their agent sessions on or off (§4.2). Other than archiving, changes apply to the snapshot at once and
  * are rolled back with a toast if the server rejects them; the server's event then confirms them.
  */
 export function useProjectActions() {
@@ -117,6 +117,23 @@ export function useProjectActions() {
           });
           return false;
         }
+      },
+      /**
+       * Archive a project: it leaves the list here once the server has archived it (the
+       * `project.archived` event says the same). Adding its folder again restores it.
+       */
+      archive: async (project: Project) => {
+        try {
+          await client.archiveProject(project.id);
+        } catch (error) {
+          toast.error(`Couldn't archive ${project.name}`, { description: message(error) });
+          return false;
+        }
+        setProjects((list) => list.filter((p) => p.id !== project.id));
+        toast.success(`${project.name} archived`, {
+          description: "Add its folder again to bring it back.",
+        });
+        return true;
       },
       reorder,
       /** Move a project to position `to` within its group (pinned or not). */

@@ -14,7 +14,7 @@ import { ModelCatalog } from "../models";
 import type { ResolvedCommand } from "../util/exec";
 import type { LocateOptions } from "../util/locate";
 import { cursorAllowListNotice } from "./allow-list";
-import { detectCursor, findCursor } from "./detect";
+import { cursorAuthGuard, detectCursor, findCursor } from "./detect";
 import { cursorExtensions } from "./extensions";
 import { cursorModelInfos, fallbackCursorModels } from "./models";
 import { type CursorProbe, probeCursor } from "./probe";
@@ -26,6 +26,8 @@ export const CURSOR_AGENT: AcpAgentSpec = {
   label: "Cursor",
   args: ["acp"],
   authMethod: "cursor_login",
+  // `cursor_login` opens the browser when the CLI's stored login can't be used: check first.
+  authGuard: (exe) => cursorAuthGuard(exe),
   modes: { agent: "agent", plan: "plan", readOnly: "ask" },
   extensions: cursorExtensions,
   allowListNotice: cursorAllowListNotice,
