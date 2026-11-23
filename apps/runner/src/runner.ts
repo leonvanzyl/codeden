@@ -118,10 +118,17 @@ export async function startRunner(opts: StartRunnerOptions): Promise<RunningRunn
   const dir = join(opts.home, "runner");
   mkdirSync(dir, { recursive: true });
   const lockFile = join(dir, "runner.json");
-  await assertSingleInstance(lockFile, opts.home, log);
+  await assertSingleInstance(lockFile, { home: opts.home, log });
 
   const token = randomBytes(32).toString("hex");
-  const journal = new Journal(dir);
+  // The journal's files are this runner's while its lock is missing or still names it: a save
+  // after another runner took over (also the one at close) would overwrite that runner's (#615).
+  const journal = new Journal(dir, {
+    owned: () => {
+      const current = readLock(lockFile);
+      return !current || current.token === token;
+    },
+  });
   // Claude Code support is installed on demand into `<home>/deps` in the published package.
   configureClaudeSdk({
     depsDir: join(opts.home, "deps"),
@@ -225,6 +232,8 @@ export async function startRunner(opts: StartRunnerOptions): Promise<RunningRunn
 
   const app = new Hono();
   app.use("*", async (c, next) => {
+    // A replaced runner takes no more servers or agent tool calls while it stops (#615).
+    if (superseded) return c.text("Replaced by another runner", 503);
     if (!LOOPBACK.test(c.req.header("host") ?? "")) return c.text("Forbidden host", 403);
     // Only the server and agents' MCP clients call the runner; a browser page never may.
     if (c.req.header("origin") !== undefined) return c.text("Forbidden origin", 403);
@@ -306,9 +315,13 @@ export async function startRunner(opts: StartRunnerOptions): Promise<RunningRunn
     const current = readLock(lockFile);
     if (!current || current.token === token || closing) return;
     log(`runner pid ${current.pid} took over this home; shutting down`);
-    // The journal files are the new runner's now: write nothing more to them.
+    // The journal files and worktrees are the new runner's now: write nothing more to them,
+    // not even a save already pending or one an ack from a connected server asks for (#615).
     superseded = true;
     stopped = true;
+    journal.handOver();
+    host.stopCheckpoints();
+    for (const conn of connections) conn.close("replaced by another runner");
     finish();
   }, opts.lockCheckMs ?? LOCK_CHECK_MS);
   lockWatch.unref();
@@ -326,8 +339,9 @@ export async function startRunner(opts: StartRunnerOptions): Promise<RunningRunn
         await browserManager.shutdown().catch((error: unknown) => log(`browser: ${String(error)}`));
       })();
       // A session that never finishes closing must not keep the runner alive (#588): its
-      // processes are ended below with everything else.
-      const graceMs = opts.closeGraceMs ?? CLOSE_GRACE_MS;
+      // processes are ended below with everything else. A replaced runner ends them at once
+      // (#615): the new runner may be running the same sessions in the same worktrees.
+      const graceMs = superseded ? 0 : (opts.closeGraceMs ?? CLOSE_GRACE_MS);
       let timer: NodeJS.Timeout | undefined;
       const late = await Promise.race([
         graceful.then(
@@ -342,7 +356,9 @@ export async function startRunner(opts: StartRunnerOptions): Promise<RunningRunn
         }),
       ]);
       clearTimeout(timer);
-      if (late) log(`sessions did not close within ${graceMs} ms; ending their processes`);
+      if (late && !superseded) {
+        log(`sessions did not close within ${graceMs} ms; ending their processes`);
+      }
       await supervisor.killAll(opts.sweepDescendants ?? false);
       for (const conn of connections) conn.close("runner stopping");
       wss.close();
@@ -354,7 +370,9 @@ export async function startRunner(opts: StartRunnerOptions): Promise<RunningRunn
       deltas.flush();
       stopped = true;
       try {
-        if (!superseded) journal.close();
+        // Saves nothing once another runner owns the files, also when it took over while this
+        // one was closing (its lock was already gone, so the lock check above had stopped).
+        journal.close();
       } catch (error) {
         log(`journal: ${String(error)}`);
       }
