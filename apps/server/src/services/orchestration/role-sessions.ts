@@ -1,4 +1,5 @@
 import {
+  isActiveSession,
   type QueuedMessage,
   type RoleSessionsRef,
   type Session,
@@ -19,9 +20,6 @@ import type { SessionRepo, StoredStartMeta } from "../sessions/repo";
 import type { SessionService } from "../sessions/session-service";
 
 export type OrchestrationRole = "orchestrator" | "pm";
-
-/** A role session with a turn starting, running or waiting on the user is left where it is. */
-const BUSY = new Set<Session["status"]>(["created", "queued", "starting", "running", "waiting"]);
 
 const EMPTY_META: StoredStartMeta = {
   workspaceMode: "repo_root",
@@ -163,7 +161,7 @@ export class RoleSessions {
 
   /** Whether the session is to be retired now: its role moved, and no turn is under way. */
   private shouldRetire(session: Session): boolean {
-    const underWay = BUSY.has(session.status) || this.deps.sessions.isDelivering(session.id);
+    const underWay = isActiveSession(session) || this.deps.sessions.isDelivering(session.id);
     return !underWay && this.moveTarget(session) !== null;
   }
 

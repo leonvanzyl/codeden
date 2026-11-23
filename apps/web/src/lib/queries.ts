@@ -137,6 +137,18 @@ export function useProject(projectId: string | null | undefined): Project | unde
   return useSnapshotData((s) => s.projects.find((x) => x.id === projectId), undefined);
 }
 
+/**
+ * Whether a session's project is archived, which makes its sessions read-only. The snapshot
+ * lists active projects only and a project is archived, never deleted, so a project id it no
+ * longer holds is an archived one. False without a project and while the snapshot loads.
+ */
+export function useProjectArchived(projectId: string | null | undefined): boolean {
+  return useSnapshotData(
+    (s) => Boolean(projectId) && !s.projects.some((x) => x.id === projectId),
+    false,
+  );
+}
+
 const NO_CHECKS: ProjectCheck[] = [];
 
 /**

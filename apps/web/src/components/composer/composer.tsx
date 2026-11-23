@@ -1,11 +1,11 @@
 import type { Session, UserInputInit } from "@codeden/contracts";
 import { useMutation } from "@tanstack/react-query";
-import { ArrowUp, ListPlus, Square, Zap } from "lucide-react";
+import { Archive, ArrowUp, ListPlus, Square, Zap } from "lucide-react";
 import { type KeyboardEvent, type ReactNode, useId, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { type SendMode, useClient } from "@/lib/api";
-import { useSnapshotData } from "@/lib/queries";
+import { useProjectArchived, useSnapshotData } from "@/lib/queries";
 import { sendToSession } from "@/lib/send-to-session";
 import { matchesCombo, shortcut } from "@/lib/shortcuts";
 import { cn } from "@/lib/utils";
@@ -221,6 +221,7 @@ export function SessionComposer({
 }) {
   const client = useClient();
   const providers = useSnapshotData((s) => s.runner.providers, []);
+  const archived = useProjectArchived(session.projectId);
   const { setText, clear } = useComposerStore.getState();
   const provider = providers.find((p) => p.id === session.provider);
 
@@ -239,6 +240,24 @@ export function SessionComposer({
     },
   });
   const stop = useMutation({ mutationFn: () => client.interrupt(session.id) });
+
+  // The server refuses input to an archived project's sessions: say so instead of a composer.
+  if (archived) {
+    return (
+      <div className="mx-auto w-full max-w-[46rem] px-3 pb-3 sm:px-6 sm:pb-5">
+        <div
+          role="status"
+          className="flex items-center gap-2 rounded-2xl border border-border bg-muted/40 px-4 py-3 text-sm text-muted-foreground"
+        >
+          <Archive className="size-4 shrink-0" />
+          <span>
+            This project is archived, so its sessions are read-only. Add its folder again to restore
+            it.
+          </span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <Composer

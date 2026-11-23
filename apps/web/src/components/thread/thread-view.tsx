@@ -6,7 +6,13 @@ import { EmptyState } from "@/components/common/bits";
 import { SessionComposer } from "@/components/composer/composer";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useClient } from "@/lib/api";
-import { useEarlierTurns, useSessionLookup, useSnapshotData, useTranscript } from "@/lib/queries";
+import {
+  useEarlierTurns,
+  useProjectArchived,
+  useSessionLookup,
+  useSnapshotData,
+  useTranscript,
+} from "@/lib/queries";
 import { checksRunning } from "@/lib/transcript/checks";
 import { activeTurn } from "@/lib/transcript/reducer";
 import { latestFollowups } from "@/lib/transcript/timeline";
@@ -98,6 +104,8 @@ export function ThreadView({
   );
   // Sent from the New session draft: shown until the transcript has the turn.
   const firstMessage = useNewSessionStore((s) => s.firstMessages[sessionId]);
+  // An archived project's sessions are read-only: no follow-ups to send.
+  const archived = useProjectArchived(session?.projectId);
 
   if (!session) {
     // Just started from the draft and not in the snapshot yet: its realtime event is on the way.
@@ -149,7 +157,9 @@ export function ThreadView({
       ) : (
         <div className="flex min-h-0 flex-1 flex-col">{empty}</div>
       )}
-      {followups && !running && <FollowupChips sessionId={sessionId} suggestions={followups} />}
+      {followups && !running && !archived && (
+        <FollowupChips sessionId={sessionId} suggestions={followups} />
+      )}
       <QueuedMessages session={session} running={running} />
       <SessionComposer session={session} running={running} checking={checking} />
     </div>

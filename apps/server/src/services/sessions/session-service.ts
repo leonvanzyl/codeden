@@ -41,6 +41,7 @@ import {
   toServiceError,
 } from "../runner-port";
 import type { UtilityService } from "../utility";
+import { assertProjectActive, inArchivedProject } from "./archived-project";
 import { freezeChecks, roundAfter, withRound } from "./checks";
 import { compactingRefusal, compactionRunning, compactRefusal, startCompaction } from "./compact";
 import { derivePurpose, deriveWorkKey, findConflicts } from "./conflicts";
@@ -332,6 +333,7 @@ export class SessionService {
     from: QueueSender = "user",
   ): Promise<SendMessageResponse> {
     const session = this.deps.repo.get(id);
+    assertProjectActive(this.deps.projects, session);
     if (NOT_STARTED.has(session.status)) return this.enqueue(id, req.input, from);
     // A turn on its way to the runner counts as running, though there is nothing to steer yet.
     const delivering = this.delivering.has(id);
@@ -374,6 +376,7 @@ export class SessionService {
 
   async steer(id: string, raw: UserInput): Promise<void> {
     const session = this.deps.repo.get(id);
+    assertProjectActive(this.deps.projects, session);
     if (!BUSY.has(session.status)) throw conflict("No turn is running", "no_turn");
     if (!this.provider(session.provider, id)?.capabilities.steer) {
       throw conflict("This provider cannot steer a running turn", "unsupported");
@@ -407,6 +410,7 @@ export class SessionService {
    */
   async compact(id: string): Promise<CompactSessionResponse> {
     const session = this.deps.repo.get(id);
+    assertProjectActive(this.deps.projects, session);
     const refusal = compactRefusal(session, this.provider(session.provider, id), {
       delivering: this.delivering.has(id),
       queued: this.deps.outbox.count(id),
@@ -522,6 +526,8 @@ export class SessionService {
     if (!next) return;
     const session = this.deps.repo.get(id);
     if (!FLUSHABLE.has(session.status)) return;
+    // Its project was archived while the message waited: it stays queued, undelivered.
+    if (inArchivedProject(this.deps.projects, session)) return;
     this.deps.outbox.remove(next, "sent");
     try {
       await this.sendNow(session, next.input, next.from);
@@ -559,6 +565,7 @@ export class SessionService {
   async continueAfterRestart(id: string, text: string): Promise<void> {
     if (this.delivering.has(id)) return;
     const session = this.deps.repo.get(id);
+    if (inArchivedProject(this.deps.projects, session)) return;
     await this.sendNow(session, { text, attachments: [], from: "codeden" }, "codeden");
   }
 
