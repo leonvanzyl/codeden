@@ -266,6 +266,12 @@ export class AcpSession implements ProviderSession {
         args: spec.args,
         label: spec.label,
         ...(spec.authMethod ? { authMethod: spec.authMethod } : {}),
+        ...(spec.authGuard
+          ? {
+              authGuard: () =>
+                spec.authGuard?.(this.config.executable) ?? Promise.resolve(undefined),
+            }
+          : {}),
         ...(spec.extensions?.clientCapabilities
           ? { clientCapabilities: spec.extensions.clientCapabilities }
           : {}),

@@ -2,7 +2,9 @@
 // commands detection runs. No model is ever called.
 //   agent.mjs --version        prints FAKE_ACP_VERSION (default 2026.10.22-abc1234)
 //   agent.mjs status           prints FAKE_ACP_STATUS (default "Logged in as dev@example.com")
-//   agent.mjs --list-models    prints a model list
+//   agent.mjs --list-models    prints a model list; FAKE_ACP_LIST_MODELS=auth fails like a CLI
+//                              whose stored login can't be used (while `status` still says
+//                              "Logged in")
 //   agent.mjs acp              serves ACP on stdio; FAKE_ACP_NO_ACP=1 fails like an old CLI
 // FAKE_ACP_LOG: every message the client sends, and every answer to the agent's requests
 // (`{ method: "answer:<method>", params }`), one JSON line each.
@@ -39,6 +41,10 @@ if (args[0] === "status") {
   process.exit(0);
 }
 if (args[0] === "--list-models") {
+  if (process.env.FAKE_ACP_LIST_MODELS === "auth") {
+    console.error("Error: Authentication required. Run 'agent login', pass --api-key/--auth-token, or set CURSOR_API_KEY/CURSOR_AUTH_TOKEN.");
+    process.exit(1);
+  }
   console.log("Available models\n\nauto - Auto (current)\ngpt-5 - GPT-5\nsonnet-4.5 - Claude 4.5 Sonnet");
   process.exit(0);
 }
