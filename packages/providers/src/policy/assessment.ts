@@ -42,12 +42,27 @@ export const asksAtEveryLevel = (risk: RiskAssessment): boolean =>
   risk.risky && (risk.codeden === true || risk.always === true);
 
 /**
- * The verdict for several checks of one action: CodeDen's own credentials first, then what
- * every level asks about (a level may allow an ordinary risk that comes before them), then the
- * first risky one, else safe.
+ * How severe a verdict is: the highest permission level that still asks about it. CodeDen's own
+ * credentials (every level asks, and read-only sessions are refused) come before what else every
+ * level asks about, then a write outside the worktree, which Full asks about, then the risks only
+ * Auto asks about, then no risk.
+ */
+function severity(risk: RiskAssessment): number {
+  if (!risk.risky) return 0;
+  if (risk.codeden === true) return 4;
+  if (risk.always === true) return 3;
+  return risk.action === "outside_worktree" ? 2 : 1;
+}
+
+/**
+ * The verdict for several checks of one action, or for the parts of one command: the most severe
+ * (`severity`), and the first of those, whatever their order. So a risk a level allows (a force
+ * push at Full) never hides one it asks about (a delete outside the worktree) (#627).
  */
 export function mostSevere(risks: readonly RiskAssessment[]): RiskAssessment {
-  return (
-    risks.find(touchesCodeden) ?? risks.find(asksAtEveryLevel) ?? risks.find((r) => r.risky) ?? SAFE
-  );
+  let worst: RiskAssessment = SAFE;
+  for (const risk of risks) {
+    if (severity(risk) > severity(worst)) worst = risk;
+  }
+  return worst;
 }
