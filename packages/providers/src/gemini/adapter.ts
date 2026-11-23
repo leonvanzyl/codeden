@@ -17,6 +17,7 @@ import { geminiSessionArgs, writeGeminiAdminPolicies } from "./admin-policy";
 import { geminiAllowListNotice } from "./allow-list";
 import {
   detectGemini,
+  GEMINI_MIN_VERSION,
   GEMINI_UPGRADE_COMMAND,
   geminiTooOldMessage,
   isSupportedGeminiVersion,
@@ -100,6 +101,7 @@ export class GeminiAdapter implements ProviderAdapter {
     if (this.found) return this.found;
     const lookup = await findExecutable("gemini", {
       ...(this.options.probeTimeoutMs ? { timeoutMs: this.options.probeTimeoutMs } : {}),
+      minVersion: GEMINI_MIN_VERSION,
       ...this.options.locate,
     });
     if (!lookup.command) throw new Error("Gemini CLI is not installed (no `gemini` on PATH)");

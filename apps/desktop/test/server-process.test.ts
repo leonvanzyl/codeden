@@ -1,15 +1,15 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { resetLoginShellPath } from "../src/main/login-shell-path";
 import { rotateLog, ServerProcess } from "../src/main/server-process";
 import { serverLog } from "../src/server/log";
 
 const STUCK = resolve(__dirname, "support/stuck-server.mjs");
 const dirs: string[] = [];
 
-function stuckServer(log: string[]): ServerProcess {
-  const home = mkdtempSync(join(tmpdir(), "codeden-server-process-"));
+function stuckServer(log: string[], home = mkdtempSync(join(tmpdir(), "codeden-server-process-"))) {
   dirs.push(home);
   return new ServerProcess({
     entry: STUCK,
@@ -23,9 +23,52 @@ function stuckServer(log: string[]): ServerProcess {
   });
 }
 
+beforeEach(() => {
+  resetLoginShellPath();
+  vi.stubEnv("SHELL", join(tmpdir(), "codeden-test-missing-shell"));
+});
+
 afterEach(() => {
+  vi.unstubAllEnvs();
   delete process.env.STUCK_SERVER_MODE;
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
+
+describe("ServerProcess.start", () => {
+  it.skipIf(process.platform !== "darwin")(
+    "passes the macOS login shell's PATH to the server",
+    async () => {
+      const home = mkdtempSync(join(tmpdir(), "codeden-shell-path-"));
+      const server = stuckServer([], home);
+      const systemPath = "/usr/bin:/bin:/usr/sbin:/sbin";
+      vi.stubEnv("SHELL", "/bin/zsh");
+      vi.stubEnv("ZDOTDIR", home);
+      vi.stubEnv("PATH", systemPath);
+      vi.stubEnv("STUCK_SERVER_MODE", "record-path");
+      writeFileSync(join(home, ".zprofile"), 'export PATH="$ZDOTDIR/homebrew/bin:$PATH"\n');
+      writeFileSync(
+        join(home, ".zshrc"),
+        `if [[ $PATH == "$ZDOTDIR/homebrew/bin:"* ]]; then
+        export PATH="$ZDOTDIR/nvm/bin:$PATH"
+      fi
+      print 'Welcome to zsh'
+      `,
+      );
+
+      try {
+        await server.start();
+        const path = readFileSync(join(home, "server-path"), "utf8");
+        expect(path.split(":").slice(0, 2)).toEqual([
+          join(home, "nvm/bin"),
+          join(home, "homebrew/bin"),
+        ]);
+        expect(path).not.toContain("Welcome to zsh");
+        expect(process.env.PATH).toBe(systemPath);
+      } finally {
+        await server.stop({ stopRunner: false });
+      }
+    },
+  );
 });
 
 describe("ServerProcess.stop", () => {

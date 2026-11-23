@@ -1,5 +1,7 @@
 import {
   cursorBroken,
+  cursorLoginMessage,
+  cursorLoginRequired,
   cursorOnly,
   isCursorVersion,
   parseCursorStatus,
@@ -86,6 +88,20 @@ export async function checkCursor({
       fix: login,
     };
   }
+  // `agent status` only reads that a login was stored. Listing models runs the CLI's real login
+  // check (never a browser login): when it asks for a login, so would every session.
+  const models = await exec(tool.path, ["--list-models"], { timeoutMs: 15_000 });
+  if (cursorLoginRequired(models.code, `${models.stdout}\n${models.stderr}`)) {
+    return {
+      ...installed,
+      loggedIn: false,
+      account: auth.account,
+      state: "missing",
+      message: cursorLoginMessage(commandName(tool.path)),
+      detail: runDetail("agent --list-models", models),
+      fix: login,
+    };
+  }
   return {
     ...installed,
     loggedIn: true,
@@ -94,4 +110,9 @@ export async function checkCursor({
     state: "ok",
     message: "Signed in",
   };
+}
+
+/** `agent` or `cursor-agent`, as the file is named, for the command in a message. */
+function commandName(file: string): string {
+  return /cursor-agent(\.(exe|cmd))?$/i.test(file) ? "cursor-agent" : "agent";
 }

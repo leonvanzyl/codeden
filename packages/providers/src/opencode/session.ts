@@ -11,23 +11,17 @@ import { type ProviderSession, ProviderSessionError, type SessionConfigChange } 
 import { ApprovalBroker } from "../approvals";
 import { AsyncQueue } from "../async-queue";
 import type { ResolvedCommand } from "../util/exec";
-import { explicitModel } from "../util/model";
 import { type ApprovalDeps, handleForm, handlePermission } from "./approvals";
-import { OpenCodeHttpError, seg } from "./client";
-import {
-  mcpName,
-  modelId,
-  modelRef,
-  openCodeConfig,
-  openCodeVariant,
-  SESSION_PERMISSIONS,
-  toPromptBody,
-} from "./config";
+import { seg } from "./client";
+import { OpenCodeCommands, type OpenCodeRoute, runCommand, withSkill } from "./commands";
+import { mcpName, openCodeConfig, toPromptBody } from "./config";
+import type { TurnOutcome } from "./errors";
 import { userMessageEvent } from "./items";
 import { OpenCodeEventMapper } from "./mapper";
 import { OpenCodePolicy } from "./policy";
-import type { OcEvent, OcModel, OcModelRef, OcSession } from "./protocol";
+import type { OcEvent } from "./protocol";
 import { OpenCodeServer } from "./server";
+import { OpenCodeModelChoice, openOrResume } from "./session-open";
 
 export interface OpenCodeSessionConfig {
   executable: ResolvedCommand;
@@ -41,9 +35,6 @@ export interface OpenCodeSessionConfig {
   startTimeoutMs?: number;
 }
 
-/** Key of CodeDen's entry in the session's instructions (`<context key="codeden">`). */
-const INSTRUCTIONS_KEY = "codeden";
-
 /**
  * An OpenCode session (§7.2): one private `opencode serve` per CodeDen session, and one
  * OpenCode session in it, created in the session's working directory. OpenCode keeps the
@@ -55,15 +46,15 @@ export class OpenCodeSession implements ProviderSession {
   private readonly mapper: OpenCodeEventMapper;
   private readonly broker: ApprovalBroker;
   private readonly policy: OpenCodePolicy;
+  /** The `/` commands and skills OpenCode lists for the worktree, and how input is routed. */
+  private readonly commands: OpenCodeCommands;
   private server: OpenCodeServer | undefined;
   private starting: Promise<OpenCodeServer> | undefined;
   private stream: AbortController | undefined;
   private closed = false;
   private turnPending = false;
-  /** CodeDen model id; undefined = OpenCode's configured default. */
-  private model: string | undefined;
-  private effort: ReasoningEffort | undefined;
-  private nextTurn: SessionConfigChange = {};
+  /** The model and effort, and a change queued for the next turn. */
+  private readonly models: OpenCodeModelChoice;
   /** Worktree and MCP server names for labelling tool calls; names grow once `/api/mcp` answers. */
   private readonly toolCtx: { cwd: string; mcpServers: string[] };
   /** Instructions that could not be set on the session go in front of the next prompt. */
@@ -114,8 +105,10 @@ export class OpenCodeSession implements ProviderSession {
       },
       opts.readOnly ?? false,
     );
-    this.model = explicitModel(opts.model);
-    this.effort = opts.effort;
+    this.models = new OpenCodeModelChoice(opts.model, opts.effort, config.modelEfforts);
+    this.commands = new OpenCodeCommands(opts.cwd, (commands) =>
+      this.events.push({ type: "session.updated", commands }),
+    );
   }
 
   /** Start the server and open (or resume) the OpenCode session. */
@@ -130,7 +123,7 @@ export class OpenCodeSession implements ProviderSession {
 
   /** Model/effort for the next turn on; OpenCode switches the session's model. */
   async configure(change: SessionConfigChange): Promise<void> {
-    this.nextTurn = { ...this.nextTurn, ...change };
+    this.models.queue(change);
   }
 
   /** Applies from the next permission request, inside a running turn too (`liveAutonomy`). */
@@ -148,14 +141,13 @@ export class OpenCodeSession implements ProviderSession {
     try {
       const server = await this.ensureServer();
       await this.applyModelChange(server);
+      const route = await this.commands.resolve(input.text, server.client);
       this.mapper.pendingTurnId = turnId;
       this.pendingInput = { turnId, input };
-      await server.client.post(
-        `/api/session/${seg(this.sessionId())}/prompt`,
-        toPromptBody(this.withInstructions(input)),
-      );
+      const refused = await this.dispatch(server, input, route);
       this.mapper.beginTurn(turnId);
-      this.flushNotice();
+      if (refused) this.mapper.endTurn(refused);
+      else this.flushNotice();
     } catch (error) {
       if (this.mapper.pendingTurnId === turnId) this.mapper.pendingTurnId = undefined;
       if (this.pendingInput?.turnId === turnId) this.pendingInput = undefined;
@@ -244,6 +236,25 @@ export class OpenCodeSession implements ProviderSession {
 
   // ---------------------------------------------------------------- internals
 
+  /**
+   * Send the input by its route (§13): `/<name>` runs a command OpenCode listed, or attaches a
+   * skill it listed; anything else is a prompt. A command OpenCode refuses comes back as the
+   * turn's failure. Instructions not yet given wait for the next prompt (a command's text is
+   * its arguments).
+   */
+  private async dispatch(
+    server: OpenCodeServer,
+    input: UserInput,
+    route: OpenCodeRoute,
+  ): Promise<TurnOutcome | undefined> {
+    const path = `/api/session/${seg(this.sessionId())}`;
+    if (route.type === "command") return runCommand(server.client, path, route, input);
+    const body = toPromptBody(this.withInstructions(input));
+    const moved = body.text.length - input.text.length;
+    await server.client.post(`${path}/prompt`, withSkill(body, route, moved));
+    return undefined;
+  }
+
   private sessionId(): string {
     const id = this.mapper.rootSession;
     if (!id) throw new ProviderSessionError("not_started", "OpenCode session is not started");
@@ -286,6 +297,7 @@ export class OpenCodeSession implements ProviderSession {
       );
       await this.openSession(server);
       void this.loadMcpNames(server);
+      void this.commands.refresh(server.client);
       return server;
     } catch (error) {
       await server.close();
@@ -293,73 +305,29 @@ export class OpenCodeSession implements ProviderSession {
     }
   }
 
-  /** Resume the OpenCode session when there is one, else create it. */
+  /**
+   * Resume the OpenCode session when there is one, else create it (`session-open.ts`). CodeDen's
+   * role prompt is a session instruction, else it goes in front of the first prompt.
+   */
   private async openSession(server: OpenCodeServer): Promise<void> {
-    const client = server.client;
-    const ref = await this.modelRefNow(server);
-    let session: OcSession | undefined;
-    const resumeId = this.mapper.rootSession;
-    if (resumeId) {
-      try {
-        session = (await client.get<{ data: OcSession }>(`/api/session/${seg(resumeId)}`)).data;
-        await client.patch(`/api/session/${seg(resumeId)}`, { permissions: SESSION_PERMISSIONS });
-        if (ref) await client.post(`/api/session/${seg(resumeId)}/model`, { model: ref });
-      } catch (error) {
-        if (!(error instanceof OpenCodeHttpError) || error.status !== 404) throw error;
-        session = undefined;
-        this.pendingNotice = `Could not resume OpenCode session ${resumeId}; started a new one.`;
-      }
-    }
-    session ??= (
-      await client.post<{ data: OcSession }>("/api/session", {
-        location: { directory: this.opts.cwd },
-        permissions: SESSION_PERMISSIONS,
-        ...(ref ? { model: ref } : {}),
-      })
-    ).data;
-    this.mapper.rootSession = session.id;
-    await this.archive(server, session.id);
-    await this.setInstructions(server, session.id);
-    const model = ref
-      ? modelId(ref)
-      : session.model
-        ? modelId(session.model)
-        : await this.defaultModel(server);
-    this.mapper.currentModel = model;
+    const opened = await openOrResume({
+      client: server.client,
+      resumeId: this.mapper.rootSession,
+      directory: this.opts.cwd,
+      models: this.models,
+      systemPrompt: this.opts.systemPrompt,
+      adopt: (id) => {
+        this.mapper.rootSession = id;
+      },
+    });
+    if (opened.notice) this.pendingNotice = opened.notice;
+    if (opened.inlineInstructions) this.inlineInstructions = opened.inlineInstructions;
+    this.mapper.currentModel = opened.model;
     this.events.push({
       type: "session.updated",
-      resumeToken: session.id,
-      ...(model ? { model } : {}),
+      resumeToken: opened.id,
+      ...(opened.model ? { model: opened.model } : {}),
     });
-  }
-
-  /**
-   * Archive the session in OpenCode's own session list: CodeDen shows it, so it doesn't clutter
-   * the user's OpenCode history. Archived sessions still run prompts. Done on create and on
-   * every resume (a no-op once archived), as its own request so an OpenCode that rejects the
-   * field never breaks the session.
-   */
-  private async archive(server: OpenCodeServer, id: string): Promise<void> {
-    try {
-      await server.client.patch(`/api/session/${seg(id)}`, { archived: true });
-    } catch {
-      // Best effort: the session works the same unarchived.
-    }
-  }
-
-  /** CodeDen's role prompt as a session instruction; else in front of the first prompt. */
-  private async setInstructions(server: OpenCodeServer, id: string): Promise<void> {
-    const text = this.opts.systemPrompt?.trim();
-    if (!text) return;
-    try {
-      await server.client.request(
-        "PUT",
-        `/api/experimental/session/${seg(id)}/instructions/entries/${INSTRUCTIONS_KEY}`,
-        { value: text },
-      );
-    } catch {
-      this.inlineInstructions = text;
-    }
   }
 
   private withInstructions(input: UserInput): UserInput {
@@ -369,36 +337,9 @@ export class OpenCodeSession implements ProviderSession {
     return { ...input, text: `<instructions>\n${text}\n</instructions>\n\n${input.text}` };
   }
 
-  /** The model reference for the current model and effort (undefined = OpenCode's default). */
-  private async modelRefNow(server: OpenCodeServer): Promise<OcModelRef | undefined> {
-    const variant = openCodeVariant(
-      this.effort,
-      this.config.modelEfforts?.(this.model ?? (await this.defaultModel(server))),
-    );
-    const ref = modelRef(this.model, variant);
-    if (ref || !variant) return ref;
-    // An effort on the default model needs the default's real id.
-    const fallback = await this.defaultModel(server);
-    return modelRef(fallback, variant);
-  }
-
-  private async defaultModel(server: OpenCodeServer): Promise<string | undefined> {
-    try {
-      const res = await server.client.get<{ data: OcModel | null }>("/api/model/default");
-      return res.data ? modelId(res.data) : undefined;
-    } catch {
-      return undefined;
-    }
-  }
-
   /** Apply a `configure()` change: the session switches model (and variant) for good. */
   private async applyModelChange(server: OpenCodeServer): Promise<void> {
-    const change = this.nextTurn;
-    if (change.model === undefined && change.effort === undefined) return;
-    this.nextTurn = {};
-    if (change.model !== undefined) this.model = explicitModel(change.model);
-    if (change.effort !== undefined) this.effort = change.effort ?? undefined;
-    const ref = (await this.modelRefNow(server)) ?? modelRef(await this.defaultModel(server));
+    const ref = await this.models.takeChange(server.client);
     if (!ref) return;
     await server.client.post(`/api/session/${seg(this.sessionId())}/model`, { model: ref });
   }
@@ -433,6 +374,10 @@ export class OpenCodeSession implements ProviderSession {
     }
     if (event.type === "form.created") {
       void handleForm(event.data.form, this.deps());
+      return;
+    }
+    if (event.type === "command.updated" || event.type === "skill.updated") {
+      if (this.server) this.commands.updated(this.server.client);
       return;
     }
     this.mapper.handle(event);

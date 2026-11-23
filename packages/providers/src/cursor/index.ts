@@ -8,7 +8,15 @@ export {
   CursorAdapter,
   type CursorAdapterOptions,
 } from "./adapter";
-export { cursorInstallCommand, detectCursor, findCursor, parseCursorStatus } from "./detect";
+export {
+  cursorAuthGuard,
+  cursorInstallCommand,
+  cursorLoginMessage,
+  cursorLoginRequired,
+  detectCursor,
+  findCursor,
+  parseCursorStatus,
+} from "./detect";
 export { cursorExtensions, cursorTodos, planMarkdown, questionAnswer } from "./extensions";
 export {
   CURSOR_COMMANDS,
@@ -20,7 +28,6 @@ export {
 export {
   cursorModelInfos,
   fallbackCursorModels,
-  modelsFromListing,
   parseModelList,
 } from "./models";
-export { type CursorProbe, LIST_MODELS, probeCursor } from "./probe";
+export { type CursorProbe, probeCursor } from "./probe";

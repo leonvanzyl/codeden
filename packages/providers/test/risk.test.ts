@@ -633,3 +633,25 @@ describe("isSecretPath", () => {
     }
   });
 });
+
+// #568: reading a file with `sed -n` is an ordinary command at Auto; only a write it is asked to
+// make outside the worktree, or a secrets file it reads, asks.
+describe("classifyCommand: sed that only prints", () => {
+  it("runs freely, wherever the file is", () => {
+    for (const cmd of [
+      "sed -n '1,40p' src/a.ts",
+      "sed -n 1,40p /work/repo/src/a.ts",
+      "sed -n '1,120p' docs/DESIGN.md | cut -c1-200",
+      "cd packages/app && sed -n '10,20p' package.json",
+      "sed -n '1,5p' ../sibling/README.md",
+    ]) {
+      expect(action(cmd), cmd).toBeNull();
+    }
+  });
+
+  it("still asks for a redirect outside the worktree and for a secrets file", () => {
+    expect(action("sed -n 1,40p src/a.ts > /etc/out.txt")).toBe("outside_worktree");
+    expect(action("sed -n 1,40p src/a.ts | tee ~/out.txt")).toBe("outside_worktree");
+    expect(action("sed -n '1,5p' .env")).toBe("secrets");
+  });
+});

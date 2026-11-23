@@ -82,6 +82,29 @@ export interface OcSession {
   location?: { directory: string };
 }
 
+/**
+ * `GET /api/command` entry: built-in, plugin and MCP-prompt commands, `commands` in the config
+ * and `{command,commands}/**\/*.md` files (nested ones named `team/review`). Run with
+ * `POST /api/session/:id/command` (`{ name, text }`, 204).
+ */
+export interface OcCommandInfo {
+  name: string;
+  description?: string;
+}
+
+/**
+ * `GET /api/skill` entry. `id` is the skill's folder name (what a `SkillAttachment` names);
+ * `name` comes from its front matter. `autoinvoke: false` only keeps the model from loading it
+ * on its own. `content` (the body) is not read.
+ */
+export interface OcSkillInfo {
+  id: string;
+  name: string;
+  description?: string;
+  autoinvoke?: boolean;
+  path: string;
+}
+
 /** A file change in permission or tool metadata (`metadata.files`). */
 export interface OcFileDiff {
   file: string;
@@ -217,7 +240,10 @@ export type OcEvent =
   | { type: "permission.replied"; data: SessionScoped<{ requestID: string; reply: string }> }
   | { type: "form.created"; data: { form: OcForm } }
   | { type: "form.replied"; data: { id: string; sessionID: string } }
-  | { type: "form.cancelled"; data: { id: string; sessionID: string } };
+  | { type: "form.cancelled"; data: { id: string; sessionID: string } }
+  /** A location's commands or skills changed (or finished loading); `data` is empty. */
+  | { type: "command.updated"; location?: { directory: string }; data?: unknown }
+  | { type: "skill.updated"; location?: { directory: string }; data?: unknown };
 
 export type OcEventType = OcEvent["type"];
 export type OcEventOf<T extends OcEventType> = Extract<OcEvent, { type: T }>;

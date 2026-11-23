@@ -3,12 +3,9 @@ import { startAgent } from "../acp/process";
 import type { AcpInitializeResult } from "../acp/protocol";
 import { AcpRpcError, METHOD_NOT_FOUND } from "../acp/rpc";
 import { type ResolvedCommand, runCommand } from "../util/exec";
-import { parseCursorStatus } from "./detect";
+import { cursorLoginRequired, readCursorLogin } from "./detect";
 import { CURSOR_CLIENT_CAPABILITIES } from "./extensions";
-import { modelsFromListing, parseModelList } from "./models";
-
-/** Cursor's request that lists the account's models without opening a session. */
-export const LIST_MODELS = "cursor/list_available_models";
+import { parseModelList } from "./models";
 
 /** What a short-lived `agent acp` showed. */
 export interface CursorProbe {
@@ -20,20 +17,31 @@ export interface CursorProbe {
   error?: string;
   /** What the CLI reported in `initialize` (its capabilities). */
   info?: AcpInitializeResult;
+  /**
+   * `agent status` said signed in, but listing models asked for a login: the stored login
+   * can't be used, and an ACP `authenticate` would open the browser.
+   */
+  loginRequired?: boolean;
 }
 
 /**
- * Start `agent acp` once, check that it answers `initialize`, and ask for the model list
- * (Cursor's `cursor/list_available_models`; signed-in CLIs only, after `cursor_login`, which
- * reuses the existing login). No session is opened and no model is called. When the ACP list
- * is empty, the CLI's own `--list-models` output is read instead. Never throws.
+ * Start `agent acp` once and check that it answers `initialize` (which also reports its
+ * capabilities), then read the account's models with the CLI's own `--list-models` when
+ * `agent status` says it is signed in. No session is opened and no model is called.
+ *
+ * A probe runs in the background (start-up, re-checks, the factory's availability checks), so
+ * it never sends ACP `authenticate`: with `cursor_login`, the CLI opens its browser login
+ * whenever its own credential check fails, even while `agent status` says signed in, and a
+ * probe that then times out kills the CLI before the login can finish, so the next probe opens
+ * it again. A login only starts from the user's own action (Sign in, or a session they start).
+ * Never throws.
  */
 export async function probeCursor(
   exe: ResolvedCommand,
   opts: { signedIn?: boolean; timeoutMs?: number },
 ): Promise<CursorProbe> {
   const timeoutMs = opts.timeoutMs ?? 20_000;
-  const signedIn = opts.signedIn ?? (await isSignedIn(exe, timeoutMs));
+  const signedIn = opts.signedIn ?? (await readCursorLogin(exe, timeoutMs)).loggedIn === true;
   let stderr = "";
   let started: Awaited<ReturnType<typeof startAgent>> | undefined;
   const result: CursorProbe = { acp: false, models: [] };
@@ -52,7 +60,7 @@ export async function probeCursor(
       {
         args: ["acp"],
         label: "Cursor",
-        ...(signedIn ? { authMethod: "cursor_login" } : {}),
+        // No `authMethod`: see above.
         // As sessions do, so `initialize` reports whether subagents run as child sessions.
         clientCapabilities: CURSOR_CLIENT_CAPABILITIES,
         timeoutMs,
@@ -67,36 +75,13 @@ export async function probeCursor(
       .join(": ")
       .slice(0, 400);
   }
-  if (started && signedIn) {
-    try {
-      const listing = await withTimeout(started.rpc.request<unknown>(LIST_MODELS, {}), timeoutMs);
-      Object.assign(result, modelsFromListing(listing));
-    } catch {
-      // Older CLIs don't answer it; the CLI's own list below may.
-    }
-  }
   await started?.rpc.close();
-  if (!result.models.length && signedIn) {
+  if (signedIn) {
     const run = await runCommand(exe, ["--list-models"], { timeoutMs });
     if (run.code === 0) Object.assign(result, parseModelList(run.stdout));
+    else if (cursorLoginRequired(run.code, `${run.stdout}\n${run.stderr}`)) {
+      result.loginRequired = true;
+    }
   }
   return result;
-}
-
-/** `agent status` says the CLI is signed in (an API key in the environment counts). */
-async function isSignedIn(exe: ResolvedCommand, timeoutMs: number): Promise<boolean> {
-  const run = await runCommand(exe, ["status"], { timeoutMs });
-  const output = [run.stdout, run.stderr].join("\n");
-  return parseCursorStatus(output, run.code, process.env).loggedIn === true;
-}
-
-function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
-  let timer: NodeJS.Timeout | undefined;
-  return Promise.race([
-    promise,
-    new Promise<never>((_, reject) => {
-      timer = setTimeout(() => reject(new Error("timed out")), ms);
-      timer.unref?.();
-    }),
-  ]).finally(() => clearTimeout(timer));
 }

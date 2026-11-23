@@ -1,12 +1,13 @@
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { Options, Query, ModelInfo as SdkModelInfo } from "@anthropic-ai/claude-agent-sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ClaudeAdapter } from "../src/claude/adapter";
 import { listClaudeModels, toModelInfos } from "../src/claude/models";
 import { type ClaudeSdkModule, claudeSdkReady } from "../src/claude/sdk";
 import type { ResolvedCommand } from "../src/util/exec";
+import { clearExecutableCache } from "../src/util/locate";
 
 const exe: ResolvedCommand = { kind: "native", path: "/opt/claude/claude" };
 
@@ -208,25 +209,49 @@ describe("ClaudeAdapter model discovery", () => {
 
   it("finds claude again after an update, and refreshes a recent list from the new one", async () => {
     const sdk = stubSdk();
-    const name = process.platform === "win32" ? "claude.exe" : "claude";
+    const win = process.platform === "win32";
+    const name = win ? "claude.cmd" : "claude";
     const oldDir = mkdtempSync(join(tmpdir(), "codeden-claude-old-"));
     const newDir = mkdtempSync(join(tmpdir(), "codeden-claude-new-"));
-    // Executable, as installs are: a file without the bit is not a command on macOS and Linux.
-    writeFileSync(join(oldDir, name), "old build", { mode: 0o755 });
-    writeFileSync(join(newDir, name), "new build", { mode: 0o755 });
-    const saved = { PATH: process.env.PATH, Path: process.env.Path };
+    // A copy that answers `--version`, as installs do: the first model list checks it. On
+    // Windows that is npm's `claude.cmd` shim and the script it runs (the SDK gets the script).
+    const script = (dir: string) =>
+      join(dir, "node_modules", "@anthropic-ai", "claude-code", "cli.js");
+    const install = (dir: string, build: string) => {
+      if (!win) {
+        writeFileSync(join(dir, name), `#!/bin/sh\n# ${build}\necho '2.1.327 (Claude Code)'\n`, {
+          mode: 0o755,
+        });
+        return;
+      }
+      mkdirSync(dirname(script(dir)), { recursive: true });
+      writeFileSync(script(dir), `// ${build}\nconsole.log("2.1.327 (Claude Code)");\n`);
+      writeFileSync(
+        join(dir, name),
+        `@ECHO off\r\nREM ${build}\r\nnode "%~dp0\\node_modules\\@anthropic-ai\\claude-code\\cli.js" %*\r\n`,
+      );
+    };
+    const launched = (dir: string) => (win ? script(dir) : join(dir, name));
+    install(oldDir, "old build");
+    install(newDir, "new build");
+    const keys = ["PATH", "Path", "HOME", "USERPROFILE"] as const;
+    const saved = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
     const setPath = (dir: string) => {
       process.env.PATH = dir;
-      if (process.platform === "win32") process.env.Path = dir;
+      if (win) process.env.Path = dir;
     };
+    // Known install locations (`~/.local/bin`) are looked at too: an empty home has none.
+    process.env.HOME = mkdtempSync(join(tmpdir(), "codeden-claude-home-"));
+    process.env.USERPROFILE = process.env.HOME;
+    clearExecutableCache();
     try {
       setPath(oldDir);
       const adapter = new ClaudeAdapter({ loadSdk: sdk.load });
       await adapter.refreshModels();
-      expect(sdk.state.launches.at(-1)?.pathToClaudeCodeExecutable).toBe(join(oldDir, name));
+      expect(sdk.state.launches.at(-1)?.pathToClaudeCodeExecutable).toBe(launched(oldDir));
 
       // Rewritten in place (the Windows native installer): the same path, a new file.
-      writeFileSync(join(oldDir, name), "old build, updated");
+      install(oldDir, "old build, updated");
       sdk.state.behaviour = "newer";
       await adapter.refreshModels({ maxAgeMs: 60 * 60_000 });
       expect(sdk.state.launches).toHaveLength(2);
@@ -240,11 +265,13 @@ describe("ClaudeAdapter model discovery", () => {
       setPath(newDir);
       await adapter.refreshModels({ maxAgeMs: 60 * 60_000 });
       expect(sdk.state.launches).toHaveLength(3);
-      expect(sdk.state.launches.at(-1)?.pathToClaudeCodeExecutable).toBe(join(newDir, name));
+      expect(sdk.state.launches.at(-1)?.pathToClaudeCodeExecutable).toBe(launched(newDir));
       await expect(adapter.detect()).resolves.toBeDefined();
     } finally {
-      process.env.PATH = saved.PATH;
-      if (process.platform === "win32") process.env.Path = saved.Path;
+      for (const key of keys) {
+        if (saved[key] === undefined) delete process.env[key];
+        else process.env[key] = saved[key];
+      }
     }
   });
 

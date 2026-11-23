@@ -12,9 +12,8 @@ import { letGoReviewer } from "./cleanup";
 import type { FactoryContext } from "./context";
 import { markStuck } from "./outcomes";
 import { continuePrompt } from "./prompts-integration";
-import { providerFailure, providerWide } from "./provider-failure";
 import { awaitedProvider, noteProviderWaits, type ProviderWait } from "./provider-wait";
-import { prAgent } from "./rebase";
+import { backOffRefused, letGoPrAgent, prAgent } from "./rebase";
 import { isRecheckObligation } from "./recheck";
 import { isReReviewRecord } from "./rereview";
 import { CLEAN_REVIEW } from "./review-environment";
@@ -191,37 +190,40 @@ async function recoverOne(
   if (pr) {
     // One its provider refused to open (signed out, a CLI too old) also keeps new work off that
     // provider, as a builder's refused start does (`progress.ts`), so its successor starts on
-    // another provider.
-    const refused =
-      builder && lost && builder.status === "failed"
-        ? providerFailure(ctx.repo, ctx.inbox, builder)
-        : null;
-    if (builder && refused && providerWide(refused)) {
-      ctx.sessions.providerFailed(builder.provider, refused);
-    }
+    // another provider; not when the factory learned something about the provider since that
+    // refusal (it backed it off already, a person rechecked it or signed in: `backOffRefused`).
+    const refused = Boolean(builder && lost && backOffRefused(ctx, builder));
     ctx.store.updateItem(item.id, (i) => {
       // A dead reviewer is let go; a fresh one takes whatever review is still owed (the
       // whole review, or only a pending re-check, with the earlier verdict kept). The dead one
       // is archived once the fresh one has started (`cleanup.ts`).
-      const { reviewerSessionId, earlierSessionIds } = reviewerDead ? letGoReviewer(i) : i;
+      const reviewers = reviewerDead ? letGoReviewer(i) : i;
+      // A builder that is gone (or never started) is no PR agent any more: conflicts and CI
+      // go to a fresh integrator, with its brief, on a provider that can take work. One that
+      // never started becomes an earlier session, archived by cleanup; one that opens late
+      // after all is stopped and archived as replaced (`late-start.ts`). A refused start's
+      // request to rebase doesn't count (`letGoPrAgent`).
+      const agent =
+        builder && lost
+          ? letGoPrAgent({ ...i, ...reviewers }, builder.id, refused)
+          : {
+              builderSessionId: builder ? i.builderSessionId : null,
+              earlierSessionIds: reviewers.earlierSessionIds,
+              nudges: i.nudges,
+            };
       return {
         ...i,
         ...base,
         stage: "verifying",
         pr,
-        // A builder that is gone (or never started) is no PR agent any more: conflicts and CI
-        // go to a fresh integrator, with its brief, on a provider that can take work. One that
-        // never started becomes an earlier session, archived by cleanup; one that opens late
-        // after all is stopped and archived as replaced (`late-start.ts`).
-        builderSessionId: builder && !lost ? i.builderSessionId : null,
-        reviewerSessionId,
-        earlierSessionIds:
-          builder && lost ? [...new Set([...earlierSessionIds, builder.id])] : earlierSessionIds,
+        builderSessionId: agent.builderSessionId,
+        reviewerSessionId: reviewers.reviewerSessionId,
+        earlierSessionIds: agent.earlierSessionIds,
         note: "Back in verification after a failure outside its code",
         // A fresh CI clock: the head is timed again from now. CI that never started is started
         // again by the verify step (`ci-kick.ts`).
         nudges: {
-          ...freshNudges(i.nudges, at),
+          ...freshNudges(agent.nudges, at),
           verifying: at,
           ...(noCi ? { [CI_KICK_NUDGE]: at } : {}),
         },

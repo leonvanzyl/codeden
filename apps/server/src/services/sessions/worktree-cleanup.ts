@@ -1,10 +1,11 @@
-import type {
-  ArchiveSessionResponse,
-  RawEventEnvelope,
-  Session,
-  SessionStatus,
-  Settings,
-  WorktreeCleanupOutcome,
+import {
+  ACTIVE_SESSION_STATUSES,
+  type ArchiveSessionResponse,
+  type RawEventEnvelope,
+  type Session,
+  type SessionStatus,
+  type Settings,
+  type WorktreeCleanupOutcome,
 } from "@codeden/contracts";
 import type { EventStore } from "../../events/store";
 import type { SandboxService } from "../../execution/sandboxes";
@@ -51,13 +52,7 @@ export const RETRY_DELAYS_MS: readonly number[] = [2_000, 6_000];
 /** Runner errors that a later attempt can get past (a file in use, a delete that failed). */
 const TRANSIENT = new Set(["worktree_in_use", "remove_failed"]);
 /** Sessions that may be using their worktree right now; never cleaned up. */
-const IN_USE: ReadonlySet<SessionStatus> = new Set([
-  "created",
-  "queued",
-  "starting",
-  "running",
-  "waiting",
-]);
+const IN_USE: ReadonlySet<SessionStatus> = new Set(ACTIVE_SESSION_STATUSES);
 
 const outcome = (
   status: WorktreeCleanupOutcome["status"],

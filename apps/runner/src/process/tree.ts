@@ -24,13 +24,17 @@ export function isAlive(pid: number): boolean {
 }
 
 /** Resolves true once `pid` is gone, false if it is still alive after `timeoutMs`. */
-export async function waitForExit(pid: number, timeoutMs: number): Promise<boolean> {
+export async function waitForExit(
+  pid: number,
+  timeoutMs: number,
+  alive: (pid: number) => boolean = isAlive,
+): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    if (!isAlive(pid)) return true;
+    if (!alive(pid)) return true;
     await new Promise((r) => setTimeout(r, 100));
   }
-  return !isAlive(pid);
+  return !alive(pid);
 }
 
 /**

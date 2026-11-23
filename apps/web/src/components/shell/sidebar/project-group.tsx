@@ -8,6 +8,7 @@ import { statusTone } from "@/lib/format";
 import { useSnapshotData } from "@/lib/queries";
 import { cn } from "@/lib/utils";
 import { useLayoutStore } from "@/stores/layout";
+import { ArchiveProjectDialog } from "./archive-project-dialog";
 import { childGroup, childRow, NavRow, rowBase, useIsActive } from "./nav-row";
 import { ProjectAutomations } from "./project-automations";
 import { type GroupPosition, useProjectMenu } from "./project-menu";
@@ -55,7 +56,7 @@ export interface ProjectDrag {
 /**
  * One project in the sidebar: header, PM, sessions, automations and archived sessions. The
  * header row drags after a few pixels (so clicks still expand and open), a grip in the gutter
- * starts a keyboard move, and its row menu pins, unpins and moves the project.
+ * starts a keyboard move, and its row menu pins, unpins, moves and archives the project.
  */
 export function ProjectGroup({
   project,
@@ -73,7 +74,8 @@ export function ProjectGroup({
   const [showAll, setShowAll] = useState(false);
   const homeActive = useIsActive(`/projects/${project.id}`, false);
   const menu = useRowMenu();
-  const entries = useProjectMenu(project, position);
+  const [archiving, setArchiving] = useState(false);
+  const entries = useProjectMenu(project, position, () => setArchiving(true));
   const pm = sessions
     .filter((s) => s.role === "pm")
     .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))[0];
@@ -158,6 +160,12 @@ export function ProjectGroup({
           </div>
         </div>
       </RowMenu>
+      <ArchiveProjectDialog
+        project={project}
+        sessions={sessions}
+        open={archiving}
+        onOpenChange={setArchiving}
+      />
 
       {open && (
         <div className={childGroup}>

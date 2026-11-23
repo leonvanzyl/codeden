@@ -16,10 +16,10 @@ import {
 import { executableFingerprint, ModelFreshness } from "../freshness";
 import { ModelCatalog } from "../models";
 import type { ResolvedCommand } from "../util/exec";
-import { quickLocate } from "../util/locate";
+import { ensureLocated, quickLocate } from "../util/locate";
 import { DEFAULT_MODEL_ID } from "../util/model";
 import type { UtilityModel } from "../utility";
-import { detectCodex } from "./detect";
+import { CODEX_MIN_VERSION, detectCodex } from "./detect";
 import { forkCodexThread } from "./fork";
 import { hideCodexHistory, listCodexHistory } from "./history";
 import { listCodexModels, visibleCodexModels } from "./models";
@@ -105,6 +105,14 @@ export class CodexAdapter implements ProviderAdapter {
     return this.options.executable ?? quickLocate("codex");
   }
 
+  /**
+   * Before a runner's first session or model list: check the copies once (`ensureLocated`),
+   * so `executable()` skips an old or broken one although no detection has run yet.
+   */
+  private async located(): Promise<void> {
+    if (!this.options.executable) await ensureLocated("codex", CODEX_MIN_VERSION);
+  }
+
   /** Finds a working copy (validating each one), so a broken shim never wins. */
   detect(): Promise<ProviderStatus> {
     return detectCodex(this.options.executable ? { executable: this.options.executable } : {});
@@ -141,6 +149,7 @@ export class CodexAdapter implements ProviderAdapter {
   }
 
   async openSession(opts: SessionOptions): Promise<ProviderSession> {
+    await this.located();
     const executable = this.executable();
     if (!executable) throw new Error("Codex is not installed (no `codex` on PATH)");
     const session = new CodexSession(await withFork(this, opts), {
@@ -191,6 +200,7 @@ export class CodexAdapter implements ProviderAdapter {
   }
 
   private async discoverModels(): Promise<void> {
+    await this.located();
     // Not installed: `detect()` reports that; the fallback stays.
     const exe = this.executable();
     if (!exe) return;

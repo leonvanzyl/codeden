@@ -12,12 +12,7 @@ import {
   withDescendants,
 } from "../src/process/inside";
 import { ProcessSupervisor } from "../src/process/supervisor";
-import {
-  parseLsofCwds,
-  parsePsTable,
-  parseWindowsCwds,
-  parseWindowsTable,
-} from "../src/process/table";
+import { parseLsofCwds, parsePsTable, parseWindowsTable } from "../src/process/table";
 import { endProcessesInside } from "../src/process/worktree-processes";
 import { removeWorkspace } from "../src/workspace/removal";
 import { emptyTrash } from "../src/workspace/trash";
@@ -281,14 +276,6 @@ describe("reading the process table", () => {
       [1, "/"],
       [42, "/home/me/wt/a"],
     ]);
-    expect([
-      ...parseWindowsCwds(
-        "4\tC:\\WINDOWS\\system32\\\r\n900\tC:\\wt\\demo\\abcd 1234\\\r\nbad\r\n\r\n",
-      ),
-    ]).toEqual([
-      [4, "C:\\WINDOWS\\system32\\"],
-      [900, "C:\\wt\\demo\\abcd 1234\\"],
-    ]);
   });
 });
 
@@ -336,14 +323,15 @@ describe("removing a worktree an agent's dev server still runs in", () => {
     };
     const server = start(wt.cwd);
     const other = start(sibling);
-    // Only its working directory ties this one to the worktree (`node -e`, `node server.js`).
-    const inCwd = start(wt.cwd, ["-e", hold]);
+    // Only its working directory ties these to the worktree (`node -e`, `node server.js`), so
+    // they're started where the platform reports it: Linux and macOS, never Windows (#608).
+    const inCwd = process.platform === "win32" ? [] : [start(wt.cwd, ["-e", hold])];
+    const inside = [server, ...inCwd];
     try {
       const ended = await endProcessesInside(wt.cwd, { home });
-      expect(ended).toContain(server.child.pid);
-      expect(ended).toContain(inCwd.child.pid);
+      for (const p of inside) expect(ended).toContain(p.child.pid);
       expect(ended).not.toContain(other.child.pid);
-      await waitUntil(() => server.state.exited && inCwd.state.exited, 15_000);
+      await waitUntil(() => inside.every((p) => p.state.exited), 15_000);
       expect(other.state.exited).toBe(false);
 
       const removed = await removeWorkspace(
@@ -353,8 +341,8 @@ describe("removing a worktree an agent's dev server still runs in", () => {
       expect(removed).toMatchObject({ removed: true });
       expect(existsSync(wt.cwd)).toBe(false);
     } finally {
-      for (const p of [server, other, inCwd]) p.child.kill();
-      await waitUntil(() => [server, other, inCwd].every((p) => p.state.exited), 15_000);
+      for (const p of [...inside, other]) p.child.kill();
+      await waitUntil(() => [...inside, other].every((p) => p.state.exited), 15_000);
     }
   }, 60_000);
 });

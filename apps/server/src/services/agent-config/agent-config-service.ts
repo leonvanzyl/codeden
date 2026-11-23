@@ -38,6 +38,7 @@ import { AgentConfigFiles } from "./files";
 import { HookShelf } from "./hook-shelf";
 import { AgentConfigHooks } from "./hooks-service";
 import { applyChange, claudeProjectKey, diffChange, readServers, sourceFor } from "./mcp";
+import { loadedOpenCodeCommands } from "./opencode-commands";
 import { claudeAutoMemoryDir, findGitRoot, mainRepoRoot, readJson } from "./paths";
 import { AgentConfigSkills } from "./skills-service";
 import { loadedClaudeCommands, mergeSlashCommands, skillCommand } from "./slash-commands";
@@ -234,14 +235,19 @@ export class AgentConfigService {
 
   // ------------------------------------------------------------------- helpers
 
-  /** Skills that are switched on, then the provider's custom command files, in precedence order. */
+  /**
+   * Skills that are switched on, then the provider's custom command files, in precedence order.
+   * OpenCode's skills and commands are read on their own (no switches; its own precedence).
+   */
   private discoveredCommands(
     provider: string,
     cwd: string,
     gitRoot: string | null,
     skills: AgentSkill[],
   ): SlashCommand[] {
-    const custom = provider === "claude" ? loadedClaudeCommands(this.deps.home, cwd, gitRoot) : [];
+    const home = this.deps.home;
+    if (provider === "opencode") return loadedOpenCodeCommands(home, cwd, gitRoot);
+    const custom = provider === "claude" ? loadedClaudeCommands(home, cwd, gitRoot) : [];
     return [...skills.filter((s) => s.enabled).map(skillCommand), ...custom];
   }
 

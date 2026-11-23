@@ -72,6 +72,8 @@ Click **+** next to **Projects** in the sidebar and choose:
 
 CodeDen then opens the new project's **New session** view, ready for your first task (the last step of first-run setup lands there too).
 
+To take a project off the list again, open its menu in the sidebar (right-click the project, or the **⋯** button that shows on hover) and choose **Archive project**. Its automations and factory stop and the worktrees of its sessions are cleaned up; your folder isn't touched. A project can't be archived while one of its sessions is working or waiting to start (created, queued, starting, running or waiting): stop those first, or archive a session that hasn't started yet. The server refuses the archive until then. Adding the same folder again brings the project back, with its sessions.
+
 New projects get the **starter set** of automations added, all switched **off**. Turn on the ones you want later (see [Automations](automations.md)).
 
 ### Optional: `.codeden/project.json`
@@ -129,7 +131,7 @@ Open **Settings** (**Ctrl/Cmd+,**):
 | Notifications | Toasts, which inbox categories notify you (needs you, failures, factory activity, automations), the chime when an agent needs you (with a test button), browser notifications |
 | Keyboard shortcuts | The full list (also **Shift+?**) |
 
-A project can override these for its own new sessions: open the project and its **Settings** tab to choose a default agent (provider, model and effort, such as a cheaper model for a docs repository) and default permissions. A new session starts on what you pick there, else the project's defaults, else Settings; a model saved for one provider is never used on another.
+A project can override these for its own new sessions: open the project and its **Settings** tab to choose a default agent (provider, model and effort, such as a cheaper model for a docs repository) and default permissions. A new session starts on what you pick there, else the project's defaults, else Settings; a model saved for one provider is never used on another. These are defaults for new sessions: a session that already exists keeps its own permissions, which you change in its **Permissions** picker (see [Security](security.md#permissions)).
 
 ## Stopping CodeDen
 

@@ -159,6 +159,12 @@ describe("removing a worktree after the runner restarted (#99)", () => {
     expect(killed.sort((a, b) => a - b)).toEqual([...DEV_SERVER].sort((a, b) => a - b));
   });
 
+  it("still ends it on Windows, which doesn't report working directories (#608)", async () => {
+    const windowsTable = table.map((r) => ({ ...r, cwd: null }));
+    // Its command line names the worktree; the shells, npx and cmd above it exit once it does.
+    expect(await endInside(SCOUT_WT, windowsTable)).toEqual([76632]);
+  });
+
   it("never ends the user's editor or terminal there, nor CodeDen", async () => {
     // What the tree kills of the chosen processes end (`taskkill /T` follows parent pids).
     const ended = withDescendants(await endInside(SCOUT_WT, table), table);

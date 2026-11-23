@@ -69,10 +69,17 @@ async function ciNeverStarted() {
 
 /**
  * CI never started and an integrator took the PR over (on the default provider, everything
- * available); then the item failed outside its code again with the integrator `fails` first.
+ * available); then the item failed outside its code again with the integrator `fails` first:
+ * CI's clock ran out, or (`failedFirst`) the item failed before a verify step saw the integrator
+ * again. A refusal the verify step sees first is handled there (#551,
+ * `factory-integrator-refused.test.ts`).
  */
-async function integratorThenFailure(fails: (integrator: string) => Promise<void> | void) {
+async function integratorThenFailure(
+  fails: (integrator: string) => Promise<void> | void,
+  failedFirst = false,
+) {
   const { id, pr } = await ciNeverStarted();
+  const reason = item(id).reason;
   await tick();
   const first = item(id).builderSessionId as string;
   expect(integratorStarts()).toHaveLength(1);
@@ -81,7 +88,17 @@ async function integratorThenFailure(fails: (integrator: string) => Promise<void
   expect(providerOf(first)).toBe("claude");
   await fails(first);
   later(2 * 60_000);
-  await tick();
+  if (failedFirst) {
+    env.factory.data.updateItem(id, (i) => ({
+      ...i,
+      stage: "failed",
+      failureKind: "infrastructure",
+      reason,
+      finishedAt: new Date().toISOString(),
+    }));
+  } else {
+    await tick();
+  }
   expect(item(id)).toMatchObject({ stage: "failed", failureKind: "infrastructure" });
   return { id, pr, first };
 }
@@ -155,7 +172,7 @@ describe("an integrator whose start never reached its provider (#540)", () => {
         refusedSignedOut(s);
         expect(env.repo.get(s).status).toBe("failed");
         expect(env.repo.turnCount(s)).toBe(0);
-      });
+      }, true);
       if (next === "conflicts") pr.mergeable = "conflicting";
 
       // The recovery lets it go, and the follow-up goes to a fresh integrator with its brief.

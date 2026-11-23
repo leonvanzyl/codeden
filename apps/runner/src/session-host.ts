@@ -56,6 +56,8 @@ export class SessionHost {
   private readonly sessions = new Map<string, Hosted>();
   /** Sessions a `start` is opening, until they are hosted. */
   private readonly opening = new Set<string>();
+  /** Another runner took this home over: its worktrees get no more checkpoints from here. */
+  private checkpointsStopped = false;
 
   constructor(
     private readonly registry: ProviderRegistry,
@@ -259,6 +261,14 @@ export class SessionHost {
     await hosted.checkpointChain;
   }
 
+  /**
+   * Write no more checkpoints, including any still queued (#615): another runner took this home
+   * over and may run the same sessions in the same worktrees, so their checkpoint refs are its.
+   */
+  stopCheckpoints(): void {
+    this.checkpointsStopped = true;
+  }
+
   async closeAll(): Promise<void> {
     await Promise.all(
       [...this.sessions.keys()].map((id) => this.stop(id, "runner_exit").catch(() => undefined)),
@@ -306,6 +316,7 @@ export class SessionHost {
    */
   private checkpoint(sessionId: string, hosted: Hosted, turnId?: string, baseline = false): void {
     hosted.checkpointChain = hosted.checkpointChain.then(async () => {
+      if (this.checkpointsStopped) return;
       try {
         const index = await nextCheckpointIndex(hosted.cwd, sessionId);
         if (baseline && index > 0) return;

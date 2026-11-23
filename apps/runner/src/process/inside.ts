@@ -4,9 +4,12 @@ export interface ProcessRow {
   ppid: number;
   /** Full path of the executable, when readable. */
   exe: string | null;
-  /** The full command line, when readable. */
+  /**
+   * The full command line, when readable. It can hold secrets: only matched against paths,
+   * never logged or put in a message.
+   */
   commandLine: string | null;
-  /** Working directory, when readable (on Windows, read from the process's memory). */
+  /** Working directory, when readable (Linux and macOS; never on Windows, #608). */
   cwd: string | null;
   /** When the process started (ms since the epoch), where the platform reports it. */
   startedAt: number | null;
@@ -200,15 +203,21 @@ export interface SelectOptions {
   allowed: ReadonlySet<number>;
   /** Processes never chosen (the user's own terminals and what runs in them). */
   spare?: ReadonlySet<number>;
+  /**
+   * Processes known to run in `dir` whatever their paths say (on Windows, what a session's stop
+   * cut off from the runner's tree: `cutOffByStop`). The other rules still apply to them.
+   */
+  inside?: ReadonlySet<number>;
 }
 
 /**
- * The processes inside `dir` that may be ended, by pid. Each is ended with its whole tree
- * (`killTree`), so a process is never chosen when anything that must survive runs under it: it
- * is an ancestor of CodeDen (`protect`), of an app a person works in (an editor opened from a
- * shell in the folder), or of a spared terminal. Nor is one that runs under such an app, even
- * one an agent opened: a shell a person works in there, and what they run in it, are theirs
- * (`runsUnderApp`). Ancestry is followed by parent pid, as tree kills do.
+ * The processes inside `dir` (`runsInside`, or named in `inside`) that may be ended, by pid.
+ * Each is ended with its whole tree (`killTree`), so a process is never chosen when anything
+ * that must survive runs under it: it is an ancestor of CodeDen (`protect`), of an app a person
+ * works in (an editor opened from a shell in the folder), or of a spared terminal. Nor is one
+ * that runs under such an app, even one an agent opened: a shell a person works in there, and
+ * what they run in it, are theirs (`runsUnderApp`). Ancestry is followed by parent pid, as tree
+ * kills do.
  */
 export function processesToEnd(opts: SelectOptions): number[] {
   const apps = new Set(
@@ -224,7 +233,7 @@ export function processesToEnd(opts: SelectOptions): number[] {
   return opts.rows
     .filter((r) => r.pid > 0 && !safe.has(r.pid))
     .filter((r) => opts.allowed.has(r.pid))
-    .filter((r) => runsInside(opts.dir, r, opts.windows))
+    .filter((r) => opts.inside?.has(r.pid) || runsInside(opts.dir, r, opts.windows))
     .filter((r) => !runsUnderApp(r, byPid, apps, codeden))
     .map((r) => r.pid);
 }
@@ -333,13 +342,20 @@ const BUNDLE_PROGRAM = /^\/(?:[^\s"']|\s(?![/"']|-\S))*?\.app\/Contents\/MacOS\/
 /**
  * The program a process runs: its executable, else the command line's (quoted) first word. Only
  * the command line is known on macOS, so a line running a program from an app bundle, whose path
- * may have spaces, yields the bundle's `Contents/MacOS/` folder instead (`BUNDLE_PROGRAM`).
+ * may have spaces, yields the bundle's `Contents/MacOS/` folder instead (`BUNDLE_PROGRAM`). Never
+ * any of its arguments, since processes are named by it in the log and in messages: with a quote
+ * that doesn't close, where the program ends is unknown, so there is none.
  */
-function programPath(row: ProcessRow): string | null {
+export function programPath(row: ProcessRow): string | null {
   if (row.exe) return row.exe;
   const line = row.commandLine?.trim();
   if (!line) return null;
-  if (line.startsWith('"')) return line.slice(1, line.indexOf('"', 1));
+  if (line.startsWith('"')) {
+    const end = line.indexOf('"', 1);
+    if (end !== -1) return line.slice(1, end) || null;
+    const rest = line.slice(1);
+    return /\s/.test(rest) ? null : rest;
+  }
   return BUNDLE_PROGRAM.exec(line)?.[0] ?? line.split(/\s+/)[0] ?? null;
 }
 

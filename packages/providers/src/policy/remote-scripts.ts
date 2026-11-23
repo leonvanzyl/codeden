@@ -3,7 +3,7 @@ import type { SimpleCommand } from "./shell";
 
 /**
  * Downloads piped into an interpreter that runs them (§11.2): `curl … | sh`,
- * `wget -qO- … | bash -s --`, `irm … | iex`, `curl … | python3 -`. An interpreter that gets
+ * `wget -qO- … | bash -s --`, `irm … | iex`, `curl … | cmd`, `curl … | python3 -`. An interpreter that gets
  * its program another way (`node -e '…'`, `python -c '…'`, `python -m json.tool`,
  * `node script.mjs`) only reads the download as data, so `curl … | node -e '…'` is not one.
  * Works on parsed commands, so a `|` inside quotes (`sed 's|a|b|'`) is not a pipe.
@@ -140,6 +140,9 @@ function runsStdin(cmd: SimpleCommand): boolean {
   const { tokens } = unwrap(cmd.words);
   const bin = binName(tokens[0]);
   if (bin === "iex" || bin === "invoke-expression") return true;
+  // cmd runs the lines it reads unless `/c` gives it a command (#550). `/k` runs its command,
+  // if any, and then goes on reading.
+  if (bin === "cmd") return !tokens.slice(1).some((a) => /^\/\/?c$/i.test(a));
   const spec = interpreter(bin);
   if (!spec) return false;
   const args = tokens.slice(1);

@@ -11,6 +11,8 @@ export interface DetectExeOptions {
   /** Options for `findExecutable` (tests). */
   locate?: LocateOptions;
   timeoutMs?: number;
+  /** The provider's oldest supported version: an older copy is used only as a last resort. */
+  minVersion?: string;
 }
 
 /** Find `name` for detection: a given copy is checked like any other. Never throws. */
@@ -25,7 +27,24 @@ export async function lookupForDetect(
       ? { command: opts.executable, version: result.version, broken: [] }
       : { version: null, broken: [{ path: opts.executable.path, reason: result.reason }] };
   }
-  return findExecutable(name, { timeoutMs: opts.timeoutMs, ...opts.locate });
+  return findExecutable(name, {
+    timeoutMs: opts.timeoutMs,
+    ...(opts.minVersion ? { minVersion: opts.minVersion } : {}),
+    ...opts.locate,
+  });
+}
+
+/**
+ * "Claude Code 2.0.8 (`/usr/local/bin/claude`) is older than the tested minimum 2.1.250."
+ * Names the file, so a leftover old copy is easy to find and remove.
+ */
+export function outdatedVersionMessage(
+  label: string,
+  version: string | null,
+  file: string,
+  minVersion: string,
+): string {
+  return `${label} ${version ?? "(unknown version)"} (\`${file}\`) is older than the tested minimum ${minVersion}.`;
 }
 
 const SHIM = /\.(cmd|bat|ps1)$/i;

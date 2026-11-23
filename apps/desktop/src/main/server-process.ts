@@ -22,6 +22,7 @@ import {
   DesktopServerMessage,
   type DesktopUpdateCommand,
 } from "@codeden/contracts";
+import { loginShellPath } from "./login-shell-path";
 
 export interface ServerReady {
   url: string;
@@ -70,7 +71,9 @@ export class ServerProcess {
     return this.child?.pid;
   }
 
-  start(): Promise<ServerReady> {
+  async start(): Promise<ServerReady> {
+    // A Dock or Finder launch has launchd's minimal PATH: hand the server the login shell's.
+    const loginPath = await loginShellPath();
     mkdirSync(dirname(this.opts.logFile), { recursive: true });
     rotateLog(this.opts.logFile);
     const out = openSync(this.opts.logFile, "a");
@@ -78,7 +81,11 @@ export class ServerProcess {
     if (this.opts.fake) args.push("--fake");
     const child = fork(this.opts.entry, args, {
       stdio: ["ignore", out, out, "ipc"],
-      env: { ...process.env, CODEDEN_DEPS_INSTALLER: "registry" },
+      env: {
+        ...process.env,
+        ...(loginPath ? { PATH: loginPath } : {}),
+        CODEDEN_DEPS_INSTALLER: "registry",
+      },
       windowsHide: true,
     });
     this.child = child;

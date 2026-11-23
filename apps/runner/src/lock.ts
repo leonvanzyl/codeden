@@ -2,7 +2,7 @@ import { readFileSync, rmSync } from "node:fs";
 import { RunnerLock } from "@codeden/contracts";
 import type { ProcessRow } from "./process/inside";
 import { processTable } from "./process/table";
-import { isAlive, killTree, waitForExit } from "./process/tree";
+import { isAlive, killTreeAndOrphans, type TreeOps, waitForExit } from "./process/tree";
 
 /** Lock files owned by runners in this process (several embedded runners in tests). */
 const activeLocks = new Set<string>();
@@ -57,6 +57,18 @@ export function isLockOwner(row: ProcessRow | undefined, lock: RunnerLock, home:
   return row.startedAt <= written + START_SLACK_MS && passesHome(row.commandLine, home);
 }
 
+export interface SingleInstanceOptions {
+  /** The home the lock belongs to: a runner to stop must have it on its command line. */
+  home: string;
+  log?: (message: string) => void;
+  /** Tests: whether the lock's runner answers (default: its `/health`, 10 s). */
+  probe?: (lock: RunnerLock) => Promise<boolean>;
+  /** Tests: the process table (default: the system's). */
+  table?: () => Promise<ProcessRow[]>;
+  /** Tests: how processes are checked and ended (default: the system's). */
+  ops?: TreeOps;
+}
+
 /**
  * Throw when another live runner owns this home; claim the lock for this process. A runner that
  * holds the lock but doesn't answer (hung or stuck busy, #588) is stopped with its process tree
@@ -64,27 +76,29 @@ export function isLockOwner(row: ProcessRow | undefined, lock: RunnerLock, home:
  */
 export async function assertSingleInstance(
   lockFile: string,
-  home: string,
-  log: (message: string) => void = () => {},
+  opts: SingleInstanceOptions,
 ): Promise<void> {
   if (activeLocks.has(lockFile)) throw new Error("Another runner is already running for this home");
+  const alive = opts.ops?.isAlive ?? isAlive;
   const lock = readLock(lockFile);
-  if (lock && lock.pid !== process.pid && isAlive(lock.pid)) {
+  if (lock && lock.pid !== process.pid && alive(lock.pid)) {
     // Longer than the server's probe: a runner that is only slow keeps its sessions.
-    if (await probeRunner(lock, 10_000)) {
+    const answers = await (opts.probe ?? ((l: RunnerLock) => probeRunner(l, 10_000)))(lock);
+    if (answers) {
       throw new Error(`Another runner (pid ${lock.pid}) is already running for this home`);
     }
-    const rows = await processTable().catch(() => [] as ProcessRow[]);
-    if (
-      isLockOwner(
-        rows.find((r) => r.pid === lock.pid),
-        lock,
-        home,
-      )
-    ) {
-      log(`runner pid ${lock.pid} holds the lock but does not answer; stopping it`);
-      await killTree(lock.pid, 5_000);
-      await waitForExit(lock.pid, 5_000);
+    const rows = await (opts.table ?? processTable)().catch(() => [] as ProcessRow[]);
+    const row = rows.find((r) => r.pid === lock.pid);
+    if (row && row.startedAt !== null && isLockOwner(row, lock, opts.home)) {
+      opts.log?.(`runner pid ${lock.pid} holds the lock but does not answer; stopping it`);
+      // Its own start time tells its processes from those an earlier owner of the pid started
+      // (Windows keeps a dead parent's pid on its children, and reuses pids; #615).
+      await killTreeAndOrphans(
+        lock.pid,
+        { startedAt: row.startedAt },
+        { graceMs: 5_000, ops: opts.ops },
+      );
+      await waitForExit(lock.pid, 5_000, alive);
     }
   }
   activeLocks.add(lockFile);

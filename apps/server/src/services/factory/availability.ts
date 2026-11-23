@@ -99,9 +99,19 @@ function loginOf(status: ProviderStatus | undefined): string | null {
 export class ProviderAvailability {
   private statuses = new Map<string, ProviderStatus>();
   private checkedAt = 0;
+  /** Whether a detection has answered yet; until then nothing is known about any provider. */
+  private detected = false;
   private running: Promise<void> | undefined;
   /** Providers a factory session failed on, and until when (persisted through `backoffs`). */
   private readonly failures: Map<string, ProviderBackoff>;
+  /**
+   * When the factory last learned something about each provider: it backed it off, a person
+   * asked to check it again, or detection saw a new login (`changedSince`). In memory; a
+   * back-off's own time (`failedAt`) survives a restart.
+   */
+  private readonly changedAt = new Map<string, number>();
+  /** When a person last asked to check every provider again. */
+  private recheckedAllAt = 0;
 
   constructor(private readonly deps: ProviderAvailabilityDeps) {
     this.failures = deps.backoffs?.all() ?? new Map();
@@ -136,13 +146,42 @@ export class ProviderAvailability {
     await this.running;
   }
 
+  /**
+   * Whether providers have been detected at all. The first time, detects and waits for it up to
+   * `waitMs` (a tool list shouldn't call every provider ready before anyone looked); afterwards
+   * answers at once and refreshes in the background like a tick does.
+   */
+  async ensureDetected(waitMs = 5_000): Promise<boolean> {
+    if (this.detected) {
+      this.refresh();
+      return true;
+    }
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, waitMs);
+    });
+    await Promise.race([this.detectNow(), timeout]);
+    clearTimeout(timer);
+    return this.detected;
+  }
+
   private async detect(): Promise<void> {
     try {
       const res = await this.deps.runner.request(
         { name: "provider.detect", refreshModels: false },
         60_000,
       );
-      this.statuses = new Map(res.statuses.map((s) => [s.providerId, s]));
+      const next = new Map(res.statuses.map((s) => [s.providerId, s]));
+      // A login that differs from the last detection's: the provider was signed in (again).
+      const now = this.deps.now().getTime();
+      for (const [provider, status] of next) {
+        const before = loginOf(this.statuses.get(provider));
+        const after = loginOf(status);
+        if (before !== null && after !== null && before !== after)
+          this.changedAt.set(provider, now);
+      }
+      this.statuses = next;
+      this.detected = true;
       this.noticeLogins();
     } catch (error) {
       // Tried again next interval; what was known stays.
@@ -176,6 +215,7 @@ export class ProviderAvailability {
    */
   markFailed(provider: string, reason: string, until: string | null, signin = false): void {
     const now = this.deps.now();
+    this.changedAt.set(provider, now.getTime());
     if (signin) {
       this.setFailure(provider, {
         reason,
@@ -204,8 +244,27 @@ export class ProviderAvailability {
     for (const [id, backoff] of this.failures) {
       if (backoff.signin && (provider === undefined || id === provider)) this.clearFailure(id);
     }
+    const now = this.deps.now().getTime();
+    if (provider === undefined) this.recheckedAllAt = now;
+    else this.changedAt.set(provider, now);
     this.checkedAt = 0;
     this.refresh();
+  }
+
+  /**
+   * Whether the factory learned something about `provider` at or after `at`: it backed the
+   * provider off, a person asked to check it again (Check now, Retry), or detection saw a new
+   * login. A provider failure from before then says nothing new about the provider now.
+   */
+  changedSince(provider: string, at: string): boolean {
+    const since = Date.parse(at);
+    const failedAt = this.failures.get(provider)?.failedAt;
+    const times = [
+      this.changedAt.get(provider) ?? 0,
+      this.recheckedAllAt,
+      failedAt ? Date.parse(failedAt) : 0,
+    ];
+    return times.some((t) => t > 0 && t >= since);
   }
 
   private setFailure(provider: string, backoff: ProviderBackoff): void {

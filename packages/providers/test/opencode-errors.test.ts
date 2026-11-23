@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classifyOpenCodeError } from "../src/opencode/errors";
+import { classifyOpenCodeError, failure } from "../src/opencode/errors";
 
 const NOW = Date.parse("2026-11-11T08:00:00.000Z");
 const err = (type: string, message: string, status?: number, retryAfterMs?: number) => ({
@@ -30,6 +30,22 @@ describe("OpenCode turn errors", () => {
       "fatal",
     );
     expect(classifyOpenCodeError(undefined, NOW).kind).toBe("fatal");
+  });
+
+  // Issue #585: "Model unavailable" matched the transient pattern, so CodeDen retried a model
+  // the session's folder doesn't have, and it said nothing about why.
+  it("treats a model OpenCode can't route as a setup problem and says where to fix it", () => {
+    const noRoute = err("provider.no-route", "Model unavailable: 9router/Worker");
+    expect(classifyOpenCodeError(noRoute, NOW)).toEqual({ kind: "fatal" });
+    const outcome = failure(noRoute);
+    expect(outcome).toMatchObject({ type: "failed", code: "opencode_provider_no_route" });
+    expect(outcome.type === "failed" && outcome.message).toMatch(
+      /^Model unavailable: 9router\/Worker\. .*global OpenCode config/,
+    );
+    // OpenCode's own advice is kept as it is.
+    const deprecated =
+      "Model unavailable: azure-cognitive-services/gpt. This provider has been deprecated; use azure/gpt instead.";
+    expect(failure(err("provider.no-route", deprecated))).toMatchObject({ message: deprecated });
   });
 
   // Issue #218: an expired OpenAI login behind an `openai/*` model fails the turn with only the

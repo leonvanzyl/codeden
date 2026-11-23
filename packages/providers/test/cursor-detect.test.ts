@@ -1,9 +1,16 @@
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { CursorAdapter } from "../src/cursor/adapter";
-import { cursorInstallCommand, detectCursor, parseCursorStatus } from "../src/cursor/detect";
+import {
+  cursorInstallCommand,
+  cursorLoginMessage,
+  detectCursor,
+  parseCursorStatus,
+} from "../src/cursor/detect";
 import { isCursorVersion } from "../src/cursor/locate";
-import { modelsFromListing, parseModelList } from "../src/cursor/models";
+import { parseModelList } from "../src/cursor/models";
 import { probeCursor } from "../src/cursor/probe";
 import type { ResolvedCommand } from "../src/util/exec";
 import { clearExecutableCache } from "../src/util/locate";
@@ -20,6 +27,8 @@ afterEach(() => {
     "FAKE_ACP_NO_ACP",
     "FAKE_ACP_VERSION",
     "FAKE_ACP_SUBAGENTS",
+    "FAKE_ACP_LIST_MODELS",
+    "FAKE_ACP_LOG",
   ]) {
     delete process.env[key];
   }
@@ -62,7 +71,7 @@ describe("Cursor versions and model lists", () => {
     expect(isCursorVersion(null)).toBe(false);
   });
 
-  it("parses the CLI's model list and Cursor's listing request", () => {
+  it("parses the CLI's model list", () => {
     expect(
       parseModelList(
         "Available models\n\nauto - Auto (current)\ngpt-5 - GPT-5\n\u001b[2mTip\u001b[0m",
@@ -74,12 +83,6 @@ describe("Cursor versions and model lists", () => {
       ],
       current: "auto",
     });
-    expect(
-      modelsFromListing({ models: [{ modelId: "gpt-5", displayName: "GPT-5" }, "sonnet"] }),
-    ).toEqual({
-      models: [{ id: "gpt-5", name: "GPT-5" }, { id: "sonnet" }],
-    });
-    expect(modelsFromListing("nonsense")).toEqual({ models: [] });
   });
 });
 
@@ -128,11 +131,11 @@ describe("detectCursor", () => {
     });
   });
 
-  it("lists the account's models through a short-lived ACP server, without a session", async () => {
+  it("lists the account's models and reads the capabilities from a short-lived ACP server", async () => {
     const adapter = new CursorAdapter({ executable: fakeAgent });
     expect(adapter.capabilities().subagents).toBe(false);
     await adapter.refreshModels();
-    expect(adapter.models().map((m) => m.id)).toEqual(["default", "gpt-5", "sonnet-4.5"]);
+    expect(adapter.models().map((m) => m.id)).toEqual(["default", "auto", "gpt-5", "sonnet-4.5"]);
     // What the CLI reported in `initialize` refines the flags; the probe opts into subagents
     // as sessions do, so it learns whether they run as child sessions.
     expect(adapter.capabilities()).toMatchObject({
@@ -152,5 +155,74 @@ describe("detectCursor", () => {
     const adapter = new CursorAdapter({ executable: fakeAgent });
     await adapter.refreshModels();
     expect(adapter.capabilities().subagents).toBe(false);
+  });
+});
+
+describe("Cursor logins are never started in the background", () => {
+  const logged = (file: string) =>
+    existsSync(file)
+      ? readFileSync(file, "utf8")
+          .trim()
+          .split("\n")
+          .map((line) => (JSON.parse(line) as { method: string }).method)
+      : [];
+
+  it("never sends `authenticate` from detection or model refreshes, however often they run", async () => {
+    const log = join(mkdtempSync(join(tmpdir(), "codeden-cursor-probe-")), "acp.log");
+    process.env.FAKE_ACP_LOG = log;
+    const adapter = new CursorAdapter({ executable: fakeAgent, probeTimeoutMs: 10_000 });
+    for (let i = 0; i < 3; i += 1) {
+      await adapter.detect();
+      await adapter.refreshModels();
+    }
+    const methods = logged(log);
+    expect(methods.filter((m) => m === "initialize").length).toBeGreaterThanOrEqual(3);
+    expect(methods).not.toContain("authenticate");
+    // Signed in: the models still come from the CLI's own list.
+    expect(adapter.models().map((m) => m.id)).toContain("gpt-5");
+  });
+
+  it("reports a login that `agent status` calls signed in but the CLI can't use", async () => {
+    process.env.FAKE_ACP_LIST_MODELS = "auth";
+    const probe = (exe: ResolvedCommand, signedIn: boolean) =>
+      probeCursor(exe, { signedIn, timeoutMs: 10_000 });
+    const status = await detectCursor({ executable: fakeAgent, probe });
+    expect(status.loggedIn).toBe(false);
+    expect(status.issues).toEqual([
+      expect.objectContaining({
+        code: "not_logged_in",
+        message: cursorLoginMessage("agent"),
+        fix: { kind: "login", command: "agent login" },
+      }),
+    ]);
+  });
+
+  it("fails a session as 'sign in again' instead of letting the CLI open its browser login", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "codeden-cursor-guard-"));
+    const log = join(dir, "acp.log");
+    process.env.FAKE_ACP_LIST_MODELS = "auth";
+    const adapter = new CursorAdapter({ executable: fakeAgent });
+    const options = {
+      sessionId: "s1",
+      role: "agent" as const,
+      cwd: dir,
+      autonomy: "auto" as const,
+      mcpServers: [],
+      additionalDirectories: [],
+      planMode: false,
+      env: { FAKE_ACP_LOG: log },
+    };
+    await expect(adapter.openSession(options)).rejects.toThrow(cursorLoginMessage("agent"));
+    expect(logged(log)).toContain("initialize");
+    expect(logged(log)).not.toContain("authenticate");
+
+    // With a usable login the session authenticates as before (reusing it).
+    delete process.env.FAKE_ACP_LIST_MODELS;
+    const session = await adapter.openSession(options);
+    try {
+      expect(logged(log)).toContain("authenticate");
+    } finally {
+      await session.close();
+    }
   });
 });

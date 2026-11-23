@@ -16,6 +16,10 @@ export function oneLineDescription(text: string, max = SLASH_DESCRIPTION_MAX): s
   return line.length > max ? `${line.slice(0, max - 1).trimEnd()}…` : line;
 }
 
+/** A command the agent runs, or a skill it loads. */
+export const SlashCommandKind = z.enum(["command", "skill"]);
+export type SlashCommandKind = z.infer<typeof SlashCommandKind>;
+
 /**
  * One command as a provider reports it for a live session (`session.updated.commands`):
  * built-in commands and everything else it would run for `/<name>`.
@@ -29,6 +33,12 @@ export const ProviderCommand = z.object({
   argumentHint: z.string().optional(),
   /** True for the provider's own commands (absent for user, project and plugin ones). */
   builtin: z.boolean().optional(),
+  /**
+   * What `/<name>` does, when the provider says: `skill` loads a skill, `command` runs a
+   * command. Absent when the provider doesn't tell them apart (the session's skill files then
+   * decide which names are skills).
+   */
+  kind: SlashCommandKind.optional(),
 });
 export type ProviderCommand = z.infer<typeof ProviderCommand>;
 
@@ -46,10 +56,6 @@ export function winningCommands<T extends { name: string; builtin?: boolean }>(
   }
   return [...byName.values()];
 }
-
-/** A command the agent runs, or a skill it loads. */
-export const SlashCommandKind = z.enum(["command", "skill"]);
-export type SlashCommandKind = z.infer<typeof SlashCommandKind>;
 
 /** One entry of the composer's `/` menu. Picking it inserts `/<name> `. */
 export const SlashCommand = z.object({

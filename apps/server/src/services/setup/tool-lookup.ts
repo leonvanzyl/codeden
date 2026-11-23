@@ -9,11 +9,12 @@ import type { Exec, ExecResult } from "../exec";
 
 /**
  * Finds a working copy of a tool (PATH, then known install locations); injectable for tests.
- * `validate` replaces the `--version` check, e.g. to accept only Cursor's `agent`.
+ * `validate` replaces the `--version` check, e.g. to accept only Cursor's `agent`; with
+ * `minVersion`, a copy older than it is the answer only when there is no newer one.
  */
 export type Locate = (
   name: string,
-  opts?: Pick<LocateOptions, "validate">,
+  opts?: Pick<LocateOptions, "validate" | "minVersion">,
 ) => Promise<ExecutableLookup>;
 
 /**
@@ -78,7 +79,7 @@ export async function lookupTool(
   name: string,
   check: Omit<CheckResult, "state" | "message">,
   notInstalled: { message: string; fix: SetupCommand },
-  locateOpts?: Pick<LocateOptions, "validate">,
+  locateOpts?: Pick<LocateOptions, "validate" | "minVersion">,
 ): Promise<ToolLookup> {
   const lookup = await locate(name, locateOpts);
   const extra = lookup.broken.length > 0 ? { broken: lookup.broken } : {};

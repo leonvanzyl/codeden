@@ -52,8 +52,16 @@ describe("slash commands", () => {
       commands: [
         { name: "compact", description: "Free up context", builtin: true },
         { name: "plugin:review", description: "", argumentHint: "<pr>" },
+        { name: "team/review", description: "Team review", kind: "command" as const },
+        { name: "pdf", description: "Read PDFs", kind: "skill" as const },
       ],
     };
+    expect(() =>
+      AgentEvent.parse({
+        type: "session.updated",
+        commands: [{ name: "x", description: "", kind: "macro" }],
+      }),
+    ).toThrow();
     roundTrip(AgentEvent, event);
     roundTrip(EventEnvelope, {
       seq: 3,

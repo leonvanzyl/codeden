@@ -43,6 +43,25 @@ export const SessionStatus = z.enum([
 export type SessionStatus = z.infer<typeof SessionStatus>;
 
 /**
+ * The statuses of a session that is working or about to: not started yet (`created`, `queued`,
+ * `starting`), in a turn (`running`) or blocked on the user (`waiting`). It is the one list the
+ * server and the UI share: such a session counts as running or queued work for conflict
+ * detection (§8.4), its worktree is never cleaned up (§9), and its project can't be archived
+ * until it is stopped (§13).
+ */
+export const ACTIVE_SESSION_STATUSES: readonly SessionStatus[] = [
+  "created",
+  "queued",
+  "starting",
+  "running",
+  "waiting",
+];
+
+/** Whether a session is working or about to (`ACTIVE_SESSION_STATUSES`). */
+export const isActiveSession = (session: { status: SessionStatus }): boolean =>
+  ACTIVE_SESSION_STATUSES.includes(session.status);
+
+/**
  * How a session was made from another one: `fork` continues the source's conversation through
  * the provider's native fork; `handoff` starts a new conversation, possibly on another
  * provider, from a brief of the source's work; `review` is a read-only session, often on

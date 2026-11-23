@@ -4,6 +4,7 @@ import {
   endableForRemoval,
   type ProcessRow,
   processesToEnd,
+  programPath,
   runsInside,
   startedByAgents,
   withDescendants,
@@ -32,6 +33,12 @@ export interface EndProcessesOptions {
   startedBefore?: number;
   /** Also allowed: processes seen as the runner's descendants earlier (`runnerDescendants`). */
   seen?: ReadonlySet<number>;
+  /**
+   * Processes known to run in the folder whatever their paths say, given the table just read:
+   * on Windows, what a session's stop cut off from the runner's tree (`cutOffByStop`). They are
+   * allowed like the runner's descendants; the other rules still apply to them.
+   */
+  inside?: (rows: readonly ProcessRow[]) => ReadonlySet<number>;
   /** Processes never ended, with everything they started (the user's terminals). */
   spare?: readonly number[];
   log?: (message: string) => void;
@@ -68,9 +75,12 @@ export async function runnerDescendants(
   return all;
 }
 
-/** A process as a message names it: `node.exe (1234)`. */
+/**
+ * A process as a message or the log names it: its program's file name, `node.exe (1234)`. Never
+ * its arguments, which can hold secrets.
+ */
 function describe(row: ProcessRow): string {
-  const program = row.exe ?? row.commandLine?.trim().split(/\s+/)[0]?.replace(/"/g, "") ?? "?";
+  const program = programPath(row) ?? "?";
   return `${program.split(/[\\/]/).pop() || program} (${row.pid})`;
 }
 
@@ -79,14 +89,15 @@ function describe(row: ProcessRow): string {
  * server an agent started through its shell outlives the agent, and on Windows a process
  * holding a file (or its working directory) in a folder keeps the folder from being moved.
  *
- * A process counts when its executable or its working directory is inside `dir`, or its
- * command line names something inside it, matched as whole paths; and it was started by
- * CodeDen's agents or terminals (`startedByAgents`), or, when `removing` on Windows, by anyone
- * but a person in an editor, terminal or file manager (`endableForRemoval`). CodeDen itself is
- * never ended: not the runner, not the server, and not their ancestors (the CLI, the desktop
- * app). Each is ended with its whole tree, so nothing with one of those, or a person's app,
- * running under it is chosen (`processesToEnd`). `dir` may name several folders (one moved
- * away, by both its paths). Returns the pids it ended; never throws.
+ * A process counts when its executable or its working directory (Linux, macOS) is inside `dir`,
+ * or its command line names something inside it, matched as whole paths, or it is known to run
+ * there (`inside`: on Windows, what the session's stop cut off from the runner's tree); and it
+ * was started by CodeDen's agents or terminals (`startedByAgents`), or, when `removing` on
+ * Windows, by anyone but a person in an editor, terminal or file manager (`endableForRemoval`).
+ * CodeDen itself is never ended: not the runner, not the server, and not their ancestors (the
+ * CLI, the desktop app). Each is ended with its whole tree, so nothing with one of those, or a
+ * person's app, running under it is chosen (`processesToEnd`). `dir` may name several folders
+ * (one moved away, by both its paths). Returns the pids it ended; never throws.
  */
 export async function endProcessesInside(
   dir: string | readonly string[],
@@ -113,13 +124,14 @@ export async function endProcessesInside(
   }
   // Only Windows refuses to move a folder something runs in (see `removing`).
   const removing = opts.removing === true && windows;
+  const inside = opts.inside?.(rows) ?? new Set<number>();
   const victims = new Set<number>();
   for (const folder of dirs) {
     const allowed = removing
       ? endableForRemoval({ rows, runnerPid: process.pid, protect, dir: folder, windows })
       : startedByAgents(rows, process.pid, RUNNER_STARTED_AT, windows);
-    for (const pid of opts.seen ?? []) allowed.add(pid);
-    const chosen = processesToEnd({ dir: folder, rows, windows, protect, allowed, spare });
+    for (const pid of [...(opts.seen ?? []), ...inside]) allowed.add(pid);
+    const chosen = processesToEnd({ dir: folder, rows, windows, protect, allowed, spare, inside });
     for (const pid of chosen) victims.add(pid);
   }
   if (victims.size === 0) return [];
@@ -128,7 +140,7 @@ export async function endProcessesInside(
   await Promise.all(ended.map((pid) => kill(pid).catch(() => undefined)));
   const names = ended.map((pid) => {
     const row = rows.find((r) => r.pid === pid);
-    return `${pid} (${row?.exe ?? row?.commandLine?.slice(0, 80) ?? "?"})`;
+    return row ? describe(row) : `? (${pid})`;
   });
   opts.log?.(`ended ${ended.length} process(es) in ${dirs.join(", ")}: ${names.join(", ")}`);
   return ended;

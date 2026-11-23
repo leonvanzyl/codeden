@@ -104,6 +104,17 @@ describe("Codex requests under CodeDen's policy (§11.2)", () => {
     expect((await decide(command("rm -rf /home/me/projects"), "full")).asked).toBe(true);
   });
 
+  it("resolves relative paths from the command's working directory, never past the worktree", async () => {
+    const at = (cwd: string, cmd: string) => command(cmd, { cwd });
+    for (const level of ["auto", "full"] as const) {
+      // `../proof.log` from `/w/frontend` is `/w/proof.log`, inside the worktree (#589).
+      expect((await decide(at("/w/frontend", "echo ok > ../proof.log"), level)).asked).toBe(false);
+      expect((await decide(at("/w/frontend", "echo ok > ../../x.log"), level)).asked).toBe(true);
+      // A working directory outside the worktree doesn't widen it.
+      expect((await decide(at("/elsewhere", "echo ok > proof.log"), level)).asked).toBe(true);
+    }
+  });
+
   it("asks for everything under Supervised and Read-only", async () => {
     for (const level of ["supervised", "read_only"] as const) {
       expect((await decide(command("pnpm test"), level)).asked, level).toBe(true);

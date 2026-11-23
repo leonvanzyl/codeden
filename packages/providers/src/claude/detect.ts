@@ -1,5 +1,10 @@
 import type { ProviderIssue, ProviderStatus } from "@codeden/contracts";
-import { brokenInstallMessage, type DetectExeOptions, lookupForDetect } from "../util/detect-exe";
+import {
+  brokenInstallMessage,
+  type DetectExeOptions,
+  lookupForDetect,
+  outdatedVersionMessage,
+} from "../util/detect-exe";
 import { runCommand } from "../util/exec";
 import { compareVersions } from "../util/version";
 
@@ -11,8 +16,9 @@ const INSTALL = { kind: "install", command: "npm install -g @anthropic-ai/claude
 export type ClaudeDetectOptions = DetectExeOptions;
 
 /**
- * Find a working `claude` (PATH, then the native installer's folders), then
- * `claude auth status` (§14). Never throws.
+ * Find a working `claude` (PATH, then the native installer's folders; a copy older than
+ * `CLAUDE_MIN_VERSION` only when there is no newer one), then `claude auth status` (§14).
+ * Never throws.
  */
 export async function detectClaude(opts: ClaudeDetectOptions = {}): Promise<ProviderStatus> {
   const checkedAt = new Date().toISOString();
@@ -31,7 +37,11 @@ export async function detectClaude(opts: ClaudeDetectOptions = {}): Promise<Prov
   };
   const issues: ProviderIssue[] = [];
   const timeoutMs = opts.timeoutMs ?? 15_000;
-  const lookup = await lookupForDetect("claude", { ...opts, timeoutMs });
+  const lookup = await lookupForDetect("claude", {
+    ...opts,
+    timeoutMs,
+    minVersion: CLAUDE_MIN_VERSION,
+  });
   const broken = lookup.broken.length > 0 ? { broken: lookup.broken } : {};
   const exe = lookup.command;
   if (!exe) {
@@ -51,13 +61,17 @@ export async function detectClaude(opts: ClaudeDetectOptions = {}): Promise<Prov
     return { ...status, ...broken, issues };
   }
   const version = lookup.version;
+  const executablePath = exe.kind === "node-script" ? exe.script : exe.path;
   const supported = version !== null && compareVersions(version, CLAUDE_MIN_VERSION) >= 0;
   if (!supported) {
+    // The login state is not asked of a copy this old: it has no `auth status` (it takes the
+    // words as a prompt and spends a model call), so the answer would hide the real cause.
     issues.push({
       code: "version_unsupported",
-      message: `Claude Code ${version ?? "(unknown version)"} is older than the tested minimum ${CLAUDE_MIN_VERSION}.`,
+      message: outdatedVersionMessage("Claude Code", version, executablePath, CLAUDE_MIN_VERSION),
       fix: { kind: "upgrade", command: "claude update" },
     });
+    return { ...status, installed: true, version, executablePath, ...broken, issues };
   }
   const authRun = await runCommand(exe, ["auth", "status"], { timeoutMs });
   const auth = parseClaudeAuthStatus(authRun.stdout);
@@ -87,8 +101,8 @@ export async function detectClaude(opts: ClaudeDetectOptions = {}): Promise<Prov
     ...status,
     installed: true,
     version,
-    executablePath: exe.kind === "node-script" ? exe.script : exe.path,
-    supported,
+    executablePath,
+    supported: true,
     ...auth,
     ...broken,
     issues,

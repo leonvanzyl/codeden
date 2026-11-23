@@ -49,8 +49,8 @@ let seq = 0;
 const id = (p) => `${p}_${process.pid}_${++seq}`;
 const tokens = { input: 100, output: 20, reasoning: 5, cache: { read: 10, write: 0 } };
 
-function emit(type, data) {
-  const line = `data: ${JSON.stringify({ id: id("evt"), type, data })}\n\n`;
+function emit(type, data, location) {
+  const line = `data: ${JSON.stringify({ id: id("evt"), type, data, ...(location ? { location } : {}) })}\n\n`;
   for (const res of clients) res.write(line);
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -73,6 +73,35 @@ const MODELS = [
   { id: "no-tools", providerID: "openai", name: "No tools", capabilities: { tools: false } },
   { id: "openai/gpt-oss-20b", providerID: "lmstudio", name: "GPT OSS 20B" },
 ];
+
+// `/api/command` and `/api/skill`. Like OpenCode, a location's lists load lazily: the first
+// request gets the built-ins only, then `command.updated` and `skill.updated` announce the rest.
+// A command's template is "<name> <arguments>"; `broken` fails to expand (500).
+const COMMANDS = [
+  { name: "init", description: "guided AGENTS.md setup" },
+  { name: "hello", description: "Say hello" },
+  { name: "team/review", description: "Team review" },
+  { name: "broken", description: "Always fails" },
+];
+const SKILLS = [
+  { id: "opencode", name: "OpenCode", description: "About OpenCode", path: "skill://opencode/SKILL.md", content: "x" },
+  { id: "pdf-tools", name: "PDF tools", description: "Work with PDFs", autoinvoke: false, path: "/skills/pdf-tools/SKILL.md", content: "x" },
+];
+let listsLoaded = false;
+let listsLoading = false;
+function lists(location) {
+  if (!listsLoaded && !listsLoading) {
+    listsLoading = true;
+    setTimeout(() => {
+      listsLoaded = true;
+      emit("command.updated", {}, location);
+      emit("skill.updated", {}, location);
+    }, 50);
+  }
+  return listsLoaded
+    ? { commands: COMMANDS, skills: SKILLS }
+    : { commands: COMMANDS.slice(0, 1), skills: SKILLS.slice(0, 1) };
+}
 
 async function permission(sid, action, resources, callId, metadata) {
   const pid = id("per");
@@ -263,7 +292,7 @@ const server = createServer((req, res) => {
     const body = raw ? JSON.parse(raw) : undefined;
     const url = new URL(req.url, "http://x");
     const path = url.pathname;
-    log({ kind: "request", method: req.method, path, body });
+    log({ kind: "request", method: req.method, path, ...(url.search ? { query: url.search } : {}), body });
     const m = (re) => re.exec(path);
     let p;
     if (path === "/api/event") {
@@ -283,6 +312,23 @@ const server = createServer((req, res) => {
     if (path === "/api/model") return mode === "models-error" ? send(res, 500, { message: "models down" }) : send(res, 200, { data: mode === "no-providers" ? [] : MODELS });
     if (path === "/api/model/default") return send(res, 200, { data: mode === "no-providers" ? null : MODELS[0] });
     if (path === "/api/mcp") return send(res, 200, { data: [{ name: "playwright", status: "connected" }, ...Object.keys(config.mcp?.servers ?? {}).map((name) => ({ name, status: "connected" }))] });
+    if (path === "/api/command" || path === "/api/skill") {
+      const directory = url.searchParams.get("location[directory]") ?? process.cwd();
+      const found = lists({ directory });
+      return send(res, 200, { location: { directory }, data: path === "/api/command" ? found.commands : found.skills });
+    }
+    if ((p = m(/^\/api\/session\/([^/]+)\/command$/))) {
+      const sid = decodeURIComponent(p[1]);
+      if (!sessions[sid]) return send(res, 404, { _tag: "SessionNotFoundError", message: "Session not found" });
+      if (!COMMANDS.some((c) => c.name === body.name)) {
+        return send(res, 404, { _tag: "CommandNotFoundError", command: body.name, message: `Command not found: ${body.name}` });
+      }
+      if (body.name === "broken") {
+        return send(res, 500, { _tag: "CommandExecutionError", command: body.name, message: "Shell interpolation failed" });
+      }
+      setTimeout(() => execute(sid, `${body.name} ${body.text}`), 5);
+      return send(res, 204);
+    }
     if (path === "/api/experimental/generate/text") return send(res, 200, { data: { text: ` echo: ${body.prompt} via ${body.model ? `${body.model.providerID}/${body.model.id}` : "default"} ` } });
     if (path === "/api/session" && req.method === "POST") {
       const sid = id("ses");
@@ -321,6 +367,8 @@ const server = createServer((req, res) => {
     if ((p = m(/^\/api\/session\/([^/]+)\/prompt$/))) {
       const sid = decodeURIComponent(p[1]);
       if (!sessions[sid]) return send(res, 404, { message: "Session not found" });
+      const unknown = (body.skills ?? []).find((s) => !SKILLS.some((k) => k.id === s.id));
+      if (unknown) return send(res, 400, { _tag: "InvalidRequestError", message: `Skill not found: ${unknown.id}`, field: "skills" });
       const run = running.get(sid);
       if (run && body.delivery === "steer") run.steers.push(body.text);
       else setTimeout(() => execute(sid, body.text), 5);

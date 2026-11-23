@@ -62,8 +62,7 @@ export async function detectCursor(opts: CursorDetectOptions = {}): Promise<Prov
     return { ...status, ...broken, issues };
   }
   const name = commandName(exe);
-  const run = await runCommand(exe, ["status"], { timeoutMs });
-  const auth = parseCursorStatus(`${run.stdout}\n${run.stderr}`, run.code, opts.env ?? process.env);
+  const auth = await readCursorLogin(exe, timeoutMs, opts.env ?? process.env);
   let supported = true;
   const probe = await opts.probe?.(exe, auth.loggedIn === true);
   if (probe && !probe.acp) {
@@ -74,10 +73,12 @@ export async function detectCursor(opts: CursorDetectOptions = {}): Promise<Prov
       fix: { kind: "upgrade", command: `${name} update` },
     });
   }
-  if (auth.loggedIn === false) {
+  // `agent status` says signed in, but the CLI asked for a login when the probe listed models.
+  const loginUnusable = auth.loggedIn === true && probe?.loginRequired === true;
+  if (auth.loggedIn === false || loginUnusable) {
     issues.push({
       code: "not_logged_in",
-      message: "The Cursor CLI is not signed in.",
+      message: loginUnusable ? cursorLoginMessage(name) : "The Cursor CLI is not signed in.",
       fix: { kind: "login", command: `${name} login` },
     });
   } else if (auth.loggedIn === null) {
@@ -89,7 +90,7 @@ export async function detectCursor(opts: CursorDetectOptions = {}): Promise<Prov
     version: lookup.version,
     executablePath: exe.kind === "node-script" ? exe.script : exe.path,
     supported,
-    loggedIn: auth.loggedIn,
+    loggedIn: loginUnusable ? false : auth.loggedIn,
     authMethod: auth.authMethod,
     account: auth.account,
     ...broken,
@@ -122,6 +123,56 @@ function commandName(exe: ResolvedCommand): string {
   return file.replace(/\.(exe|cmd|bat|ps1|js|mjs)$/i, "") === "cursor-agent"
     ? "cursor-agent"
     : "agent";
+}
+
+/**
+ * What the Cursor CLI prints when its stored login can't be used ("Error: Authentication
+ * required. Run 'agent login' ..."). `agent status` can still say "Logged in" then (it only
+ * reads that a login was stored), but ACP `authenticate` with `cursor_login` would open the
+ * browser login.
+ */
+const LOGIN_REQUIRED = /authentication required|not (logged|signed) in|please (log|sign) ?in/i;
+
+/** True when a Cursor CLI command failed because its login can't be used. */
+export function cursorLoginRequired(code: number | null, output: string): boolean {
+  return code !== 0 && LOGIN_REQUIRED.test(output);
+}
+
+/**
+ * The message for a Cursor CLI whose login can't be used, with the command that renews it.
+ * Matches the `auth` error kind (§7.3), so a failed session start reads as a sign-in problem.
+ */
+export function cursorLoginMessage(name = "agent"): string {
+  return `The Cursor CLI needs you to sign in again: run \`${name} login\`, then try again.`;
+}
+
+/**
+ * Before a session's ACP `authenticate`: `--list-models` runs the same login check without
+ * ever opening a browser. Returns the error to fail with when the login can't be used, so
+ * CodeDen never starts Cursor's browser login on its own (a factory or automation session
+ * included). Any other outcome (a slow or offline CLI) lets the session go ahead.
+ */
+export async function cursorAuthGuard(
+  exe: ResolvedCommand,
+  timeoutMs = 15_000,
+): Promise<string | undefined> {
+  const run = await runCommand(exe, ["--list-models"], { timeoutMs });
+  return cursorLoginRequired(run.code, `${run.stdout}\n${run.stderr}`)
+    ? cursorLoginMessage(commandName(exe))
+    : undefined;
+}
+
+/**
+ * Run `agent status` and read the login from it (an API key or token in the environment
+ * counts). Never throws; `loggedIn: null` when the output can't be read.
+ */
+export async function readCursorLogin(
+  exe: ResolvedCommand,
+  timeoutMs: number,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<ReturnType<typeof parseCursorStatus>> {
+  const run = await runCommand(exe, ["status"], { timeoutMs });
+  return parseCursorStatus(`${run.stdout}\n${run.stderr}`, run.code, env);
 }
 
 /**

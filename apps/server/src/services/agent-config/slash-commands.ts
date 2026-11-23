@@ -21,10 +21,10 @@ import { dirsFromRootTo } from "./paths";
  */
 
 /** Names the composer can complete: no whitespace. */
-const COMMAND_NAME = /^\S+$/;
+export const COMMAND_NAME = /^\S+$/;
 
 /** `description` and `argument-hint` from front matter, else the first line of the body. */
-function commandInfo(file: string): { description: string; argumentHint?: string } {
+export function commandInfo(file: string): { description: string; argumentHint?: string } {
   let text: string;
   try {
     text = readFileSync(file, "utf8").slice(0, 8_000);
@@ -86,12 +86,12 @@ export function skillCommand(skill: AgentSkill): SlashCommand {
   };
 }
 
-/** A command the session's provider reported as a `/` entry. */
+/** A command the session's provider reported as a `/` entry (a command unless it says skill). */
 export function reportedCommand(command: ProviderCommand, provider: string): SlashCommand {
   return {
     name: command.name,
     description: oneLineDescription(command.description),
-    kind: "command",
+    kind: command.kind ?? "command",
     provider,
     ...(command.argumentHint ? { argumentHint: command.argumentHint } : {}),
   };
@@ -108,7 +108,8 @@ const byName = (a: SlashCommand, b: SlashCommand) => a.name.localeCompare(b.name
  * it is what `/<name>` runs:
  * - a built-in command is shown as the provider reports it, even if a file shares its name;
  * - any other name keeps what the files say (a skill stays a skill), and the provider fills in
- *   a description or argument hint the files lack.
+ *   a description or argument hint the files lack. When the provider says what the name is
+ *   (`kind`), that wins: it is what `/<name>` does in the session.
  */
 export function mergeSlashCommands(
   discovered: SlashCommand[],
@@ -130,6 +131,7 @@ export function mergeSlashCommands(
       const argumentHint = file.argumentHint ?? own.argumentHint;
       return {
         ...file,
+        kind: c.kind ?? file.kind,
         description: file.description || own.description,
         ...(argumentHint ? { argumentHint } : {}),
       };

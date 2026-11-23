@@ -75,6 +75,7 @@ import {
   FactorySessions,
   isFactorySession,
   LENS_WORK_KEY_PREFIX,
+  type ProviderChoice,
   SCOUT_WORK_KEY,
 } from "./sessions";
 import { SlotBoard } from "./slots";
@@ -686,6 +687,14 @@ export class FactoryService {
    */
   providerRunnable(provider: string): ProviderRunnable {
     return this.ctx.sessions.runnable(provider);
+  }
+
+  /**
+   * The providers the runner offers, each with whether new work can start on it now and, if not,
+   * why and the fix: what a PM or the orchestrator needs to pick a provider without trying each.
+   */
+  providerChoices(): Promise<ProviderChoice[]> {
+    return this.ctx.sessions.choices();
   }
 
   /**
