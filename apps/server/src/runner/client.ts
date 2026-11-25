@@ -20,8 +20,10 @@ import { eq } from "drizzle-orm";
 import type { Db } from "../db/client";
 import { runnerState } from "../db/schema";
 import { ingestRunnerEvent } from "../events/ingest";
+import { ingestRunnerEvents } from "../events/ingest-batch";
 import type { EventStore } from "../events/store";
 import type { McpHandler } from "../mcp/endpoint";
+import { RunnerEventIntake } from "./event-intake";
 import { journalIdRefusal } from "./identity";
 import type { RunnerLaunchConfig, RunnerStartTimeouts } from "./launcher";
 import { isProcessAlive } from "./lock";
@@ -170,6 +172,8 @@ export class RunnerClient {
 
   /** What an untrusted runner may send beyond its sessions' events; none for the home runner. */
   private readonly guard: UntrustedRunnerGuard | undefined;
+  /** Durable events waiting to be stored together (`onEvents`). */
+  private readonly intake = new RunnerEventIntake((batch) => this.onEvents(batch));
 
   constructor(private readonly opts: RunnerClientOptions) {
     this.guard = opts.untrusted ? new UntrustedRunnerGuard(opts.db) : undefined;
@@ -248,6 +252,7 @@ export class RunnerClient {
    * never connects, records `runner.connected` or answers commands again.
    */
   async stop(): Promise<void> {
+    this.intake.flush();
     this.stopped = true;
     this.abort.abort();
     const transport = this.transport;
@@ -405,6 +410,8 @@ export class RunnerClient {
 
   /** A transport that completed its handshake (or was mid-handshake) ended. */
   private onClosed(transport: RunnerTransport | undefined, detail: string | undefined): void {
+    // Events that arrived before the close are stored before anything about the close.
+    this.intake.flush();
     // A transport a newer one replaced changes nothing (`stop` clears it before closing).
     if (this.transport !== undefined && this.transport !== transport) return;
     const wasConnected = this.current.state === "connected";
@@ -430,6 +437,8 @@ export class RunnerClient {
   }
 
   private handle(msg: RunnerToServerMessage, settle: (error?: Error) => void): void {
+    // Events are stored before any message that came after them is handled.
+    if (msg.type !== "event") this.intake.flush();
     switch (msg.type) {
       case "welcome":
         this.onWelcome(msg);
@@ -449,7 +458,7 @@ export class RunnerClient {
         return;
       }
       case "event":
-        this.onEvent(msg);
+        this.intake.push(msg);
         return;
       case "stream":
         // An untrusted runner's stream for a pty or session that isn't its own is dropped.
@@ -555,6 +564,37 @@ export class RunnerClient {
         timeoutMs: this.opts.drainTimeoutMs,
       }).catch((error: unknown) => log?.(`runner: drain failed: ${String(error)}`));
     }
+  }
+
+  /**
+   * Persist durable events that arrived together and their ack position in one transaction,
+   * then ack the highest. If the batch can't be stored, each event is stored on its own
+   * (`onEvent`), so one bad event doesn't hold back the others.
+   */
+  private onEvents(batch: RunnerEventMessage[]): void {
+    const runnerId = this.runnerId;
+    if (!runnerId) return;
+    const guard = this.guard;
+    let result: ReturnType<typeof ingestRunnerEvents>;
+    try {
+      result = ingestRunnerEvents(this.opts.db, this.opts.store, runnerId, batch, {
+        recordId: this.opts.recordId,
+        untrusted: !!guard,
+        ownsPty: guard && ((ptyId) => guard.ownsPty(ptyId)),
+      });
+    } catch (error) {
+      this.opts.log?.(`runner: storing ${batch.length} events together failed: ${String(error)}`);
+      for (const msg of batch) this.onEvent(msg);
+      return;
+    }
+    for (const { msg, reason } of result.refused) {
+      this.opts.log?.(`runner: dropped event ${msg.seq} (${msg.event.kind}): ${reason}`);
+    }
+    for (const msg of result.stored) {
+      if (msg.event.kind === "pty.exited") guard?.ptyExited(msg.event.ptyId);
+    }
+    this.lastAckedSeq = Math.max(this.lastAckedSeq, result.ackSeq);
+    this.send({ type: "ack", seq: result.ackSeq });
   }
 
   /** Persist a durable event and its ack position atomically, then ack. */

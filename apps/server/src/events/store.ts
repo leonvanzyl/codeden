@@ -45,7 +45,30 @@ export class EventStore {
     build: (reader: ProjectionReader) => NewEvent[],
     extra?: (tx: Tx) => void,
   ): RawEventEnvelope[] {
-    return this.transact((tx) => build(new DbProjectionReader(tx)), extra);
+    return this.appendSteps([build], extra);
+  }
+
+  /**
+   * Several `appendFrom` builds in one transaction (and one commit), in order: each build sees
+   * the projections as the builds before it left them.
+   */
+  appendSteps(
+    builds: ((reader: ProjectionReader) => NewEvent[])[],
+    extra?: (tx: Tx) => void,
+  ): RawEventEnvelope[] {
+    if (builds.length === 0 && !extra) return [];
+    const ts = new Date().toISOString();
+    const stored = this.db.transaction((tx) => {
+      const out: RawEventEnvelope[] = [];
+      const reader = new DbProjectionReader(tx);
+      for (const build of builds) {
+        for (const event of build(reader)) insertAndProject(tx, event, ts, out);
+      }
+      extra?.(tx);
+      return out;
+    });
+    this.notify(stored);
+    return stored;
   }
 
   /** Events with `seq > afterSeq`, oldest first. Session filter keeps global events too. */
@@ -77,8 +100,12 @@ export class EventStore {
       extra?.(tx);
       return out;
     });
-    if (stored.length > 0) for (const listener of this.listeners) listener(stored);
+    this.notify(stored);
     return stored;
+  }
+
+  private notify(stored: RawEventEnvelope[]): void {
+    if (stored.length > 0) for (const listener of this.listeners) listener(stored);
   }
 }
 
