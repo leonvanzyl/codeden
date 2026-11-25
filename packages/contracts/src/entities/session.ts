@@ -61,6 +61,13 @@ export const ACTIVE_SESSION_STATUSES: readonly SessionStatus[] = [
 export const isActiveSession = (session: { status: SessionStatus }): boolean =>
   ACTIVE_SESSION_STATUSES.includes(session.status);
 
+/** Terminal session states. Idle and interrupted sessions are resumable. */
+export const TERMINAL_SESSION_STATUSES: readonly SessionStatus[] = [
+  "completed",
+  "failed",
+  "stopped",
+];
+
 /**
  * How a session was made from another one: `fork` continues the source's conversation through
  * the provider's native fork; `handoff` starts a new conversation, possibly on another

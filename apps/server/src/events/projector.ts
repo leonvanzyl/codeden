@@ -7,6 +7,7 @@ import {
   automations,
   inboxItems,
   projects,
+  projectTechDebt,
   sessions,
 } from "../db/schema";
 import { applyFactoryProjection } from "../services/factory/projection";
@@ -36,6 +37,14 @@ export { applyDelta } from "./reducer/items";
  */
 export function applyProjection(tx: Tx, e: EventEnvelope): NewEvent[] {
   switch (e.type) {
+    case "tech_debt.updated": {
+      const { view } = e.payload;
+      tx.insert(projectTechDebt)
+        .values({ projectId: view.projectId, view })
+        .onConflictDoUpdate({ target: projectTechDebt.projectId, set: { view } })
+        .run();
+      return [];
+    }
     case "project.created":
     case "project.updated": {
       const { project } = e.payload;

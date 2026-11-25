@@ -10,4 +10,5 @@ export * from "./schema-github";
 export * from "./schema-orchestration";
 export * from "./schema-runners";
 export * from "./schema-search";
+export * from "./schema-tech-debt";
 export * from "./schema-usage";

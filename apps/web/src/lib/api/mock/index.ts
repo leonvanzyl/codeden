@@ -24,6 +24,7 @@ import { mockProjectApi } from "./projects";
 import { MockQueue } from "./queue";
 import { respond } from "./responses";
 import { mockSearch } from "./search";
+import { mockTechDebtApi } from "./tech-debt";
 import { workbenchApi } from "./workbench-api";
 import { MockWorld } from "./world";
 
@@ -442,6 +443,7 @@ export function createMockClient(opts: MockClientOptions = {}): CodeDenClient {
     ...mockProjectApi(world),
     automations: mockAutomationsApi(world),
     factory: mockFactoryApi(world),
+    techDebt: mockTechDebtApi(),
 
     async updateSettings(patch: SettingsPatch) {
       const settings = Settings.parse(deepMerge(world.snapshot.settings, patch));

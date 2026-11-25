@@ -4,6 +4,7 @@ import {
   GITHUB_EVENT_TYPES,
   isAgentEnvelope,
   type Snapshot,
+  TERMINAL_SESSION_STATUSES,
 } from "@codeden/contracts";
 import type { QueryClient } from "@tanstack/react-query";
 import { useConnectionStore } from "@/stores/connection";
@@ -44,6 +45,12 @@ function invalidateWorkbench(queryClient: QueryClient, env: EventEnvelope): void
     void queryClient.invalidateQueries({ queryKey: ["conflicts"] });
   if (env.type === "session.created" || env.type === "session.updated")
     void queryClient.invalidateQueries({ queryKey: ["project-status"] });
+  if (env.type === "session.updated") {
+    const { session } = env.payload;
+    if (session.projectId && TERMINAL_SESSION_STATUSES.includes(session.status)) {
+      void queryClient.invalidateQueries({ queryKey: ["tech-debt", session.projectId] });
+    }
+  }
   if (GITHUB_EVENTS.has(env.type)) void queryClient.invalidateQueries({ queryKey: ["github"] });
   if (env.type === "message.queued" || env.type === "message.dequeued") {
     const id =

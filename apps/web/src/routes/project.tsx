@@ -19,6 +19,7 @@ import { ArchivedSessionsList, SessionsList } from "@/components/project/lists";
 import { NowNext } from "@/components/project/now-next";
 import { ProjectExecution } from "@/components/project/project-execution";
 import { ProjectSettings } from "@/components/project/project-settings";
+import { TechDebtPanel } from "@/components/project/tech-debt-panel";
 import { ProjectTile } from "@/components/shell/sidebar/project-group";
 import { Button } from "@/components/ui/button";
 import { ProjectSpendCard } from "@/components/usage/project-spend-card";
@@ -28,11 +29,12 @@ import { activeSessions, type SessionView, sessionCounts } from "@/lib/session-f
 import { cn } from "@/lib/utils";
 import { PageHeader } from "./page-header";
 
-export type ProjectTab = "overview" | "github" | "settings";
+export type ProjectTab = "overview" | "github" | "tech-debt" | "settings";
 
 const TAB_LABELS: Record<ProjectTab, string> = {
   overview: "Overview",
   github: "GitHub",
+  "tech-debt": "Tech debt",
   settings: "Settings",
 };
 
@@ -125,7 +127,7 @@ export function ProjectPage({
         className="flex h-10 shrink-0 items-end gap-4 border-b border-border px-6"
         role="tablist"
       >
-        {(["overview", "github", "settings"] as const).map((t) => (
+        {(["overview", "github", "tech-debt", "settings"] as const).map((t) => (
           <button
             key={t}
             type="button"
@@ -145,6 +147,8 @@ export function ProjectPage({
         <div className="mx-auto w-full max-w-6xl space-y-8 px-6 py-6">
           {tab === "github" ? (
             <ProjectGithub project={project} />
+          ) : tab === "tech-debt" ? (
+            <TechDebtPanel key={projectId} projectId={projectId} />
           ) : tab === "settings" ? (
             <div className="max-w-3xl">
               <ProjectSettings project={project} />

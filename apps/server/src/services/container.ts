@@ -60,6 +60,9 @@ import { WorktreeCleanup, type WorktreeCleanupDeps } from "./sessions/worktree-c
 import { ClaudeSdkService } from "./setup/claude-sdk";
 import { SetupService } from "./setup/setup-service";
 import { execLocate, type Locate } from "./setup/tool-lookup";
+import { techDebtIssuePort } from "./tech-debt/issue";
+import { TechDebtService } from "./tech-debt/service";
+import { startTechDebtFix } from "./tech-debt/start";
 import { DesktopUpdateService } from "./updates/desktop";
 import { notesSources, updateRegistry } from "./updates/registry";
 import { type SelfUpdateHost, UpdateService, type Updates } from "./updates/service";
@@ -148,6 +151,7 @@ export interface AppServices {
   secrets: SecretStore;
   utility: UtilityService;
   projects: ProjectService;
+  techDebt: TechDebtService;
   /** Re-detects projects' git checkout and GitHub remote (§9): on demand, on start, after turns. */
   redetector: ProjectRedetector;
   sessionRepo: SessionRepo;
@@ -455,6 +459,12 @@ export function createServices(opts: ServicesOptions): AppServices {
     secrets: opts.secrets,
     utility,
     projects,
+    techDebt: new TechDebtService(
+      opts.db,
+      opts.store,
+      techDebtIssuePort(github.client),
+      (project, findings) => startTechDebtFix(services.sessions, project, findings),
+    ),
     redetector,
     sessionRepo,
     sessions,

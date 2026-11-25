@@ -61,6 +61,7 @@ import { httpGithubApi, httpOrchestrationApi, httpSessionConflictApi } from "./h
 import { httpAuthApi, httpNetworkApi } from "./network-api";
 import { httpQueueApi } from "./queue-api";
 import { RealtimeSocket } from "./realtime-socket";
+import { httpTechDebtApi } from "./tech-debt-api";
 import { openTerminalSocket } from "./terminal-channel";
 import type { MentionCandidate } from "./types";
 import { httpUpdatesApi } from "./updates-api";
@@ -198,6 +199,7 @@ export function createHttpClient(origin: string, opts: HttpClientOptions = {}): 
     },
     automations: httpAutomationsApi(http),
     factory: httpFactoryApi(http),
+    techDebt: httpTechDebtApi(http),
 
     updateSettings: (patch) => call("PATCH", "/settings", patch, (v) => Settings.parse(v)),
     secrets: httpSecretsApi(http),

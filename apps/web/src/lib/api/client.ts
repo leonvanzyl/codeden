@@ -78,6 +78,7 @@ import type {
 } from "./feature-apis";
 import type { AuthApi, NetworkApi } from "./network-api";
 import type { QueueApi } from "./queue-api";
+import type { TechDebtApi } from "./tech-debt-api";
 import type { MentionCandidate, OpenTerminalOptions, TerminalChannel } from "./types";
 import type { UpdatesApi } from "./updates-api";
 
@@ -259,6 +260,7 @@ export interface CodeDenClient {
   readonly automations: AutomationsApi;
   /** Autonomy modes, the vision, the factory panel and kill switches (§10.1, experimental). */
   readonly factory: FactoryApi;
+  readonly techDebt: TechDebtApi;
 
   // Settings.
   updateSettings(patch: SettingsPatch): Promise<Settings>;

@@ -110,6 +110,7 @@ describe("CodeDen MCP endpoint", () => {
     expect(pmTools.map((t) => t.name)).toEqual([
       "ask_user",
       "share_to_chat",
+      "list_tech_debt",
       "get_project_status",
       "list_sessions",
       "get_session",

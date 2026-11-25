@@ -6,6 +6,7 @@ import {
   type ChecksEnv,
   createChecksEnv,
   fail,
+  pass,
   T,
   until,
   usageLimit,
@@ -41,6 +42,13 @@ async function atTheCap(): Promise<string> {
   expect(rounds()).toEqual([1, 2]);
   expect(c.env.repo.get(id).checks).toMatchObject({ round: 2, capReached: true });
   return id;
+}
+
+function atTheCapThenPassAfterRetry(): Promise<string> {
+  // Three failures reach the cap. After the reset, fail once and pass on the retry.
+  const failure = fail("still broken");
+  c.script.set("pnpm test", [failure, failure, failure, failure, pass()]);
+  return atTheCap();
 }
 
 /** Let a turn that just started run its course, and whatever the loop does after it. */
@@ -82,22 +90,22 @@ describe("the checks loop's round count (#412)", () => {
   });
 
   it("starts the count again on a new user message", async () => {
-    const id = await atTheCap();
+    const id = await atTheCapThenPassAfterRetry();
     await c.sessions.send(id, { input: user("Try another way"), whenBusy: "queue" });
     expect(c.env.repo.get(id).checks?.capReached).toBeUndefined();
-    await until(() => rounds().length === 3);
+    await until(() => c.card(id, "u5")?.data.outcome === "passed");
     expect(c.card(id, "u4")?.data.round).toBe(0);
     expect(rounds()).toEqual([1, 2, 1]);
   });
 
   it("starts the count again when the user switches the loop off and on", async () => {
-    const id = await atTheCap();
+    const id = await atTheCapThenPassAfterRetry();
     await c.sessions.update(id, { untilChecksPass: false });
     await c.sessions.update(id, { untilChecksPass: true });
     expect(c.env.repo.get(id).checks?.round).toBeUndefined();
     // A turn CodeDen starts itself (not a compaction, which runs no checks) runs them again.
     await c.sessions.continueAfterRestart(id, RESTART_CONTINUE_MESSAGE);
-    await until(() => rounds().length === 3);
+    await until(() => c.card(id, "u5")?.data.outcome === "passed");
     expect(c.card(id, "u4")?.data.round).toBe(0);
     expect(rounds()).toEqual([1, 2, 1]);
   });

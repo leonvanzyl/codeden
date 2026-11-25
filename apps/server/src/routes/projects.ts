@@ -7,6 +7,7 @@ import {
   ReorderProjectsRequest,
   type SessionFileList,
   type SlashCommandList,
+  TechDebtAction,
   UpdateProjectRequest,
 } from "@codeden/contracts";
 import { Hono } from "hono";
@@ -46,6 +47,12 @@ export function projectRoutes(s: AppServices) {
       }
       return c.json(s.projects.update(c.req.param("id"), patch));
     })
+    .get("/:id/tech-debt", async (c) =>
+      c.json(await s.techDebt.list(s.projects.get(c.req.param("id")))),
+    )
+    .post("/:id/tech-debt", jsonBody(TechDebtAction), async (c) =>
+      c.json(await s.techDebt.act(s.projects.get(c.req.param("id")), c.req.valid("json"))),
+    )
     .get("/:id/commands", queryOf(ProjectCommandsQuery), (c) =>
       c.json<SlashCommandList>(
         s.agentConfig.projectSlashCommands(c.req.param("id"), c.req.valid("query").provider),

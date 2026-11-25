@@ -151,7 +151,7 @@ const projectRoute = createRoute({
     s: Record<string, unknown>,
   ): { newSession?: boolean; tab?: ProjectTab; archived?: boolean } => ({
     ...(s.newSession ? { newSession: true } : {}),
-    ...(s.tab === "github" || s.tab === "settings" ? { tab: s.tab } : {}),
+    ...(s.tab === "github" || s.tab === "tech-debt" || s.tab === "settings" ? { tab: s.tab } : {}),
     // The sessions list shows archived sessions (from the sidebar's "N archived" row).
     ...(s.archived ? { archived: true } : {}),
   }),
