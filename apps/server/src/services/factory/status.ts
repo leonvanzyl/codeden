@@ -16,10 +16,10 @@ import { budgetSpend, type FactoryContext, visionOf } from "./context";
 import { drainStatus } from "./drain";
 import { heldFollowUps } from "./follow-ups-held";
 import { heldIssues, itemHeld } from "./hold";
-import { takenIn } from "./intake";
 import { itemCosts } from "./item-cost";
 import { lessonsInForce } from "./lessons";
 import { localDay, queueOrder } from "./policy";
+import { decidedPr } from "./pr-gone";
 import { ownedPr, pullRequests } from "./pr-status";
 import { recoverable } from "./recover";
 import { scoutNowBlocker, scoutNowFacts } from "./scout";
@@ -79,8 +79,15 @@ export function workItem(
   };
 }
 
-function mergeChecks(i: FactoryItem): FactoryMergeChecks | null {
+/**
+ * A PR the panel still has CI to wait on. A PR whose GitHub state already settled - merged or
+ * closed, by a person or by the merge queue - decides nothing the factory can act on, so it does
+ * not gate here either: `pullRequests` has already left it out and the two views have to agree.
+ * The item keeps the checks it recorded (`workItem`), and nothing about it reopens or retries.
+ */
+function mergeChecks(ctx: FactoryContext, i: FactoryItem): FactoryMergeChecks | null {
   if (!i.pr || i.checks.length === 0) return null;
+  if (decidedPr(ctx, i)) return null;
   return {
     itemId: i.id,
     prNumber: i.pr.number,
@@ -142,12 +149,12 @@ export async function buildStatus(ctx: FactoryContext, projectId: string): Promi
     wip: wipOf(ctx, project, loop),
     backlog: waiting.map(toWork),
     inProgress: active.map(toWork),
-    mergeChecks: [...active, ...done].flatMap((i) => mergeChecks(i) ?? []).slice(0, 20),
+    mergeChecks: [...active, ...done].flatMap((i) => mergeChecks(ctx, i) ?? []).slice(0, 20),
     pullRequests: pullRequests(ctx, project, all),
     recent: done.map(toWork),
     viewRecent: viewRecent.map(toWork),
     ignored: ignored.map((i) => workItem(i)),
-    held: heldIssues(ctx, projectId, loop, all, (issue) => takenIn(loop, issue)),
+    held: heldIssues(ctx, projectId, loop, all),
     githubLogin,
     scout: project.autonomyMode === "dark_factory" ? scoutStatus(ctx, project, loop, spend) : null,
     visionExists: visionOf(project).exists,

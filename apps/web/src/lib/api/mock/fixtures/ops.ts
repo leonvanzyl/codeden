@@ -295,6 +295,7 @@ export function factoryFor(
       {
         issue: sf.issue(161, "Move search to the new index"),
         itemId: null,
+        kind: "recorded",
         reason: "Waiting on #158 (the search index migration)",
         by: "pm",
         since: new Date(Date.now() - 40 * 60_000).toISOString(),

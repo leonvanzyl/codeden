@@ -73,6 +73,10 @@ export const FactoryHoldResult = z.object({
 });
 export type FactoryHoldResult = z.infer<typeof FactoryHoldResult>;
 
+/** What holds an issue: the record CodeDen made, or the label on GitHub alone. */
+export const FactoryHoldKind = z.enum(["recorded", "label"]);
+export type FactoryHoldKind = z.infer<typeof FactoryHoldKind>;
+
 /**
  * An issue the loop skips because it carries the hold label (`FactoryStatus.held`): one intake
  * hasn't taken in, or one whose item waits in the queue, parked. Work already under way when its
@@ -82,6 +86,12 @@ export const FactoryHeldIssue = z.object({
   issue: GitHubIssueRef,
   /** Its work item, parked in the queue; null when intake hasn't taken the issue in. */
   itemId: Id.nullable(),
+  /**
+   * What holds it: `recorded` — CodeDen made a hold record for it (`factory_hold_issue`, or the UI)
+   * and put the label on; `label` — the label alone, put on the issue by hand on GitHub, so there
+   * is no record, reason or author to show.
+   */
+  kind: FactoryHoldKind,
   /** Why it is held, as recorded; null when the label was added on GitHub or without a reason. */
   reason: z.string().nullable(),
   /** Who held it through CodeDen; null when the label was added on GitHub. */

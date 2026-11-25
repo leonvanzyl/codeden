@@ -263,6 +263,67 @@ describe("local-only projects", () => {
   });
 });
 
+describe("github issue labels", () => {
+  // A PM reported `list_issues` answering with none of the labels GitHub had applied to an
+  // issue, while `list_issues` with a label filter did show them. Both reads come out of one
+  // projection table, so this pins them (and the live issue, and the table itself) agreeing as
+  // labels arrive from GitHub, from CodeDen, and from a removal upstream.
+  it("answers every read path with the same labels", async () => {
+    const issue = env.gh.addIssue({ title: "Flaky test", labels: ["P0", "reliability"] });
+    await env.service.syncNow(P);
+
+    const sorted = (labels: string[] | undefined) => [...(labels ?? [])].sort();
+    const read = async () => ({
+      projection: sorted(
+        env.service.data.issues(P, "all").find((i) => i.number === issue.number)?.labels,
+      ),
+      unfiltered: sorted(
+        (await env.service.listIssues(P)).find((i) => i.number === issue.number)?.labels,
+      ),
+      filtered: sorted(
+        (await env.service.listIssues(P, { labels: ["reliability"] })).find(
+          (i) => i.number === issue.number,
+        )?.labels,
+      ),
+      live: sorted((await env.service.getIssue(P, issue.number)).labels),
+    });
+
+    const all = (...labels: string[]) => ({
+      projection: sorted(labels),
+      unfiltered: sorted(labels),
+      filtered: sorted(labels),
+      live: sorted(labels),
+    });
+
+    expect(await read()).toEqual(all("P0", "reliability"));
+
+    // A label applied by hand on GitHub reaches every path on the next poll.
+    env.gh.touch(issue.number, (i) => i.labels.push("factory:hold"));
+    const mark = env.events.length;
+    await env.service.syncNow(P);
+    expect(types(mark)).toContain("issue.labeled");
+    expect(await read()).toEqual(all("P0", "reliability", "factory:hold"));
+
+    // CodeDen adding one label keeps the ones GitHub owns: `addLabels`/`removeLabel`, never a
+    // replacement of the whole set.
+    await env.service.labelIssue(P, issue.number, { add: ["codeden:in-progress"], remove: [] });
+    expect(await read()).toEqual(all("P0", "reliability", "factory:hold", "codeden:in-progress"));
+
+    // And a label removed on GitHub drops out everywhere - a label change is an
+    // `issue.updated` carrying the full set, not an `issue.unlabeled`.
+    env.gh.touch(issue.number, (i) => {
+      i.labels = i.labels.filter((l) => l !== "P0");
+    });
+    const mark2 = env.events.length;
+    await env.service.syncNow(P);
+    expect(types(mark2)).toEqual(["issue.updated"]);
+    expect(await read()).toEqual(all("reliability", "factory:hold", "codeden:in-progress"));
+    expect(
+      (await env.service.listIssues(P, { labels: ["P0"] })).find((i) => i.number === issue.number),
+    ).toBeUndefined();
+  });
+});
+
 async function waitFor(probe: () => boolean, timeoutMs = 5_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (!probe()) {

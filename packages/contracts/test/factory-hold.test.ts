@@ -36,10 +36,28 @@ describe("holding work out of the factory loop (#593)", () => {
     roundTrip(FactoryHeldIssue, {
       issue: { number: 12, url: "https://github.com/acme/app/issues/12", title: "Add export" },
       itemId: null,
+      kind: "label",
       reason: null,
       by: null,
       since: null,
     });
+    roundTrip(FactoryHeldIssue, {
+      issue: { number: 12, url: "https://github.com/acme/app/issues/12", title: "Add export" },
+      itemId: "item-1",
+      kind: "recorded",
+      reason: "waiting on #11",
+      by: "pm",
+      since: at,
+    });
+    expect(
+      FactoryHeldIssue.safeParse({
+        issue: { number: 12, url: "https://github.com/acme/app/issues/12", title: "Add export" },
+        itemId: null,
+        reason: null,
+        by: null,
+        since: null,
+      }).success,
+    ).toBe(false);
     roundTrip(FactoryHoldResult, {
       issueNumber: 12,
       held: true,

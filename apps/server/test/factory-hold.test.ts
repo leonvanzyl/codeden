@@ -91,6 +91,54 @@ describe("holding issues out of the factory loop (#593)", () => {
     expect((await env.factory.status(projectId())).held).toEqual([]);
   });
 
+  it("lists an issue the label holds that the loop never took in, and says how each one is held", async () => {
+    env = createFactoryEnv();
+    // Opened before the loop was switched on and without the intake label, so intake never takes
+    // it in: all CodeDen knows about it is the label GitHub reports.
+    const handHeld = openIssue("Retire the legacy exporter", [FACTORY_HOLD_LABEL]);
+    env.clock.offsetMs = 2 * 60 * 60_000;
+    s.enable();
+    const pmHeld = openIssue("Add CSV export");
+    await env.factory.hold(
+      projectId(),
+      { issueNumber: pmHeld.number, reason: "waiting on #11" },
+      "pm",
+    );
+    await s.tick();
+
+    // The admission gate skips the labelled issue either way: the view must list it too, or the
+    // loop refuses work nobody can see.
+    expect(byIssue(handHeld.number)).toBeUndefined();
+    const held = (await env.factory.status(projectId())).held;
+    expect(held.map((h) => h.issue.number)).toEqual([handHeld.number, pmHeld.number]);
+    // A hold CodeDen recorded (a record plus the label) and one only the label makes.
+    expect(held).toEqual([
+      expect.objectContaining({
+        issue: expect.objectContaining({ number: handHeld.number }),
+        itemId: null,
+        kind: "label",
+        reason: null,
+        by: null,
+        since: null,
+      }),
+      expect.objectContaining({
+        issue: expect.objectContaining({ number: pmHeld.number }),
+        kind: "recorded",
+        reason: "waiting on #11",
+        by: "pm",
+      }),
+    ]);
+
+    // The label taken off on GitHub: it is not held any more, and the loop still skips it because
+    // it was opened before the factory was switched on.
+    await env.gh.unlabelIssue(projectId(), handHeld.number, [FACTORY_HOLD_LABEL]);
+    await s.tick();
+    expect((await env.factory.status(projectId())).held.map((h) => h.issue.number)).toEqual([
+      pmHeld.number,
+    ]);
+    expect(byIssue(handHeld.number)).toBeUndefined();
+  });
+
   it("parks a queued item until it is released, and leaves work in progress alone", async () => {
     env = createFactoryEnv();
     s.enable();

@@ -50,16 +50,18 @@ export function settleHolds(
 
 /**
  * The issues the loop skips for their hold, oldest first, for the factory view: an issue whose
- * item waits in the queue (parked), and one without an item that intake would take in once
- * released (`takesIn`) or that was held through CodeDen. `items` are the project's items, newest
- * first; an issue whose work is under way or done isn't listed.
+ * item waits in the queue (parked), and every other labelled issue that has no item — including
+ * one intake would never take in on its own (opened before the factory was switched on), since
+ * `intake.ts` refuses every labelled issue and hiding it would hide work the loop is refusing.
+ * `items` are the project's items, newest first; an issue whose work is under way or done isn't
+ * listed. Each entry says what holds it: a record CodeDen made (`recorded`) or the label alone,
+ * put on the issue by hand on GitHub (`label`).
  */
 export function heldIssues(
   ctx: FactoryContext,
   projectId: string,
   loop: FactoryLoop,
   items: FactoryItem[],
-  takesIn: (issue: GithubIssue) => boolean,
 ): FactoryHeldIssue[] {
   const byIssue = new Map<number, FactoryItem>();
   for (const i of items) {
@@ -75,14 +77,13 @@ export function heldIssues(
     .flatMap((issue) => {
       const item = byIssue.get(issue.number);
       const hold = records.get(issue.number);
-      const listed = item
-        ? WAITING_STAGES.includes(item.stage)
-        : hold !== undefined || takesIn(issue);
-      if (!listed) return [];
+      // Held work under way or done is listed with the rest of it, not here.
+      if (item && !WAITING_STAGES.includes(item.stage)) return [];
       return [
         {
           issue: { number: issue.number, url: issue.url, title: issue.title },
           itemId: item?.id ?? null,
+          kind: hold ? ("recorded" as const) : ("label" as const),
           reason: hold?.reason ?? null,
           by: hold?.by ?? null,
           since: hold?.at ?? null,
