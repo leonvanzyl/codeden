@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readdirSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, statSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import {
   ACTIVE_SESSION_STATUSES,
@@ -22,6 +22,7 @@ import { projects, sessions } from "../../db/schema";
 import type { EventStore } from "../../events/store";
 import { badRequest, conflict, notFound, ServiceError } from "../errors";
 import type { Exec } from "../exec";
+import { cloneDestination } from "./clone-destination";
 import {
   detectPlainFolder,
   detectProject,
@@ -380,9 +381,8 @@ export class ProjectService {
   private async clone(source: Extract<CreateProjectRequest["source"], { type: "clone" }>) {
     const { url, name } = normalizeCloneUrl(source.url);
     const dest = resolve(source.path ?? join(source.parentDir ?? this.deps.projectsDir, name));
-    if (existsSync(dest) && readdirSync(dest).length > 0) {
-      throw conflict(`${dest} already exists and is not empty`, "destination_exists");
-    }
+    // Already a checkout of this repository (a reinstall, a second profile): add it as is.
+    if ((await cloneDestination(this.deps.exec, dest, url)) === "reuse") return dest;
     mkdirSync(dirname(dest), { recursive: true });
     const result = await this.deps.exec("git", ["clone", "--", url, dest], {
       timeoutMs: CLONE_TIMEOUT_MS,

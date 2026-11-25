@@ -122,6 +122,82 @@ describe("ProjectService", () => {
   });
 });
 
+describe("cloning into a folder that already exists", () => {
+  /** A bare repository with one commit, standing in for the remote. */
+  const bareRemote = (name: string) => {
+    const work = join(dir, `${name}-work`);
+    mkdirSync(work);
+    git(work, "init", "-q", "-b", "main");
+    git(
+      work,
+      "-c",
+      "user.email=t@e.st",
+      "-c",
+      "user.name=T",
+      "commit",
+      "-q",
+      "--allow-empty",
+      "-m",
+      "init",
+    );
+    const bare = join(dir, `${name}.git`);
+    execFileSync("git", ["clone", "-q", "--bare", work, bare], { stdio: "pipe" });
+    return pathToFileURL(bare).href;
+  };
+  const dest = () => join(dir, "clones", "app");
+
+  it("adds an existing clone of the same repository instead of cloning again", async () => {
+    const url = bareRemote("app");
+    execFileSync("git", ["clone", "-q", url, dest()], { stdio: "pipe" });
+    writeFileSync(join(dest(), "local-only.txt"), "kept");
+
+    const created = await service.create({ source: { type: "clone", url, path: dest() } });
+    expect(created.project.path).toBe(dest());
+    expect(existsSync(join(dest(), "local-only.txt"))).toBe(true);
+    // The same folder again is a project already, as for a local folder.
+    await expect(
+      service.create({ source: { type: "clone", url, path: dest() } }),
+    ).rejects.toMatchObject({ code: "project_exists" });
+  });
+
+  it("counts ssh and https forms of a GitHub repository as the same", async () => {
+    mkdirSync(dest(), { recursive: true });
+    git(dest(), "init", "-q");
+    git(dest(), "remote", "add", "origin", "git@github.com:Octo/Demo.git");
+
+    const created = await service.create({
+      source: { type: "clone", url: "https://github.com/octo/demo", path: dest() },
+    });
+    expect(created.project).toMatchObject({ kind: "github", path: dest() });
+  });
+
+  it("refuses a folder holding another repository, and says which", async () => {
+    mkdirSync(dest(), { recursive: true });
+    git(dest(), "init", "-q");
+    git(dest(), "remote", "add", "origin", "https://github.com/other/repo.git");
+
+    await expect(
+      service.create({ source: { type: "clone", url: "octo/demo", path: dest() } }),
+    ).rejects.toMatchObject({
+      code: "destination_exists",
+      message: `${dest()} already exists and holds a clone of other/repo. Choose another folder, or add it as a local folder.`,
+    });
+  });
+
+  it("refuses a non-empty folder that is not a git checkout", async () => {
+    mkdirSync(dest(), { recursive: true });
+    writeFileSync(join(dest(), "notes.txt"), "mine");
+
+    await expect(
+      service.create({ source: { type: "clone", url: bareRemote("app"), path: dest() } }),
+    ).rejects.toMatchObject({
+      code: "destination_exists",
+      message: expect.stringContaining("already exists and is not empty. Choose another folder"),
+    });
+    expect(service.list()).toEqual([]);
+  });
+});
+
 describe("runTool", () => {
   it("reports missing executables", async () => {
     const result = await runTool("definitely-not-a-real-tool-xyz", []);
