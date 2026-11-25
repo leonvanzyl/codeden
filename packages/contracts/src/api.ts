@@ -451,9 +451,8 @@ export const SessionSnapshotQuery = z
     /** With `turns`: the page before this root turn (the turns that started before it). */
     before: Id.optional(),
     /**
-     * With `turns`: reach back far enough to include the root turn that holds this item (in the
-     * root thread, or in a subagent thread under it), so a search hit or link opens at it. An
-     * item the session doesn't have is ignored.
+     * With `turns`: if this item belongs to an older root turn, include that turn and its
+     * subagents as a separate focused page. An item the session doesn't have is ignored.
      */
     item: Id.optional(),
   })

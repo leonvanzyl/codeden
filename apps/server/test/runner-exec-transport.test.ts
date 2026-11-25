@@ -1,6 +1,17 @@
 import { PassThrough } from "node:stream";
-import { encodeLinkFrame, RunnerLinkExit } from "@codeden/contracts";
-import { describe, expect, it } from "vitest";
+import {
+  CODEDEN_VERSION,
+  encodeLinkFrame,
+  LinkFrameDecoder,
+  RUNNER_PROTOCOL_VERSION,
+  RunnerLinkExit,
+  type RunnerWelcome,
+  ServerToRunnerMessage,
+} from "@codeden/contracts";
+import { describe, expect, it, vi } from "vitest";
+import { openDatabase } from "../src/db/client";
+import { EventStore } from "../src/events/store";
+import { RunnerClient } from "../src/runner/client";
 import { type LinkProcess, openExecTransport, StderrLines } from "../src/runner/transport-exec";
 
 /**
@@ -93,4 +104,71 @@ describe("exec transport stderr", () => {
     expect(detail?.length).toBeLessThan(400);
     expect(logged.every((line) => line.length < 400)).toBe(true);
   });
+});
+
+it("reports an attached runner missing pongs and recovers only on the current ping", async () => {
+  const database = openDatabase(":memory:");
+  const store = new EventStore(database.db);
+  const link = fakeLink();
+  const decoder = new LinkFrameDecoder();
+  const sent: ServerToRunnerMessage[] = [];
+  (link.proc.stdin as PassThrough).on("data", (chunk: Buffer) => {
+    for (const raw of decoder.push(chunk)) {
+      const message = ServerToRunnerMessage.parse(raw);
+      sent.push(message);
+      if (message.type === "hello") {
+        link.stdout.write(
+          encodeLinkFrame({
+            type: "welcome",
+            protocolVersion: RUNNER_PROTOCOL_VERSION,
+            runnerId: "heartbeat-runner",
+            runnerVersion: CODEDEN_VERSION,
+            pid: process.pid,
+            startedAt: "2026-11-21T12:00:00.000Z",
+            capabilities: { pty: false, browser: false, git: true, mcpProxy: false },
+            providers: [],
+            sessions: [],
+            journal: { lastSeq: 0, unacked: 0 },
+            draining: false,
+          } satisfies RunnerWelcome),
+        );
+      }
+    }
+  });
+  const client = new RunnerClient({
+    home: ".",
+    lockFile: "",
+    launch: null,
+    db: database.db,
+    store,
+    link: { kind: "exec", start: () => link.proc },
+  });
+  const pings = () => sent.filter((m) => m.type === "ping");
+  let ended = false;
+  try {
+    vi.useFakeTimers({
+      toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "performance"],
+    });
+    await client.start();
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(pings()).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(client.status).toMatchObject({ state: "connected", responsive: false });
+    expect(pings()).toHaveLength(2);
+    link.stdout.write(encodeLinkFrame({ type: "pong", id: pings()[0]?.id }));
+    expect(client.status.responsive).toBe(false);
+    link.stdout.write(encodeLinkFrame({ type: "pong", id: pings()[1]?.id }));
+    expect(client.status).toMatchObject({ state: "connected", responsive: true });
+    expect(store.listAfter(0, 100).filter((e) => e.type === "runner.disconnected")).toEqual([]);
+    const stopping = client.stop();
+    await link.exit(0);
+    ended = true;
+    await stopping;
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(pings()).toHaveLength(2);
+  } finally {
+    vi.useRealTimers();
+    if (!ended) await Promise.all([client.stop(), link.exit(0)]);
+    database.close();
+  }
 });

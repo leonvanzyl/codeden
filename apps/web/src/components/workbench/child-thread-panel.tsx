@@ -1,5 +1,7 @@
+import { useRouterState } from "@tanstack/react-router";
 import { Bot } from "lucide-react";
 import { Transcript } from "@/components/thread/transcript";
+import { useFocusedTranscript } from "@/lib/queries";
 import { useTranscriptsStore } from "@/stores/transcripts";
 
 /**
@@ -15,7 +17,12 @@ export function ChildThreadPanel({
   threadId: string;
   focusItemId?: string;
 }) {
-  const transcript = useTranscriptsStore((s) => s.byId[sessionId]);
+  const live = useTranscriptsStore((s) => s.byId[sessionId]);
+  const rootItem = useRouterState({ select: (s) => s.location.search.item });
+  const item = typeof rootItem === "string" ? rootItem : undefined;
+  const focused = useFocusedTranscript(sessionId, item);
+  const history = item && !live?.items[item] ? focused : undefined;
+  const transcript = history?.threads[threadId] ? history : live;
   const thread = transcript?.threads[threadId];
   if (!transcript || !thread) return null;
   return (

@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, renameSync } from "node:fs";
 import { join } from "node:path";
 import type {
   AgentEvent,
@@ -127,6 +127,32 @@ async function attach(adapter: ProviderAdapter): Promise<TestServer> {
 }
 
 describe("streamed deltas through the runner", () => {
+  it("shuts down cleanly when a delta timer hits a journal append error", async () => {
+    const { adapter, streamed } = stallingProvider([...opening, delta("m1", "x".repeat(140_000))]);
+    const shutdown = Promise.withResolvers<void>();
+    runner = await startRunner({
+      home,
+      adapters: [adapter],
+      deltaBatching: { windowMs: 50, maxChars: 200_000 },
+      onShutdown: shutdown.resolve,
+    });
+    server = await TestServer.attach(runner);
+
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      server.send({ type: "command", id: "start", command: start(home) });
+      await streamed;
+      const file = join(home, "runner", "journal.jsonl");
+      renameSync(file, `${file}.saved`);
+      mkdirSync(file); // Appending to a directory fails on every platform.
+      expect(() => vi.advanceTimersByTime(50)).not.toThrow();
+    } finally {
+      vi.useRealTimers();
+    }
+
+    await shutdown.promise;
+  });
+
   it("are journaled before a manual checkpoint that arrives while they wait", async () => {
     const repo = makeRepo();
     cleanup.push(repo);

@@ -2,6 +2,7 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 import { existsSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
+import { monitorEventLoopDelay } from "node:perf_hooks";
 import {
   CODEDEN_VERSION,
   RUNNER_PROTOCOL_VERSION,
@@ -127,7 +128,17 @@ export async function startRunner(opts: StartRunnerOptions): Promise<RunningRunn
     const current = readLock(lockFile);
     return !current || current.token === token;
   };
-  const journal = new Journal(dir, { owned: ownsHome });
+  let attached: ServerConnection | undefined;
+  let stopped = false;
+  const journal = new Journal(dir, {
+    owned: ownsHome,
+    onAppend: (message) => attached?.deliver(message),
+    onAppendError: (error) => {
+      stopped = true;
+      log(`journal: append failed, stopping runner for recovery: ${error.message}`);
+      setImmediate(finish);
+    },
+  });
   // Claude Code support is installed on demand into `<home>/deps` in the published package.
   configureClaudeSdk({
     depsDir: join(opts.home, "deps"),
@@ -152,7 +163,6 @@ export async function startRunner(opts: StartRunnerOptions): Promise<RunningRunn
   });
 
   const connections = new Set<ServerConnection>();
-  let attached: ServerConnection | undefined;
   let draining = false;
   let drainExit: Promise<void> | undefined;
   let closing: Promise<void> | undefined;
@@ -163,7 +173,6 @@ export async function startRunner(opts: StartRunnerOptions): Promise<RunningRunn
   const mcpLink = new LinkMcpUpstream({ channel: () => attached });
   let port = 0;
 
-  let stopped = false;
   /** Another runner took over this home, and its journal with it. */
   let superseded = false;
   const journalEvent = (event: RunnerEvent) => {
@@ -175,8 +184,13 @@ export async function startRunner(opts: StartRunnerOptions): Promise<RunningRunn
       handOver();
       return;
     }
-    const msg = journal.append(event);
-    attached?.deliver(msg);
+    try {
+      if (event.kind === "agent" && event.event.type === "item.delta") journal.queueDelta(event);
+      else journal.append(event);
+    } catch (error) {
+      // onAppendError has already scheduled recovery. Let it close the running sessions.
+      if (!stopped) throw error;
+    }
   };
   // Every durable event goes through the batcher: streamed deltas wait briefly to be merged,
   // and any other event journals the batches it follows first, so order is kept.
@@ -318,6 +332,25 @@ export async function startRunner(opts: StartRunnerOptions): Promise<RunningRunn
   writeFileSync(tmp, `${JSON.stringify(lock, null, 2)}\n`, { mode: 0o600 });
   renameSync(tmp, lockFile);
   log(`runner ${journal.runnerId} listening on 127.0.0.1:${port}`);
+  const loopDelay = monitorEventLoopDelay({ resolution: 20 });
+  loopDelay.enable();
+  const diagnostics = setInterval(() => {
+    const eventLoopMaxMs = Math.round(loopDelay.max / 1e6);
+    loopDelay.reset();
+    const { appendCount, appendMaxMs, journalQueuedBytes } = journal.takeAppendDiagnostics();
+    const { replayMaxMs = 0, socketQueuedBytes = 0 } = attached?.takeDiagnostics() ?? {};
+    if (
+      appendCount ||
+      replayMaxMs ||
+      journalQueuedBytes ||
+      socketQueuedBytes ||
+      eventLoopMaxMs >= 100
+    ) {
+      log(
+        `runner diagnostics: eventLoopMaxMs=${eventLoopMaxMs} appendCount=${appendCount} appendMaxMs=${appendMaxMs.toFixed(1)} replayMaxMs=${replayMaxMs.toFixed(1)} journalQueuedBytes=${journalQueuedBytes} socketQueuedBytes=${socketQueuedBytes}`,
+      );
+    }
+  }, 60_000).unref();
   // Ask providers for their models now, so pickers are right before the first session.
   // Spawns provider CLIs, so it runs in the background; it never throws.
   void registry.refreshModels();
@@ -343,6 +376,8 @@ export async function startRunner(opts: StartRunnerOptions): Promise<RunningRunn
       // Stop advertising first so a new server spawns a fresh runner instead of reconnecting.
       clearInterval(lockWatch);
       removeLock();
+      clearInterval(diagnostics);
+      loopDelay.disable();
       stopProviderUpdates();
       const graceful = (async () => {
         await host.closeAll();
@@ -379,13 +414,14 @@ export async function startRunner(opts: StartRunnerOptions): Promise<RunningRunn
         if ("closeAllConnections" in server) server.closeAllConnections();
       });
       process.off("exit", removeLock);
-      deltas.flush();
-      stopped = true;
       try {
+        deltas.flush();
+        stopped = true;
         // Saves nothing once another runner owns the files, also when it took over while this
         // one was closing (its lock was already gone, so the lock check above had stopped).
         journal.close();
       } catch (error) {
+        stopped = true;
         log(`journal: ${String(error)}`);
       }
       log("runner stopped");

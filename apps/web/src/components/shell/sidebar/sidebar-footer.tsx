@@ -58,10 +58,13 @@ export function SidebarFooter({ compact = false }: { compact?: boolean }) {
       {!compact && (
         <div
           className="flex min-w-0 flex-1 items-center gap-2 px-1.5 text-2xs text-muted-foreground"
+          role="status"
           title={detail}
         >
           <StatusDot tone={tone} />
-          <span className="truncate">{label}</span>
+          <span className={runner?.responsive === false ? "min-w-0 wrap-break-word" : "truncate"}>
+            {label}
+          </span>
           {isMockMode && (
             <span className="rounded border border-border px-1 text-3xs tracking-wide text-muted-foreground/80 uppercase">
               mock
@@ -69,7 +72,12 @@ export function SidebarFooter({ compact = false }: { compact?: boolean }) {
           )}
         </div>
       )}
-      {compact && <StatusDot tone={tone} className="mb-1" />}
+      {compact && (
+        <div role="status" title={detail}>
+          <StatusDot tone={tone} className="mb-1" />
+          <span className="sr-only">{label}</span>
+        </div>
+      )}
       <IconButton label="Keyboard shortcuts" onClick={() => openShortcuts(true)}>
         <Keyboard />
       </IconButton>

@@ -120,6 +120,12 @@ describe("opening a long-lived session (#321)", () => {
     expect.soft(snap.items.length).toBeLessThanOrEqual(500);
     expect.soft(page.bytes).toBeLessThan(1_000_000);
     expect(snap.earlierTurns).toBe(turns - 20);
+    const link = await snapshot("?turns=20&item=out-0");
+    const focused = parse(link.body);
+    expect(focused.turns).toEqual(snap.turns);
+    expect(focused.focused?.turns.map((t) => t.id)).toEqual(["u0"]);
+    expect(focused.focused?.items.map((item) => item.item.id)).toContain("out-0");
+    expect(link.bytes).toBeLessThan(page.bytes + 8_000);
     // The whole-session form stays available.
     const whole = parse((await snapshot()).body);
     expect(whole.items).toHaveLength(2 * turns);
@@ -159,18 +165,36 @@ describe("session snapshot by root turns", () => {
     expect(missing.body).toMatchObject({ error: { code: "turn_not_found" } });
   });
 
-  it("reaches back to the turn holding an item, also one inside a subagent's thread", async () => {
+  it("pages tied start timestamps in insertion order without a gap or duplicate", async () => {
+    seedSession();
+    for (const id of [9, 2, 12, 1, 4]) rootTurn(id);
+    server.database.client.exec("UPDATE turns SET started_at = '2026-11-21T12:00:00.000Z'");
+    const latest = parse((await snapshot("?turns=2")).body);
+    const earlier = parse((await snapshot("?turns=2&before=u1")).body);
+    const first = parse((await snapshot("?turns=2&before=u2")).body);
+    expect(latest.turns.map((t) => t.id)).toEqual(["u1", "u4"]);
+    expect(earlier.turns.map((t) => t.id)).toEqual(["u2", "u12"]);
+    expect(first.turns.map((t) => t.id)).toEqual(["u9"]);
+    expect([latest.earlierTurns, earlier.earlierTurns, first.earlierTurns]).toEqual([3, 1, 0]);
+  });
+
+  it("returns the latest page and only the owning root turn for an older item", async () => {
     seedSession();
     for (let n = 0; n < 8; n++) (n === 2 ? subagentTurn : rootTurn)(n);
     const hit = parse((await snapshot("?turns=3&item=out-4")).body);
-    expect(hit.turns.map((t) => t.id)).toEqual(["u4", "u5", "u6", "u7"]);
-    expect(hit.earlierTurns).toBe(4);
+    expect(hit.turns.map((t) => t.id)).toEqual(["u5", "u6", "u7"]);
+    expect(hit.earlierTurns).toBe(5);
+    expect(hit.focused?.turns.map((t) => t.id)).toEqual(["u4"]);
+    expect(hit.focused?.items.map((item) => item.item.id)).toContain("out-4");
     const nested = parse((await snapshot("?turns=3&item=c2-msg")).body);
-    expect(nested.earlierTurns).toBe(2);
-    expect(itemIds(nested)).toContain("c2-msg");
+    expect(nested.earlierTurns).toBe(5);
+    expect(nested.focused?.items.map((item) => item.item.id)).toContain("c2-msg");
+    expect(nested.focused?.turns.map((t) => t.id).sort()).toEqual(["c2-turn", "u2"]);
     // An item that is already in the latest turns, or doesn't exist, changes nothing.
     expect(parse((await snapshot("?turns=3&item=out-7")).body).earlierTurns).toBe(5);
     expect(parse((await snapshot("?turns=3&item=nope")).body).earlierTurns).toBe(5);
+    expect(parse((await snapshot("?turns=3&item=out-7")).body).focused).toBeUndefined();
+    expect(parse((await snapshot("?turns=3&item=nope")).body).focused).toBeUndefined();
   });
 
   it("rejects a query it can't answer", async () => {

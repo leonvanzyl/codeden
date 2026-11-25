@@ -29,6 +29,8 @@ export const RunnerConnectionStatus = z.object({
   version: z.string().nullable(),
   providers: z.array(ProviderInfo),
   lastError: z.string().nullable(),
+  /** False when an attached runner has missed its application-level pong deadline. */
+  responsive: z.boolean().optional(),
 });
 export type RunnerConnectionStatus = z.infer<typeof RunnerConnectionStatus>;
 
@@ -85,6 +87,14 @@ export const SessionSnapshot = z.object({
    * (load them with `before`). Always 0 for the whole session.
    */
   earlierTurns: z.int().nonnegative().default(0),
+  /** The owning root turn of a deep link outside the latest page, with its subagent threads. */
+  focused: z
+    .object({
+      threads: z.array(Thread),
+      turns: z.array(Turn),
+      items: z.array(ItemRecord),
+    })
+    .optional(),
 });
 export type SessionSnapshot = z.infer<typeof SessionSnapshot>;
 

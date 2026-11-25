@@ -1,10 +1,12 @@
 import type { FollowupSuggestion } from "@codeden/contracts";
 import { useMutation } from "@tanstack/react-query";
+import { useNavigate } from "@tanstack/react-router";
 import { Sparkles } from "lucide-react";
 import { useMemo } from "react";
 import { EmptyState } from "@/components/common/bits";
 import { SessionComposer } from "@/components/composer/composer";
 import { ArchivedRoleNotice, isArchivedRole } from "@/components/orchestration/start-fresh";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useClient } from "@/lib/api";
 import {
@@ -18,6 +20,7 @@ import { checksRunning } from "@/lib/transcript/checks";
 import { activeTurn } from "@/lib/transcript/reducer";
 import { latestFollowups } from "@/lib/transcript/timeline";
 import { useComposerStore } from "@/stores/composer";
+import { useLayoutStore } from "@/stores/layout";
 import { useNewSessionStore } from "@/stores/new-session";
 import { FirstMessage } from "./first-message";
 import { McpNotice } from "./mcp-notice";
@@ -88,10 +91,14 @@ export function ThreadView({
   empty?: React.ReactNode;
   focusItemId?: string;
 }) {
+  const navigate = useNavigate();
   // An older archived session isn't in the snapshot: it is fetched by id.
   const { session, loading } = useSessionLookup(sessionId);
-  // The latest turns, reaching back to the item it opens at; earlier ones load on scroll.
-  const { transcript, isLoading, error } = useTranscript(sessionId, { item: focusItemId });
+  const { transcript, focusedTranscript, isLoading, error } = useTranscript(sessionId, {
+    item: focusItemId,
+  });
+  const history = focusItemId && !transcript?.items[focusItemId] ? focusedTranscript : undefined;
+  const visibleTranscript = history ?? transcript;
   const earlier = useEarlierTurns(sessionId);
   const threadId = transcript?.rootThreadId ?? session?.rootThreadId ?? null;
   const running = Boolean(transcript && threadId && activeTurn(transcript, threadId));
@@ -101,12 +108,27 @@ export function ThreadView({
     [transcript, threadId],
   );
   const hasItems = Boolean(
-    transcript && threadId && (transcript.threads[threadId]?.itemIds.length ?? 0) > 0,
+    visibleTranscript && threadId && (visibleTranscript.threads[threadId]?.itemIds.length ?? 0) > 0,
   );
   // Sent from the New session draft: shown until the transcript has the turn.
   const firstMessage = useNewSessionStore((s) => s.firstMessages[sessionId]);
   // An archived project's sessions are read-only: no follow-ups to send.
   const archived = useProjectArchived(session?.projectId);
+
+  const showLatest = () => {
+    const { childThread, rightTab } = useLayoutStore.getState();
+    if (
+      childThread?.sessionId === sessionId &&
+      history?.threads[childThread.threadId] &&
+      !transcript?.threads[childThread.threadId]
+    ) {
+      useLayoutStore.setState({
+        childThread: null,
+        ...(rightTab === "thread" ? { rightTab: "diff", rightSheetOpen: false } : {}),
+      });
+    }
+    void navigate({ to: "/sessions/$sessionId", params: { sessionId }, search: {} });
+  };
 
   if (!session) {
     // Just started from the draft and not in the snapshot yet: its realtime event is on the way.
@@ -137,17 +159,26 @@ export function ThreadView({
     <div className="flex min-h-0 flex-1 flex-col">
       <ThreadHeader session={session} running={running} />
       <McpNotice session={session} />
+      {history && (
+        <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border px-4 py-1 text-xs text-muted-foreground">
+          <span>Earlier turn</span>
+          <Button variant="ghost" size="sm" onClick={showLatest}>
+            Back to latest
+          </Button>
+        </div>
+      )}
       {error ? (
         <EmptyState icon={<Sparkles />} title="Couldn't load this session" className="flex-1">
           {error.message}
         </EmptyState>
-      ) : hasItems && transcript && threadId ? (
+      ) : hasItems && visibleTranscript && threadId ? (
         <Transcript
-          transcript={transcript}
+          key={history ? focusItemId : "live"}
+          transcript={visibleTranscript}
           threadId={threadId}
           sessionId={sessionId}
           focusItemId={focusItemId}
-          earlier={earlier}
+          earlier={history ? undefined : earlier}
         />
       ) : firstMessage ? (
         <FirstMessage input={firstMessage} status={session.status} />
@@ -162,13 +193,15 @@ export function ThreadView({
         // A newer session holds the role: this conversation is read-only (§8.1).
         <ArchivedRoleNotice session={session} />
       ) : (
-        <>
-          {followups && !running && !archived && (
-            <FollowupChips sessionId={sessionId} suggestions={followups} />
-          )}
-          <QueuedMessages session={session} running={running} />
-          <SessionComposer session={session} running={running} checking={checking} />
-        </>
+        !history && (
+          <>
+            {followups && !running && !archived && (
+              <FollowupChips sessionId={sessionId} suggestions={followups} />
+            )}
+            <QueuedMessages session={session} running={running} />
+            <SessionComposer session={session} running={running} checking={checking} />
+          </>
+        )
       )}
     </div>
   );

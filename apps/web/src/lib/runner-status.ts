@@ -17,6 +17,13 @@ export function runnerStatusText(
   const note = runner.lastError ? `\n${runner.lastError}` : "";
   switch (runner.state) {
     case "connected":
+      if (runner.responsive === false) {
+        return {
+          tone: "failed",
+          label: "Runner unresponsive",
+          detail: `The runner is connected and hasn't answered the server recently.${note}`,
+        };
+      }
       return { tone: "done", label: "Ready", detail: `Runner connected · ${providers}${note}` };
     case "starting":
       return {

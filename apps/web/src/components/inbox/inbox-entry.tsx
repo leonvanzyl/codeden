@@ -30,17 +30,19 @@ function planBefore(transcript: TranscriptState, itemId: string): string | undef
 
 /** The mirrored approval or question, answered with the same card as the transcript. */
 function MirroredRequest({ item }: { item: InboxItem }) {
-  // The latest turn, reaching back to the request if it is older.
-  const { transcript } = useTranscript(item.sessionId ?? undefined, {
+  const { transcript, focusedTranscript } = useTranscript(item.sessionId ?? undefined, {
     turns: 1,
     ...(item.itemId ? { item: item.itemId } : {}),
   });
-  const mirrored = item.itemId ? transcript?.items[item.itemId]?.item : undefined;
+  const source = item.itemId && transcript?.items[item.itemId] ? transcript : focusedTranscript;
+  const mirrored = item.itemId ? source?.items[item.itemId]?.item : undefined;
   if (!item.sessionId) return null;
   if (!transcript) return <Skeleton className="h-24 w-full rounded-xl" />;
   if (mirrored?.kind === "approval_request") {
     const plan =
-      mirrored.action === "plan" && item.itemId ? planBefore(transcript, item.itemId) : undefined;
+      mirrored.action === "plan" && item.itemId && source
+        ? planBefore(source, item.itemId)
+        : undefined;
     return <ApprovalCard item={mirrored} sessionId={item.sessionId} compact plan={plan} />;
   }
   if (mirrored?.kind === "user_question")

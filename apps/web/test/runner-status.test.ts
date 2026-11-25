@@ -40,4 +40,12 @@ describe("runnerStatusText (#14)", () => {
     expect(runnerStatusText("open", status({})).label).toBe("Ready");
     expect(runnerStatusText("closed", status({})).label).toBe("Connecting…");
   });
+
+  it("shows when the attached runner stops answering and clears on recovery", () => {
+    expect(runnerStatusText("open", status({ responsive: false }))).toMatchObject({
+      tone: "failed",
+      label: "Runner unresponsive",
+    });
+    expect(runnerStatusText("open", status({ responsive: true })).label).toBe("Ready");
+  });
 });

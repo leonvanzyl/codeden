@@ -24,6 +24,13 @@ interface Entry {
   bytes: number;
 }
 
+interface PendingEntry extends Entry {
+  line: string;
+}
+
+const STREAM_BATCH_ENTRIES = 16;
+const STREAM_BATCH_BYTES = 128 * 1024;
+
 export interface JournalOptions {
   /** Compact once this many acked events are still in the file. Default 1,000. */
   compactEntries?: number;
@@ -36,6 +43,10 @@ export interface JournalOptions {
    * before every save, including the one at `close`: the journal then stops writing for good.
    */
   owned?: () => boolean;
+  /** Publish each record only after its append succeeds. */
+  onAppend?: (message: RunnerEventMessage) => void;
+  /** Called once when a failed append requires recovery from disk. */
+  onAppendError?: (error: Error) => void;
 }
 
 /**
@@ -68,8 +79,18 @@ export class Journal {
   private fileBytes = 0;
   private ackedBytes = 0;
   private persistTimer: ReturnType<typeof setTimeout> | undefined;
+  private pending: PendingEntry[] = [];
+  private pendingBytes = 0;
+  private flushTimer: ReturnType<typeof setImmediate> | undefined;
+  private appendError: Error | undefined;
+  private appendCount = 0;
+  private appendMaxMs = 0;
+  private queuedBytesPeak = 0;
 
-  constructor(dir: string, opts: JournalOptions = {}) {
+  constructor(
+    dir: string,
+    private readonly opts: JournalOptions = {},
+  ) {
     mkdirSync(dir, { recursive: true });
     this.file = join(dir, "journal.jsonl");
     this.stateFile = join(dir, "state.json");
@@ -102,26 +123,109 @@ export class Journal {
     return this.entries.length - this.head;
   }
 
+  /** Serialized bytes awaiting append or server acknowledgment. */
+  get queuedBytes(): number {
+    return this.fileBytes - this.ackedBytes + this.pendingBytes;
+  }
+
+  takeAppendDiagnostics() {
+    const metrics = {
+      appendCount: this.appendCount,
+      appendMaxMs: this.appendMaxMs,
+      journalQueuedBytes: Math.max(this.queuedBytes, this.queuedBytesPeak),
+    };
+    this.appendCount = 0;
+    this.appendMaxMs = 0;
+    this.queuedBytesPeak = this.queuedBytes;
+    return metrics;
+  }
+
   /** Assign the next seq, persist the event, and return the wire message. */
   append(event: RunnerEvent): RunnerEventMessage {
-    this.state.lastSeq += 1;
+    this.flushDeltas();
+    const entry = this.prepare(event);
+    this.write([entry]);
+    return entry.msg;
+  }
+
+  /** Coalesce streamed deltas from this event-loop turn into a bounded append. */
+  queueDelta(event: RunnerEvent): void {
+    if (this.handedOver) return;
+    if (this.appendError) throw this.appendError;
+    const entry = this.prepare(event);
+    if (
+      this.pending.length === STREAM_BATCH_ENTRIES ||
+      this.pendingBytes + entry.bytes > STREAM_BATCH_BYTES
+    ) {
+      this.flushDeltas();
+    }
+    if (this.handedOver) return;
+    if (entry.bytes > STREAM_BATCH_BYTES) {
+      this.write([entry]);
+      return;
+    }
+    this.pending.push(entry);
+    this.pendingBytes += entry.bytes;
+    this.queuedBytesPeak = Math.max(this.queuedBytesPeak, this.queuedBytes);
+    this.flushTimer ??= setImmediate(() => {
+      try {
+        this.flushDeltas();
+      } catch (error) {
+        if (error !== this.appendError || !this.opts.onAppendError) throw error;
+      }
+    });
+  }
+
+  flushDeltas(): void {
+    if (this.flushTimer) clearImmediate(this.flushTimer);
+    this.flushTimer = undefined;
+    if (this.appendError) throw this.appendError;
+    if (this.pending.length === 0) return;
+    const entries = this.pending;
+    this.pending = [];
+    this.pendingBytes = 0;
+    this.write(entries);
+  }
+
+  private prepare(event: RunnerEvent): PendingEntry {
     const msg: RunnerEventMessage = {
       type: "event",
-      seq: this.state.lastSeq,
+      seq: this.state.lastSeq + this.pending.length + 1,
       ts: new Date().toISOString(),
       event,
     };
     const line = `${JSON.stringify(msg)}\n`;
-    if (!this.handedOver) appendFileSync(this.file, line);
-    const bytes = Buffer.byteLength(line);
-    this.entries.push({ msg, bytes });
-    this.fileBytes += bytes;
-    return msg;
+    return { msg, line, bytes: Buffer.byteLength(line) };
+  }
+
+  private write(batch: PendingEntry[]): void {
+    if (!this.handedOver && !this.owned()) this.handOver();
+    if (this.handedOver) return;
+    const startedAt = performance.now();
+    try {
+      appendFileSync(this.file, batch.map((entry) => entry.line).join(""));
+    } catch (error) {
+      // A partial write can contain whole records. Only restart may recover their sequence
+      // numbers from disk. Stop writing and compacting until then.
+      this.appendError = error instanceof Error ? error : new Error(String(error));
+      this.cancelPersist();
+      this.opts.onAppendError?.(this.appendError);
+      throw this.appendError;
+    }
+    this.appendCount += 1;
+    this.appendMaxMs = Math.max(this.appendMaxMs, performance.now() - startedAt);
+    for (const { msg, bytes } of batch) {
+      this.entries.push({ msg, bytes });
+      this.fileBytes += bytes;
+      this.state.lastSeq = msg.seq;
+    }
+    this.queuedBytesPeak = Math.max(this.queuedBytesPeak, this.queuedBytes);
+    for (const { msg } of batch) this.opts.onAppend?.(msg);
   }
 
   /** Acknowledge everything with `seq <= seq` (cumulative ack). */
   ack(seq: number): void {
-    if (this.handedOver) return;
+    if (this.handedOver || this.appendError) return;
     const upTo = Math.min(seq, this.state.lastSeq);
     if (upTo <= this.state.ackedSeq) return;
     this.state.ackedSeq = upTo;
@@ -141,6 +245,7 @@ export class Journal {
 
   /** Persist the acked position and drop every acked event from the file (runner shutdown). */
   close(): void {
+    this.flushDeltas();
     this.persist(true);
   }
 
@@ -150,8 +255,11 @@ export class Journal {
    */
   handOver(): void {
     this.handedOver = true;
-    if (this.persistTimer) clearTimeout(this.persistTimer);
-    this.persistTimer = undefined;
+    if (this.flushTimer) clearImmediate(this.flushTimer);
+    this.flushTimer = undefined;
+    this.pending = [];
+    this.pendingBytes = 0;
+    this.cancelPersist();
   }
 
   private advanceHead(ackedSeq: number): void {
@@ -182,15 +290,19 @@ export class Journal {
     this.persistTimer.unref();
   }
 
+  private cancelPersist(): void {
+    if (this.persistTimer) clearTimeout(this.persistTimer);
+    this.persistTimer = undefined;
+  }
+
   /**
    * Write the acked position, then compact when it is due (`all`: whenever anything is acked).
    * State first, so `lastSeq` outlives the events the compaction drops.
    */
   private persist(all: boolean): void {
-    if (this.persistTimer) clearTimeout(this.persistTimer);
-    this.persistTimer = undefined;
+    this.cancelPersist();
     if (!this.handedOver && !this.owned()) this.handOver();
-    if (this.handedOver) return;
+    if (this.handedOver || this.appendError) return;
     this.writeState(this.state);
     if (all ? this.head > 0 : this.compactDue()) this.compact();
   }

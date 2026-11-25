@@ -29,6 +29,7 @@ import {
   RetryInboxResponse,
   ReviewSessionRequest,
   ReviewSessionResponse,
+  RunnerConnectionStatus,
   SESSION_LOOKUP_MAX,
   SendMessageRequest,
   SessionSnapshot,
@@ -466,6 +467,22 @@ describe("api schemas", () => {
     // A server from before paging sent no count: it was always the whole session.
     expect(roundTrip(SessionSnapshot, snapshot).earlierTurns).toBe(0);
     expect(roundTrip(SessionSnapshot, { ...snapshot, earlierTurns: 12 }).earlierTurns).toBe(12);
+    const focused = { threads: [], turns: [], items: [] };
+    expect(roundTrip(SessionSnapshot, { ...snapshot, focused }).focused).toEqual(focused);
+  });
+
+  it("round-trips an attached runner's responsiveness and accepts older status messages", () => {
+    const status = {
+      state: "connected",
+      runnerId: "r1",
+      version: "0.0.0",
+      providers: [],
+      lastError: null,
+    };
+    expect(roundTrip(RunnerConnectionStatus, status).responsive).toBeUndefined();
+    expect(roundTrip(RunnerConnectionStatus, { ...status, responsive: false }).responsive).toBe(
+      false,
+    );
   });
 
   it("coerces query strings", () => {

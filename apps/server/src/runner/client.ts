@@ -139,6 +139,8 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 /** Wait `ms`, or less when `signal` aborts first. */
 const pause = (ms: number, signal: AbortSignal) =>
   delay(ms, undefined, { signal }).catch(() => undefined);
+const HEARTBEAT_INTERVAL_MS = 5_000;
+const HEARTBEAT_TIMEOUT_MS = 10_000;
 
 /**
  * Server side of the runner protocol (§4.3): reaches the runner over a `RunnerTransport`
@@ -153,6 +155,8 @@ export class RunnerClient {
   /** The connection attempt in flight, if any; `stop()` waits for it to settle. */
   private attempt: Promise<void> | undefined;
   private reconnectDelay = 250;
+  private heartbeatTimer: ReturnType<typeof setTimeout> | undefined;
+  private heartbeatId: string | undefined;
   private readonly pending = new Map<string, Pending>();
   private connectedWaiters: Array<() => void> = [];
   private runnerId: string | undefined;
@@ -250,6 +254,7 @@ export class RunnerClient {
   async stop(): Promise<void> {
     this.stopped = true;
     this.abort.abort();
+    this.clearHeartbeat();
     const transport = this.transport;
     this.transport = undefined;
     await transport?.close("server stopping");
@@ -326,6 +331,7 @@ export class RunnerClient {
     const mcp = this.opts.mcpLink && this.mcpLinkServer(this.opts.mcpLink, () => transport);
     const handlers: RunnerTransportHandlers = {
       onMessage: (raw) => {
+        if (!transport || this.transport !== transport || abandoned) return;
         try {
           const msg = RunnerToServerMessage.parse(raw);
           if (msg.type === "welcome") {
@@ -408,6 +414,7 @@ export class RunnerClient {
     // A transport a newer one replaced changes nothing (`stop` clears it before closing).
     if (this.transport !== undefined && this.transport !== transport) return;
     const wasConnected = this.current.state === "connected";
+    this.clearHeartbeat();
     this.transport = undefined;
     if (wasConnected && this.runnerId) {
       this.opts.store.append([
@@ -424,7 +431,7 @@ export class RunnerClient {
     }
     this.failPending("connection closed");
     if (this.current.state !== "incompatible") {
-      this.setStatus({ ...this.current, state: "disconnected" });
+      this.setStatus({ ...this.current, state: "disconnected", responsive: undefined });
     }
     if (!this.stopped && wasConnected) void this.connectLoop();
   }
@@ -464,6 +471,12 @@ export class RunnerClient {
         this.send({ type: "pong", id: msg.id });
         return;
       case "pong":
+        if (msg.id !== this.heartbeatId) return;
+        this.clearHeartbeat();
+        if (this.current.responsive === false) {
+          this.setStatus({ ...this.current, responsive: true });
+        }
+        this.scheduleHeartbeat(HEARTBEAT_INTERVAL_MS);
         return;
     }
   }
@@ -509,12 +522,33 @@ export class RunnerClient {
       version: msg.runnerVersion,
       providers: msg.providers,
       lastError: versionNote,
+      responsive: true,
     });
     this.send({ type: "resume", lastAckedSeq: this.lastAckedSeq });
+    this.scheduleHeartbeat(HEARTBEAT_INTERVAL_MS);
     this.afterHandshake(msg);
     const waiters = this.connectedWaiters;
     this.connectedWaiters = [];
     for (const w of waiters) w();
+  }
+
+  private scheduleHeartbeat(ms: number): void {
+    this.heartbeatTimer = setTimeout(() => {
+      if (this.stopped || !this.transport || this.current.state !== "connected") return;
+      if (this.heartbeatId && this.current.responsive !== false) {
+        this.setStatus({ ...this.current, responsive: false });
+      }
+      const id = randomUUID();
+      this.heartbeatId = id;
+      this.scheduleHeartbeat(HEARTBEAT_TIMEOUT_MS);
+      this.send({ type: "ping", id });
+    }, ms).unref();
+  }
+
+  private clearHeartbeat(): void {
+    clearTimeout(this.heartbeatTimer);
+    this.heartbeatTimer = undefined;
+    this.heartbeatId = undefined;
   }
 
   /**

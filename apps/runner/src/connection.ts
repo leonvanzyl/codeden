@@ -8,6 +8,7 @@ import {
   ServerToRunnerMessage as ServerToRunnerSchema,
 } from "@codeden/contracts";
 import type { WSContext, WSEvents } from "hono/ws";
+import { WebSocket } from "ws";
 import { executeCommand, type RunnerCore } from "./commands";
 import { CommandError } from "./errors";
 import type { McpLinkChannel } from "./mcp/link-upstream";
@@ -21,6 +22,8 @@ export type { RunnerCore };
  */
 export class ServerConnection implements McpLinkChannel {
   private attached = false;
+  private replayMaxMs = 0;
+  private socketQueuedBytes = 0;
 
   constructor(
     private readonly ws: WSContext,
@@ -40,8 +43,18 @@ export class ServerConnection implements McpLinkChannel {
   /** Send an MCP frame (never journaled); false when this connection isn't attached and open. */
   sendMcp(frame: McpLinkRunnerFrame): boolean {
     if (!this.attached || this.ws.readyState !== 1) return false;
-    this.ws.send(JSON.stringify(frame));
+    this.send(frame);
     return true;
+  }
+
+  takeDiagnostics() {
+    const metrics = {
+      replayMaxMs: this.replayMaxMs,
+      socketQueuedBytes: this.socketQueuedBytes,
+    };
+    this.replayMaxMs = 0;
+    this.socketQueuedBytes = this.bufferedBytes;
+    return metrics;
   }
 
   detach(): void {
@@ -95,15 +108,18 @@ export class ServerConnection implements McpLinkChannel {
           backend: this.core.backend,
         });
         return;
-      case "resume":
+      case "resume": {
         // Synchronous replay + attach: nothing can be journaled in between.
+        const startedAt = performance.now();
         this.core.journal.ack(msg.lastAckedSeq);
         for (const event of this.core.journal.after(msg.lastAckedSeq)) this.send(event);
+        this.replayMaxMs = Math.max(this.replayMaxMs, performance.now() - startedAt);
         this.attached = true;
         this.onAttach(this);
         // Models discovered between `welcome` and now would otherwise be missed.
         this.send({ type: "providers", providers: this.core.registry.info() });
         return;
+      }
       case "ack":
         this.core.journal.ack(msg.seq);
         return;
@@ -150,8 +166,14 @@ export class ServerConnection implements McpLinkChannel {
     });
   }
 
-  private send(msg: RunnerToServerMessage): void {
-    if (this.ws.readyState === 1) this.ws.send(JSON.stringify(msg));
+  private get bufferedBytes(): number {
+    return this.ws.raw instanceof WebSocket ? this.ws.raw.bufferedAmount : 0;
+  }
+
+  private send(msg: RunnerToServerMessage | McpLinkRunnerFrame): void {
+    if (this.ws.readyState !== 1) return;
+    this.ws.send(JSON.stringify(msg));
+    this.socketQueuedBytes = Math.max(this.socketQueuedBytes, this.bufferedBytes);
   }
 }
 

@@ -1,11 +1,18 @@
-import type { Project, ProjectCheck, Session, Snapshot } from "@codeden/contracts";
+import type {
+  Project,
+  ProjectCheck,
+  Session,
+  SessionSnapshot,
+  Snapshot,
+  TranscriptMessage,
+} from "@codeden/contracts";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef } from "react";
 import { toast } from "sonner";
 import { useTranscriptsStore } from "@/stores/transcripts";
 import { type CodeDenClient, useClient } from "./api";
 import { sessionLoader } from "./session-batch";
-import type { TranscriptState } from "./transcript/reducer";
+import { type TranscriptState, transcriptFromSnapshot } from "./transcript/reducer";
 
 export const snapshotKey = ["snapshot"] as const;
 
@@ -171,6 +178,49 @@ export function useProjectChecks(projectId: string): ProjectCheck[] {
 /** Root turns a transcript opens with, and each page of earlier ones adds. */
 export const TRANSCRIPT_PAGE_TURNS = 20;
 
+function transcriptQuery(
+  client: CodeDenClient,
+  sessionId: string | undefined,
+  turns: number,
+  item: string | undefined,
+) {
+  return {
+    queryKey: ["session", sessionId, turns, item ?? null],
+    queryFn: () => client.getSessionSnapshot(sessionId ?? "", { turns, ...(item ? { item } : {}) }),
+    enabled: Boolean(sessionId),
+    staleTime: Infinity,
+  };
+}
+
+function focusedPage(snapshot: SessionSnapshot | undefined): TranscriptState | undefined {
+  if (!snapshot?.focused) return undefined;
+  return transcriptFromSnapshot({ ...snapshot, ...snapshot.focused, earlierTurns: 0 });
+}
+
+function touchesFocused(page: NonNullable<SessionSnapshot["focused"]>, msg: TranscriptMessage) {
+  const turns = new Set(page.turns.map((turn) => turn.id));
+  const children = new Set(page.threads.filter((t) => t.parentThreadId).map((thread) => thread.id));
+  const items = new Set(page.items.map((entry) => entry.item.id));
+  return (
+    msg.turns.some((turn) => turns.has(turn.id) || children.has(turn.threadId)) ||
+    msg.items.some((item) => turns.has(item.turnId) || children.has(item.threadId)) ||
+    msg.threads.some(
+      (thread) =>
+        children.has(thread.id) || (thread.parentItemId && items.has(thread.parentItemId)),
+    )
+  );
+}
+
+/** The historical root turn currently open in the transcript, also used by its subagent panel. */
+export function useFocusedTranscript(sessionId: string, item: string | undefined) {
+  const client = useClient();
+  return useQuery({
+    ...transcriptQuery(client, sessionId, TRANSCRIPT_PAGE_TURNS, item),
+    enabled: Boolean(item),
+    select: focusedPage,
+  }).data;
+}
+
 /**
  * Load a session's transcript into the live store and return it. Only its latest root turns are
  * fetched (`turns`, a page by default), reaching back to `item` when given (a search hit), so a
@@ -182,6 +232,7 @@ export function useTranscript(
   opts: { turns?: number; item?: string } = {},
 ): {
   transcript: TranscriptState | undefined;
+  focusedTranscript: TranscriptState | undefined;
   isLoading: boolean;
   error: Error | null;
 } {
@@ -189,12 +240,7 @@ export function useTranscript(
   const queryClient = useQueryClient();
   const turns = opts.turns ?? TRANSCRIPT_PAGE_TURNS;
   const item = opts.item;
-  const query = useQuery({
-    queryKey: ["session", sessionId, turns, item ?? null],
-    queryFn: () => client.getSessionSnapshot(sessionId ?? "", { turns, ...(item ? { item } : {}) }),
-    enabled: Boolean(sessionId),
-    staleTime: Infinity,
-  });
+  const query = useQuery(transcriptQuery(client, sessionId, turns, item));
   const resynced = useRef(false);
   useEffect(() => {
     if (!query.data) return;
@@ -205,16 +251,30 @@ export function useTranscript(
   const seq = query.data?.seq;
   useEffect(() => {
     if (!sessionId || seq === undefined) return;
+    const { queryKey } = transcriptQuery(client, sessionId, turns, item);
     return client.watchSession(sessionId, seq, (msg) => {
-      if (msg.type === "transcript") useTranscriptsStore.getState().applyTranscript(msg);
-      else {
+      if (msg.type === "transcript") {
+        useTranscriptsStore.getState().applyTranscript(msg);
+        // Historical approvals and subagents can still change while this bounded page is open.
+        if (item) {
+          const snapshot = queryClient.getQueryData<SessionSnapshot>(queryKey);
+          if (
+            snapshot?.focused &&
+            msg.seq > snapshot.seq &&
+            touchesFocused(snapshot.focused, msg)
+          ) {
+            void queryClient.invalidateQueries({ queryKey, exact: true }, { cancelRefetch: false });
+          }
+        }
+      } else {
         resynced.current = true;
         void queryClient.invalidateQueries({ queryKey: ["session", sessionId] });
       }
     });
-  }, [client, queryClient, sessionId, seq]);
+  }, [client, item, queryClient, sessionId, seq, turns]);
   const transcript = useTranscriptsStore((s) => (sessionId ? s.byId[sessionId] : undefined));
-  return { transcript, isLoading: query.isLoading, error: query.error };
+  const focusedTranscript = useMemo(() => focusedPage(query.data), [query.data]);
+  return { transcript, focusedTranscript, isLoading: query.isLoading, error: query.error };
 }
 
 /** The root turns before a loaded transcript's earliest one, and loading them a page at a time. */
