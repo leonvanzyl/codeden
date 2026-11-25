@@ -25,6 +25,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ApiRequestError, useClient } from "@/lib/api";
+import { DIFF_LIMITS, isLargePatch, visibleFiles } from "@/lib/diff-limits";
 import {
   type CommentAnchor,
   captureRange,
@@ -39,6 +40,7 @@ import { isNotGitRepo } from "@/lib/session-workspace";
 import { cn } from "@/lib/utils";
 import { type ReviewComment, sessionComments, useDiffReviewStore } from "@/stores/diff-review";
 import { useResolvedTheme } from "@/stores/theme";
+import { CollapsedFile, MoreFiles } from "./diff-collapsed";
 import { CompareLegend, CompareMenuItems, sessionName } from "./diff-compare";
 import { DiffLinePicker } from "./diff-line-picker";
 import {
@@ -149,6 +151,18 @@ export function DiffPanel({ sessionId }: { sessionId: string }) {
   // Until it's loaded, none are on screen, so the review bar offers a way to every open one.
   const ready = !isLoading && !failed;
   const anchors = useReviewAnchors(sessionId, scopeKey, ready ? files : null);
+  // A big diff draws a page of files at a time (`DIFF_LIMITS`), plus every file with comments
+  // so Show can reach them; another session or scope starts again at the first page.
+  const listKey = `${sessionId} ${scopeKey}`;
+  const [page, setPage] = useState<{ key: string; shown: number }>({
+    key: listKey,
+    shown: DIFF_LIMITS.filesPerPage,
+  });
+  const shown = page.key === listKey ? page.shown : DIFF_LIMITS.filesPerPage;
+  const drawn = useMemo(
+    () => visibleFiles(files, shown, (f) => anchors.byPath.has(f.path)),
+    [files, shown, anchors],
+  );
   const body = useRef<HTMLDivElement>(null);
   const [reveal, setReveal] = useState<string | null>(null);
   const show = useCallback(
@@ -324,7 +338,7 @@ export function DiffPanel({ sessionId }: { sessionId: string }) {
           </EmptyState>
         ) : (
           <div className="space-y-3 p-2">
-            {files.map((f) => (
+            {drawn.map((f) => (
               <FilePatch
                 key={f.path}
                 sessionId={sessionId}
@@ -337,6 +351,13 @@ export function DiffPanel({ sessionId }: { sessionId: string }) {
                 onRestore={canRestore ? () => restore.mutate([f.path]) : undefined}
               />
             ))}
+            {drawn.length < files.length && (
+              <MoreFiles
+                drawn={drawn.length}
+                total={files.length}
+                onMore={() => setPage({ key: listKey, shown: shown + DIFF_LIMITS.filesPerPage })}
+              />
+            )}
           </div>
         )}
       </div>
@@ -386,8 +407,10 @@ function FilePatch({
     },
     [sessionId, scopeKey, file.path, file.patch],
   );
+  // A very large file waits to be asked for, unless a comment needs it drawn (`isLargePatch`).
+  const [open, setOpen] = useState(() => annotations.length > 0 || !isLargePatch(file));
   // In the file's header, laid out with its name and counts rather than over them.
-  const pickLines = commentable && !file.binary;
+  const pickLines = commentable && !file.binary && open;
   const actions =
     pickLines || onRestore ? (
       <div className="flex items-center gap-1">
@@ -431,6 +454,8 @@ function FilePatch({
           </span>
           {actions}
         </div>
+      ) : !open ? (
+        <CollapsedFile file={file} actions={actions} onOpen={() => setOpen(true)} />
       ) : (
         <PatchDiff
           patch={file.patch}
