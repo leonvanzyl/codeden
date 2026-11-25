@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { AutonomyLevel, ProviderId, QuietHours, ReasoningEffort } from "./common";
+import { AppearanceSettings } from "./theme";
 import { TokenSaverSettings } from "./token-saver";
 import { UpdateMode } from "./updates";
 import { DictationEngine, WhisperModelId } from "./voice-api";
@@ -97,11 +98,8 @@ const CustomModelList = z
  */
 export const Settings = z.object({
   schemaVersion: z.literal(1).default(1),
-  appearance: z
-    .object({
-      theme: z.enum(["system", "dark", "light"]).default("dark"),
-    })
-    .prefault({}),
+  /** Light/dark mode, the theme of each mode and custom themes (see `theme.ts`). */
+  appearance: AppearanceSettings.prefault({}),
   /** Default autonomy level (§11.2), overridable per project and session. */
   autonomy: z
     .object({

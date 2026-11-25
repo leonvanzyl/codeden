@@ -36,6 +36,7 @@ import { relatedSessions } from "@/lib/fork-origin";
 import { ageShort } from "@/lib/format";
 import { useSession, useSnapshotData } from "@/lib/queries";
 import { isNotGitRepo } from "@/lib/session-workspace";
+import { useDiffThemes } from "@/lib/theme/diff-theme";
 import { cn } from "@/lib/utils";
 import { type ReviewComment, sessionComments, useDiffReviewStore } from "@/stores/diff-review";
 import { useResolvedTheme } from "@/stores/theme";
@@ -367,6 +368,7 @@ function FilePatch({
   onRestore?: () => void;
 }) {
   const card = useCommentButtonLabels();
+  const syntax = useDiffThemes();
   // Lines picked with the line numbers; otherwise the open comment's lines stay highlighted.
   const [picked, setPicked] = useState<SelectedLineRange | null>(null);
   // Its id is watched, not its text, so typing doesn't re-render the diff.
@@ -435,7 +437,7 @@ function FilePatch({
         <PatchDiff
           patch={file.patch}
           options={{
-            theme: { dark: "pierre-dark", light: "pierre-light" },
+            theme: syntax,
             themeType: options.theme,
             diffStyle: options.split ? "split" : "unified",
             overflow: options.wrap ? "wrap" : "scroll",

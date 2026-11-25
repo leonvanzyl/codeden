@@ -194,6 +194,21 @@
   }
 }
 
+/*
+ * Themes other than CodeDen's own two (`lib/theme/`) set every colour variable above on
+ * `<html>` and add `data-theme`. These rules cover what a variable can't reach; CodeDen Light
+ * and Dark never match them, so they look exactly as designed.
+ */
+html[data-theme] ::selection {
+  background: color-mix(in oklch, var(--primary) 30%, transparent);
+}
+/* The diff and file views (`@pierre/diffs`) sit on the theme's inset surface instead of their
+   syntax theme's own background. Their host rule loses to this. */
+html[data-theme] diffs-container {
+  --diffs-dark-bg: var(--surface);
+  --diffs-light-bg: var(--surface);
+}
+
 /* Unlayered so it wins over Streamdown's utility classes. */
 /* Dense, readable markdown for transcripts. */
 .markdown {

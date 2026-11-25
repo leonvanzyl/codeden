@@ -94,3 +94,24 @@ export function srgbToHex([r, g, b]: Rgb): string {
       .padStart(2, "0");
   return `#${byte(r)}${byte(g)}${byte(b)}`;
 }
+
+/** The sRGB transfer curve back to linear light. */
+function decode(x: number): number {
+  return x <= 0.04045 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4;
+}
+
+/** Gamma-encoded sRGB as OKLCH (hue 0 for greys); the inverse of `oklchToSrgb`. */
+export function srgbToOklch([r, g, b]: Rgb): Omit<Oklch, "alpha"> {
+  const R = decode(r);
+  const G = decode(g);
+  const B = decode(b);
+  const l_ = Math.cbrt(0.4122214708 * R + 0.5363325363 * G + 0.0514459929 * B);
+  const m_ = Math.cbrt(0.2119034982 * R + 0.6806995451 * G + 0.1073969566 * B);
+  const s_ = Math.cbrt(0.0883024619 * R + 0.2817188376 * G + 0.6299787005 * B);
+  const L = 0.2104542553 * l_ + 0.793617785 * m_ - 0.0040720468 * s_;
+  const A = 1.9779984951 * l_ - 2.428592205 * m_ + 0.4505937099 * s_;
+  const Bk = 0.0259040371 * l_ + 0.7827717662 * m_ - 0.808675766 * s_;
+  const c = Math.hypot(A, Bk);
+  const h = c < 1e-4 ? 0 : ((Math.atan2(Bk, A) * 180) / Math.PI + 360) % 360;
+  return { l: L, c, h };
+}

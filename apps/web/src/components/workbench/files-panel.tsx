@@ -7,6 +7,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useClient } from "@/lib/api";
 import type { FileNode } from "@/lib/api/types";
 import { buildFileTree } from "@/lib/file-tree";
+import { useDiffThemes } from "@/lib/theme/diff-theme";
 import { cn } from "@/lib/utils";
 import { useResolvedTheme } from "@/stores/theme";
 
@@ -85,6 +86,7 @@ function TreeNode({
 export function FilesPanel({ sessionId }: { sessionId: string }) {
   const client = useClient();
   const theme = useResolvedTheme();
+  const syntax = useDiffThemes();
   const [selected, setSelected] = useState<string | null>(null);
   const list = useQuery({
     queryKey: ["files", sessionId],
@@ -140,7 +142,7 @@ export function FilesPanel({ sessionId }: { sessionId: string }) {
           <FileView
             file={{ name: file.data.path, contents: file.data.content }}
             options={{
-              theme: { dark: "pierre-dark", light: "pierre-light" },
+              theme: syntax,
               themeType: theme,
               overflow: "scroll",
               stickyHeader: true,

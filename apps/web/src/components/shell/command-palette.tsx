@@ -39,11 +39,13 @@ import { formatCombo, type ShortcutId, shortcut } from "@/lib/shortcuts";
 import { useLayoutStore } from "@/stores/layout";
 import { useThemeStore } from "@/stores/theme";
 import { useUiStore } from "@/stores/ui";
+import { PaletteThemes } from "./palette-themes";
 import { PaletteTranscripts, paletteFilter } from "./palette-transcripts";
 import { ProjectTile } from "./sidebar/project-group";
 
 const SETTINGS = [
   "general",
+  "appearance",
   "providers",
   "autonomy",
   "voice",
@@ -346,6 +348,7 @@ export function CommandPalette() {
               onSelect={run(() => navigate({ to: "/setup" }))}
             />
           </CommandGroup>
+          <PaletteThemes close={() => setOpen(false)} />
           <CommandGroup heading="Settings">
             {SETTINGS.map((section) => (
               <Row

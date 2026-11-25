@@ -11,6 +11,7 @@ import {
   Keyboard,
   type LucideIcon,
   Mic,
+  Palette,
   Settings2,
   ShieldCheck,
   SlidersHorizontal,
@@ -18,6 +19,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import type { ReactNode } from "react";
+import { AppearanceSettings } from "@/components/settings/sections-appearance";
 import {
   AutonomySettings,
   GeneralSettings,
@@ -75,6 +77,7 @@ function About() {
 
 const SECTIONS: { id: string; label: string; icon: LucideIcon; render: () => ReactNode }[] = [
   { id: "general", label: "General", icon: Settings2, render: () => <GeneralSettings /> },
+  { id: "appearance", label: "Appearance", icon: Palette, render: () => <AppearanceSettings /> },
   { id: "providers", label: "Providers", icon: Bot, render: () => <ProviderSettings /> },
   { id: "autonomy", label: "Autonomy", icon: ShieldCheck, render: () => <AutonomySettings /> },
   { id: "github", label: "GitHub", icon: GitPullRequest, render: () => <GithubSettings /> },

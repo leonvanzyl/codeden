@@ -10,6 +10,7 @@ import { installClipboardFallback } from "@/lib/clipboard";
 import { notifyCopyFailed } from "@/lib/copy";
 import { platform } from "@/lib/platform";
 import { startRealtime } from "@/lib/realtime";
+import { startThemeSync } from "@/lib/theme/sync";
 import { router } from "@/router";
 import { applyTheme, useThemeStore } from "@/stores/theme";
 import "./index.css";
@@ -28,9 +29,14 @@ const queryClient = new QueryClient({
 });
 const client = createClient();
 
-applyTheme(useThemeStore.getState().preference);
-useThemeStore.subscribe((s) => applyTheme(s.preference));
+applyTheme(useThemeStore.getState());
+useThemeStore.subscribe(applyTheme);
+// `system` follows the OS while the app is open.
+window
+  .matchMedia("(prefers-color-scheme: light)")
+  .addEventListener("change", (e) => useThemeStore.setState({ systemDark: !e.matches }));
 startRealtime(client, queryClient);
+startThemeSync(client, queryClient);
 // Phones on the LAN use plain http, where browsers hide the Clipboard API; code block copy
 // buttons in rendered markdown call it directly.
 installClipboardFallback(notifyCopyFailed);

@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useClient } from "@/lib/api";
 import { platform } from "@/lib/platform";
+import { useDiffThemes } from "@/lib/theme/diff-theme";
 import { cn } from "@/lib/utils";
 import { useResolvedTheme } from "@/stores/theme";
 
@@ -165,6 +166,7 @@ function FileDiffBody({
   diff: GithubPrDiffFile | undefined;
 }) {
   const theme = useResolvedTheme();
+  const syntax = useDiffThemes();
   if (diff?.patch) {
     // A patch the renderer can't parse shows a note for this file only, not a broken PR view.
     return (
@@ -180,7 +182,7 @@ function FileDiffBody({
         <PatchDiff
           patch={diff.patch}
           options={{
-            theme: { dark: "pierre-dark", light: "pierre-light" },
+            theme: syntax,
             themeType: theme,
             diffStyle: "unified",
             overflow: "wrap",

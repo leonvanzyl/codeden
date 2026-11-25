@@ -9,37 +9,18 @@ import { AUTONOMY } from "@/components/thread/autonomy";
 import { Switch } from "@/components/ui/switch";
 import { useSetupStatus, useSnapshotData } from "@/lib/queries";
 import { cn } from "@/lib/utils";
-import { type ThemePreference, useThemeStore } from "@/stores/theme";
 import { AgentEnvironmentSettings } from "./agent-environment";
 import { CustomModelSettings } from "./custom-models";
 import { ModelVisibilitySettings } from "./model-visibility";
 import { ProviderHistorySettings } from "./provider-history";
-import { Segmented, SettingRow, SettingsSection, useSettings } from "./settings-ui";
+import { SettingRow, SettingsSection, useSettings } from "./settings-ui";
 import { TokenSaverSettingsSection } from "./token-saver";
 import { UpdateModeSetting } from "./update-mode";
 
 export function GeneralSettings() {
   const { settings, update } = useSettings();
-  const preference = useThemeStore((s) => s.preference);
-  const setPreference = useThemeStore((s) => s.setPreference);
   return (
     <>
-      <SettingsSection title="Appearance">
-        <SettingRow label="Theme" help="Dark is the default; light mirrors it.">
-          <Segmented<ThemePreference>
-            value={preference}
-            onChange={(v) => {
-              setPreference(v);
-              update({ appearance: { theme: v } });
-            }}
-            options={[
-              { value: "dark", label: "Dark" },
-              { value: "light", label: "Light" },
-              { value: "system", label: "System" },
-            ]}
-          />
-        </SettingRow>
-      </SettingsSection>
       <SettingsSection
         title="Follow-up prompts"
         description="Suggested next prompts appear as chips when a turn completes."
