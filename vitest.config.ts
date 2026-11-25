@@ -244,8 +244,20 @@ async function idleShare(ms: number): Promise<number> {
  * CPU. With a worker per CPU on top of that load, the process-heavy suites starved each other
  * past their timeouts, and Vitest's own workers could not start within its fixed 60 s.
  * `VITEST_MAX_WORKERS` (which Vitest reads for every project) or `--maxWorkers` still wins.
+ *
+ * Vitest evaluates this file again for each inline project with its own Vite config (they
+ * extend it by default), while the other projects resolve at the same time. So the machine is
+ * measured once per process and every evaluation shares that answer: a second measurement could
+ * set the variable halfway through, leaving the projects resolved before it with the default
+ * worker count, and Vitest refuses projects with different `maxWorkers` in the same group.
  */
-async function capWorkersWhenBusy(): Promise<void> {
+function capWorkersWhenBusy(): Promise<void> {
+  const run = globalThis as { codedenBusyCheck?: Promise<void> };
+  run.codedenBusyCheck ??= checkBusy();
+  return run.codedenBusyCheck;
+}
+
+async function checkBusy(): Promise<void> {
   if (process.env.VITEST_MAX_WORKERS) return;
   if (process.argv.some((arg) => arg.startsWith("--maxWorkers"))) return;
   const idle = await idleShare(300);
