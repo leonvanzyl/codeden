@@ -6,7 +6,14 @@ import { countLines, normalizePatch } from "@/lib/api/mock/fixtures/patches";
 import { inboxItems } from "@/lib/api/mock/fixtures/sessions";
 import { MockWorld } from "@/lib/api/mock/world";
 import { cronError, describeCron, nextRuns } from "@/lib/cron";
-import { ageShort, duration, subagentStatsParts, subagentStatsTitle, until } from "@/lib/format";
+import {
+  ageShort,
+  clockTime,
+  duration,
+  subagentStatsParts,
+  subagentStatsTitle,
+  until,
+} from "@/lib/format";
 import { groupInbox, inboxCounts } from "@/lib/inbox";
 import { formatCombo, matchesCombo } from "@/lib/shortcuts";
 import { applyDomainEvent } from "@/lib/snapshot-reducer";
@@ -180,6 +187,28 @@ describe("formatting", () => {
     expect(duration(96_000)).toBe("1m 36s");
     expect(duration(4200)).toBe("4.2s");
     expect(until("2026-11-07T12:38:00.000Z", now)).toBe("in 38 min");
+  });
+  it("says when something happened by local calendar day (#653)", () => {
+    // Local times, so the test holds in any time zone; a Thursday mid-morning.
+    const nowLocal = new Date(2026, 10, 26, 10, 0).getTime();
+    const at = (year: number, day: number, hour: number) =>
+      new Date(year, 10, day, hour, 5).toISOString();
+    const time = (hour: number) =>
+      new Date(2026, 10, 1, hour, 5).toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+      });
+    const weekday = (day: number) =>
+      new Date(2026, 10, day).toLocaleDateString([], { weekday: "short" });
+    expect(clockTime(at(2026, 26, 0), nowLocal)).toBe(time(0));
+    expect(clockTime(at(2026, 25, 23), nowLocal)).toBe(`yesterday ${time(23)}`);
+    expect(clockTime(at(2026, 23, 9), nowLocal)).toBe(`${weekday(23)} ${time(9)}`);
+    // A week back the weekday would be ambiguous: the date instead, with the year once it differs.
+    const older = clockTime(at(2026, 19, 9), nowLocal);
+    expect(older).toMatch(/19/);
+    expect(older).not.toMatch(/2026/);
+    expect(clockTime(at(2025, 19, 9), nowLocal)).toMatch(/2025/);
   });
   it("formats a subagent's reported figures, only those present", () => {
     expect(subagentStatsParts({ totalTokens: 48_213, toolUses: 23, durationMs: 72_000 })).toEqual([

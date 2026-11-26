@@ -21,6 +21,10 @@ export function ago(iso: string, now = Date.now()): string {
   return d === 1 ? "yesterday" : `${d} days ago`;
 }
 
+/** "09:00": the time of day, 24-hour. */
+const hourMinute = (d: Date) =>
+  d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+
 /** "in 38 min", "in 2 h 30 min", "tomorrow 09:00", "Mon 09:00". */
 export function until(iso: string, now = Date.now()): string {
   const target = new Date(iso);
@@ -32,7 +36,7 @@ export function until(iso: string, now = Date.now()): string {
     const m = mins % 60;
     return m ? `in ${h} h ${m} min` : `in ${h} h`;
   }
-  const time = target.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+  const time = hourMinute(target);
   const today = new Date(now);
   const tomorrow = new Date(now + 86_400_000);
   if (target.toDateString() === today.toDateString()) return `today ${time}`;
@@ -41,6 +45,23 @@ export function until(iso: string, now = Date.now()): string {
   if (mins >= 6 * 24 * 60)
     return `${target.toLocaleDateString([], { day: "numeric", month: "short" })} ${time}`;
   return `${target.toLocaleDateString([], { weekday: "short" })} ${time}`;
+}
+
+/** When something happened: "14:32" today, "yesterday 14:32", "Mon 14:32", "3 Dec 14:32". */
+export function clockTime(iso: string, now = Date.now()): string {
+  const target = new Date(iso);
+  const time = hourMinute(target);
+  const today = new Date(now);
+  if (target.toDateString() === today.toDateString()) return time;
+  // By calendar day, not 24 h back, so a DST change doesn't skip or repeat a day.
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  if (target.toDateString() === yesterday.toDateString()) return `yesterday ${time}`;
+  // A weekday alone is ambiguous from a week back.
+  if (now - target.getTime() < 6 * 86_400_000)
+    return `${target.toLocaleDateString([], { weekday: "short" })} ${time}`;
+  const year = target.getFullYear() === today.getFullYear() ? undefined : "numeric";
+  return `${target.toLocaleDateString([], { day: "numeric", month: "short", year })} ${time}`;
 }
 
 /** "850ms", "4.2s", "1m 36s", "1h 4m". */
