@@ -303,7 +303,7 @@ With the **Issue triage** automation on (GitHub projects only), each new issue g
 Then:
 
 - a **ready** issue starts a session (work key `issue:<n>`) if `autoStart` is on, the project isn't in Manual mode and the issue's author is trusted (see below);
-- otherwise you get a **"Should I take this on?"** inbox item to accept (a session starts) or decline.
+- otherwise you get a **"Should I take this on?"** inbox item to accept (a session starts) or decline. It resolves on its own when the issue is closed on GitHub ("Issue #12 was closed as completed"); reopening the issue doesn't bring it back, the next triage run asks again. The project's PM can also resolve a stale one with a reason, which you can undo with **Restore**.
 
 ### Who triage starts work for
 
