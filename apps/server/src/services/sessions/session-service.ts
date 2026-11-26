@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import type {
   AutonomyLevel,
   CompactSessionResponse,
@@ -697,7 +698,12 @@ export class SessionService {
     }
   }
 
-  /** Queue a message; `at` is a place reserved for it earlier (`Outbox.reserve`). */
+  /**
+   * Queue a message; `at` is a place reserved for it earlier (`Outbox.reserve`). A message from
+   * CodeDen's own senders (a PM, the orchestrator, an automation…) that is already waiting
+   * word for word from the same sender is not queued twice: the waiting one carries it (#657).
+   * The user's messages are always queued.
+   */
   private enqueue(
     id: string,
     input: UserInput,
@@ -705,7 +711,11 @@ export class SessionService {
     at?: string,
   ): SendMessageResponse {
     const session = this.deps.repo.get(id);
-    this.deps.outbox.push(id, this.externalize(session, input), from, at);
+    const stored = this.externalize(session, input);
+    const waiting =
+      from !== "user" &&
+      this.deps.outbox.list(id).some((m) => m.from === from && isDeepStrictEqual(m.input, stored));
+    if (!waiting) this.deps.outbox.push(id, stored, from, at);
     return { status: "queued" };
   }
 

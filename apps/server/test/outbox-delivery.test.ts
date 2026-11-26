@@ -217,6 +217,47 @@ describe("a send the runner answers too late (#657)", () => {
   });
 });
 
+describe("repeated requests while a turn runs (#657)", () => {
+  it("queues a message waiting word for word from the same sender once; the user's always", async () => {
+    const { sessions, sent } = service({ status: "running", send: async () => {} });
+    const send = (text: string, from: "orchestrator" | "automation" | "user") =>
+      sessions.send("s1", { input: input(text), whenBusy: "queue" }, from);
+
+    for (const [text, from] of [
+      ["status?", "orchestrator"],
+      ["status?", "orchestrator"],
+      ["status?", "automation"],
+      ["status?", "user"],
+      ["status?", "user"],
+      ["status of #12?", "orchestrator"],
+      ["status?", "automation"],
+    ] as const) {
+      await expect(send(text, from)).resolves.toEqual({ status: "queued" });
+    }
+    expect(outbox.list("s1").map((m) => [m.input.text, m.from])).toEqual([
+      ["status?", "orchestrator"],
+      ["status?", "automation"],
+      ["status?", "user"],
+      ["status?", "user"],
+      ["status of #12?", "orchestrator"],
+    ]);
+
+    // Once delivered, the same request queues again.
+    repo.update("s1", (s) => ({ ...s, status: "idle" }));
+    await sessions.flushOutbox("s1");
+    expect(sent).toEqual(["status?"]);
+    repo.update("s1", (s) => ({ ...s, status: "running" }));
+    await send("status?", "orchestrator");
+    expect(outbox.list("s1").map((m) => m.from)).toEqual([
+      "automation",
+      "user",
+      "user",
+      "orchestrator",
+      "orchestrator",
+    ]);
+  });
+});
+
 describe("decorated input", () => {
   it("tells the decorator whether the runner took the turn", async () => {
     let away = true;
