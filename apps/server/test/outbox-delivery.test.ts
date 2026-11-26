@@ -1,7 +1,7 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Session, UserInput } from "@codeden/contracts";
+import { agentEventToNewEvent, type Session, type UserInput } from "@codeden/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { type Database, openDatabase } from "../src/db/client";
 import { EventStore } from "../src/events/store";
@@ -161,6 +161,100 @@ describe("queued message delivery", () => {
       sessions.send("s1", { input: input("wake"), whenBusy: "reject" }, "codeden"),
     ).rejects.toMatchObject({ code: "runner_unavailable" });
     expect(texts()).toEqual(["from the orchestrator"]);
+  });
+});
+
+describe("a send the runner answers too late (#657)", () => {
+  const timeout = () => new RunnerCommandError("timeout", "Runner command session.send timed out");
+  let turns = 0;
+  /** The runner starts the turn and its events reach the server, but the answer doesn't. */
+  const startsThenTimesOut = async () => {
+    turns += 1;
+    store.append([
+      agentEventToNewEvent("s1", { type: "thread.started", thread: { id: "t1" } }),
+      agentEventToNewEvent("s1", { type: "turn.started", threadId: "t1", turnId: `u${turns}` }),
+    ]);
+    throw timeout();
+  };
+
+  it("counts a queued message as delivered once its turn started: no idle session, no resend", async () => {
+    const { sessions, launcher } = service({ status: "idle", send: startsThenTimesOut });
+    const one = outbox.push("s1", input("one"), "orchestrator");
+    outbox.push("s1", input("two"), "automation");
+
+    await sessions.flushOutbox("s1");
+    expect(repo.get("s1").status).toBe("running");
+    expect(texts()).toEqual(["two"]);
+    expect(launcher.fail).not.toHaveBeenCalled();
+    expect(outbox.dequeuedReason("s1", one.id)).toBe("sent");
+
+    // Not held: the turn's end delivers the next message at once, with no retry wait.
+    repo.update("s1", (s) => ({ ...s, status: "idle" }));
+    await sessions.flushOutbox("s1");
+    expect(texts()).toEqual([]);
+  });
+
+  it("answers the sender `sent` when the turn its message started is already running", async () => {
+    const { sessions } = service({ status: "idle", send: startsThenTimesOut });
+    await expect(
+      sessions.send("s1", { input: input("hello"), whenBusy: "queue" }, "user"),
+    ).resolves.toEqual({ status: "sent" });
+    expect(repo.get("s1").status).toBe("running");
+    expect(texts()).toEqual([]);
+  });
+
+  it("still puts the message back when no turn started", async () => {
+    const { sessions } = service({
+      status: "idle",
+      send: async () => {
+        throw timeout();
+      },
+    });
+    outbox.push("s1", input("one"), "orchestrator");
+    await sessions.flushOutbox("s1");
+    expect(repo.get("s1").status).toBe("idle");
+    expect(texts()).toEqual(["one"]);
+  });
+});
+
+describe("repeated requests while a turn runs (#657)", () => {
+  it("queues a message waiting word for word from the same sender once; the user's always", async () => {
+    const { sessions, sent } = service({ status: "running", send: async () => {} });
+    const send = (text: string, from: "orchestrator" | "automation" | "user") =>
+      sessions.send("s1", { input: input(text), whenBusy: "queue" }, from);
+
+    for (const [text, from] of [
+      ["status?", "orchestrator"],
+      ["status?", "orchestrator"],
+      ["status?", "automation"],
+      ["status?", "user"],
+      ["status?", "user"],
+      ["status of #12?", "orchestrator"],
+      ["status?", "automation"],
+    ] as const) {
+      await expect(send(text, from)).resolves.toEqual({ status: "queued" });
+    }
+    expect(outbox.list("s1").map((m) => [m.input.text, m.from])).toEqual([
+      ["status?", "orchestrator"],
+      ["status?", "automation"],
+      ["status?", "user"],
+      ["status?", "user"],
+      ["status of #12?", "orchestrator"],
+    ]);
+
+    // Once delivered, the same request queues again.
+    repo.update("s1", (s) => ({ ...s, status: "idle" }));
+    await sessions.flushOutbox("s1");
+    expect(sent).toEqual(["status?"]);
+    repo.update("s1", (s) => ({ ...s, status: "running" }));
+    await send("status?", "orchestrator");
+    expect(outbox.list("s1").map((m) => m.from)).toEqual([
+      "automation",
+      "user",
+      "user",
+      "orchestrator",
+      "orchestrator",
+    ]);
   });
 });
 

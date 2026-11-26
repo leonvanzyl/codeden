@@ -78,6 +78,28 @@ describe("QueuedMessages", () => {
     );
   });
 
+  it("says how long the next message has waited, once that is a minute or more (#657)", async () => {
+    const at = (minutesAgo: number) => new Date(Date.now() - minutesAgo * 60_000).toISOString();
+    renderWithClient(
+      <QueuedMessages session={session()} running />,
+      withQueue({
+        list: async () => [
+          { ...queued("a", "status?", "orchestrator"), createdAt: at(15) },
+          { ...queued("b", "later"), createdAt: at(2) },
+        ],
+      }),
+    );
+    const tray = await screen.findByRole("region", { name: "Queued messages" });
+    expect(within(tray).getByText("next waiting 15m")).toBeTruthy();
+
+    const { container } = renderWithClient(
+      <QueuedMessages session={session({ id: "s-fresh" })} running />,
+      withQueue({ list: async () => [{ ...queued("c", "just now"), createdAt: at(0) }] }),
+    );
+    await within(container).findByTestId("queued-message");
+    expect(within(container).queryByText(/next waiting/)).toBeNull();
+  });
+
   it("hides send-now when the provider cannot steer", async () => {
     renderWithClient(
       <QueuedMessages session={session({ provider: "no-steer" })} running />,

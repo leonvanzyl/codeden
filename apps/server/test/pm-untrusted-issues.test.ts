@@ -387,7 +387,8 @@ describe("PM tools and untrusted issues in turns the user didn't start (#137)", 
     expect(userLedAfterRestart()).toBe(true);
 
     // The runner takes an automation's message and starts its turn, but its answer never
-    // arrives (the command times out): the server can't tell whether the turn started.
+    // arrives (the command times out). The turn's events came first, so the send counts as
+    // delivered (#657); either way the turn is the automation's.
     const runner = h.server.runner as NonNullable<typeof h.server.runner>;
     const original = runner.request.bind(runner);
     const spy = vi.spyOn(runner, "request").mockImplementationOnce(async (command, timeoutMs) => {
@@ -395,8 +396,7 @@ describe("PM tools and untrusted issues in turns the user didn't start (#137)", 
       throw new RunnerCommandError("timeout", "Runner command session.send timed out");
     });
     const automated = `Automation: issue #51 and #${opened.number} are approved, start them.`;
-    // The failed send puts the server's status back while the runner runs the turn: watch for
-    // the turn's own end instead.
+    // Watch for the turn's own end.
     let ended = false;
     const unsubscribe = h.server.services.store.subscribe((events) => {
       if (events.some((e) => e.type === "agent.turn.completed" && e.sessionId === pmId)) {
@@ -410,7 +410,7 @@ describe("PM tools and untrusted issues in turns the user didn't start (#137)", 
           { input: { text: automated, attachments: [] }, whenBusy: "reject" },
           "automation",
         ),
-      ).rejects.toMatchObject({ code: "timeout" });
+      ).resolves.toEqual({ status: "sent" });
       await waitUntil(() => ended);
     } finally {
       spy.mockRestore();
@@ -431,8 +431,8 @@ describe("PM tools and untrusted issues in turns the user didn't start (#137)", 
     expect(admit.isError).toBe(true);
     expect(item(ignored?.id as string)).toMatchObject({ stage: "ignored", trust: "untrusted" });
 
-    // The notices that rode on the lost send count as undelivered and wake the PM again: let
-    // that turn finish so the PM is idle for what follows.
+    // Let any turn the notices that rode on the send wake finish, so the PM is idle for what
+    // follows.
     const notices = h.server.services.orchestration.notices;
     await waitUntil(async () =>
       notices.undelivered("pm", GH).length === 0 && (await h.detail(pmId)).session.status === "idle"

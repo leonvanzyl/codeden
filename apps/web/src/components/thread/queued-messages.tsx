@@ -4,12 +4,18 @@ import { FileText, ListOrdered, Pencil, SendHorizontal, Trash2 } from "lucide-re
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { ImageGallery, ImageThumbnail } from "@/components/common/image-viewer";
+import { useNow } from "@/components/factory-view/hooks";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useClient } from "@/lib/api";
 import { attachmentGallery } from "@/lib/attachments";
+import { ageShort } from "@/lib/format";
 import { useSnapshotData } from "@/lib/queries";
 import { queueKey, queuePosition, senderLabel, useQueuedMessages } from "@/lib/queue";
+import { cn } from "@/lib/utils";
+
+/** A message waiting this long says so in the tray's header: delivery may be stuck (#657). */
+const LONG_WAIT_MS = 10 * 60_000;
 
 function attachmentName(attachment: Attachment): string {
   if (attachment.type === "file") return attachment.name ?? attachment.path;
@@ -203,7 +209,8 @@ function QueuedRow({
  * Messages waiting for the running turn to end, just above the composer: each with its
  * position, sender, text and thumbnails, and edit, delete and send-now actions. Send-now
  * steers the running turn, so it shows only while a turn runs on a provider that can steer.
- * A delivered message leaves the tray and shows in the transcript.
+ * A delivered message leaves the tray and shows in the transcript. The header says how long
+ * the next message has waited, in the waiting colour once that is long.
  */
 export function QueuedMessages({ session, running }: { session: Session; running: boolean }) {
   const { data: messages = [] } = useQueuedMessages(session.id);
@@ -212,7 +219,10 @@ export function QueuedMessages({ session, running }: { session: Session; running
     false,
   );
   const canSteer = running && providerCanSteer;
+  const now = useNow();
   if (messages.length === 0) return null;
+  const next = messages[0]?.createdAt;
+  const waited = next ? now - Date.parse(next) : 0;
   return (
     <section
       aria-label="Queued messages"
@@ -224,6 +234,17 @@ export function QueuedMessages({ session, running }: { session: Session; running
           <ListOrdered className="size-3" />
           <span className="font-medium text-foreground/80">{messages.length} queued</span>
           <span>· sent one at a time when the current turn ends</span>
+          {next && waited >= 60_000 && (
+            <span
+              className={cn(
+                "ml-auto shrink-0 tabular-nums",
+                waited >= LONG_WAIT_MS && "font-medium text-status-waiting",
+              )}
+              title={`The next message was queued ${new Date(next).toLocaleString()}`}
+            >
+              next waiting {ageShort(next, now)}
+            </span>
+          )}
         </div>
         <ul className="max-h-64 divide-y divide-border/60 overflow-y-auto scroll-thin">
           {messages.map((m, i) => (

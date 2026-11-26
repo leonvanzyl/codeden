@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import type {
   AutonomyLevel,
   CompactSessionResponse,
@@ -48,7 +49,7 @@ import { compactingRefusal, compactionRunning, compactRefusal, startCompaction }
 import { derivePurpose, deriveWorkKey, findConflicts } from "./conflicts";
 import { planFork } from "./fork";
 import { planHandoff } from "./handoff";
-import type { InputDecorator } from "./input-decorator";
+import { type InputDecorator, mayHaveStarted } from "./input-decorator";
 import type { LaunchFork, SessionLauncher } from "./launcher";
 import type { Outbox } from "./outbox";
 import { isTransientRunnerError, isTurnRunningError, OutboxHolds } from "./outbox-holds";
@@ -658,6 +659,7 @@ export class SessionService {
     const runner = this.runnerOf(session.id);
     await applyPendingConfig(this.deps.repo, runner, session);
     const previous = session.status;
+    const turnsBefore = this.deps.repo.turnCount(session.id);
     // Messaging an archived agent session brings it back; an archived role session never gets
     // here (`send` refuses it) and would stay archived.
     this.deps.repo.update(session.id, (s) => ({
@@ -681,6 +683,10 @@ export class SessionService {
         await this.deps.launcher.resume(this.deps.repo.get(session.id), input);
       }
     } catch (error) {
+      // The runner answered too late (or the link dropped), but the turn this input started
+      // already reached the server: it was delivered. Undoing it would show the session idle
+      // under a running turn and send the message a second time (#657).
+      if (mayHaveStarted(error) && this.deps.repo.turnCount(session.id) > turnsBefore) return;
       // Refused because the provider is running a turn: the session is running, so it stays so
       // and that turn's end delivers what waits. Anything else: back to how it was.
       if (!isTurnRunningError(error)) {
@@ -692,7 +698,12 @@ export class SessionService {
     }
   }
 
-  /** Queue a message; `at` is a place reserved for it earlier (`Outbox.reserve`). */
+  /**
+   * Queue a message; `at` is a place reserved for it earlier (`Outbox.reserve`). A message from
+   * CodeDen's own senders (a PM, the orchestrator, an automation…) that is already waiting
+   * word for word from the same sender is not queued twice: the waiting one carries it (#657).
+   * The user's messages are always queued.
+   */
   private enqueue(
     id: string,
     input: UserInput,
@@ -700,7 +711,11 @@ export class SessionService {
     at?: string,
   ): SendMessageResponse {
     const session = this.deps.repo.get(id);
-    this.deps.outbox.push(id, this.externalize(session, input), from, at);
+    const stored = this.externalize(session, input);
+    const waiting =
+      from !== "user" &&
+      this.deps.outbox.list(id).some((m) => m.from === from && isDeepStrictEqual(m.input, stored));
+    if (!waiting) this.deps.outbox.push(id, stored, from, at);
     return { status: "queued" };
   }
 
