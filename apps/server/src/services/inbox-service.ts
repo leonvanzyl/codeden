@@ -9,6 +9,7 @@ import {
   type InboxItemKind,
   type InboxSettlement,
   inboxAttempts,
+  inboxRestorable,
   inboxWaitsOnYou,
   type JsonValue,
   type ListInboxQuery,
@@ -196,16 +197,16 @@ export class InboxService {
   }
 
   /**
-   * Undo a bulk dismiss: reopen the given items a bulk dismiss closed, in one transaction. One
-   * since re-raised, settled or dismissed by hand is left as it is, so exactly the dismissed set
-   * comes back.
+   * Undo a bulk dismiss or the PM's resolution of stale items: reopen the given items closed that
+   * way (`inboxRestorable`), in one transaction. One since re-raised, settled or closed by hand
+   * is left as it is, so exactly the closed set comes back.
    */
   restoreMany(ids: readonly string[]): RestoreInboxResponse {
     const now = new Date().toISOString();
     const reopened: InboxItem[] = [];
     for (const id of new Set(ids)) {
       const item = this.find(id);
-      if (item?.status !== "dismissed" || !bulkDismissed(item) || inboxWaitsOnYou(item)) continue;
+      if (!item || !inboxRestorable(item)) continue;
       reopened.push({
         ...item,
         status: "open",
@@ -260,12 +261,6 @@ function waitsOnYou(): SQL {
   const answer = inArray(inboxItems.kind, [...INBOX_ANSWER_KINDS]);
   const act = inArray(inboxItems.notify, [...INBOX_ACT_NOTIFY]);
   return sql`(${answer} or (${eq(inboxItems.priority, "high")} and ${act}))`;
-}
-
-/** The item was closed by a bulk dismiss (`dismissMany`), not one at a time. */
-function bulkDismissed(item: InboxItem): boolean {
-  const r = item.resolution;
-  return typeof r === "object" && r !== null && !Array.isArray(r) && r.bulk === true;
 }
 
 /** `item` closed now with `status` and `resolution` (append it as `inbox.updated`). */

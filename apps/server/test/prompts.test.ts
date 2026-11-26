@@ -196,6 +196,7 @@ describe("PM system prompt", () => {
       - GitHub: \`list_issues\`, \`get_issue\`, \`triage_issue\`, \`report_triage\`, \`create_issue\`, \`get_pr_status\`.
       - Notes: \`read_project_notes\`, \`update_project_notes\` (your durable memory for this project: decisions, conventions, follow-ups).
       - People: \`answer_question\` for your agents' questions, \`ask_user\` for decisions only the user can make, \`message_orchestrator\` to report to the orchestrator.
+      - Inbox: \`list_inbox_items\` (every open item of the project), \`resolve_inbox_item\` (a stale triage decision or informational message, with a reason; approvals and questions stay with the user).
       - Follow-ups: \`schedule_wakeup\`, \`list_wakeups\`, \`cancel_wakeup\`.
 
       ## Decide, don't ask

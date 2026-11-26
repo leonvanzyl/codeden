@@ -117,6 +117,8 @@ describe("CodeDen MCP endpoint", () => {
       "message_session",
       "stop_session",
       "answer_question",
+      "list_inbox_items",
+      "resolve_inbox_item",
       "list_scheduled_runs",
       "skip_next_run",
       "pause_automation",
