@@ -565,9 +565,10 @@ export const DismissInboxResponse = z.object({
 export type DismissInboxResponse = z.infer<typeof DismissInboxResponse>;
 
 /**
- * `POST /api/inbox/restore`: undo a bulk dismiss. Reopens the given items that a bulk dismiss
- * closed and that are still dismissed; anything since re-raised, settled or dismissed by hand
- * is left as it is.
+ * `POST /api/inbox/restore`: undo a bulk dismiss, or the PM's resolution of a stale item.
+ * Reopens the given items that a bulk dismiss closed or the PM resolved and that are still
+ * closed that way (`inboxRestorable`); anything since re-raised, settled or closed by hand is
+ * left as it is.
  */
 export const RestoreInboxRequest = z.object({ ids: z.array(Id).min(1).max(INBOX_BULK_MAX) });
 export type RestoreInboxRequest = z.infer<typeof RestoreInboxRequest>;
