@@ -31,6 +31,21 @@ export function TriageCard({ item }: { item: InboxItem }) {
 
   const onAccepted = (res: TriageDecisionResponse) => {
     const start = res.start;
+    if (start?.status === "conflict" && res.item.status !== "open") {
+      // The issue's work was already running: the decision closed, nothing new started.
+      const running = start.existing.find((w) => w.sessionId)?.sessionId ?? null;
+      toast.info("Already being worked on", {
+        description: "No new session started.",
+        action: running
+          ? {
+              label: "Open session",
+              onClick: () =>
+                void navigate({ to: "/sessions/$sessionId", params: { sessionId: running } }),
+            }
+          : undefined,
+      });
+      return;
+    }
     if (start?.status === "conflict") {
       void queryClient.invalidateQueries({ queryKey: ["conflicts"] });
       toast.warning("Matching work is already running", {

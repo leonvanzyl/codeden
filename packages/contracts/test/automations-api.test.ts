@@ -9,6 +9,7 @@ import {
   TriageDecisionResponse,
   TriagePolicy,
   TriageReport,
+  TriageReportResult,
 } from "../src";
 import { sampleAutomation, ts } from "./fixtures";
 
@@ -132,5 +133,23 @@ describe("automations API (§10)", () => {
         start: null,
       }).start,
     ).toBeNull();
+    const work = {
+      kind: "session",
+      id: "s1",
+      sessionId: "s1",
+      projectId: "p1",
+      startedBy: { kind: "automation", id: "factory" },
+      purpose: "Resolve #1",
+      workKey: "issue:1",
+      scope: { projectId: "p1" },
+      progress: null,
+      status: "running",
+      startedAt: ts,
+    };
+    const running = { status: "already_running", existing: [work] };
+    expect(TriageReportResult.parse(running)).toEqual(running);
+    expect(TriageReportResult.safeParse({ status: "already_running", existing: [] }).success).toBe(
+      false,
+    );
   });
 });

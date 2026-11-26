@@ -123,6 +123,7 @@ export class AutomationService implements AutomationPort {
       github: deps.github,
       triageAutomation: (projectId) => this.triageAutomation(projectId),
       sessionAutonomy: (automation, project) => this.runAutonomy(automation, project),
+      activeWork: (projectId) => deps.repo.activeWork(projectId),
       reported: (projectId, issueNumber, decision) =>
         this.executor.completeTriage(projectId, issueNumber, decision),
     });

@@ -14,6 +14,7 @@ import {
   TriagePolicy,
   type TriageReport,
   type TriageReportResult,
+  type WorkSummary,
 } from "@codeden/contracts";
 import { and, eq } from "drizzle-orm";
 import type { Db } from "../../db/client";
@@ -54,6 +55,8 @@ export interface TriageDeps {
    * approved (undefined: the project's default). The policy's own level when absent.
    */
   sessionAutonomy?: (automation: Automation, project: Project) => AutonomyLevel | undefined;
+  /** Running or queued work in a project (sessions and automation runs). */
+  activeWork: (projectId: string) => WorkSummary[];
   /** A report arrived: complete the triage runs waiting on this issue. */
   reported?: (projectId: string, issueNumber: number, decision: string) => void;
 }
@@ -66,6 +69,12 @@ export function triageItemId(projectId: string, issueNumber: number): string {
 function policyOf(automation: Automation | undefined): TriagePolicy {
   const raw = automation?.action.type === "triage" ? automation.action.policy : undefined;
   return TriagePolicy.parse(raw ?? {});
+}
+
+/** How a triage decision settles when the issue's work is already running. */
+function alreadyRunning(running: WorkSummary[]): { by: "codeden"; note: string } {
+  const what = running[0]?.purpose ?? "another session";
+  return { by: "codeden", note: `Already being worked on: ${what}` };
 }
 
 /** What the inbox item says when the author is not trusted. */
@@ -118,6 +127,14 @@ export class TriageService {
 
   private async act(project: Project, report: TriageReport): Promise<TriageReportResult> {
     if (report.decision !== "ready") return { status: "recorded" };
+    const id = triageItemId(project.id, report.issueNumber);
+    const running = this.issueWork(project.id, report.issueNumber);
+    if (running.length > 0) {
+      // Someone already took it on: asking "Should I take this on?" would only lead to a conflict.
+      const open = this.deps.inbox.find(id);
+      if (open?.status === "open") this.deps.inbox.settle(open, alreadyRunning(running));
+      return { status: "already_running", existing: running };
+    }
     const automation = this.deps.triageAutomation(project.id);
     const policy = this.sessionPolicy(automation, project);
     const { issue, author } = this.syncedIssue(project, report.issueNumber);
@@ -129,7 +146,6 @@ export class TriageService {
       });
       return { status: "started", start };
     }
-    const id = triageItemId(project.id, report.issueNumber);
     const existing = this.deps.inbox.find(id);
     if (existing?.status === "open") return { status: "inbox", inboxItemId: id };
     const now = new Date().toISOString();
@@ -165,6 +181,13 @@ export class TriageService {
     const item = this.openItem(itemId);
     const project = this.deps.projects.get(item.projectId ?? "");
     if (!item.issue) throw badRequest("The decision has no issue", "no_issue");
+    const running = req.conflict ? [] : this.issueWork(project.id, item.issue.number);
+    if (running.length > 0) {
+      // The work started since the PM asked (the factory or another session picked it up):
+      // there is nothing left to decide, so the decision closes instead of raising a conflict.
+      const closed = this.deps.inbox.settle(item, alreadyRunning(running));
+      return { item: closed, start: { status: "conflict", existing: running } };
+    }
     const policy = this.sessionPolicy(this.deps.triageAutomation(project.id), project);
     const start = await this.startForIssue(
       project,
@@ -197,6 +220,11 @@ export class TriageService {
     const policy = policyOf(automation);
     if (!automation || !this.deps.sessionAutonomy) return policy;
     return { ...policy, autonomy: this.deps.sessionAutonomy(automation, project) };
+  }
+
+  /** Running or queued work on issue `number` (its work key is `issue:<number>`). */
+  private issueWork(projectId: string, number: number): WorkSummary[] {
+    return this.deps.activeWork(projectId).filter((w) => w.workKey === `issue:${number}`);
   }
 
   private openItem(itemId: string): InboxItem {

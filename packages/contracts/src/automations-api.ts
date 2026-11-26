@@ -262,6 +262,11 @@ export const TriageReportResult = z.discriminatedUnion("status", [
   z.object({ status: z.literal("started"), start: StartSessionResponse }),
   /** `ready`, waiting on the user's "Should I take this on?" decision. */
   z.object({ status: z.literal("inbox"), inboxItemId: Id }),
+  /**
+   * `ready`, but work on the issue is already running or queued (the factory or another
+   * session picked it up): nothing started and nobody is asked.
+   */
+  z.object({ status: z.literal("already_running"), existing: z.array(WorkSummary).min(1) }),
 ]);
 export type TriageReportResult = z.infer<typeof TriageReportResult>;
 
@@ -277,7 +282,10 @@ export type TriageDecisionRequest = z.infer<typeof TriageDecisionRequest>;
 
 export const TriageDecisionResponse = z.object({
   item: InboxItem,
-  /** The session start when accepted (possibly `conflict`); null when declined. */
+  /**
+   * The session start when accepted; null when declined. `conflict` with a closed `item`: the
+   * issue's work was already running, so the decision closed without starting anything.
+   */
   start: StartSessionResponse.nullable(),
 });
 export type TriageDecisionResponse = z.infer<typeof TriageDecisionResponse>;

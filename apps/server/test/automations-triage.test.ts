@@ -5,6 +5,7 @@ import {
   InboxItem,
   Project,
   type Role,
+  StartSessionResponse,
   TriageDecisionResponse,
   TriageReportResult,
 } from "@codeden/contracts";
@@ -158,6 +159,54 @@ describe("issue triage (§10)", () => {
       issue: { number: 42 },
       startedBy: { kind: "user" },
     });
+  });
+
+  it("doesn't ask about an issue whose work is already running, and closes a stale ask", async () => {
+    // A session already working on the issue (held on an approval, so it stays active).
+    const startOn = async (number: number) => {
+      const res = StartSessionResponse.parse(
+        (
+          await h.api("POST", "/sessions", {
+            projectId: GH,
+            provider: "fake",
+            purpose: `Resolve #${number}`,
+            workKey: `issue:${number}`,
+            input: { text: "edit something [approval]" },
+          })
+        ).body,
+      );
+      if (res.status !== "started") throw new Error(`not started: ${res.status}`);
+      await waitUntil(async () =>
+        (await h.detail(res.sessionId)).session.status === "waiting" ? true : undefined,
+      );
+      return res.sessionId;
+    };
+
+    const running = await startOn(60);
+    const result = await report({ issueNumber: 60, decision: "ready", summary: "Clear." });
+    expect(result).toMatchObject({
+      status: "already_running",
+      existing: [{ sessionId: running, workKey: "issue:60" }],
+    });
+    expect(h.server.services.inbox.find(`triage:${GH}:60`)).toBeUndefined();
+
+    // Asked first, then the work started elsewhere: taking it on closes the ask, no conflict.
+    expect(await report({ issueNumber: 61, decision: "ready", summary: "Clear." })).toMatchObject({
+      status: "inbox",
+    });
+    const other = await startOn(61);
+    const accepted = TriageDecisionResponse.parse(
+      (await h.api("POST", `/automations/triage/triage:${GH}:61/accept`, {})).body,
+    );
+    expect(accepted.item).toMatchObject({
+      status: "resolved",
+      resolution: { by: "codeden", note: "Already being worked on: Resolve #61" },
+    });
+    expect(accepted.start).toMatchObject({
+      status: "conflict",
+      existing: [{ sessionId: other }],
+    });
+    expect(h.server.services.inbox.list().some((i) => i.kind === "conflict")).toBe(false);
   });
 
   it("records other decisions, declines, and auto-starts when the policy allows", async () => {
