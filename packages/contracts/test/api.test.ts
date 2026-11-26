@@ -15,6 +15,8 @@ import {
   INBOX_BULK_MAX,
   type InboxItem,
   type InboxItemKind,
+  InboxSettlement,
+  inboxRestorable,
   inboxWaitsOnYou,
   ListSessionsQuery,
   LoginCommandResponse,
@@ -140,6 +142,31 @@ describe("api schemas", () => {
     // High priority but the factory's own activity, or low priority for a person: notices.
     expect(inboxWaitsOnYou(item("message", { priority: "high", notify: "factory" }))).toBe(false);
     expect(inboxWaitsOnYou(item("message", { priority: "low", notify: "needs_you" }))).toBe(false);
+  });
+
+  it("restores bulk dismissals and the PM's resolutions, nothing else (#673)", () => {
+    const closed = (extra: Partial<InboxItem>): InboxItem => ({
+      ...sampleInboxItem,
+      kind: "message",
+      notify: "automation",
+      status: "dismissed",
+      resolvedAt: sampleInboxItem.createdAt,
+      ...extra,
+    });
+    const pm = roundTrip(InboxSettlement, { by: "pm", note: "Issue #12 was closed upstream" });
+    expect(inboxRestorable(closed({ resolution: { bulk: true } }))).toBe(true);
+    expect(inboxRestorable(closed({ kind: "triage", status: "resolved", resolution: pm }))).toBe(
+      true,
+    );
+    // Waits on the user: a bulk dismiss never closes it, so it never undoes one either.
+    expect(inboxRestorable(closed({ kind: "triage", resolution: { bulk: true } }))).toBe(false);
+    // Closed by hand, settled by CodeDen, or open again.
+    expect(inboxRestorable(closed({ resolution: { note: "done" } }))).toBe(false);
+    expect(inboxRestorable(closed({ resolution: { by: "codeden", note: "Issue closed" } }))).toBe(
+      false,
+    );
+    expect(inboxRestorable(closed({ status: "open", resolution: pm }))).toBe(false);
+    expect(InboxSettlement.safeParse({ by: "someone", note: "x" }).success).toBe(false);
   });
 
   it("names the open conflict a start replaces", () => {

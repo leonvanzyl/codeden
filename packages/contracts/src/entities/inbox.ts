@@ -132,12 +132,30 @@ export function inboxWaitsOnYou(item: Pick<InboxItem, "kind" | "priority" | "not
 /**
  * The resolution of an item CodeDen closed by itself, never a person: a `run_failed` item the
  * factory handles (`factory`: it restarts the work, on another provider when this one can't
- * run), or one whose work moved on (`codeden`: the session ran again, another session of the same
- * work succeeded, its pull request merged or closed, its factory item finished). `note` says
- * which, in a few words.
+ * run), one whose work moved on (`codeden`: the session ran again, another session of the same
+ * work succeeded, its pull request merged or closed, its factory item finished, a triage
+ * decision's issue was closed), or one the project's PM resolved as stale (`pm`, with its reason;
+ * `resolve_inbox_item`, which the user can undo: `inboxRestorable`). `note` says which, in a few
+ * words.
  */
 export const InboxSettlement = z.object({
-  by: z.enum(["codeden", "factory"]),
+  by: z.enum(["codeden", "factory", "pm"]),
   note: z.string(),
 });
 export type InboxSettlement = z.infer<typeof InboxSettlement>;
+
+/**
+ * `POST /api/inbox/restore` reopens the item: one a bulk dismiss closed (resolution
+ * `{ bulk: true }`) that doesn't wait on the user, or one the project's PM resolved
+ * (`InboxSettlement` by `pm`). Anything since re-raised, settled or closed by hand is not.
+ */
+export function inboxRestorable(
+  item: Pick<InboxItem, "kind" | "priority" | "notify" | "status" | "resolution">,
+): boolean {
+  const r = item.resolution;
+  if (item.status === "open" || typeof r !== "object" || r === null || Array.isArray(r)) {
+    return false;
+  }
+  if (r.by === "pm") return true;
+  return item.status === "dismissed" && r.bulk === true && !inboxWaitsOnYou(item);
+}

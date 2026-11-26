@@ -1,4 +1,4 @@
-import { type InboxItem, InboxSettlement } from "@codeden/contracts";
+import type { InboxItem } from "@codeden/contracts";
 import { Link } from "@tanstack/react-router";
 import { ArrowUpRight, CircleDot, GitPullRequest } from "lucide-react";
 import { ProjectTile } from "@/components/shell/sidebar/project-group";
@@ -7,12 +7,13 @@ import { QuestionCard } from "@/components/thread/cards/question-card";
 import { Markdown } from "@/components/thread/markdown";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ago } from "@/lib/format";
+import { settledNote } from "@/lib/inbox";
 import { platform } from "@/lib/platform";
 import { useProject, useTranscript } from "@/lib/queries";
 import type { TranscriptState } from "@/lib/transcript/reducer";
 import { cn } from "@/lib/utils";
 import { FactoryInboxCard, factoryInboxKind } from "./factory-inbox";
-import { InboxActions, PrReviewStatus } from "./inbox-actions";
+import { InboxActions, PrReviewStatus, RestoreButton } from "./inbox-actions";
 import { TriageCard } from "./triage-card";
 
 /** The plan a plan approval asks about: the latest plan before it in the same turn. */
@@ -51,12 +52,6 @@ function MirroredRequest({ item }: { item: InboxItem }) {
       {item.body && <p className="mt-1 text-[13px] text-muted-foreground">{item.body}</p>}
     </div>
   );
-}
-
-/** Why CodeDen settled the item by itself ("PR #12 merged"), when it did. */
-function settledNote(item: InboxItem): string | null {
-  const parsed = InboxSettlement.safeParse(item.resolution);
-  return parsed.success ? parsed.data.note : null;
 }
 
 /** DOM id of an inbox entry (a conflict card too), for scrolling it into view. */
@@ -151,10 +146,13 @@ export function InboxEntry({ item, focused = false }: { item: InboxItem; focused
             </div>
           )}
           {resolved && (
-            <p className="mt-2 text-2xs text-status-done">
-              Resolved {item.resolvedAt ? ago(item.resolvedAt) : ""}
-              {settledNote(item) && ` · ${settledNote(item)}`}
-            </p>
+            <div className="mt-2 flex items-center gap-2">
+              <p className="text-2xs text-status-done">
+                Resolved {item.resolvedAt ? ago(item.resolvedAt) : ""}
+                {settledNote(item) && ` · ${settledNote(item)}`}
+              </p>
+              <RestoreButton item={item} />
+            </div>
           )}
         </div>
       )}

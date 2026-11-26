@@ -48,6 +48,7 @@ import {
 import { PrReviewInbox } from "./review-inbox";
 import { GithubStore, type IssueStateFilter } from "./store";
 import { GithubSync } from "./sync";
+import { resolveClosedTriage, syncedIssues, triagedIssues } from "./triage-inbox";
 
 export interface GithubServiceDeps extends RunnerDeps {
   db: Db;
@@ -115,24 +116,35 @@ export class GithubService {
   }
 
   /**
-   * Follow PR events (merge follow-up, the `pr_review` inbox item) and, unless `sync: false`,
-   * poll GitHub projects.
+   * Follow PR and issue events (merge follow-up, the `pr_review` inbox item, triage decisions of
+   * closed issues) and, unless `sync: false`, poll GitHub projects. Triage decisions whose issue
+   * was already closed when it starts resolve now.
    */
   start(opts: { sync?: boolean } = {}): void {
     this.unsubscribe ??= this.deps.store.subscribe((events) => {
       this.followUp.onEvents(events);
       this.linkSoon(events);
-      if (!events.some((e) => e.type.startsWith("pr."))) return;
+      const prs = events.some((e) => e.type.startsWith("pr."));
+      const closed = syncedIssues(events).filter((i) => i.state === "closed");
+      if (!prs && closed.length === 0) return;
       // After commit, never inside the store's notification.
       setImmediate(() => {
-        try {
-          this.reviewInbox.onEvents(events);
-        } catch (error) {
-          this.deps.log?.(`github: review inbox: ${errorMessage(error)}`);
-        }
+        if (prs) this.inboxSafely("review inbox", () => this.reviewInbox.onEvents(events));
+        this.inboxSafely("triage inbox", () => resolveClosedTriage(this.deps.inbox, closed));
       });
     });
+    this.inboxSafely("triage inbox", () =>
+      resolveClosedTriage(this.deps.inbox, triagedIssues(this.deps.inbox, this.data)),
+    );
     if (opts.sync !== false) this.sync.start();
+  }
+
+  private inboxSafely(what: string, fn: () => void): void {
+    try {
+      fn();
+    } catch (error) {
+      this.deps.log?.(`github: ${what}: ${errorMessage(error)}`);
+    }
   }
 
   /**

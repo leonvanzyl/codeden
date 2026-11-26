@@ -2,6 +2,7 @@ import type { AnyServerTool } from "../../define";
 import { createAutomation, updateAutomation } from "./automation-edit";
 import { listAutomations, reportTriage, runAutomation } from "./automations";
 import { createIssue, getIssue, listIssues, triageIssue } from "./github";
+import { listInboxItems, resolveInboxItem } from "./inbox";
 import { messageOrchestrator, readProjectNotes, updateProjectNotes } from "./notes";
 import { answerQuestion } from "./questions";
 import { getSession } from "./session-detail";
@@ -27,6 +28,8 @@ export const pmTools: AnyServerTool[] = [
   messageSession,
   stopSession,
   answerQuestion,
+  listInboxItems,
+  resolveInboxItem,
   listScheduledRuns,
   skipNextRun,
   pauseAutomation,

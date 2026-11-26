@@ -7,7 +7,9 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useClient } from "@/lib/api";
+import { settledNote } from "@/lib/inbox";
 import { platform } from "@/lib/platform";
+import { RestoreButton } from "./inbox-actions";
 
 /** "Should I take this on? #12 Fix the login" -> the issue title part. */
 function questionOf(item: InboxItem): string {
@@ -102,9 +104,12 @@ export function TriageCard({ item }: { item: InboxItem }) {
           </div>
         )}
         {!open ? (
-          <p className="text-2xs text-muted-foreground">
-            {item.status === "resolved" ? "Accepted" : "Declined"}
-          </p>
+          <div className="flex items-center gap-2">
+            <p className="text-2xs text-muted-foreground">
+              {settledNote(item) ?? (item.status === "resolved" ? "Accepted" : "Declined")}
+            </p>
+            <RestoreButton item={item} />
+          </div>
         ) : declining ? (
           <div className="flex items-center gap-2">
             <Input
