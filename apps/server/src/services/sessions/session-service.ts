@@ -48,7 +48,7 @@ import { compactingRefusal, compactionRunning, compactRefusal, startCompaction }
 import { derivePurpose, deriveWorkKey, findConflicts } from "./conflicts";
 import { planFork } from "./fork";
 import { planHandoff } from "./handoff";
-import type { InputDecorator } from "./input-decorator";
+import { type InputDecorator, mayHaveStarted } from "./input-decorator";
 import type { LaunchFork, SessionLauncher } from "./launcher";
 import type { Outbox } from "./outbox";
 import { isTransientRunnerError, isTurnRunningError, OutboxHolds } from "./outbox-holds";
@@ -658,6 +658,7 @@ export class SessionService {
     const runner = this.runnerOf(session.id);
     await applyPendingConfig(this.deps.repo, runner, session);
     const previous = session.status;
+    const turnsBefore = this.deps.repo.turnCount(session.id);
     // Messaging an archived agent session brings it back; an archived role session never gets
     // here (`send` refuses it) and would stay archived.
     this.deps.repo.update(session.id, (s) => ({
@@ -681,6 +682,10 @@ export class SessionService {
         await this.deps.launcher.resume(this.deps.repo.get(session.id), input);
       }
     } catch (error) {
+      // The runner answered too late (or the link dropped), but the turn this input started
+      // already reached the server: it was delivered. Undoing it would show the session idle
+      // under a running turn and send the message a second time (#657).
+      if (mayHaveStarted(error) && this.deps.repo.turnCount(session.id) > turnsBefore) return;
       // Refused because the provider is running a turn: the session is running, so it stays so
       // and that turn's end delivers what waits. Anything else: back to how it was.
       if (!isTurnRunningError(error)) {
