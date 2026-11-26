@@ -1,7 +1,7 @@
-import { githubPrId, type InboxItem } from "@codeden/contracts";
+import { githubPrId, type InboxItem, inboxRestorable } from "@codeden/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { ExternalLink, Eye, GitMerge, GitPullRequest, Play, RotateCcw } from "lucide-react";
+import { ExternalLink, Eye, GitMerge, GitPullRequest, Play, RotateCcw, Undo2 } from "lucide-react";
 import { toast } from "sonner";
 import { SPOT_CHECKS_ANCHOR } from "@/components/factory/spot-checks";
 import { ChecksBadge, ReviewDecisionBadge } from "@/components/github/github-bits";
@@ -35,6 +35,34 @@ export function PrReviewStatus({ item }: { item: InboxItem }) {
         <span className="text-status-failed">Merge conflicts</span>
       )}
     </div>
+  );
+}
+
+/**
+ * Reopen a closed item the server can restore (`inboxRestorable`): one the PM resolved as stale
+ * (#673), or a bulk dismiss. Nothing for anything else.
+ */
+export function RestoreButton({ item }: { item: InboxItem }) {
+  const client = useClient();
+  const restore = useMutation({
+    mutationFn: () => client.restoreInbox([item.id]),
+    onError: (e: Error) => toast.error("Couldn't restore it", { description: e.message }),
+    onSuccess: (res) =>
+      res.restored > 0
+        ? toast.success("Restored to the inbox")
+        : toast.warning("It changed since; nothing to restore"),
+  });
+  if (!inboxRestorable(item)) return null;
+  return (
+    <Button
+      size="xs"
+      variant="ghost"
+      className="text-muted-foreground"
+      onClick={() => restore.mutate()}
+      disabled={restore.isPending}
+    >
+      <Undo2 /> Restore
+    </Button>
   );
 }
 

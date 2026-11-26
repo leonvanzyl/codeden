@@ -1,4 +1,9 @@
-import { type InboxItem, type InboxItemKind, inboxWaitsOnYou } from "@codeden/contracts";
+import {
+  type InboxItem,
+  type InboxItemKind,
+  InboxSettlement,
+  inboxWaitsOnYou,
+} from "@codeden/contracts";
 
 export type InboxFilter = "all" | "asks" | "reviews" | "problems";
 
@@ -65,4 +70,11 @@ export function inboxCounts(items: InboxItem[], conflicts: number): Record<Inbox
     reviews: count("reviews"),
     problems: count("problems"),
   };
+}
+
+/** Why the item closed without the user ("PR #12 merged", "PM: issue fixed upstream"), if so. */
+export function settledNote(item: InboxItem): string | null {
+  const parsed = InboxSettlement.safeParse(item.resolution);
+  if (!parsed.success) return null;
+  return parsed.data.by === "pm" ? `PM: ${parsed.data.note}` : parsed.data.note;
 }

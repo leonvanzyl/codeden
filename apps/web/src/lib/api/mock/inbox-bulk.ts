@@ -1,17 +1,12 @@
-import { type InboxItem, inboxWaitsOnYou } from "@codeden/contracts";
+import { type InboxItem, inboxRestorable, inboxWaitsOnYou } from "@codeden/contracts";
 import type { CodeDenClient } from "../client";
 import type { MockWorld } from "./world";
 
 type MockInboxBulkApi = Pick<CodeDenClient, "dismissInbox" | "restoreInbox">;
 
-/** Closed by a bulk dismiss (resolution `{ bulk: true }`), so Undo may reopen it. */
-const bulkDismissed = (item: InboxItem) =>
-  item.status === "dismissed" &&
-  (item.resolution as { bulk?: unknown } | null | undefined)?.bulk === true;
-
 /**
  * The inbox's bulk dismiss and its Undo in the mock (#407). Like the server: what waits on the
- * user stays, and Undo reopens only items a bulk dismiss closed.
+ * user stays, and Undo reopens only items a bulk dismiss closed (or the PM resolved).
  */
 export function mockInboxBulkApi(world: MockWorld): MockInboxBulkApi {
   const update = (item: InboxItem) =>
@@ -46,7 +41,7 @@ export function mockInboxBulkApi(world: MockWorld): MockInboxBulkApi {
       const ids: string[] = [];
       for (const id of new Set(itemIds)) {
         const item = find(id);
-        if (!item || !bulkDismissed(item)) continue;
+        if (!item || !inboxRestorable(item)) continue;
         update({
           ...item,
           status: "open",
