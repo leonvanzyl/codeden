@@ -1,7 +1,7 @@
 import { CircleSlash, OctagonX } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTurnCostText } from "@/components/usage/session-cost";
-import { duration, plural } from "@/lib/format";
+import { clockTime, duration, plural } from "@/lib/format";
 import { checkRunOf } from "@/lib/transcript/checks";
 import type { TimelineRow as Row } from "@/lib/transcript/timeline";
 import { ApprovalCard } from "./cards/approval-card";
@@ -53,6 +53,8 @@ function TurnFooter({
     parts.push(`Worked for ${duration(row.durationMs)}`);
   if (row.filesChanged > 0) parts.push(`${plural(row.filesChanged, "file")} changed`);
   if (cost) parts.push(cost);
+  // When the reply was sent (a turn still settling falls back to when it began).
+  const at = turn.completedAt ?? turn.startedAt;
   return (
     <div className="group relative flex items-center gap-3 py-1 text-3xs text-muted-foreground/70">
       <div className="h-px flex-1 bg-border/70" />
@@ -69,6 +71,9 @@ function TurnFooter({
       ) : (
         <span>{parts.join(" · ") || "Done"}</span>
       )}
+      <time dateTime={at} title={new Date(at).toLocaleString()} className="-ml-1.5 tabular-nums">
+        · {clockTime(at)}
+      </time>
       <div className="h-px flex-1 bg-border/70" />
       <ForkFromHere sessionId={sessionId} row={row} />
     </div>
