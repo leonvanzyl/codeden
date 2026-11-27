@@ -227,8 +227,10 @@ export class ProviderUtilityService implements UtilityService {
     prompt: string,
     opts: { timeoutMs?: number } = {},
   ): Promise<string | null> {
-    const { utilityModel } = this.deps.settings();
-    const available = this.deps.oneShot.available();
+    const { utilityModel, providers } = this.deps.settings();
+    const available = this.deps.oneShot
+      .available()
+      .filter((id) => !providers.disabled.includes(id));
     const chosen = utilityModel.provider === "auto" ? null : utilityModel.provider;
     const order = [chosen, ...PREFERENCE].filter(
       (id, i, all): id is string => !!id && available.includes(id) && all.indexOf(id) === i,

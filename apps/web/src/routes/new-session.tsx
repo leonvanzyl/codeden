@@ -4,6 +4,7 @@ import { useEffect, useMemo } from "react";
 import { EmptyState } from "@/components/common/bits";
 import { Composer } from "@/components/composer/composer";
 import { DraftOptions } from "@/components/composer/draft-options";
+import { useEnabledProviders } from "@/components/composer/model-picker/use-model-settings";
 import { useProjectProviders } from "@/components/composer/model-picker/use-project-models";
 import { ConflictCard } from "@/components/project/conflict-card";
 import { NewSessionHeader } from "@/components/project/new-session-header";
@@ -21,7 +22,8 @@ import { getNewSessionDraft, useNewSessionStore } from "@/stores/new-session";
 export function NewSessionPage({ projectId }: { projectId: string }) {
   const loaded = useSnapshot().data !== undefined;
   const project = useProject(projectId);
-  const runnerProviders = useSnapshotData((s) => s.runner.providers, []);
+  // Providers turned off in Settings → Providers are never the default.
+  const runnerProviders = useEnabledProviders(useSnapshotData((s) => s.runner.providers, []));
   // The project's own model lists, so its default and its config's models resolve (#643).
   const { providers } = useProjectProviders(projectId, runnerProviders);
   const defaultAutonomy = useSnapshotData<AutonomyLevel>(

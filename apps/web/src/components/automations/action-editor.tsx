@@ -1,6 +1,7 @@
 import type { AutomationAction, TriagePolicy } from "@codeden/contracts";
 import { Bot, Filter, MessageSquare } from "lucide-react";
 import { ModelPicker } from "@/components/composer/model-picker/model-picker";
+import { useEnabledProviders } from "@/components/composer/model-picker/use-model-settings";
 import { Switch } from "@/components/ui/switch";
 import { useSnapshotData } from "@/lib/queries";
 import { Segmented } from "./form-bits";
@@ -9,7 +10,10 @@ type SessionAction = Extract<AutomationAction, { type: "start_session" }>;
 
 /** The provider a session action runs on: its own, else the agent default, else the first. */
 export function useSessionProvider(action: SessionAction) {
-  const providers = useSnapshotData((s) => s.runner.providers, []);
+  const providers = useEnabledProviders(
+    useSnapshotData((s) => s.runner.providers, []),
+    action.provider,
+  );
   const fallback = useSnapshotData((s) => s.settings.providers.agent.provider, null);
   const known = (id: string | null | undefined) =>
     id && providers.some((p) => p.id === id) ? id : null;
