@@ -1,5 +1,13 @@
-import type { CustomModel, ModelRef, Settings, SettingsPatch, Snapshot } from "@codeden/contracts";
+import type {
+  CustomModel,
+  ModelRef,
+  ProviderInfo,
+  Settings,
+  SettingsPatch,
+  Snapshot,
+} from "@codeden/contracts";
 import { useQueryClient } from "@tanstack/react-query";
+import { useMemo } from "react";
 import { toast } from "sonner";
 import { useClient } from "@/lib/api";
 import { snapshotKey, useSnapshotData } from "@/lib/queries";
@@ -81,4 +89,25 @@ export function useCustomModels(): {
     );
   };
   return { custom: models.custom, set };
+}
+
+const NO_IDS: string[] = [];
+
+/**
+ * `providers` without the ones turned off in Settings → Providers (`settings.providers.disabled`),
+ * so nothing offers them for new work. `keep` (a provider already chosen, such as a started
+ * session's) stays even when it is turned off.
+ */
+export function useEnabledProviders(
+  providers: ProviderInfo[],
+  keep?: string | null,
+): ProviderInfo[] {
+  const disabled = useSnapshotData((s) => s.settings.providers.disabled, NO_IDS);
+  return useMemo(
+    () =>
+      disabled.length === 0
+        ? providers
+        : providers.filter((p) => p.id === keep || !disabled.includes(p.id)),
+    [providers, disabled, keep],
+  );
 }

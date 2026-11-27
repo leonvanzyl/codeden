@@ -79,8 +79,13 @@ export interface FactorySessionsDeps {
   repo: SessionRepo;
   runner: RunnerPort;
   availability: ProviderAvailability;
+  /** Providers turned off in Settings (`settings.providers.disabled`): never chosen for new work. */
+  disabled: () => readonly string[];
   log?: (message: string) => void;
 }
+
+/** Why a provider turned off in Settings → Providers can't take new work. */
+const TURNED_OFF: Unavailable = { reason: "turned off in Settings", until: null };
 
 /** Starts and stops the factory's agent sessions through the normal session service (§8.2). */
 export class FactorySessions {
@@ -107,31 +112,43 @@ export class FactorySessions {
   }
 
   /**
-   * Providers new factory sessions may use: offered by the runner, installed, signed in and not
-   * at a usage limit (see `ProviderAvailability`).
+   * Providers new factory sessions may use: offered by the runner, not turned off in Settings,
+   * installed, signed in and not at a usage limit (see `ProviderAvailability`).
    */
   providers(): string[] {
-    return this.registered().filter((id) => !this.deps.availability.unavailable(id));
+    return this.registered().filter((id) => !this.blocked(id));
   }
 
   /** Registered providers that can't take new work, and why. */
   unavailable(): Array<{ provider: string } & Unavailable> {
     return this.registered().flatMap((provider) => {
-      const u = this.deps.availability.unavailable(provider);
+      const u = this.blocked(provider);
       return u ? [{ provider, ...u }] : [];
     });
   }
 
+  /** Why `provider` can't take new work: turned off in Settings, else what availability says. */
+  private blocked(provider: string): Unavailable | null {
+    return this.deps.disabled().includes(provider)
+      ? TURNED_OFF
+      : this.deps.availability.unavailable(provider);
+  }
+
   /**
    * Whether new work can start on `provider` now and, if not, why and the fix (see
-   * `ProviderAvailability.runnable`). A provider the runner doesn't offer can't run either.
+   * `ProviderAvailability.runnable`). A provider the runner doesn't offer, or one turned off in
+   * Settings, can't run either.
    * Starts a background detection when the last one is old; never waits for it.
    */
   runnable(provider: string, opts: { ignoreFailures?: boolean } = {}): ProviderRunnable {
     this.deps.availability.refresh();
     const name = this.displayName(provider);
-    if (!this.deps.runner.providers().some((p) => p.id === provider)) {
-      const reason = "not offered by the runner";
+    const reason = !this.deps.runner.providers().some((p) => p.id === provider)
+      ? "not offered by the runner"
+      : this.deps.disabled().includes(provider)
+        ? TURNED_OFF.reason
+        : null;
+    if (reason) {
       return {
         runnable: false,
         reason,
@@ -155,7 +172,7 @@ export class FactorySessions {
       id: p.id,
       name: p.displayName,
       checked,
-      ...this.deps.availability.runnable(p.id, p.displayName),
+      ...this.runnable(p.id),
     }));
   }
 

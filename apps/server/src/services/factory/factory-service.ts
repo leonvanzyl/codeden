@@ -178,6 +178,7 @@ export class FactoryService {
           backoffs: new ProviderBackoffStore(deps.db),
           log: deps.log,
         }),
+        disabled: () => deps.settings.get().providers.disabled,
         log: deps.log,
       }),
       projects: deps.projects,

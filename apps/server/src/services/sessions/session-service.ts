@@ -759,13 +759,21 @@ export class SessionService {
     return runner.providers().find((p) => p.id === id);
   }
 
+  /** A new session's provider. One turned off in Settings → Providers is never chosen. */
   private resolveProvider(req: StartSessionRequest, projectDefault: string | null): string {
-    const available = this.deps.runner.providers().map((p) => p.id);
+    const loaded = this.deps.runner.providers().map((p) => p.id);
+    const { disabled } = this.deps.settings.get().providers;
     const connected = this.deps.runner.isConnected();
     if (req.provider && req.provider !== "auto") {
-      if (connected && !available.includes(req.provider)) {
+      if (disabled.includes(req.provider)) {
         throw badRequest(
-          `Provider ${req.provider} is not available. Loaded providers: ${available.join(", ") || "none"}`,
+          `Provider ${req.provider} is turned off in Settings → Providers. Turn it on to start sessions on it.`,
+          "provider_disabled",
+        );
+      }
+      if (connected && !loaded.includes(req.provider)) {
+        throw badRequest(
+          `Provider ${req.provider} is not available. Loaded providers: ${loaded.join(", ") || "none"}`,
           "unknown_provider",
         );
       }
@@ -773,20 +781,28 @@ export class SessionService {
     }
     const configured = this.configuredProvider(req.role, projectDefault);
     if (configured) return configured;
-    return autoOrder(available)[0] ?? "claude";
+    const enabled = loaded.filter((id) => !disabled.includes(id));
+    const auto = autoOrder(enabled)[0] ?? (loaded.length === 0 ? "claude" : null);
+    if (auto && !disabled.includes(auto)) return auto;
+    throw badRequest(
+      "Every provider is turned off in Settings → Providers. Turn one on to start a session.",
+      "provider_disabled",
+    );
   }
 
   /**
    * The provider that settings name for a role's new sessions: the project's default, else the
    * role's (`settings.providers.<role>`). Null when both leave it to Auto, or name a provider
-   * the connected runner doesn't have.
+   * the connected runner doesn't have or that is turned off in Settings.
    */
   configuredProvider(role: Session["role"], projectDefault: string | null): string | null {
     const available = this.deps.runner.providers().map((p) => p.id);
     const connected = this.deps.runner.isConnected();
-    const roleDefault = this.deps.settings.get().providers[role].provider;
+    const { providers } = this.deps.settings.get();
+    const roleDefault = providers[role].provider;
     for (const choice of [projectDefault, roleDefault === "auto" ? null : roleDefault]) {
-      if (choice && (!connected || available.includes(choice))) return choice;
+      if (!choice || providers.disabled.includes(choice)) continue;
+      if (!connected || available.includes(choice)) return choice;
     }
     return null;
   }

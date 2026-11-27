@@ -37,7 +37,12 @@ import {
 import { ConfigNotice, ModelList, SetupNotice } from "./model-list";
 import { ProviderRail } from "./provider-rail";
 import { PickerTrigger } from "./trigger";
-import { useCustomModels, useFavoriteModels, useHiddenModels } from "./use-model-settings";
+import {
+  useCustomModels,
+  useEnabledProviders,
+  useFavoriteModels,
+  useHiddenModels,
+} from "./use-model-settings";
 import { useProjectProviders } from "./use-project-models";
 import { useRefreshModels } from "./use-refresh-models";
 
@@ -118,8 +123,10 @@ export function ModelPicker({
 
   const { favorites, toggle: toggleFavorite } = useFavoriteModels();
   const { hidden, toggle: toggleHidden } = useHiddenModels();
+  // Providers turned off in Settings stay out, unless one is already the choice.
+  const offered = useEnabledProviders(given, lockedProvider ?? value?.provider);
   // The project's own lists where they differ (#643); the user's custom ids join them (§13).
-  const { providers: listed, warnings } = useProjectProviders(projectId, given);
+  const { providers: listed, warnings } = useProjectProviders(projectId, offered);
   const { custom } = useCustomModels();
   const providers = withCustomModels(listed, custom);
   const tabs = providerTabs(providers, checks, lockedProvider, {

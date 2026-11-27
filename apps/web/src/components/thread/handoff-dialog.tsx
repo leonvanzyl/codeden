@@ -13,6 +13,7 @@ import {
   providerAvailability,
 } from "@/components/composer/model-picker/logic";
 import { ModelPicker } from "@/components/composer/model-picker/model-picker";
+import { useEnabledProviders } from "@/components/composer/model-picker/use-model-settings";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -108,7 +109,10 @@ function HandoffForm({
   asked: string | null;
   onDone: () => void;
 }) {
-  const providers = useSnapshotData((s) => s.runner.providers, []);
+  const providers = useEnabledProviders(
+    useSnapshotData((s) => s.runner.providers, []),
+    session.provider,
+  );
   const checks = useSetupStatus({ staleTime: 60_000 }).data?.checks;
   // Until the user picks, the default follows the setup checks as they arrive.
   const [picked, setPicked] = useState<ModelChoice | null>(null);

@@ -149,24 +149,28 @@ const roles: { role: Role; label: string; help: string }[] = [
 export function ProviderSettings() {
   const { settings, update } = useSettings();
   const providers = useSnapshotData((s) => s.runner.providers, []);
+  const { disabled } = settings.providers;
   // The same checks as the setup checklist, so the two screens never disagree.
   const checks = useSetupStatus({ staleTime: 60_000 }).data?.checks;
   return (
     <>
       <SettingsSection
         title="Installed providers"
-        description="Detected on this machine and reused with their own logins."
+        description="Detected on this machine and reused with their own logins. Turn one off and CodeDen never picks it for new work; sessions already on it keep working."
       >
         {providers.map((p) => {
           const availability = providerAvailability(p.id, checks);
+          const off = disabled.includes(p.id);
           return (
             <SettingRow
               key={p.id}
               label={p.displayName}
               help={
-                availability.ready
-                  ? `${p.models.length} models · ${Object.entries(p.capabilities).filter(([, v]) => v).length} capabilities`
-                  : (availability.detail ?? undefined)
+                off
+                  ? "Turned off: not offered for new sessions, Auto or the factory."
+                  : availability.ready
+                    ? `${p.models.length} models · ${Object.entries(p.capabilities).filter(([, v]) => v).length} capabilities`
+                    : (availability.detail ?? undefined)
               }
             >
               <div className="flex items-center gap-2">
@@ -174,13 +178,26 @@ export function ProviderSettings() {
                 <span
                   className={cn(
                     "rounded-full px-2 py-0.5 text-2xs",
-                    availability.ready
-                      ? "bg-status-done/12 text-status-done"
-                      : "bg-status-waiting/12 text-status-waiting",
+                    off
+                      ? "bg-muted text-muted-foreground"
+                      : availability.ready
+                        ? "bg-status-done/12 text-status-done"
+                        : "bg-status-waiting/12 text-status-waiting",
                   )}
                 >
-                  {availability.ready ? "Ready" : availability.reason}
+                  {off ? "Off" : availability.ready ? "Ready" : availability.reason}
                 </span>
+                <Switch
+                  checked={!off}
+                  aria-label={`Use ${p.displayName}`}
+                  onCheckedChange={(on) =>
+                    update({
+                      providers: {
+                        disabled: on ? disabled.filter((id) => id !== p.id) : [...disabled, p.id],
+                      },
+                    })
+                  }
+                />
               </div>
             </SettingRow>
           );

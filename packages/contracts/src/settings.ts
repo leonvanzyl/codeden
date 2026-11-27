@@ -120,6 +120,12 @@ export const Settings = z.object({
        * other. Agent sessions aren't moved; they wait for the reset (`sessions.autoRetry`).
        */
       autoSwitchOnLimit: z.boolean().default(true),
+      /**
+       * Providers the user turned off in Settings → Providers. CodeDen leaves them out of new
+       * work: the pickers, Auto, the factory, role fallbacks and the utility model never choose
+       * them, and starting a session on one is refused. Sessions already on one keep working.
+       */
+      disabled: z.array(ProviderId).default([]),
     })
     .prefault({}),
   /** Small, cheap model for side jobs (§7.4). */

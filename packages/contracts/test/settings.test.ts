@@ -1,6 +1,16 @@
 import { describe, expect, it } from "vitest";
 import { CustomModel, defaultSettings, ModelRef, Settings, speechExcerpt } from "../src";
 
+describe("Settings.providers.disabled", () => {
+  it("defaults to none, round-trips provider ids and rejects malformed ones", () => {
+    expect(defaultSettings().providers.disabled).toEqual([]);
+    const parsed = Settings.parse({ providers: { disabled: ["cursor", "gemini"] } });
+    expect(parsed.providers.disabled).toEqual(["cursor", "gemini"]);
+    expect(Settings.parse(JSON.parse(JSON.stringify(parsed)))).toEqual(parsed);
+    expect(() => Settings.parse({ providers: { disabled: ["Not A Provider"] } })).toThrow();
+  });
+});
+
 describe("Settings.models", () => {
   it("defaults to no favourites or hidden models, so older settings files still parse", () => {
     expect(defaultSettings().models).toEqual({ favorites: [], hidden: {}, custom: {} });

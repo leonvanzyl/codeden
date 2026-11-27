@@ -158,8 +158,12 @@ export class RoleSessions {
     }));
   }
 
+  /** Whether the runner has `provider` and it isn't turned off in Settings → Providers. */
   private loaded(provider: string): boolean {
-    return this.deps.runner.providers().some((p) => p.id === provider);
+    return (
+      this.deps.runner.providers().some((p) => p.id === provider) &&
+      !this.deps.settings.get().providers.disabled.includes(provider)
+    );
   }
 
   /**
