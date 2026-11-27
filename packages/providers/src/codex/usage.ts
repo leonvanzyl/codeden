@@ -49,11 +49,13 @@ export class CodexTurnUsage {
 
 /**
  * Codex token usage in CodeDen's terms, from `u.total` (context from `last`). OpenAI counts
- * cached input inside `inputTokens`; CodeDen's `inputTokens` is the uncached part.
+ * cached reads and cache writes inside `inputTokens` (each input token is billed at one of the
+ * uncached, cached or cache-write rates); CodeDen's `inputTokens` is the part that is neither.
  */
 export function tokenUsage(u: ThreadTokenUsage): Usage {
+  const uncached = u.total.inputTokens - u.total.cachedInputTokens - u.total.cacheWriteInputTokens;
   const usage: Usage = {
-    inputTokens: count(Math.max(0, u.total.inputTokens - u.total.cachedInputTokens)),
+    inputTokens: count(Math.max(0, uncached)),
     outputTokens: count(u.total.outputTokens),
     cachedInputTokens: count(u.total.cachedInputTokens),
     cacheWriteTokens: count(u.total.cacheWriteInputTokens),

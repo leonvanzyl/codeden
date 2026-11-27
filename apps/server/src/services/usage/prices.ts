@@ -2,7 +2,7 @@ import type { CostSource, ModelPrice, TokenCounts } from "@codeden/contracts";
 
 const ANTHROPIC = "https://platform.claude.com/docs/en/about-claude/pricing";
 const OPENAI = "https://developers.openai.com/api/docs/pricing";
-const AS_OF = "2026-11-10";
+const AS_OF = "2026-11-26";
 
 type Row = [
   model: string,
@@ -29,8 +29,8 @@ function table(provider: string, sourceUrl: string, rows: Row[]): ModelPrice[] {
 
 /**
  * Bundled list prices in USD per million tokens, checked on `AS_OF` against the providers'
- * pricing pages. Cache writes are the 5-minute rate for Claude; OpenAI charges none for the
- * models Codex runs. Haiku 5.5 uses its rate for prompts up to 100k tokens. Users can
+ * pricing pages. Cache writes are the 5-minute rate for Claude, and the default 30-minute rate
+ * (1.25× input) for OpenAI's GPT-5.6 and later; OpenAI's earlier models charge none. Haiku 5.5 uses its rate for prompts up to 100k tokens. Users can
  * override or add models in the usage settings.
  */
 export const BUNDLED_PRICES: ModelPrice[] = [
@@ -59,14 +59,16 @@ export const BUNDLED_PRICES: ModelPrice[] = [
     ["haiku", "Haiku (latest)", 0.1, 0.5, 0.01, 0.125],
   ]),
   ...table("codex", OPENAI, [
-    ["gpt-6.1-sol", "GPT-6.1 Sol", 2, 10, 0.1, 0],
-    ["gpt-6.1-terra", "GPT-6.1 Terra", 1, 5, 0.05, 0],
-    ["gpt-6-sol", "GPT-6 Sol", 2, 10, 0.2, 0],
-    ["gpt-6-astra", "GPT-6 Astra", 10, 50, 1, 0],
-    ["gpt-6-luna", "GPT-6 Luna", 0.1, 0.5, 0.01, 0],
-    ["gpt-5.6-sol", "GPT-5.6 Sol", 4, 20, 0.4, 0],
-    ["gpt-5.6-terra", "GPT-5.6 Terra", 2, 12, 0.2, 0],
-    ["gpt-5.6-luna", "GPT-5.6 Luna", 0.2, 1.2, 0.02, 0],
+    ["gpt-6.2-astra", "GPT-6.2 Astra", 8, 40, 0.4, 10],
+    ["gpt-6.2-sol", "GPT-6.2 Sol", 2, 10, 0.1, 2.5],
+    ["gpt-6.1-sol", "GPT-6.1 Sol", 2, 10, 0.1, 2.5],
+    ["gpt-6.1-terra", "GPT-6.1 Terra", 1, 5, 0.05, 1.25],
+    ["gpt-6-sol", "GPT-6 Sol", 2, 10, 0.2, 2.5],
+    ["gpt-6-astra", "GPT-6 Astra", 10, 50, 1, 12.5],
+    ["gpt-6-luna", "GPT-6 Luna", 0.1, 0.5, 0.01, 0.125],
+    ["gpt-5.6-sol", "GPT-5.6 Sol", 4, 20, 0.4, 5],
+    ["gpt-5.6-terra", "GPT-5.6 Terra", 2, 12, 0.2, 2.5],
+    ["gpt-5.6-luna", "GPT-5.6 Luna", 0.2, 1.2, 0.02, 0.25],
     ["gpt-5.5", "GPT-5.5", 5, 30, 0.5, 0],
     ["gpt-5.4", "GPT-5.4", 2.5, 15, 0.25, 0],
     ["gpt-5.4-mini", "GPT-5.4 mini", 0.75, 4.5, 0.075, 0],

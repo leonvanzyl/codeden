@@ -289,10 +289,11 @@ describe("Codex sub-agents", () => {
     const card = subagentCards(events).at(-1);
     expect(card?.status).toBe("completed");
     expect(card?.stats?.totalTokens).toBe(52_000);
-    // OpenAI counts cached input inside `inputTokens`; the card's input is the uncached part.
+    // OpenAI counts cached reads and cache writes inside `inputTokens` (total = input + output);
+    // the card's input is the part that is neither.
     expect(card?.stats?.usage).toEqual([
       {
-        inputTokens: 4_000,
+        inputTokens: 2_500,
         outputTokens: 2_000,
         cacheReadTokens: 46_000,
         cacheWriteTokens: 1_500,

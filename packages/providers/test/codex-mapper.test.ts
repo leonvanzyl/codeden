@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { mapThreadItem } from "../src/codex/items";
 import { CodexEventMapper } from "../src/codex/mapper";
 import type { ServerNotification } from "../src/codex/protocol";
-import { CodexTurnUsage } from "../src/codex/usage";
+import { CodexTurnUsage, tokenUsage } from "../src/codex/usage";
 
 const T = "thread-x";
 const TURN = "turn-1";
@@ -224,6 +224,24 @@ describe("CodexEventMapper", () => {
       inputTokens: 50,
       cachedInputTokens: 100,
       outputTokens: 20,
+    });
+  });
+
+  it("counts cache writes once, not again as uncached input", () => {
+    // OpenAI's inputTokens includes cached reads and cache writes; each is billed at its own rate.
+    const total = {
+      totalTokens: 1010,
+      inputTokens: 1000,
+      cachedInputTokens: 600,
+      cacheWriteInputTokens: 300,
+      outputTokens: 10,
+      reasoningOutputTokens: 0,
+    };
+    expect(tokenUsage({ total, last: total, modelContextWindow: null })).toMatchObject({
+      inputTokens: 100,
+      cachedInputTokens: 600,
+      cacheWriteTokens: 300,
+      outputTokens: 10,
     });
   });
 

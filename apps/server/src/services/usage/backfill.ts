@@ -78,7 +78,10 @@ export function backfillUsageLedger(db: Db): number {
         if (mode.cachedInInput && usage.inputTokens !== undefined) {
           usage = {
             ...usage,
-            inputTokens: Math.max(0, usage.inputTokens - (usage.cachedInputTokens ?? 0)),
+            inputTokens: Math.max(
+              0,
+              usage.inputTokens - (usage.cachedInputTokens ?? 0) - (usage.cacheWriteTokens ?? 0),
+            ),
           };
         }
       }
