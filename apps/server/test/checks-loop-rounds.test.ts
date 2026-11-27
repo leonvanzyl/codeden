@@ -43,6 +43,18 @@ async function atTheCap(): Promise<string> {
   return id;
 }
 
+/**
+ * The count started again after `atTheCap`: the loop runs both rounds afresh (u4 is round 0)
+ * and stops at its cap again. Waits for that cap, not for a round in between: the loop can run
+ * past one between two polls of `until` (#680).
+ */
+async function backAtTheCap(id: string): Promise<void> {
+  await until(() => c.card(id, "u6")?.item.status === "completed");
+  expect(c.card(id, "u4")?.data.round).toBe(0);
+  expect(c.card(id, "u6")?.data.outcome).toBe("cap_reached");
+  expect(rounds()).toEqual([1, 2, 1, 2]);
+}
+
 /** Let a turn that just started run its course, and whatever the loop does after it. */
 async function settle(turns: number): Promise<void> {
   await until(() => c.turnCount() >= turns);
@@ -85,9 +97,7 @@ describe("the checks loop's round count (#412)", () => {
     const id = await atTheCap();
     await c.sessions.send(id, { input: user("Try another way"), whenBusy: "queue" });
     expect(c.env.repo.get(id).checks?.capReached).toBeUndefined();
-    await until(() => rounds().length === 3);
-    expect(c.card(id, "u4")?.data.round).toBe(0);
-    expect(rounds()).toEqual([1, 2, 1]);
+    await backAtTheCap(id);
   });
 
   it("starts the count again when the user switches the loop off and on", async () => {
@@ -97,9 +107,7 @@ describe("the checks loop's round count (#412)", () => {
     expect(c.env.repo.get(id).checks?.round).toBeUndefined();
     // A turn CodeDen starts itself (not a compaction, which runs no checks) runs them again.
     await c.sessions.continueAfterRestart(id, RESTART_CONTINUE_MESSAGE);
-    await until(() => rounds().length === 3);
-    expect(c.card(id, "u4")?.data.round).toBe(0);
-    expect(rounds()).toEqual([1, 2, 1]);
+    await backAtTheCap(id);
   });
 
   it("refuses Compact now while checks run, and keeps their run", async () => {
